@@ -43,13 +43,19 @@ static const EpdWaveformMode* s_bw_modes[]={&s_bw_mode};
 static EpdWaveform s_bw_waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=s_bw_modes};
 static bool s_bw_ready;
 _Static_assert(MAIN_EXIT_FRAMES <= E0470_GL16_FRAMES, "soft water must fit endpoint cleanup");
+// E4P 左侧大块内容在 4 帧补推下仍会留灰；水波纹把 37 相剩余相位全部用于向白推动。
+// 书架退出保持原 4 帧，避免改变它的节奏。
+// E4P still retained gray on large left-edge content with four extra pushes; water uses
+// every remaining phase of the 37-phase table for whitening. Shelf exit keeps its original four frames.
+#define WATER_ERASE_EXTRA_FRAMES (E0470_GL16_FRAMES - E0470_FULL_DU_FRAMES)
+_Static_assert(WATER_ERASE_EXTRA_FRAMES >= MAIN_ERASE_EXTRA_FRAMES, "water whitening must not be weaker than shelf exit");
 
-static int endpoint_action(const EpdWaveformPhases* bw, int f, int to, int from) {
+static int endpoint_action(const EpdWaveformPhases* bw, int f, int to, int from, int extra) {
     if (to == from) return 0;
     if (f < bw->phases) return e0470_phase_action(bw, f, to, from);
-    // 只给变白像素补四相同向推动；未变白底与最终黑字均不增加推动。
-    // Add four same-direction pushes only to whitening pixels, never unchanged backgrounds or final black text.
-    return to == 15 && f < bw->phases + MAIN_ERASE_EXTRA_FRAMES ? 2 : 0;
+    // 只给变白像素补同向推动；未变白底与最终黑字均不增加推动。
+    // Add same-direction pushes only to whitening pixels, never unchanged backgrounds or final black text.
+    return to == 15 && f < bw->phases + extra ? 2 : 0;
 }
 
 const EpdWaveform* display_main_gray_waveform(void) {
@@ -77,7 +83,7 @@ const EpdWaveform* display_main_shelf_exit_waveform(void) {
         for (int to = 0; to < 16; ++to)
             for (int from = 0; from < 16; ++from) {
                 for (int f = 0; f < MAIN_EXIT_FRAMES; ++f)
-                    s_exit_data[f][to][from / 4] |= (uint8_t)(endpoint_action(bw, f, to, from) << (6 - 2 * (from % 4)));
+                    s_exit_data[f][to][from / 4] |= (uint8_t)(endpoint_action(bw, f, to, from, MAIN_ERASE_EXTRA_FRAMES) << (6 - 2 * (from % 4)));
             }
         s_exit_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
         s_exit_ready = true;
@@ -96,7 +102,7 @@ const EpdWaveform* display_main_water_waveform(void) {
             for (int from = 0; from < 16; ++from)
                 for (int f = 0; f < E0470_GL16_FRAMES; ++f) {
                     const int action = to == from ? 0 : to == 0 || to == 15
-                        ? endpoint_action(bw, f, to, from) : e0470_phase_action(gl, f, to, from);
+                        ? endpoint_action(bw, f, to, from, WATER_ERASE_EXTRA_FRAMES) : e0470_phase_action(gl, f, to, from);
                     s_water_data[f][to][from / 4] |= (uint8_t)(action << (6 - 2 * (from % 4)));
                 }
         s_water_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;

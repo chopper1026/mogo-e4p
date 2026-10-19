@@ -88,9 +88,11 @@ int main(void) {
     const EpdWaveformPhases* water_table=e0470_waveform_phases(water_wave,MODE_GL16);
     assert(water_wave!=&E0470_WAVEFORM && water_wave->temp_intervals==E0470_WAVEFORM.temp_intervals);
     assert(water_table && water_table->phases==37 && !water_table->phase_times);
+    // 水波纹把 37 相剩余相位全部用于向白推动，修复 E4P 左侧大块内容擦不净。
+    // Water uses every remaining phase for whitening to clear large E4P left-edge content.
     for(int f=0;f<water_table->phases;++f)for(int from=0;from<16;++from)for(int to=0;to<16;++to){
         int expected=from==to?0:to==0 || to==15?
-            (f<bw->phases?e0470_phase_action(bw,f,to,from):to==15 && f<24?2:0):
+            (f<bw->phases?e0470_phase_action(bw,f,to,from):to==15 && f<37?2:0):
             e0470_phase_action(gray_table,f,to,from);
         int action=e0470_phase_action(water_table,f,to,from);
         assert(action==expected);

@@ -336,11 +336,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             *result=epd_hl_update_area(hl,MODE_GL16,25,body_area);
         }
     } else if (water && changing_page && changed) {
-        // 水波纹直接输出最终灰阶图，不先刷黑白、不追加整页灰阶；失败由统一恢复处理。
-        // Water outputs the final gray target directly, without a BW prepass or a second whole-page gray update; common recovery handles failure.
+        // 水波纹直接输出最终灰阶图，不先刷黑白、不追加整页灰阶；横条并入同一次扫描，
+        // 旧横条随正文一起用强白推动擦除。失败由统一恢复处理。
+        // Water outputs the final gray target directly, without a BW prepass or a second
+        // whole-page gray update; the marker joins the same scan so the old bar is erased
+        // with the body's stronger whitening. Common recovery handles failure.
         read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
         epd_lcd_set_prefill_lines(127);
         EpdRect ripple = main_body_area();
+        ripple.height = UI_NAV_MARKER_SCAN_END;
+        marker_with_body = true;
         const int prior_tick=e0470_page_turn_tick_us();
         e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
         *result = e0470_page_turn_with_waveform_compact(hl, ripple, E0470_TURN_RTL,
