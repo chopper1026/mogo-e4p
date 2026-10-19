@@ -88,5 +88,6 @@ python3 tools/ota_ui_host_test.py
 
 python3 tools/image_page_host_test.py
 python3 tools/pmic_gate_host_test.py
+python3 tools/e4p_vcom_gate_host_test.py
 python3 tools/settings_scroll_host_test.py
 python3 tools/ui_refresh_feedback_host_test.py

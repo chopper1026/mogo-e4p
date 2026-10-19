@@ -413,6 +413,8 @@ static void board_poweroff(epd_ctrl_state_t* state) {
         .ep_output_enable = true,
         .ep_mode = true,
     };
+    // 只有真正关电才撤 VCOM；release_drive 不碰它。
+    // VCOM drops only on real power-off; release_drive never touches it.
     s_vcom_ctrl = false;
     s_pwrup = false;
     state->ep_stv = false;
@@ -548,8 +550,8 @@ bool read_pico_epd_release_drive(void) {
     state->ep_output_enable = false;
     epd_ctrl_state_t mask = {.ep_mode = true, .ep_output_enable = true};
     board_set_ctrl(state, &mask);
-    s_vcom_ctrl = false;
-    p0_write();
+    // VCOM_CTRL 保持到板级关电；每次推屏后拉低会让同一 burst 内后续扫描失去公共电压。
+    // Keep VCOM_CTRL until board power-off; dropping it after each output leaves later scans in the same burst without a common voltage.
     return true;
 }
 
