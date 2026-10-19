@@ -1,0 +1,39 @@
+# 触摸丢点诊断开关；仅排查构建启用，正式版保持关闭。
+# Touch tap-drop diagnostics; enable only on investigation builds.
+menu "Touch diagnostics"
+
+    config TOUCH_DIAG
+        bool "Enable touch tap-drop diagnostics logging"
+        default n
+        help
+            阅读翻页偶发无响应排查用：在触摸输入链路（app_loop / ui_gesture /
+            app_book / cst836u）输出单行事件日志、阻塞窗口与统计汇总。
+            Investigation aid for sporadic dropped page-turn taps: one-line
+            event logs, stall windows and stats on the touch input chain.
+
+    config TOUCH_DIAG_BEEP
+        bool "Beep when an input event is discarded without action"
+        depends on TOUCH_DIAG
+        default n
+        help
+            手势被取消或双击挂起被冲销时短鸣一声，便于不接串口时统计丢失率。
+            Short beep when a gesture is cancelled or a pending double-tap is
+            dropped, so drop rates can be counted without a serial console.
+
+endmenu
+
+# bring-up 阶段的面板自检；正式固件保持关闭。
+# Panel self-test for bring-up; keep disabled in production images.
+menu "Bring-up diagnostics"
+
+    config MOGO_EPD_TEST_PATTERN
+        bool "Run EPD test pattern at boot"
+        default n
+        help
+            开机先画灰阶条、棋盘格、细线、四角十字、中心圆和 1 px 边框，
+            再做一次 GC16 全刷与 20 次 GL16 局刷，最后停 10 秒。
+            Draw gray bars, checkerboard, thin lines, corner crosses, a center
+            circle and a 1 px border, then one GC16 full refresh and 20 GL16
+            area updates, holding the pattern for 10 seconds.
+
+endmenu

@@ -1,0 +1,9 @@
+# ESP32-S31 16 MB 分区表：5 MB OTA x2 + ~6.2 MB FAT storage（Mogo /flash）。
+# ESP32-S31 16 MB layout: 5 MB OTA slots plus a 6.2 MB FAT storage partition for Mogo's /flash.
+# Name,    Type, SubType, Offset,   Size,     Flags
+nvs,       data, nvs,     0x9000,   0x4000,
+otadata,   data, ota,     0xD000,   0x2000,
+phy_init,  data, phy,     0xF000,   0x1000,
+ota_0,     app,  ota_0,   0x10000,  0x500000,
+ota_1,     app,  ota_1,   0x510000, 0x500000,
+storage,   data, fat,     0xA10000, 0x5F0000,
