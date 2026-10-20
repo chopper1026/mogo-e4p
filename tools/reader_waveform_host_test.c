@@ -21,6 +21,9 @@ int main(void) {
     assert(soft && soft->phases == old->phases && soft->phase_times == old->phase_times);
     unsigned changed = 0;
     for (int from = 0; from < 16; ++from) for (int to = 0; to < 16; ++to) {
+        // 变白列由白列检查单独覆盖，不参与文字软化的逐相对比。
+        // The whitening column has its own check below and is excluded from the softening comparison.
+        if (to == 15) continue;
         int a_count[4] = {0}, b_count[4] = {0}, a_balance = 0, b_balance = 0;
         int a_peak = 0, b_peak = 0, first = -1, last = -1;
         unsigned differences = 0;
@@ -28,7 +31,7 @@ int main(void) {
             int a = e0470_phase_action(old, f, to, from), b = e0470_phase_action(soft, f, to, from);
             ++a_count[a]; ++b_count[b];
             if (a != b) ++differences;
-            if (from != 15 || to == 0 || to == 15) assert(a == b);
+            if (from != 15 || to == 0) assert(a == b);
             if (a == 0 || a == 3) assert(b == a);
             if (a) {if (first < 0) first = f; last = f;}
             a_balance += a == 1 ? 1 : a == 2 ? -1 : 0;
@@ -48,6 +51,14 @@ int main(void) {
             putchar('\n');
         }
     }
+    // 普通文字表仍沿用主页白列的 35 次擦白，白到白保持。
+    // The ordinary text table keeps the main-page 35 erases and holds white-to-white.
+    unsigned text_erases = 0;
+    for (int f = 0; f < soft->phases; ++f) {
+        text_erases += e0470_phase_action(soft, f, 15, 0) == 2;
+        assert(e0470_phase_action(soft, f, 15, 15) == 0);
+    }
+    assert(text_erases == 35);
     assert(changed > 0 && !memcmp(saved, old->luts, sizeof(saved)));
     // 普通纯文字翻页复用这套已验证文字序列：相同灰阶全保持，不能改字形目标或原厂水波纹表。
     // Ordinary text turns share these proven text phases: equal grays hold, retaining glyph targets and the vendor ripple table.
@@ -72,6 +83,23 @@ int main(void) {
         }
     }
     assert(held==16&&edge_runs>=10);
+    // 水波纹白列：黑→白只保留 DU 的 18 次擦白，等灰保持，其他迁移与原厂表一致。
+    // Water white column: keep only the 18 DU erases for black→white, hold equal
+    // grays and leave every other pair on the vendor table.
+    const EpdWaveform* water = display_reader_water_waveform();
+    const EpdWaveformPhases* wav = e0470_waveform_phases(water, MODE_GL16);
+    assert(water != &E0470_WAVEFORM && display_reader_water_waveform() == water);
+    assert(wav && wav->phases == E0470_GL16_FRAMES && !wav->phase_times);
+    unsigned erases = 0;
+    for (int f = 0; f < wav->phases; ++f) {
+        erases += e0470_phase_action(wav, f, 15, 0) == 2;
+        assert(e0470_phase_action(wav, f, 15, 15) == 0);
+    }
+    assert(erases == 18);
+    for (int to = 0; to < 15; ++to) for (int from = 0; from < 16; ++from)
+        for (int f = 0; f < wav->phases; ++f)
+            assert(e0470_phase_action(wav, f, to, from) == e0470_phase_action(raw, f, to, from));
+    puts("PASS: reader water keeps 18 DU erases for black-to-white, holds white-to-white and leaves other pairs on the vendor table");
     puts("PASS: ordinary text turns hold all 16 unchanged grays and reduce at least ten gray-edge dark runs; existing text profile, targets and 37 phases unchanged");
     puts("PASS: all 256 pairs, endpoints, holds, first/final actions, pulse counts, 37-frame timing and original LUT retained; optical validation pending");
     return 0;

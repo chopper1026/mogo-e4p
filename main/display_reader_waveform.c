@@ -11,6 +11,11 @@
  * 其余灰阶、文字软化与帧时序不变。
  * User report 2026-10-19: reader pages drift gray within seconds; pure-white targets now
  * reuse the verified main-page water whitening column, leaving other grays and timing intact.
+ * 用户 2026-10-20 反馈水波纹翻页几乎整页变白：水波纹白列从 35 次擦白降回 DU 的 18 次，
+ * 仍保留先擦后画的节奏，普通翻页与整页输出不受影响。
+ * User report 2026-10-20: water turns washed the page white; the water column drops from
+ * 35 erases back to the DU 18 while keeping the erase-then-draw order. Ordinary turns and
+ * full-page output are unchanged.
  */
 #include "display_reader_waveform.h"
 #include "display_main_waveform.h"
@@ -101,4 +106,49 @@ const EpdWaveform* display_reader_page_waveform(void) {
     s_page_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_page_ready = true;
     return &s_page_waveform;
+}
+
+static uint8_t s_water_data[E0470_GL16_FRAMES][16][4];
+static const EpdWaveformPhases s_water_phases = {E0470_GL16_FRAMES, (const uint8_t*)s_water_data, NULL};
+static const EpdWaveformPhases* s_water_ranges[] = {&s_water_phases};
+static const EpdWaveformMode s_water_mode = {5, 1, s_water_ranges};
+static const EpdWaveformMode* s_water_modes[] = {&s_water_mode};
+static EpdWaveform s_water_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_water_modes};
+static bool s_water_ready;
+
+// 水波纹白列只取 DU 的擦白次数（黑→白 18 次），不追加主页白列的尾部补推。
+// 先擦后画的顺序不变；旧字在第 18 相擦完后保持，不再持续推白。
+// The water column keeps only the DU erase count (18 for black→white) and adds no
+// main-page tail pushes. Erase-then-draw is unchanged; old text stops being
+// driven white after phase 18 instead of staying saturated to the end.
+#define READER_WATER_WHITE_EXTRA_FRAMES 0
+
+static void copy_reader_water_column(uint8_t (*dst)[16][4]) {
+    const EpdWaveformPhases* du = e0470_waveform_phases(&E0470_WAVEFORM, MODE_DU);
+    if (!du || !du->luts || du->phases != E0470_FULL_DU_FRAMES || du->phase_times) return;
+    for (int f = 0; f < E0470_GL16_FRAMES; ++f) {
+        for (int from = 0; from < 16; ++from) {
+            int action = 0;
+            if (f < du->phases) action = e0470_phase_action(du, f, 15, from);
+            else if (from < 15 && f < du->phases + READER_WATER_WHITE_EXTRA_FRAMES) action = 2;
+            // 等灰不驱动；尾部不再补白，白列总次数与 DU 表一致。
+            // Hold equal grays and skip the tail so the total matches the DU table.
+            if (from == 15) action = 0;
+            const int shift = 6 - 2 * (from % 4);
+            dst[f][15][from / 4] = (uint8_t)((dst[f][15][from / 4] & ~(3u << shift)) |
+                                             ((unsigned)action << shift));
+        }
+    }
+}
+
+const EpdWaveform* display_reader_water_waveform(void) {
+    if (s_water_ready) return &s_water_waveform;
+    const EpdWaveformPhases* base = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
+    if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
+        return &E0470_WAVEFORM;
+    memcpy(s_water_data, base->luts, sizeof(s_water_data));
+    copy_reader_water_column(s_water_data);
+    s_water_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_water_ready = true;
+    return &s_water_waveform;
 }

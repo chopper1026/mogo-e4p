@@ -662,12 +662,13 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
-    // 水波纹使用面板原厂GL16表，纯白目标沿用主页水波纹的完整擦白列；
+    // 水波纹使用面板原厂GL16表，纯白目标只保留DU的18次擦白（不再追加主页白列的尾部补推）；
     // 保留旧像素到灰色目标的前导擦除，灰阶由原厂脉冲校准。
-    // Ripple uses the vendor GL16 table with the main-page whitening column for pure
-    // white targets: keep the leading erase into gray targets and factory-calibrated grays.
+    // Ripple uses the vendor GL16 table with only the DU 18 erases for pure white
+    // targets (no main-page tail pushes): keep the leading erase into gray targets
+    // and factory-calibrated grays.
     enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir,
-        display_reader_page_waveform(), E0470_TURN_FAST_BANDS);
+        display_reader_water_waveform(), E0470_TURN_FAST_BANDS);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) return result;

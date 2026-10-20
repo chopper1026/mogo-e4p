@@ -20,6 +20,7 @@ const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1},
 static const EpdWaveform main_gray = {4}, main_exit = {5}, main_water = {6}, main_bw = {7}, main_acrylic = {8}, main_acrylic_clean = {9};
 static const EpdWaveform reader_soft = {10};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
+const EpdWaveform* display_reader_water_waveform(void) {return &reader_soft;}
 static app_main_refresh_mode_t main_mode=APP_MAIN_REFRESH_FAST;
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) {return main_mode;}
 static int exit_calls;

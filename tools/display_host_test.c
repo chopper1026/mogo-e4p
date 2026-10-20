@@ -44,8 +44,9 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
     assert(false); return EPD_DRAW_OTHER_ERROR;
 }
 static const EpdWaveform soft_gray = {4};
-static const EpdWaveform reader_soft = {5};
+static const EpdWaveform reader_soft = {5}, reader_water = {6};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
+const EpdWaveform* display_reader_water_waveform(void) {return &reader_water;}
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}
@@ -80,7 +81,7 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,
     e0470_turn_dir_t dir,const EpdWaveform* waveform,unsigned bands) {
     assert(ota_display_depth);
     assert(hl&&area.width>0&&dir==E0470_TURN_RTL);
-    assert(waveform==&E0470_WAVEFORM&&bands==E0470_TURN_FAST_BANDS);
+    assert(waveform==&reader_water&&bands==E0470_TURN_FAST_BANDS);
     ++water_calls;assert(last_scan==READ_PICO_EPD_SCAN_FAST);
     return water_result;
 }
