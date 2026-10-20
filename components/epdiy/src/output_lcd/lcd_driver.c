@@ -161,8 +161,9 @@ typedef struct {
     size_t bb_size;
     size_t batches;
     size_t bb_eof_count; // EOF 次序选 bounce，勿用 desc 指针比较（AXI 地址可能不一致）
-    size_t lines_fed; // 本帧已喂行数，用于无 VSYNC 时收尾
-    int finish_reason; // 1=VSYNC 2=lines_fed 3=abort
+    size_t lines_fed; // 本帧已喂行数（供数是扫描的前置，不能代表已扫行）
+    size_t lines_scanned; // 本帧已被 LCD 取走的行数，只在 EOF 后累计
+    int finish_reason; // 1=VSYNC 2=no VSYNC 3=abort
     bool frame_finishing; // 防止重复 stop/回调
     bool bb_behind_cache; // bounce 在 cacheable 区时需 msync
 
@@ -269,12 +270,6 @@ static IRAM_ATTR bool fill_bounce_buffer(uint8_t* buffer) {
         esp_cache_msync(buffer, lcd.bb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     }
 #endif
-
-    // VSYNC 未到时靠行计数收尾，避免 GDMA 环链 EOF 在 ISR 里空转触发 INT WDT
-    if (!lcd.frame_finishing && lcd.lines_fed >= (size_t)lcd.display_lines) {
-        lcd.finish_reason = 2;
-        lcd_finish_frame_from_isr();
-    }
     return task_awoken;
 }
 
@@ -490,6 +485,13 @@ static IRAM_ATTR bool lcd_rgb_panel_eof_handler(
     }
     lcd.eof_last_us = t0;
 
+    // 一个 bounce 完成即表示这 8 行已被 LCD 取走。供数线程始终领先两个
+    // bounce，lines_fed 不能代表扫描进度，这里可以。
+    // One completed bounce means the LCD has taken those 8 lines. The feeders
+    // always run two bounces ahead, so lines_fed is not the scan position but
+    // this counter is.
+    lcd.lines_scanned += BOUNCE_BUF_LINES;
+
     // 与 esp_lcd RGB 一致：用 EOF 计数选 buffer，AXI 下 desc 指针不可靠
     int bb = (int)(lcd.bb_eof_count & 1u);
     lcd.bb_eof_count += 1;
@@ -510,6 +512,19 @@ static IRAM_ATTR bool lcd_rgb_panel_eof_handler(
     }
     lcd.eof_work_sum_us += work;
     lcd.eof_work_n += 1;
+
+    // 正常帧由 VSYNC 结束；只有 VSYNC 丢失时才按扫描行数兜底。阈值必须晚于
+    // 一整帧，否则会在末行扫完前停掉 LCD，末尾几条门极永远得不到驱动。
+    // A normal frame ends on VSYNC. Fall back to the scan-line count only when
+    // VSYNC is lost, and keep the threshold past a whole frame: stopping before
+    // the last lines scan leaves the final gate lines undriven for good.
+    if (!lcd.frame_finishing &&
+        lcd.lines_scanned >= (size_t)lcd.display_lines + (size_t)lcd.display_lines / 2) {
+        ESP_EARLY_LOGW(TAG, "frame ended without VSYNC (scanned=%u/%d)",
+                       (unsigned)lcd.lines_scanned, lcd.display_lines);
+        lcd.finish_reason = 2;
+        lcd_finish_frame_from_isr();
+    }
     return awoken;
 }
 
@@ -1179,6 +1194,7 @@ void IRAM_ATTR epd_lcd_start_frame() {
     lcd.batches = 0;
     lcd.bb_eof_count = 0;
     lcd.lines_fed = 0;
+    lcd.lines_scanned = 0;
     lcd.frame_finishing = false;
     lcd.eof_last_us = 0;
     lcd.eof_dt_min_us = 0;
