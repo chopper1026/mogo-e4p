@@ -15,22 +15,23 @@
 
 #define TAG "read_pico"
 
-// 规格给的消隐下界：行起始 ≥0.3µs、行后肩 ≥0.8µs、行结束 ≥4 钟。
-// / Spec blanking floors: line start ≥0.3 µs, back porch ≥0.8 µs, line end ≥4 clocks.
-#define LINE_START_MIN_NS 300
-#define LINE_BACK_MIN_NS 800
-#define LINE_END_MIN_CLK 4
+// 原厂 Metalio 时序：L_SL 9、L_BL 4、L_EL 3 时钟，20 MHz 下 16 µs 一行（320 时钟）。
+// Vendor Metalio timing: L_SL 9, L_BL 4, L_EL 3 clocks, 16 µs per line (320 clocks) at 20 MHz.
+#define LINE_START_MIN_NS 450
+#define LINE_BACK_MIN_NS 200
+#define LINE_END_MIN_CLK 3
 
-// 帧消隐：起始 1 行、后肩固定 4 行、结束 12 行。
-// / Frame blanking: 1 start line, 4-line back porch, 12 end lines.
+// 原厂帧消隐：起始 1 行、无后肩、结束 3 行；688 行约 11.0 ms（≈90.8 Hz）。
+// Vendor frame blanking: 1 start line, no back porch, 3 end lines; 688 lines ≈ 11.0 ms (≈90.8 Hz).
 #define FRAME_START_LINES 1
-#define FRAME_BACK_LINES 4
-#define FRAME_END_LINES 12
+#define FRAME_BACK_LINES 0
+#define FRAME_END_LINES 3
 
-// 栅极开门必须严格短于一行。厂家表 LGONL≈13.4µs，低电平至少留 1.2µs。
-// / Gate open must be strictly shorter than one line. Vendor LGONL≈13.4 µs; leave ≥1.2 µs low.
+// 原厂 CKV 高 6.0 µs；源极整行保持数据，门极只需充电窗口，不要求覆盖整个数据窗。
+// Vendor CKV high is 6.0 µs; the source holds the row for the whole line, so the
+// gate only needs a charging window rather than the full data window.
 #define CKV_LOW_MIN_01US 12
-#define CKV_HIGH_MAX_01US 134
+#define CKV_HIGH_MAX_01US 60
 
 static int s_frame_target_us = E0470_WAVEFORM_FRAME_US;
 static int s_ckv_high_max_01us = CKV_HIGH_MAX_01US;
@@ -115,13 +116,11 @@ void read_pico_epd_scan(
     out->frame_us = line_us * vall;
     out->frame_hz_x100 = 100000000 / out->frame_us;
 
-    // 开门至少盖住有效数据，再按厂家 LGONL 上限收；短行盖不住就收到行长减 1.2µs。
-    // / Gate must cover active data, then cap at vendor LGONL; if the line is
-    // too short, cap at line length minus 1.2 µs.
-    const int data_end_01us = ceil_div((lsl + lbl + ldl) * 10, pclk_mhz);
-    int ckv = s_ckv_high_max_01us;
-    if (ckv < data_end_01us) ckv = data_end_01us;
-    out->ckv_high_01us = clampi(ckv, CKV_LOW_MIN_01US, line_us * 10 - CKV_LOW_MIN_01US);
+    // 原厂门极高 6.0 µs；行长不足时收到行长减 1.2 µs，低电平至少 1.2 µs。
+    // Vendor gate high is 6.0 µs; on a short line cap at line minus 1.2 µs and
+    // keep at least 1.2 µs low.
+    out->ckv_high_01us = clampi(s_ckv_high_max_01us, CKV_LOW_MIN_01US,
+                                line_us * 10 - CKV_LOW_MIN_01US);
 }
 
 int read_pico_epd_refresh_ms(int pclk_mhz, read_pico_epd_scan_profile_t profile, int phases) {
