@@ -47,6 +47,7 @@ settings=(root/'main/settings.h').read_text();a=settings.index('typedef enum {\n
 unit+=r'''
 enum {READER_PANEL_NONE,READER_PANEL_TOOLS};
 static bool s_reader_return_home;static int s_reader_panel,s_reader_slider,s_stats_activity_ms;
+static bool s_reader_tools_toggle;
 static struct {bool pending;} s_reader_tap;
 // 合并后的提取函数不再读 s_reader_tap；引用一次避免 -Wunused。
 // The extracted functions no longer read s_reader_tap; reference it once against -Wunused.
@@ -60,9 +61,17 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return AP
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static void invalidate_prep(void){}
 '''
-unit+='\n'.join(function(n,book) for n in ['reader_return','reader_key_action','reader_key_label'])
+unit+='\n'.join(function(n,book) for n in ['reader_return','toggle_reader_tools_panel','reader_key_action','reader_key_label'])
 unit+=r'''
 int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
+ // 只有 NONE↔TOOLS 是纯开关；从设置卡片切过来必须走整页差分。
+ // Only NONE↔TOOLS is a pure toggle; switching in from a settings sheet keeps the page diff.
+ s_reader_panel=READER_PANEL_NONE;s_reader_tools_toggle=false;toggle_reader_tools_panel();
+ assert(s_reader_panel==READER_PANEL_TOOLS&&s_reader_tools_toggle);
+ s_reader_panel=2;s_reader_tools_toggle=false;toggle_reader_tools_panel();
+ assert(s_reader_panel==READER_PANEL_TOOLS&&!s_reader_tools_toggle);
+ s_reader_panel=READER_PANEL_TOOLS;s_reader_tools_toggle=false;toggle_reader_tools_panel();
+ assert(s_reader_panel==READER_PANEL_NONE&&s_reader_tools_toggle);
  int points=0;
  for(int y=172;y<574;y+=17)for(int x=24;x<660;x+=17){
   s_view=HOME_ROOT;nav=-1;int old=open_calls;

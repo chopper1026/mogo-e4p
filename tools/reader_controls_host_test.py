@@ -22,6 +22,7 @@ enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTI
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider=3,s_pressed_control=2;
+static bool s_reader_tools_toggle;
 static char *s_text="text";
 static bool s_clear_confirm,s_scan_pending;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
@@ -52,7 +53,7 @@ unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRA
 unit+=r'''
 static void reset(app_ctx_t *ctx){
  s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
- s_reader_slider=3;s_pressed_control=2;invalidations=0;
+ s_reader_slider=3;s_pressed_control=2;invalidations=0;s_reader_tools_toggle=false;
  *ctx=(app_ctx_t){.now_ms=2200};
 }
 int main(void){
@@ -65,7 +66,7 @@ int main(void){
   assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,vertical)==(vertical?1:0));
   assert(reader_swipe_direction(UI_GESTURE_SWIPE_L,vertical)==1);
  }
- for(unsigned y=1000;y<1220;++y){reset(&ctx);e.y0=y;bool allowed=y>=1096&&y<1216;assert(reader_tools_swipe(&ctx,&e)==allowed);if(!allowed)assert(s_reader_panel==READER_PANEL_NONE&&!invalidations);}
+ for(unsigned y=1000;y<1220;++y){reset(&ctx);e.y0=y;bool allowed=y>=1096&&y<1216;assert(reader_tools_swipe(&ctx,&e)==allowed);assert(s_reader_tools_toggle==allowed);if(!allowed)assert(s_reader_panel==READER_PANEL_NONE&&!invalidations);}
  e.y0=1160;
  for(unsigned x=0;x<=684;++x){reset(&ctx);e.x0=x;assert(reader_tools_swipe(&ctx,&e)==(x<684));}e.x0=342;
  for(int type=UI_GESTURE_SWIPE_D;type<=UI_GESTURE_MOVE;++type){reset(&ctx);e.type=type;assert(!reader_tools_swipe(&ctx,&e));}e.type=UI_GESTURE_SWIPE_U;

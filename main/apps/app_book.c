@@ -245,6 +245,10 @@ static bool s_reader_turn_pending;
 // 只记录成功推屏的纯正文基准，避免跨章或退出插图时误用文字波形。
 // Track only successfully presented text-only bodies, protecting chapter and image transitions.
 static bool s_reader_text_frame;
+// 工具栏开关只改底部一条带；这一帧单独走 GC16，整页 GL16 差分擦不掉实心进度条。
+// A tools toggle changes only the bottom band; that frame drives it with GC16 because a
+// whole-page GL16 differential cannot erase the solid progress bar.
+static bool s_reader_tools_toggle;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
 static bool s_requested_fullscreen = true;
@@ -532,6 +536,11 @@ static EpdRect reader_area(void) {
 static EpdRect reader_fullscreen_progress_area(void) {
     return (EpdRect){0, READER_FULLSCREEN_PROGRESS_TOP,
                      UI_LOCK_WIDTH, UI_LOCK_HEIGHT - READER_FULLSCREEN_PROGRESS_TOP};
+}
+// 工具栏覆盖底部 120px；页脚进度条（1143–1155）和章节行都在这条带内。
+// The tools bar covers the bottom 120 px; the footer bar (1143–1155) and title row sit inside it.
+static EpdRect reader_tools_area(void) {
+    return (EpdRect){0, UI_BAR_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_BAR_TOP};
 }
 static EpdRect body_rect_for_tracking(int tracking_index) {
     (void)tracking_index;
@@ -2946,8 +2955,11 @@ static void draw_reader_panel(uint8_t* fb) {
     if (s_reader_panel==READER_PANEL_NONE) return;
     ui_text_set_system_scale(true);
     if (s_reader_panel == READER_PANEL_TOOLS) {
-        ui_fill_rect_fast((EpdRect){0, 1096, UI_LOCK_WIDTH, 120}, UI_GRAY_WHITE, fb);
-        ui_hairline(fb, 1096, 0, UI_LOCK_WIDTH, 0x98);
+        EpdRect band = reader_tools_area();
+        ui_fill_rect_fast(band, UI_GRAY_WHITE, fb);
+        // 1px 浅灰线在白底工具栏上几乎看不见；结构分隔改用深色双像素。
+        // A 1 px light-gray rule reads as almost nothing on the white bar; use the dark two-pixel separator.
+        ui_draw_separator(fb, band.y, 0, UI_LOCK_WIDTH, 0x70);
         const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置",
                                 s_reader_fullscreen ? "退出全屏" : "全屏"};
         for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
@@ -3842,6 +3854,11 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
     return APP_REDRAW_AREA;
 }
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
+    // 开关标记只对本次推屏有效：提前返回也不留给下一帧。
+    // The toggle flag applies to this present only; consume it even on an early return.
+    const bool tools_toggle = s_reader_tools_toggle;
+    s_reader_tools_toggle = false;
+    bool tools_band = false;
     if(reader_indent_present(ctx,redraw))return true;
     if(s_shelf_key_paint_pending && redraw==APP_REDRAW_AREA && s_view==SHELF && !ctx->request_app){
         s_shelf_key_paint_pending=false;
@@ -3930,6 +3947,16 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);
+    // 工具栏开关只改底部一条带：这一帧用 GC16 全像素驱动，实心进度条才能擦净；
+    // 整页 GL16 差分只擦变化像素，会在工具栏白底上留下进度条轮廓。
+    // A tools toggle changes only the bottom band; drive it with full-pixel GC16 so the solid
+    // progress bar is erased. A page-wide GL16 differential leaves its outline on the white bar.
+    else if (tools_toggle && redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
+             s_presented_view == (int)READING) {
+        tools_band = true;
+        err = update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GC16,
+                                            reader_tools_area());
+    }
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
         // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。
         // Lift and restore only changed pixels, avoiding a dark pulse over the whole cover.
@@ -3991,7 +4018,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         else if (s_cover_batch_present_pending) s_cover_dirty_mask &= ~s_cover_present_mask;
     }
     s_cover_present_mask=0;
-    if (err==EPD_DRAW_SUCCESS && reader_status_visible() &&
+    if (err==EPD_DRAW_SUCCESS && reader_status_visible() && !tools_band &&
         (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup))
         s_reader_clock_minute=frame_minute;
     s_reader_text_frame = err == EPD_DRAW_SUCCESS && s_view == READING && s_text &&
@@ -5682,6 +5709,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             return APP_REDRAW_PAGE;
         }
         s_reader_panel = READER_PANEL_NONE;
+        s_reader_tools_toggle = true;
         invalidate_prep();
         return APP_REDRAW_PAGE;
     }
@@ -6677,6 +6705,7 @@ static bool reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ev->x0 >= UI_LOCK_WIDTH || ev->y0 < UI_LOCK_HEIGHT - 120 || ev->y0 >= UI_LOCK_HEIGHT) return false;
     s_pressed_control = s_reader_slider = -1;
     s_reader_panel = READER_PANEL_TOOLS;
+    s_reader_tools_toggle = true;
     s_stats_activity_ms = ctx->now_ms;
     ctx->user_activity = true;
     invalidate_prep();
@@ -6912,6 +6941,14 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     return decorated ? paint_control(ctx, start_rect) : APP_REDRAW_NONE;
 }
+// 只有 NONE↔TOOLS 是纯开关；从设置卡片切过来会整张换掉，必须保留整页差分。
+// Only NONE↔TOOLS is a pure toggle; switching in from a settings sheet replaces a whole
+// card and must keep the page-wide differential.
+static void toggle_reader_tools_panel(void) {
+    const bool pure = s_reader_panel == READER_PANEL_NONE || s_reader_panel == READER_PANEL_TOOLS;
+    s_reader_panel = s_reader_panel == READER_PANEL_TOOLS ? READER_PANEL_NONE : READER_PANEL_TOOLS;
+    if (pure) s_reader_tools_toggle = true;
+}
 static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
     switch (action) {
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:
@@ -6922,7 +6959,7 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
         case APP_READER_KEY_TOOLS:
             s_reader_slider = -1;
-            s_reader_panel = s_reader_panel == READER_PANEL_TOOLS ? READER_PANEL_NONE : READER_PANEL_TOOLS;
+            toggle_reader_tools_panel();
             invalidate_prep();
             return APP_REDRAW_PAGE;
         default: return APP_REDRAW_NONE;
@@ -6994,7 +7031,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
         else if (s_view == SHELF) { ui_nav_request(ctx, 3); return APP_REDRAW_NONE; }
         else if (s_view == READING) {
             s_reader_slider = -1;
-            s_reader_panel = s_reader_panel == READER_PANEL_TOOLS ? READER_PANEL_NONE : READER_PANEL_TOOLS;
+            toggle_reader_tools_panel();
             invalidate_prep();
         } else if (s_view == TOC) {
             set_reader_view(s_text ? READING : SHELF);
