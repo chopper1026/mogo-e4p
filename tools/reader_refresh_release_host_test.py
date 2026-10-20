@@ -71,7 +71,7 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define E0470_TURN_FAST_TICK_US 11090
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
 static bool s_reader_clock_pending,s_input_settle,s_shelf_feedback_pending,s_cover_batch_present_pending,s_shelf_page_pending;
-static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_text_frame;
+static bool s_reader_image_refresh_pending,s_reader_cleanup,s_reader_turn_pending,s_water_turn_pending,s_clear_confirm,s_reader_fullscreen,s_reader_footer_pending,s_reader_footer_strong,s_reader_text_frame;
 static bool s_toolbar;
 static int s_view=READING,s_reader_panel,s_mode=MODE_GL16,s_presented_view=READING,s_water_turn_dir,s_page,s_du_count;
 static unsigned s_cover_dirty_mask,s_cover_present_mask;

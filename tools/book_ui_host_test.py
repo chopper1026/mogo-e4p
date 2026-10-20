@@ -305,7 +305,7 @@ static bool test_open_full=true;
 static bool app_settings_reader_open_fullscreen(void){return test_open_full;}
 static void app_settings_set_reader_hold_refresh(bool on){test_hold_refresh=on;}
 static void app_settings_set_reader_hide_images(bool on){test_hide_images=on;}
-static bool s_reader_footer_pending,s_reader_image_refresh_pending,s_water_turn_pending;
+static bool s_reader_footer_pending,s_reader_footer_strong,s_reader_image_refresh_pending,s_water_turn_pending;
 static int s_turns;
 static bool s_bookmark_edit,s_bookmark_delete_confirm,s_bookmark_delete_error;
 static uint32_t s_bookmark_selected;

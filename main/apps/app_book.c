@@ -421,6 +421,9 @@ static bool s_reader_cleanup;
 // text, so the first frame takes a whole-screen GC16 instead.
 static bool s_reader_entry_full;
 static bool s_reader_footer_pending;
+// 换章这一次页脚改用 37 相 GL16 差分，其余翻页仍是 8 相 DU。
+// A chapter-change turn presents the footer with the 37-phase GL16 differential; other turns keep the 8-phase DU.
+static bool s_reader_footer_strong;
 static bool s_water_turn_pending;
 static e0470_turn_dir_t s_water_turn_dir;
 static int s_pressed_control = -1;
@@ -3957,11 +3960,16 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                                 reader_fullscreen_progress_area());
         }
         if (s_reader_footer_pending) {
-            // 普通翻页页脚只驱动变化像素；全刷由上方整屏分支一次完成。
-            // Ordinary turns drive only changed footer pixels; the full-screen branch handles cleanup at once.
-            err = (enum EpdDrawError)(err | update_display_area_with(ctx->hl, &E0470_FOLLOW_WAVEFORM,
-                                                                     MODE_DU, progress_rect()));
-            ESP_LOGI(TAG, "reader regions body_h=%d footer=diff pct=%u", s_area.height, percent(s_page));
+            // 普通翻页页脚只驱动变化像素；换章这一次改用 37 相 GL16 擦净标题和页码。
+            // Ordinary turns drive only changed footer pixels; a chapter change uses the
+            // 37-phase GL16 differential to erase the old title and page number.
+            err = (enum EpdDrawError)(err | (s_reader_footer_strong
+                ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect())
+                : update_display_area_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, progress_rect())));
+            if (s_reader_footer_strong)
+                ESP_LOGI(TAG, "reader footer gl16 pct=%u", percent(s_page));
+            else
+                ESP_LOGI(TAG, "reader regions body_h=%d footer=diff pct=%u", s_area.height, percent(s_page));
         }
     }
     else err = s_view == READING
@@ -3993,6 +4001,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_reader_image_refresh_pending = false;
     s_presented_view = (int)s_view;
     s_reader_footer_pending = false;
+    s_reader_footer_strong = false;
     s_water_turn_pending = false;
     s_shelf_feedback_pending = false;
     s_cover_batch_present_pending = false;
@@ -5148,7 +5157,9 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
 }
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     TD_LOGI("TURN dir=%d ch=%u pg=%u", dir, (unsigned)s_chapter, (unsigned)s_page);
+    s_reader_footer_strong = false;
     if (!s_text || s_clear_confirm) return APP_REDRAW_NONE;
+    const size_t prior_chapter = s_chapter;
     // 页面图片表可能随跨章加载替换，旧页资格以实际成功显示的画面为准。
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
     bool from_text_frame = s_reader_text_frame;
@@ -5186,6 +5197,12 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
                            app_settings_reader_turn_effect() == 1 && from_text_frame &&
                            book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
+    // 换章时页脚标题整行变化，8 相 DU 擦不干净；这一次单独用 37 相 GL16 差分。
+    // 整屏全刷已覆盖页脚，周期清理那一次不重复升级。
+    // A chapter change replaces the whole footer title and the 8-phase DU cannot erase it,
+    // so that turn presents the footer with the 37-phase GL16 differential. A whole-screen
+    // refresh already covers the footer, so cleanup turns do not upgrade it again.
+    s_reader_footer_strong = !chrome_changed && !s_reader_cleanup && s_chapter != prior_chapter;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
 static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px, int next_margin,
@@ -5350,6 +5367,7 @@ static app_redraw_t reader_manual_refresh(app_ctx_t* ctx) {
     s_reader_panel = READER_PANEL_NONE;
     s_reader_slider = -1;
     s_reader_footer_pending = s_reader_image_refresh_pending = false;
+    s_reader_footer_strong = false;
     s_water_turn_pending = s_reader_cleanup = false;
     s_du_count = s_turns = 0;
     invalidate_prep();
@@ -5421,6 +5439,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
         save_progress();
     }
     s_reader_footer_pending = s_reader_image_refresh_pending = false;
+    s_reader_footer_strong = false;
     s_water_turn_pending = false;
     return APP_REDRAW_PAGE;
 }
