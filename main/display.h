@@ -51,6 +51,10 @@ enum EpdDrawError update_display_mode(EpdiyHighlevelState* hl, enum EpdDrawMode 
 /// 普通页面切换使用真实差分 GL16；未变化像素不进入 dirty map。
 /// True differential GL16 for ordinary page transitions; unchanged pixels stay clean.
 enum EpdDrawError update_display_mode_diff(EpdiyHighlevelState* hl, enum EpdDrawMode mode);
+/// 同上，但使用指定波形；用于阅读页纯白目标的完整擦白列。
+/// Same as above with a supplied waveform; used for the reader's full white column.
+enum EpdDrawError update_display_mode_diff_with(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode);
 /// 系统页切换：普通模式柔和16灰阶差分，等灰保持、黑白端点单向推动，周期GC16清残影；不安排二次刷新。
 /// System transitions: ordinary soft 16-gray differences hold equal grays and drive BW endpoints directionally, with periodic GC16 cleanup and no second pass.
 /// 四主页面固定底栏，仅横条局部更新；普通保留灰阶与内容区整理，快刷用完整黑白表及棋盘格亚克力。

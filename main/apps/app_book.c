@@ -416,6 +416,10 @@ static EpdRect s_area;
 static enum EpdDrawMode s_mode = MODE_GL16;
 static bool s_input_settle;
 static bool s_reader_cleanup;
+// 开书首帧：上一页的深灰边线和文字靠差分擦不干净，首帧改走整屏 GC16。
+// Opening frame: a differential cannot fully erase the previous page's dark frame lines and
+// text, so the first frame takes a whole-screen GC16 instead.
+static bool s_reader_entry_full;
 static bool s_reader_footer_pending;
 static bool s_water_turn_pending;
 static e0470_turn_dir_t s_water_turn_dir;
@@ -3868,6 +3872,15 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     if (redraw == APP_REDRAW_NONE || redraw == APP_REDRAW_DONE || ctx->request_app) return true;
     if (s_presented_view != (int)s_view && redraw == APP_REDRAW_AREA) redraw = APP_REDRAW_PAGE;
+    // 开书首帧走整屏 GC16：差分只驱动变化像素，首页深灰边线与文字会留下浅灰残影，
+    // 全像素黑白循环才能把旧画面彻底擦掉。
+    // Present the first frame after opening a book as a whole-screen GC16: a differential
+    // drives changed pixels only and leaves the previous page's dark lines as gray ghosts;
+    // a full-pixel black/white cycle erases the old frame.
+    if (s_reader_entry_full) {
+        s_reader_entry_full = false;
+        if (s_view == READING) redraw = APP_REDRAW_FULL;
+    }
     if ((s_view == SHELF || s_view == MANAGE) &&
         !(redraw == APP_REDRAW_AREA && (s_shelf_feedback_pending || s_cover_batch_present_pending))) {
         prepare_covers(ctx);
@@ -3895,7 +3908,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
         err = app_settings_reader_turn_effect() == 1
-            ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, reader_area())
+            ? update_display_area_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16,
+                                            reader_area())
             : update_display_area_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, reader_area());
         if (err == EPD_DRAW_SUCCESS && s_reader_footer_pending)
             err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect());
@@ -3905,7 +3919,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     else if (image_gray_refresh) err = app_settings_reader_turn_effect() == 1 &&
         redraw != APP_REDRAW_FULL && !s_reader_cleanup
-        ? update_display_mode_diff(ctx->hl, MODE_GL16)
+        ? update_display_mode_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16)
         : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
     else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
@@ -3932,8 +3946,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
                 ? update_display_area_diff_with(ctx->hl,
-                    s_reader_turn_pending ? display_reader_text_waveform() : &E0470_WAVEFORM, s_mode, s_area)
-                : update_display_area_with(ctx->hl, &E0470_WAVEFORM, s_mode, s_area);
+                    s_reader_turn_pending ? display_reader_text_waveform() : display_reader_page_waveform(),
+                    s_mode, s_area)
+                : update_display_area_with(ctx->hl, display_reader_page_waveform(), s_mode, s_area);
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
         if (s_reader_fullscreen && err == EPD_DRAW_SUCCESS) {
             // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
@@ -3950,7 +3965,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         }
     }
     else err = s_view == READING
-        ? update_display_mode_diff(ctx->hl, APP_PAGE_REFRESH_MODE)
+        ? update_display_mode_diff_with(ctx->hl, display_reader_page_waveform(), APP_PAGE_REFRESH_MODE)
         : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
     reader_prefetch_end(prep);
@@ -4511,6 +4526,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     skip_hidden_image_pages(ctx, 1);
     if (!s_text) { free_book(); return false; }
     s_view = READING;
+    s_reader_entry_full = true;
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
         book_layout_page_image_count(s_page) > 0 && s_page_images;
     s_stats_last_ms = s_stats_activity_ms = ctx->now_ms;
@@ -6433,6 +6449,9 @@ static void on_enter(app_ctx_t* ctx) {
     s_shelf_feedback_pending = false;
     s_cover_batch_present_pending = false;
     s_reader_cleanup = false;
+    // 进页本身不整屏刷；只有真的开了书，首帧才需要擦掉上一页。
+    // Entering the app alone does not force a full refresh; only an actually opened book does.
+    s_reader_entry_full = false;
     s_poll_ms = 0;
     read_pico_sd_info_t sd = {0};
     esp_err_t media_err = read_pico_sd_get_info(&sd);

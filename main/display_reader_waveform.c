@@ -7,8 +7,13 @@
  * Frozen: Advance at most two settling phases only for white-to-midgray pairs. Keep endpoints,
  * all other pairs, original tables and frame timing. Equal pulse counts do not guarantee equal
  * optical grays; validate this ordering on the panel against tone and ghosting.
+ * 用户 2026-10-19 反馈阅读页数秒后回灰：纯白目标改用水波纹已验证的完整擦白列，
+ * 其余灰阶、文字软化与帧时序不变。
+ * User report 2026-10-19: reader pages drift gray within seconds; pure-white targets now
+ * reuse the verified main-page water whitening column, leaving other grays and timing intact.
  */
 #include "display_reader_waveform.h"
+#include "display_main_waveform.h"
 #include "e0470_epaper_waveform.h"
 #include <stdbool.h>
 #include <string.h>
@@ -20,6 +25,26 @@ static const EpdWaveformMode s_mode = {5, 1, s_ranges};
 static const EpdWaveformMode* s_modes[] = {&s_mode};
 static EpdWaveform s_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_modes};
 static bool s_ready;
+
+static uint8_t s_page_data[E0470_GL16_FRAMES][16][4];
+static const EpdWaveformPhases s_page_phases = {E0470_GL16_FRAMES, (const uint8_t*)s_page_data, NULL};
+static const EpdWaveformPhases* s_page_ranges[] = {&s_page_phases};
+static const EpdWaveformMode s_page_mode = {5, 1, s_page_ranges};
+static const EpdWaveformMode* s_page_modes[] = {&s_page_mode};
+static EpdWaveform s_page_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_page_modes};
+static bool s_page_ready;
+
+// E4P 原厂 GL16 的白饱和不足：大片旧文字转白后会在数秒内回灰。主页水波纹已验证
+// 把全部剩余相用作同向擦白可以消除；这里只替换 to=15 一列，其余迁移和帧时序不动。
+// The E4P vendor GL16 under-saturates white: large text-to-white areas drift gray
+// within seconds. The main-page water table already uses every remaining phase as a
+// white push; copy only its to=15 column, leaving all other pairs and timing alone.
+static void copy_white_column(uint8_t (*dst)[16][4]) {
+    const EpdWaveformPhases* water = e0470_waveform_phases(display_main_water_waveform(), MODE_GL16);
+    if (!water || !water->luts || water->phases != E0470_GL16_FRAMES || water->phase_times) return;
+    for (int f = 0; f < E0470_GL16_FRAMES; ++f)
+        memcpy(dst[f][15], water->luts + ((size_t)f * 16 + 15) * 4, 4);
+}
 
 static void set_action(int phase, int to, int action) {
     // from=15 占该字节最低两位；其余三对不变。/ from=15 occupies only the lowest two bits.
@@ -60,7 +85,20 @@ const EpdWaveform* display_reader_text_waveform(void) {
             ++moved; target_rank += 2;
         }
     }
+    copy_white_column(s_data);
     s_waveform.temp_intervals = E0470_TEXTTURN_WAVEFORM.temp_intervals;
     s_ready = true;
     return &s_waveform;
+}
+
+const EpdWaveform* display_reader_page_waveform(void) {
+    if (s_page_ready) return &s_page_waveform;
+    const EpdWaveformPhases* base = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
+    if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
+        return &E0470_WAVEFORM;
+    memcpy(s_page_data, base->luts, sizeof(s_page_data));
+    copy_white_column(s_page_data);
+    s_page_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_page_ready = true;
+    return &s_page_waveform;
 }

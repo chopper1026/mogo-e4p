@@ -269,7 +269,7 @@ static EpdRect s_area;
 #define MODE_GL16 1
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;++test_cover_prepares;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++test_shelf_renders;}
-static bool s_resume_pending,s_reader_cleanup,s_shake_enabled;
+static bool s_resume_pending,s_reader_cleanup,s_shake_enabled,s_reader_entry_full;
 static bool s_reader_fullscreen,test_reader_statusbar=true,test_hold_refresh,test_hide_images,test_power_turn;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_shelf_key_pressed;
 static int s_shelf_key_delta;

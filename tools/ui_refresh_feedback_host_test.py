@@ -53,7 +53,7 @@ static const int E0470_WAVEFORM=0,E0470_FULL_WAVEFORM=1,E0470_FOLLOW_WAVEFORM=2,
 static const int* display_reader_text_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
 static const char *TAG="test";
 static int s_view,s_presented_view,s_reader_panel,s_pressed_control,s_reader_slider;
-static bool s_shelf_page_pending,s_shelf_feedback_pending,s_reader_cleanup,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm;
+static bool s_shelf_page_pending,s_shelf_feedback_pending,s_reader_cleanup,s_reader_entry_full,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm;
 static bool s_reader_fullscreen,s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
 static bool s_shelf_key_paint_pending;
 static app_redraw_t shelf_key_paint(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_NONE;}

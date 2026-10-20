@@ -42,6 +42,7 @@
 #include <string.h>
 #include "esp_heap_caps.h"
 #include "display_main_waveform.h"
+#include "display_reader_waveform.h"
 #include "ui/ui_nav_layout.h"
 
 static const char* TAG = "read_pico";
@@ -490,6 +491,20 @@ static enum EpdDrawError update_display_mode_diff_unlocked(
     return result;
 }
 
+// 阅读页整页差分可带自己的白目标序列；输出后恢复默认表，后续局部刷新不受影响。
+// Reader page differentials may carry their own white-target sequence; restore the
+// default waveform afterward so later partial updates are unaffected.
+static enum EpdDrawError update_display_mode_diff_with_unlocked(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
+) {
+    epd_poweron();
+    epd_hl_waveform(hl, waveform);
+    enum EpdDrawError result = hl_update(hl, waveform, mode, false, NULL, true);
+    epd_hl_waveform(hl, &E0470_WAVEFORM);
+    rails_keepalive();
+    return result;
+}
+
 static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* hl) {
     enum EpdDrawError navigation;
     if (main_begin(hl, &navigation)) return navigation;
@@ -647,10 +662,12 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
-    // 水波纹使用面板原厂GL16表：保留旧像素到灰色目标的前导擦除，灰阶由原厂脉冲校准。
-    // Ripple uses the vendor GL16 table: keep the leading erase into gray targets and factory-calibrated gray pulses.
+    // 水波纹使用面板原厂GL16表，纯白目标沿用主页水波纹的完整擦白列；
+    // 保留旧像素到灰色目标的前导擦除，灰阶由原厂脉冲校准。
+    // Ripple uses the vendor GL16 table with the main-page whitening column for pure
+    // white targets: keep the leading erase into gray targets and factory-calibrated grays.
     enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir,
-        &E0470_WAVEFORM, E0470_TURN_FAST_BANDS);
+        display_reader_page_waveform(), E0470_TURN_FAST_BANDS);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) return result;
@@ -731,6 +748,18 @@ enum EpdDrawError update_display_mode_diff(
     bool held = pico_online_display_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_diff_unlocked(hl, mode);
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
+enum EpdDrawError update_display_mode_diff_with(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
+) {
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    enum EpdDrawError result = display_needs_full()
+        ? update_display_full_unlocked(hl) : update_display_mode_diff_with_unlocked(hl, waveform, mode);
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
     return result;
