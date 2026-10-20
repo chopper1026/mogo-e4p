@@ -26,6 +26,7 @@ enum EpdDrawError {EPD_DRAW_SUCCESS=0,EPD_DRAW_FAULT=1};
 #define APP_LOCK_LIGHT_SLEEP_MS 600000u
 #define APP_LOCK_IGNORE_BOOT_MS 1000
 #define ESP_ERR_NOT_FINISHED 1
+#define ESP_OK 0
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 #define pdMS_TO_TICKS(x) (x)
@@ -35,12 +36,13 @@ typedef struct {bool mounted;} read_pico_sd_info_t;
 typedef struct {bool active;} app_lock_font_t;
 typedef void *sc7a20h_handle_t;typedef void *cst836u_handle_t;
 typedef int app_wake_source_t;
+typedef int esp_err_t;
 static const uint8_t lock_4bpp_bin_start[1]={0};
 static uint8_t pixels[FRAME_BYTES],panel[FRAME_BYTES],style,current_background=0x32;
 static bool frame_ready, s_lock_feedback_visible, feedback_seen, final_ok=true;
 static unsigned full_presents, entry_clears;
 static unsigned draws[4],fallback,presents,auths,font_begin,font_end,pause,resume,clear_resume;
-static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok;
+static bool pin,draw_ok=true,transfer_ok=true,timeout,reader,boot_cache,cache_ok,deep_fail;
 static unsigned cached_style;
 static jmp_buf deep;
 static const char *app_settings_wallpaper_path(void){return "/sdcard/wallpaper.jpg";}
@@ -72,8 +74,9 @@ static void read_pico_transfer_resume_after_sleep(void){++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
 static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert(acc==(void*)1&&(ms==0||ms==600000));if(ms==0)return APP_WAKE_KEY;return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
-static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
+static int app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);if(deep_fail)return -1;longjmp(deep,1);}
 static void read_pico_pmu_drain_events(void){}
+static void read_pico_pmu_consume_key_press(void){}
 // 后台对时取消只验证被调用，本测试不桥接对时状态机。/ Cancelling background sync is only counted as called; this test does not bridge its state machine.
 static unsigned time_cancels;
 static void app_time_service_cancel(void){++time_cancels;}
@@ -88,7 +91,7 @@ static int epd_height(void){return 1216;}
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'
 unit += r'''
-static void reset(void){current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;timeout=reader=boot_cache=cache_ok=false;}
+static void reset(void){current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;timeout=reader=boot_cache=cache_ok=false;}
 int main(void){
  EpdiyHighlevelState hl={0};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.
@@ -110,6 +113,9 @@ int main(void){
  reset();transfer_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(!presents&&!auths&&!font_begin&&clear_resume==1&&!resume);
  // 超时深睡保留已选择的实际画面，不重绘拼贴。/ Deep timeout retains selected art without redrawing a collage.
  for(unsigned s=0;s<4;++s){reset();style=s;pin=false;timeout=true;if(!setjmp(deep)){enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(0);}assert(presents==1&&draws[s]==1&&style==s&&!resume);}
+ // 没有深睡交接（S31 无 PMU EN）：超时后保持锁屏继续无期限浅睡，按键唤醒才解锁。
+ // Without a deep-sleep handoff (S31 has no PMU EN) a timeout stays locked in deadline-free light sleep; only a key wake unlocks.
+ for(unsigned s=0;s<4;++s){reset();style=s;pin=false;timeout=true;deep_fail=true;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,false);assert(presents==1&&draws[s]==1&&style==s&&pause==1&&resume==1&&clear_resume==1&&ignore==3000);}
  // 关机睡眠"仅浅睡"：无期限浅睡，即使挂起超时标志也不下电，正常解锁恢复。/ Shutdown "light-only": deadline-free sleep; even a pending timeout never powers down and unlocks normally.
  reset();style=1;pin=false;timeout=true;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,true);assert(presents==1&&draws[1]==1&&pause==1&&resume==1&&clear_resume==1);
  reset();style=0;pin=true;timeout=true;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,true);assert(presents==1&&draws[0]==1&&auths==1&&resume==1&&clear_resume==1); // 密码冷启动：同样式缓存才命中，跨样式/损坏时重画当前选择。/ Cold PIN gate redraws the current choice for stale/corrupt cache.

@@ -203,6 +203,9 @@ bool read_pico_pmu_take_key_short(void);
 /// 抽干队列；按下或短按都算唤醒（浅睡常先收到 KEY_DOWN）。
 /// / Drain the queue; KEY_DOWN or SHORT both count as wake (light sleep often sees KEY_DOWN first).
 bool read_pico_pmu_take_key_wakeup(void);
+/// 丢弃本次唤醒按键的按下/释放动作，避免解锁后被当成新的短按或长按。
+/// / Discard the wake press/release so it cannot become a new short or long press after unlock.
+void read_pico_pmu_consume_key_press(void);
 /// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
 /// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).
 esp_err_t read_pico_pmu_report_sleep(void);

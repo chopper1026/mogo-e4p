@@ -392,6 +392,16 @@ bool read_pico_pmu_take_key_wakeup(void) {
     return got;
 }
 
+void read_pico_pmu_consume_key_press(void) {
+    (void)read_pico_pmu_poll();
+    s_key_short_pending = false;
+    s_key_long_pending = false;
+    // 键仍按着时连释放一起吞掉：标记长按已触发，松手不再生成短按。
+    // Swallow the release while the key is still down: mark the hold fired so it yields no short press.
+    if (s_key_down) s_key_long_fired = true;
+    s_snap.pending_events = 0;
+}
+
 esp_err_t read_pico_pmu_report_sleep(void) {
     // 无 PMU EN 可拉；软睡由 main/sleep.c 的 esp_light_sleep 路径负责。
     // No PMU EN to drop; main/sleep.c handles light sleep directly.

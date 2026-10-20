@@ -432,6 +432,12 @@ bool read_pico_pmu_take_key_wakeup(void) {
     return wake;
 }
 
+void read_pico_pmu_consume_key_press(void) {
+    // 事件型 PMU：抽干并确认本次唤醒的按下/短按/长按，避免解锁后再次触发。
+    // Event-driven PMU: drain and acknowledge this wake's press/short/long so it cannot fire again after unlock.
+    read_pico_pmu_drain_events();
+}
+
 // 命令 OK/ACCEPTED 只表示受理，以 STATUS power_state 为准。
 // OK/ACCEPTED means accepted; the real state is STATUS power_state.
 static esp_err_t wait_power_state(uint8_t want, int timeout_ms) {

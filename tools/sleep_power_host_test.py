@@ -38,6 +38,7 @@ typedef int app_sleep_mode_t;
 #define CST836U_MODE_NORMAL 0
 #define CST836U_MODE_DEEPSLEEP 3
 #define HOST_EN_DROP_WAIT_MS 5000
+#define CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU 1
 #define pdMS_TO_TICKS(n) (n)
 #define ESP_LOGW(...) ((void)0)
 #define ESP_LOGE(...) ((void)0)
@@ -84,6 +85,7 @@ static bool read_pico_transfer_pause_for_sleep(void) { ++pauses; return transfer
 static void read_pico_transfer_resume_after_sleep(void) { ++resumes; }
 static int ble_pt_stop(int timeout) { assert(timeout == 2000); ++radio_stops; return ESP_OK; }
 static int app_sync_time_to_pmu(void) { ++syncs; return ESP_OK; }
+static void app_time_service_cancel(void) {}
 static void pmu_selftest_prepare_powerdown(void) { ++prepared; rails_on = false; }
 static int pmu_result(void) {
     assert(prepared && !rails_on && !acc_on && tp_mode == CST836U_MODE_DEEPSLEEP);

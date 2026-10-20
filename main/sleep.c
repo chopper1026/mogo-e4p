@@ -510,12 +510,20 @@ void enter_lock_and_sleep(
     epd_poweroff();
     app_wake_source_t wake = APP_WAKE_KEY;
     if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false, light_only);
-    else wake = app_light_sleep_wait_timed(acc, light_only ? 0 : APP_LOCK_LIGHT_SLEEP_MS);
-    if (wake == APP_WAKE_TIMEOUT) {
-        // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
-        // power-key press boots the host; the e-paper keeps this lock image.
-        if(!lock_pin_enabled() && lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
-        app_enter_host_sleep(APP_SLEEP_DEEP);
+    else {
+        wake = app_light_sleep_wait_timed(acc, light_only ? 0 : APP_LOCK_LIGHT_SLEEP_MS);
+        if (wake == APP_WAKE_TIMEOUT) {
+            // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
+            // power-key press boots the host; the e-paper keeps this lock image.
+            if(lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
+            esp_err_t handoff = app_enter_host_sleep(APP_SLEEP_DEEP);
+            if (handoff != ESP_OK) {
+                // 本板没有可用的深睡交接（S31 无 PMU EN）：保持锁屏继续无期限浅睡，绝不自行解锁。
+                // No deep-sleep handoff on this board (S31 has no PMU EN): stay locked in a deadline-free light sleep; never self-unlock.
+                ESP_LOGW(TAG, "deep sleep unavailable (%s); stay locked", esp_err_to_name(handoff));
+                wake = app_light_sleep_wait_timed(acc, 0);
+            }
+        }
     }
     pico_boot_clear_resume();
     if (system_lock) app_font_end_lock(&lock_font);
@@ -528,6 +536,9 @@ void enter_lock_and_sleep(
     epd_clear();
     epd_hl_set_all_white(hl);
     read_pico_pmu_drain_events();
+    // 唤醒键的按下/释放属于锁屏，不能在下一次轮询里变成新的短按再锁一次。
+    // The wake press/release belongs to the lock; it must not become a new short press on the next poll and lock again.
+    read_pico_pmu_consume_key_press();
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;
     }
