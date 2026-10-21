@@ -7,7 +7,7 @@
  *
  * 用户修订：阅读设置采用已确认的半屏双列排版；自动全刷与翻页效果点按轮换，保留按键控制二级页。
  * User revision: use the approved compact two-column reading sheet; tap cycles refresh/effect and key controls retain their secondary page.
- * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具条保留强刷。屏幕翻页在抬起提交，不画按下态。
+ * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
@@ -53,7 +53,7 @@
  * 用户增加管理/导入按压态：复用现有抬起确认流程，按下灰底加深并下沉2px，只推按钮区域。
  * User adds management/import feedback: retain release-confirmed actions, darken and depress controls 2px on press, presenting only their region.
  * 用户修订：快刷封面保留轻量减黑并按最新要求略增黑点密度，在PSRAM缓存最多九张1位缩略图（约40KiB）；进度未改变时不重复丢弃封面。缓存只画封面，收藏与界面文字实时绘制，开书或卡失效时释放。
- * Frozen: Phase4b uses the shared gesture entry and owns previous/tools/next keys; the toolbar keeps full refresh. Screen turns commit on release without pressed decoration.
+ * Frozen: Phase4b uses the shared gesture entry and owns previous/tools/next keys; a tools toggle runs a GL16 differential over the bottom band. Screen turns commit on release without pressed decoration.
  * User revision: adopt PR9's book_layout unchanged; callers only adapt bitmap caching and context lifetimes.
  * Authorized keyboard revision: titles and search share T9/QWERTY, bilingual offline phrase candidates; body layout stays intact.
  * 用户修订：输入不重画题头、封面或正文，只刷新输入变化区域，退出后释放查字缓存。
@@ -103,6 +103,11 @@
  * User revision: drop the header back/favorite controls and left-align the title; the right side draws the status-bar clock and battery; key actions gain "back" (undoing the entry path) and the favorite toggle moves to the shelf details panel.
  * 用户修订：工具栏展开时点按正文只收起工具栏，不再顺带翻页；滑动、按键与电源键仍翻页。
  * User revision: a body tap with the tools bar open only dismisses it; swipes, keys and the power key still turn pages.
+ * 用户 2026-10-21 修订：工具栏开关恢复为带内 GL16 差分；此前改 GC16 只因实心进度条擦除后留轮廓，
+ * 差分脏区膨胀已补推边缘邻行/邻列，不再需要整块全像素驱动。
+ * User revision 2026-10-21: the tools toggle returns to a band GL16 differential. GC16 was only
+ * needed while erasing the solid progress bar left an outline; dirty-mask dilation now re-drives
+ * the neighbouring rows/columns, so the full-pixel pass is no longer required.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -245,9 +250,9 @@ static bool s_reader_turn_pending;
 // 只记录成功推屏的纯正文基准，避免跨章或退出插图时误用文字波形。
 // Track only successfully presented text-only bodies, protecting chapter and image transitions.
 static bool s_reader_text_frame;
-// 工具栏开关只改底部一条带；这一帧单独走 GC16，整页 GL16 差分擦不掉实心进度条。
-// A tools toggle changes only the bottom band; that frame drives it with GC16 because a
-// whole-page GL16 differential cannot erase the solid progress bar.
+// 工具栏开关只改底部一条带；这一帧只对带内做 GL16 差分，脏区膨胀负责擦掉进度条边缘。
+// A tools toggle changes only the bottom band; that frame runs a GL16 differential inside
+// the band, with dirty-mask dilation erasing the progress bar edges.
 static bool s_reader_tools_toggle;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
@@ -3947,14 +3952,15 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);
-    // 工具栏开关只改底部一条带：这一帧用 GC16 全像素驱动，实心进度条才能擦净；
-    // 整页 GL16 差分只擦变化像素，会在工具栏白底上留下进度条轮廓。
-    // A tools toggle changes only the bottom band; drive it with full-pixel GC16 so the solid
-    // progress bar is erased. A page-wide GL16 differential leaves its outline on the white bar.
+    // 工具栏开关只改底部一条带：GL16 差分只驱动带内变化像素，脏区膨胀补推进度条边缘的
+    // 白色邻行/邻列，实心进度条擦除后不再留轮廓。
+    // A tools toggle changes only the bottom band: a GL16 differential drives the changed
+    // pixels inside it, and dirty-mask dilation re-drives the white neighbours around the
+    // solid progress bar so erasing it leaves no outline.
     else if (tools_toggle && redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
              s_presented_view == (int)READING) {
         tools_band = true;
-        err = update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GC16,
+        err = update_display_area_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16,
                                             reader_tools_area());
     }
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
