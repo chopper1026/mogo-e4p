@@ -10,14 +10,15 @@
  * Authorized keyboard revision: profile and signature share T9/QWERTY and offline phrases; this page still owns saving.
  * 用户修订：资料卡与签名输入只画变化区域，不因输入次数触发整屏黑白清屏。
  * User revision: profile/signature input paints changed regions without whole-screen wipes based on typing counts.
- * 用户修订：快刷说明标注棋盘格亚克力，普通与水波纹继续保留灰阶；三种主页面刷新模式均固定底栏。
- * User revision: the fast-mode description identifies checkerboard acrylic; ordinary/water keep grays and all main-screen modes retain navigation.
+ * 用户修订：主页刷新模式只列普通与水波纹，快刷按用户 2026-10-21 要求撤下；两种模式均固定底栏。
+ * User revision: the main-page refresh page lists only ordinary and water; fast was withdrawn per the user
+ * on 2026-10-21, and both remaining modes retain navigation.
  * 用户修订：联网升级先画反馈再启动任务；进度只追加黑色段，不擦除已完成段，不累计整页清屏。升级前释放不在显示的封面缓存。
  * User revision: present feedback before starting online work; append black progress without erasing completed segments or counting page cleanup. Release off-screen cover caches before updating.
  * 用户确认：字号并入系统字体并预览；选择字体后询问同步阅读字体，设置按连接/显示/个性化/升级分组。
  * Approved revision: size and preview live with the UI face; ask before syncing the reading face, and group connection/display/personalization/maintenance.
- * 用户修订：设置题头与列表周围留白保持纯白，普通主页切入/周期整理复用书架同轮分区输出；题头柔和，内容白像素只向白擦除，灰阶保留。普通列表滑动使用柔和差分；手动全刷、离散滚动和快刷/水波纹节奏保持。
- * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh, discrete gestures and fast/ripple pacing.
+ * 用户修订：设置题头与列表周围留白保持纯白，普通主页切入/周期整理复用书架同轮分区输出；题头柔和，内容白像素只向白擦除，灰阶保留。普通列表滑动使用柔和差分；手动全刷、离散滚动和水波纹节奏保持。
+ * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh, discrete gestures and ripple pacing.
  * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  */
@@ -76,6 +77,12 @@
 static void fit_value(char *value, int width);
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge);
 static char s_notice[96];
+// 主页刷新模式只列出普通与水波纹；快刷已撤下，旧设置加载时回落普通。
+// Main-page refresh lists ordinary and water only; fast was retired and stored values fall back to ordinary.
+static const app_main_refresh_mode_t s_main_refresh_choices[] = {
+    APP_MAIN_REFRESH_NORMAL, APP_MAIN_REFRESH_WATER,
+};
+#define MAIN_REFRESH_CHOICE_COUNT ((int)(sizeof(s_main_refresh_choices) / sizeof(s_main_refresh_choices[0])))
 typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_TIME_EDIT, SETTINGS_SHELF_STYLE, SETTINGS_SYSTEM_FONT,
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
@@ -1062,11 +1069,11 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_MAIN_REFRESH) {
         back_header(fb, "主页刷新模式");
         section(fb, 248, "首页 · 书架 · 文件管理 · 设置");
-        const char* names[] = {"普通", "快刷", "水波纹"};
-        const char* details[] = {"保留灰阶层次，兼顾画面清晰度", "黑白快刷，亚克力用细棋盘格", "以水波纹切换页面，保留灰阶"};
-        for (int i = 0; i < 3; ++i) {
+        const char* names[] = {"普通", "水波纹"};
+        const char* details[] = {"保留灰阶层次，兼顾画面清晰度", "以水波纹切换页面，保留灰阶"};
+        for (int i = 0; i < MAIN_REFRESH_CHOICE_COUNT; ++i) {
             const EpdRect box = {36, 298 + i * 158, 612, 132};
-            const bool active = app_settings_main_refresh_mode() == (app_main_refresh_mode_t)i;
+            const bool active = app_settings_main_refresh_mode() == s_main_refresh_choices[i];
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x58);
             ui_text_vc(fb, 64, box.y + 38, 30, names[i], EPD_DRAW_ALIGN_LEFT, false);
             char detail[128]; snprintf(detail, sizeof(detail), "%s", details[i]); fit_value(detail, 498);
@@ -1443,7 +1450,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else strcpy(idle,"关闭");
     const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","关机睡眠"};
     const char *display_values[]={font_name,contrast,
-        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
+        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
         app_settings_shutdown_style()==APP_SHUTDOWN_STAGED?"先浅后深":app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底断电"};
     const int display_icons[]={2,7,15,11,14,9};
@@ -2039,9 +2046,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_MAIN_REFRESH) {
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < MAIN_REFRESH_CHOICE_COUNT; ++i) {
             if (!ui_rect_hit((EpdRect){36, 298 + i * 158, 612, 132}, ev->x0, y)) continue;
-            app_settings_set_main_refresh_mode((app_main_refresh_mode_t)i);
+            app_settings_set_main_refresh_mode(s_main_refresh_choices[i]);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;

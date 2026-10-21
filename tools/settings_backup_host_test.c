@@ -205,11 +205,12 @@ int main(void) {
     loaded_hold=APP_READER_KEY_REFRESH;app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     test_loaded_fast = 1;
     app_settings_init();
-    assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL);
+    assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     app_settings_set_main_refresh_mode(APP_MAIN_REFRESH_FAST);
-    assert(app_settings_main_fast_refresh()&&loaded_main_mode==1);
-    s_main_refresh=APP_MAIN_REFRESH_NORMAL;app_settings_init();assert(app_settings_main_fast_refresh());
-    loaded_main_mode=3;app_settings_init();assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL);
+    assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER && !app_settings_main_fast_refresh());
+    loaded_main_mode=1;has_main_mode=true;s_main_refresh=APP_MAIN_REFRESH_NORMAL;
+    app_settings_init();assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
+    loaded_main_mode=3;app_settings_init();assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     app_settings_set_main_refresh_mode(APP_MAIN_REFRESH_WATER);
     s_main_refresh=APP_MAIN_REFRESH_NORMAL;app_settings_init();assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     assert(!app_settings_main_fast_refresh());
@@ -411,9 +412,10 @@ int main(void) {
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     assert(commit_count == prior_restore_commits + 1); /* Restore commits exactly once. */
     app_settings_set_main_refresh_mode(APP_MAIN_REFRESH_FAST);
+    assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     assert(app_settings_backup_save()==ESP_OK);
     app_settings_set_main_refresh_mode(APP_MAIN_REFRESH_NORMAL);
-    assert(app_settings_backup_restore()==ESP_OK&&app_settings_main_fast_refresh());
+    assert(app_settings_backup_restore()==ESP_OK&&app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     // 新格式 v24：题头样式、字号、全屏偏好与中键双击一起往返。
     // New v24 format: heading style, heading size, full-screen preference and middle double press round-trip together.
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
@@ -620,7 +622,7 @@ int main(void) {
     assert(fwrite(&saved_profile,1,sizeof(saved_profile),saved)==sizeof(saved_profile));
     assert(fwrite(tail,1,tail_size,saved)==tail_size);free(tail);assert(fflush(saved)==0);
     assert(ftruncate(fileno(saved),file_end-(long)sizeof(settings_backup_keys_t)-(long)sizeof(settings_backup_hold_t)-(long)(sizeof(settings_backup_indent_adjust_t)+sizeof(settings_backup_weight_t)))==0);assert(fclose(saved)==0);
-    assert(app_settings_backup_restore()==ESP_OK&&app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL);
+    assert(app_settings_backup_restore()==ESP_OK&&app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER);
     assert(app_settings_reader_key_action(0)==APP_READER_KEY_PREV && app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(2)==APP_READER_KEY_NEXT);
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     app_settings_set_reader_full_pages(30);

@@ -48,15 +48,15 @@ app_home_component_t app_settings_home_component(void);
 esp_err_t app_settings_set_home_component(app_home_component_t component);
 uint8_t app_settings_home_goal_minutes(void);
 esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes);
-/// 主页刷新模式，只控制四个主页面；默认普通。/ Main-tab refresh mode; ordinary by default.
+/// 主页刷新模式，只控制四个主页面；默认水波纹。/ Main-tab refresh mode; water ripple by default.
 typedef enum {
     APP_MAIN_REFRESH_NORMAL = 0, ///< 普通灰阶 / Ordinary grayscale
-    APP_MAIN_REFRESH_FAST = 1,   ///< 黑白快刷与灰阶亚克力 / Monochrome fast with gray acrylic
+    APP_MAIN_REFRESH_FAST = 1,   ///< 已撤下，仅为旧存档保留数值 / Retired; kept only for stored profiles
     APP_MAIN_REFRESH_WATER = 2,  ///< 水波纹灰阶 / Staggered grayscale
 } app_main_refresh_mode_t;
 app_main_refresh_mode_t app_settings_main_refresh_mode(void);
 void app_settings_set_main_refresh_mode(app_main_refresh_mode_t mode);
-/// 绘制主页面黑白资源时使用，其他两种模式保留灰阶。/ Used to render monochrome resources; the other modes retain grayscale.
+/// 黑白渲染路径的开关；快刷撤下后恒为 false，仅保留内部判断。/ Monochrome path flag; always false now that fast refresh is retired.
 bool app_settings_main_fast_refresh(void);
 /// 无操作自动锁屏分钟数：0 关闭，1/5/10。/ Idle lock timeout: off, 1/5/10 minutes.
 uint8_t app_settings_auto_lock_minutes(void);

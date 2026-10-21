@@ -105,7 +105,7 @@ static app_shutdown_style_t s_shutdown_style = APP_SHUTDOWN_FULL;
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
-static app_main_refresh_mode_t s_main_refresh;
+static app_main_refresh_mode_t s_main_refresh = APP_MAIN_REFRESH_WATER;
 static char s_device_name[64] = "kiikoread";
 static char s_avatar[288];
 static char s_status_signature[96];
@@ -238,8 +238,12 @@ void app_settings_init(void) {
     raw = 30;
     s_home_goal_minutes = nvs_get_u8(h, NVS_KEY_HOME_GOAL, &raw) == ESP_OK && raw >= 5 && raw <= 180 && raw % 5 == 0 ? raw : 30;
     raw = 0;
-    s_main_refresh = nvs_get_u8(h, NVS_KEY_MAIN_REFRESH, &raw) == ESP_OK && raw <= APP_MAIN_REFRESH_WATER
-        ? (app_main_refresh_mode_t)raw : APP_MAIN_REFRESH_NORMAL;
+    // 主页刷新默认水波纹；快刷已撤下，旧存档里的 1 也回落到默认，避免没有入口却仍停在快刷。
+    // Main pages default to water; fast refresh is retired, so a stored 1 also falls back to
+    // the default instead of running with no entry.
+    s_main_refresh = nvs_get_u8(h, NVS_KEY_MAIN_REFRESH, &raw) == ESP_OK &&
+            (raw == APP_MAIN_REFRESH_NORMAL || raw == APP_MAIN_REFRESH_WATER)
+        ? (app_main_refresh_mode_t)raw : APP_MAIN_REFRESH_WATER;
     raw = 0;
 
     raw = 0;
@@ -488,7 +492,9 @@ bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) { return s_main_refresh; }
 bool app_settings_main_fast_refresh(void) { return s_main_refresh == APP_MAIN_REFRESH_FAST; }
 void app_settings_set_main_refresh_mode(app_main_refresh_mode_t mode) {
-    if (mode < APP_MAIN_REFRESH_NORMAL || mode > APP_MAIN_REFRESH_WATER || mode == s_main_refresh) return;
+    // 只接受普通与水波纹；快刷不再有入口，内部调用也被忽略。
+    // Accept ordinary and water only; the retired fast mode is ignored even from internal callers.
+    if ((mode != APP_MAIN_REFRESH_NORMAL && mode != APP_MAIN_REFRESH_WATER) || mode == s_main_refresh) return;
     s_main_refresh = mode;
     nvs_put_u8(NVS_KEY_MAIN_REFRESH, (uint8_t)mode);
 }
@@ -1410,7 +1416,7 @@ esp_err_t app_settings_backup_restore(void) {
     bool has_wifi = false;
     settings_backup_background_t background = {0}, bookmark = {0};
     settings_backup_home_t home = {.component=APP_HOME_FOLDER, .minutes=30};
-    app_main_refresh_mode_t main_refresh = APP_MAIN_REFRESH_NORMAL;
+    app_main_refresh_mode_t main_refresh = APP_MAIN_REFRESH_WATER;
     if (ok && !memcmp(backup.magic, "PICOSET2", 8)) {
         uint8_t extension[5];
         ok = fread(extension, 1, sizeof(extension), file) == sizeof(extension);
@@ -1450,13 +1456,16 @@ esp_err_t app_settings_backup_restore(void) {
                      strnlen(profile.device_name, sizeof(profile.device_name)) < sizeof(profile.device_name) &&
                      profile.device_name[0] &&
                      strnlen(profile.status_signature, sizeof(profile.status_signature)) < sizeof(profile.status_signature) &&
-                     // 位6仍忽略旧实验模式；v9 在校验扩展内保存三种主页刷新模式。/ Bit 6 still ignores the retired experiment; v9 stores all three main modes in its checked extension.
+                     // 位6仍忽略旧实验模式；v9 在校验扩展内保存主页刷新模式，快刷值回落普通。/ Bit 6 still ignores the retired experiment; v9 stores the main mode in its checked extension, with fast values falling back to ordinary.
                      backup_path_valid(profile.avatar, sizeof(profile.avatar));
             }
         }
     }
     if (ok && (version >= 9)) main_refresh = (app_main_refresh_mode_t)(staged_shutdown >> 3);
-    else if (ok && (profile.home_full_refresh & 128)) main_refresh = APP_MAIN_REFRESH_FAST;
+    // 旧备份里的快刷（v9 的 1 或更早的位7）不再恢复，统一回落默认水波纹。
+    // Fast refresh from older backups (1 in v9 or bit 7 earlier) no longer returns; it falls back to the water default.
+    if (main_refresh != APP_MAIN_REFRESH_NORMAL && main_refresh != APP_MAIN_REFRESH_WATER)
+        main_refresh = APP_MAIN_REFRESH_WATER;
     if (ok && version >= 10)
         ok = fread(&keys, 1, sizeof(keys), file) == sizeof(keys) && backup_keys_valid(&keys);
     if (ok && version >= 11)

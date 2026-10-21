@@ -20,10 +20,10 @@
  * User revision: root-tab routing commits on initial contact; modal controls and reader gestures retain their owners.
  * 用户修订：系统页面切换使用 GL16，不再每次 GC16 全刷；锁屏、手动强刷和周期清残影仍可全刷。
  * User revision: system page changes use GL16 instead of GC16; lock, manual refresh and periodic ghost cleanup may still use full refresh.
- * 用户修订：设置可选普通/快刷/水波纹，默认普通；普通保留原灰阶路线，快刷采用确认的黑白主页面和亚克力灰阶。用户反馈残影和黑带后，书架退出只同向擦白，主页水波纹改白底/24窄带且端点单向推动，中灰保留校准序列；五行横条局部移动、图标固定，没有异步补刷。
- * User revision: settings offer ordinary/fast/water, default ordinary. Ordinary retains the original gray path; fast uses approved monochrome main screens and gray acrylic. Following reported ghosts and dark bands, shelf exit whitens directionally; main water uses white backgrounds, 24 narrow bands and directional endpoints, retaining calibrated midgrays. Move the five-row marker locally, retain icons, and schedule no asynchronous completion.
- * 用户修订：普通模式也固定主页面底栏，仅局部移动横条；快刷亚克力采用规则一像素棋盘格，与已缓存封面一起输出。普通及水波纹保留灰阶，首次进入及解锁仍完整绘制底栏。
- * User revision: ordinary main screens also retain navigation and move only its marker locally; fast acrylic uses a regular one-pixel checkerboard in the same output as cached covers. Ordinary/water retain grays; initial entry and unlock still draw complete navigation.
+ * 用户修订：设置只保留普通与水波纹，默认水波纹；快刷按用户 2026-10-21 要求撤下，旧设置与旧备份加载时回落默认，黑白渲染代码保留但不再可达。普通保留原灰阶路线。用户反馈残影和黑带后，书架退出只同向擦白，主页水波纹改白底/24窄带且端点单向推动，中灰保留校准序列；五行横条局部移动、图标固定，没有异步补刷。
+ * User revision: settings keep ordinary and water only, defaulting to water; fast refresh was withdrawn per the user on 2026-10-21, so stored settings and older backups fall back to the default and the monochrome renderer remains but is unreachable. Ordinary retains the original gray path. Following reported ghosts and dark bands, shelf exit whitens directionally; main water uses white backgrounds, 24 narrow bands and directional endpoints, retaining calibrated midgrays. Move the five-row marker locally, retain icons, and schedule no asynchronous completion.
+ * 用户修订：普通模式也固定主页面底栏，仅局部移动横条。普通及水波纹保留灰阶，首次进入及解锁仍完整绘制底栏。
+ * User revision: ordinary main screens also retain navigation and move only its marker locally. Ordinary/water retain grays; initial entry and unlock still draw complete navigation.
  * 冻结：返回消费最近切页来源，恢复原页及菜单位置，不跳固定首页。
  * Frozen: Return consumes the latest page origin, restoring its page and menu position.
  * 用户采用顶部快捷层：仅顶部32px起手下滑72px才接管，覆盖时冻结页内输入/轮询，WiFi直接连接最近保存网络/再次断开，蓝牙开启并异步连接最近成功的翻页器，全刷和锁屏复用原路径。用户要求三个模式均真实灰阶并加深轮廓；关闭重绘当前页并局部整理，不修改底栏。
