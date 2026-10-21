@@ -92,6 +92,7 @@ ICONS = (
     "pager-chevron-last",  # AnimateIcons / last page
     "animate-circle-chevron-left", # AnimateIcons / shared back
     "animate-bookmark-plus", # 阅读题头已收藏 / saved reader-header favorite
+    "sun",               # 快捷栏·前光 / quick layer, frontlight
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")

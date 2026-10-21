@@ -61,6 +61,7 @@
 #include "read_pico_sd.h"
 #include "settings.h"
 #include "sleep.h"
+#include "frontlight.h"
 #include "time_service.h"
 #include "ui_avatar.h"
 #include "book/book_cover_jobs.h"
@@ -143,10 +144,36 @@ static const app_desc_t* s_presented_main;
 static ui_quick_menu_t s_quick;
 static unsigned s_quick_status;
 static int s_quick_pressed=-1;
+// 上一次推上屏的快捷层高度；收起前光卡片后按旧高度擦除，避免 224..460 残留。
+// Height last presented; closing the frontlight card erases by the old height so 224..460 cannot remain.
+static int s_quick_height;
+// 回放期间只更新硬件，整批结束后再按最终值刷一行；否则一次拖动会被每个积压帧各刷一遍。
+// During replay only hardware follows; one row is flushed at the end, or a single drag would present every queued frame.
+static bool s_fl_pending;
+static bool s_fl_pending_commit;
+static ui_quick_control_t s_fl_pending_control;
+// 屏幕上开关当前画出的状态；滑杆自动开灯时要连带重画 ON 行。
+// The switch state currently painted; auto-on from a slider must repaint the ON row too.
+static bool s_fl_shown_on;
+static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current);
+// 快捷层只持有预览值；落盘只发生在松手、点选或关闭/读错时，一次拖动只写一遍 NVS。
+// The layer holds preview values; NVS writes happen on release, tap, close or a read error, once per drag.
+static void quick_frontlight_persist(void) {
+    if (!s_quick.frontlight) return;
+    app_settings_set_frontlight_on(s_quick.fl_on);
+    app_settings_set_frontlight_brightness(s_quick.fl_bri);
+    app_settings_set_frontlight_cct(s_quick.fl_cct);
+}
 static void quick_reset(void) {
+    quick_frontlight_persist();
     ui_quick_menu_reset(&s_quick);
     ui_quick_menu_end();
     s_quick_pressed=-1;
+    s_quick_height=0;
+    s_fl_pending=false;
+    s_fl_pending_commit=false;
+    s_fl_pending_control=UI_QUICK_CTL_NONE;
+    s_fl_shown_on=s_quick.fl_on;
 }
 static bool s_nav_contact_down,s_nav_polled;
 // 锁屏占用整屏后旧主页面底栏不再是物理基准；解锁第一帧必须完整绘制。
@@ -172,6 +199,12 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     bool motion=ui_click_feedback_nav_finish(ctx->fb,&motion_area);
     ui_click_feedback_begin(ctx->fb);
     display_main_transition_cancel();
+    // 整层重绘会带上最新前光状态，积压的局部行刷新作废。
+    // A whole-layer repaint already carries the latest frontlight state, so queued row refreshes are dropped.
+    s_fl_pending = false;
+    s_fl_pending_commit = false;
+    s_fl_pending_control = UI_QUICK_CTL_NONE;
+    s_fl_shown_on = s_quick.fl_on;
     unsigned status=quick_status();
     if(full&&s_quick.open){
         // 已合成的页面直接全刷，只还原圆键按压，不重排底页或重算玻璃。
@@ -186,12 +219,16 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     }else{
         if (current->render) current->render(ctx, ctx->fb);
         if(!s_quick.open)ui_quick_menu_end();
-        else ui_quick_menu_draw(ctx->fb,status&1u,status&2u);
+        else ui_quick_menu_draw(ctx->fb,&s_quick,status&1u,status&2u);
     }
     s_quick_status=status;
     s_quick_pressed=-1;
+    const int quick_height = ui_quick_menu_rect(&s_quick).height;
+    const int area_height = quick_height > s_quick_height ? quick_height : s_quick_height;
+    s_quick_height = quick_height;
     enum EpdDrawError error = full ? update_display_full(ctx->hl)
-        : update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, ui_quick_menu_rect());
+        : update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
+                                       (EpdRect){0, 0, UI_LOCK_WIDTH, area_height});
     guard_draw_result(ctx->hl, error);
     if(motion&&!full&&error==EPD_DRAW_SUCCESS) {
         error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,motion_area);
@@ -253,25 +290,93 @@ static void quick_toggle_wifi(void) {
 }
 static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
+// 前光事件只动卡片的一行：拖动走 DU，松手/点选走 GL16 定稿，随后才写 NVS。
+// A frontlight event touches one card row: DU while dragging, GL16 on release or tap, then NVS.
+static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
+                                     const ui_quick_event_t *event) {
+    EpdRect dirty;
+    if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
+    // 滑杆把灯自动打开时，开关状态也变了；把 ON 行并进同一次刷新。
+    // A slider turning the light on also changes the switch, so fold the ON row into the same refresh.
+    const bool on_changed = event->control != UI_QUICK_CTL_ON && s_quick.fl_on != s_fl_shown_on;
+    if (on_changed) {
+        EpdRect on_dirty;
+        if (ui_quick_menu_draw_control(ctx->fb, &s_quick, UI_QUICK_CTL_ON, &on_dirty)) {
+            const int x1 = dirty.x < on_dirty.x ? dirty.x : on_dirty.x;
+            const int y1 = dirty.y < on_dirty.y ? dirty.y : on_dirty.y;
+            const int x2a = dirty.x + dirty.width, x2b = on_dirty.x + on_dirty.width;
+            const int y2a = dirty.y + dirty.height, y2b = on_dirty.y + on_dirty.height;
+            const int x2 = x2a > x2b ? x2a : x2b;
+            const int y2 = y2a > y2b ? y2a : y2b;
+            dirty = (EpdRect){x1, y1, x2 - x1, y2 - y1};
+        }
+    }
+    s_fl_shown_on = s_quick.fl_on;
+    const bool settle = event->commit || on_changed;
+    enum EpdDrawError error = update_display_area_diff_with(
+        ctx->hl, settle ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
+        settle ? MODE_GL16 : MODE_DU, dirty);
+    guard_draw_result(ctx->hl, error);
+    if (error != EPD_DRAW_SUCCESS) {
+        quick_reset();
+        app_present(ctx, current, APP_REDRAW_FULL);
+    }
+}
+
+// coalesce：回放积压帧时只更新硬件，等整批结束由 quick_frontlight_flush 刷一次。
+// coalesce: while replaying queued frames only hardware follows; one flush paints the final row.
+static void quick_frontlight_event(app_ctx_t *ctx, const app_desc_t *current,
+                                   const ui_quick_event_t *event, bool coalesce) {
+    if (!s_quick.frontlight) return;
+    (void)frontlight_apply(s_quick.fl_on, s_quick.fl_bri, s_quick.fl_cct);
+    if (event->commit) quick_frontlight_persist();
+    if (!coalesce) {
+        quick_frontlight_present(ctx, current, event);
+        return;
+    }
+    s_fl_pending = true;
+    s_fl_pending_control = event->control;
+    s_fl_pending_commit = s_fl_pending_commit || event->commit;
+}
+
+static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current) {
+    if (!s_fl_pending) return;
+    const ui_quick_event_t event = {
+        .control = s_fl_pending_control,
+        .commit = s_fl_pending_commit,
+    };
+    s_fl_pending = false;
+    s_fl_pending_commit = false;
+    s_fl_pending_control = UI_QUICK_CTL_NONE;
+    quick_frontlight_present(ctx, current, &event);
+}
+
 // 快捷层单帧输入：识别并执行动作；本帧由快捷层持有输入时返回 true。
 // 正常 tick 与采样回放共用同一入口，回放不能只看最后一帧，否则按下沿会丢。
 // One quick-layer input frame: recognize and run the action; true when the layer owns
 // the frame. The normal tick and sampler replay share it so replay never drops a press edge.
-static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lock_requested) {
-    ui_quick_action_t action;
+static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lock_requested,
+                             bool coalesce) {
+    ui_quick_event_t event;
     bool owned = ui_quick_menu_feed(&s_quick, ctx,
         current->render && !current->holds_pmu && !usb_storage_active() && !pico_online_busy(),
-        &action);
+        &event);
     if (owned) ctx->consumed = true;
-    if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(ctx, current, false);
-    else if (action == UI_QUICK_WIFI) quick_toggle_wifi();
-    else if (action == UI_QUICK_BLUETOOTH) {
+    if (event.action == UI_QUICK_OPEN || event.action == UI_QUICK_CLOSE) {
+        // 收起前把预览值落盘：权限变化或 USB 抢占导致的关闭也走这里。
+        // Persist previews before closing, including permission changes or USB preemption.
+        if (event.action == UI_QUICK_CLOSE) quick_frontlight_persist();
+        quick_present(ctx, current, false);
+    }
+    else if (event.action == UI_QUICK_WIFI) quick_toggle_wifi();
+    else if (event.action == UI_QUICK_BLUETOOTH) {
         bool enable = !app_settings_ble_turner();
         app_settings_set_ble_turner(enable);
         if (enable) ble_pt_reconnect_recent();
         else { ble_pt_cancel_recent(); ble_pt_sync(false); }
-    } else if (action == UI_QUICK_FULL) quick_present(ctx, current, true);
-    else if (action == UI_QUICK_LOCK) *lock_requested = true;
+    } else if (event.action == UI_QUICK_FULL) quick_present(ctx, current, true);
+    else if (event.action == UI_QUICK_LOCK) *lock_requested = true;
+    if (event.control != UI_QUICK_CTL_NONE) quick_frontlight_event(ctx, current, &event, coalesce);
     return owned;
 }
 
@@ -745,6 +850,11 @@ void app_loop_run(const app_loop_config_t* config) {
 
     bool was_touched = false;
     quick_reset();
+    // 本板有没有前光决定层高和卡片；预览值来自已加载的设置，开机恢复由 app_main 写入硬件。
+    // Board capability decides layer height and card presence; previews come from settings and app_main restored the hardware at boot.
+    ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),
+                                 app_settings_frontlight_brightness(), app_settings_frontlight_cct());
+    s_fl_shown_on = s_quick.fl_on;
     bool menu_open = false;
     ui_gesture_t gesture = {0};
     ui_power_dialog_t power_dialog = {0};
@@ -867,7 +977,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         }
                         ctx.consumed = true;
                     } else if (!menu_open) {
-                        quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested);
+                        quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, true);
                         if (quick_input_owned) {
                             held_key = -1;
                             cancel_gesture(&ctx, current, &gesture);
@@ -882,6 +992,15 @@ void app_loop_run(const app_loop_config_t* config) {
                     last_ms = (int64_t)f.t_ms;
 #endif
                     if (ctx.request_app || ctx.request_menu || ctx.request_return) break;
+                }
+                // 回放期间只写硬件；这里按最终值刷新一次前光行，页面切换请求则丢弃这一行。
+                // Replay only drove hardware; paint the final frontlight row once, or drop it when a page switch is queued.
+                if (!ctx.request_app && !ctx.request_menu && !ctx.request_return) {
+                    quick_frontlight_flush(&ctx, current);
+                } else {
+                    s_fl_pending = false;
+                    s_fl_pending_commit = false;
+                    s_fl_pending_control = UI_QUICK_CTL_NONE;
                 }
                 replayed = true;
                 frame_ms = esp_timer_get_time() / 1000;
@@ -989,10 +1108,13 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!power_input_owned && !menu_open) {
             if (err != ESP_OK) {
                 ui_quick_menu_cancel_input(&s_quick);
+                // 读点错误取消拖动时把当前档位落盘，避免硬件与 NVS 长期不一致。
+                // Persist the current step when a read error cancels a drag so hardware and NVS do not diverge.
+                quick_frontlight_persist();
                 quick_input_owned=s_quick.open;
             }
             else {
-                quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested);
+                quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, false);
                 if (quick_input_owned) {
                     held_key = -1;
                     cancel_gesture(&ctx, current, &gesture);

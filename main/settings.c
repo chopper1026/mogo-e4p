@@ -94,6 +94,9 @@
 #define NVS_KEY_BOOK_VERTICAL "bk_vert"
 #define NVS_KEY_BOOK_TITLE_STYLE "bk_title"
 #define NVS_KEY_BOOK_TITLE_SIZE "bk_tsize"
+#define NVS_KEY_FRONTLIGHT_ON "fl_on"
+#define NVS_KEY_FRONTLIGHT_BRI "fl_bri"
+#define NVS_KEY_FRONTLIGHT_CCT "fl_cct"
 #define FONT_PATH_MAX 160
 #define MEDIA_DIR_MAX 96
 
@@ -137,6 +140,11 @@ static uint8_t s_reader_double_action = APP_READER_KEY_NONE;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
+// 前光默认关、亮度 40%、中性色温；升级后行为和没有该功能时一致。
+// Frontlight defaults to off, 40% brightness and neutral CCT, so upgrading behaves as before.
+static bool s_frontlight_on;
+static uint8_t s_frontlight_brightness = 40;
+static uint8_t s_frontlight_cct = 50;
 static bool s_shelf_recent_sort;
 // 书内自带字体默认开启：多数带字体的书排版就是靠它才对得上版。
 // Embedded book faces are on by default: most books that ship a face only typeset correctly
@@ -349,6 +357,16 @@ void app_settings_init(void) {
     uint8_t title_size = 0;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TITLE_SIZE, &title_size) == ESP_OK)
         s_book_title_size = book_title_size_snap(title_size);
+    uint8_t fl_on = 0, fl_bri = 40, fl_cct = 50;
+    if (nvs_get_u8(h, NVS_KEY_FRONTLIGHT_ON, &fl_on) == ESP_OK) s_frontlight_on = fl_on == 1;
+    if (nvs_get_u8(h, NVS_KEY_FRONTLIGHT_BRI, &fl_bri) == ESP_OK) {
+        if (fl_bri < 1) fl_bri = 1;
+        else if (fl_bri > 100) fl_bri = 100;
+        s_frontlight_brightness = fl_bri;
+    }
+    if (nvs_get_u8(h, NVS_KEY_FRONTLIGHT_CCT, &fl_cct) == ESP_OK) {
+        s_frontlight_cct = fl_cct > 100 ? 100 : fl_cct;
+    }
     s_book_tracking = -APP_BOOK_TRACK_MIN;
     uint8_t tracking = 2, reading_line = 0, rule_offset = 4, indent = 2, indent_adjust = 20;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK) {
@@ -845,6 +863,27 @@ void app_settings_set_ble_turner(bool on) {
     if (s_ble_turner == on) return;
     s_ble_turner = on;
     nvs_put_u8(NVS_KEY_BLE_TURNER, on ? 1 : 0);
+}
+bool app_settings_frontlight_on(void) { return s_frontlight_on; }
+void app_settings_set_frontlight_on(bool on) {
+    if (s_frontlight_on == on) return;
+    s_frontlight_on = on;
+    nvs_put_u8(NVS_KEY_FRONTLIGHT_ON, on ? 1 : 0);
+}
+uint8_t app_settings_frontlight_brightness(void) { return s_frontlight_brightness; }
+void app_settings_set_frontlight_brightness(uint8_t percent) {
+    if (percent < 1) percent = 1;
+    else if (percent > 100) percent = 100;
+    if (s_frontlight_brightness == percent) return;
+    s_frontlight_brightness = percent;
+    nvs_put_u8(NVS_KEY_FRONTLIGHT_BRI, percent);
+}
+uint8_t app_settings_frontlight_cct(void) { return s_frontlight_cct; }
+void app_settings_set_frontlight_cct(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    if (s_frontlight_cct == percent) return;
+    s_frontlight_cct = percent;
+    nvs_put_u8(NVS_KEY_FRONTLIGHT_CCT, percent);
 }
 bool app_settings_shelf_recent_sort(void) { return s_shelf_recent_sort; }
 void app_settings_set_shelf_recent_sort(bool on) {

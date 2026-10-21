@@ -37,6 +37,7 @@
 #include "epd_test.h"
 #include "epdiy.h"
 #include "esp_log.h"
+#include "frontlight.h"
 #include "ota_update.h"
 #include "pmu_selftest.h"
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -172,6 +173,18 @@ void app_main(void) {
 
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;
+    // 前光在板级初始化里已挂好 LEDC；这里按 NVS 恢复用户状态，早于首帧。
+    // The board step already wired LEDC; restore the user state before the first frame.
+    const bool fl_on = app_settings_frontlight_on();
+    const uint8_t fl_bri = app_settings_frontlight_brightness();
+    const uint8_t fl_cct = app_settings_frontlight_cct();
+    esp_err_t fl_err = frontlight_apply(fl_on, fl_bri, fl_cct);
+    if (fl_err != ESP_OK && fl_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "frontlight restore %s", esp_err_to_name(fl_err));
+    } else if (fl_err == ESP_OK) {
+        ESP_LOGI(TAG, "frontlight on=%d brightness=%u cct=%u", (int)fl_on,
+                 (unsigned)fl_bri, (unsigned)fl_cct);
+    }
     rp_boot_mark("hw");
     if (hw.pmu_ready) restore_time_from_pmu();
     const bool vcom_ok = resolve_vcom_at_boot();

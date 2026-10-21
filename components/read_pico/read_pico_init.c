@@ -11,6 +11,7 @@
 
 #include "epdiy.h"
 #include "esp_log.h"
+#include "frontlight.h"
 #include "read_pico_board.h"
 #include "read_pico_epd_timing.h"
 #include "e0470_epaper_waveform.h"
@@ -28,6 +29,14 @@ esp_err_t read_pico_init(read_pico_handle_t* hw) {
     *hw = (read_pico_handle_t){ 0 };
 
     ESP_LOGI(TAG, "%s", READ_PICO_PRODUCT_NAME);
+    // 前光先于首帧：先关着初始化，保存的开关状态由 app_main 在设置加载后恢复。
+    // Frontlight before the first frame: initialise dark; app_main restores the saved state after settings load.
+    gpio_num_t fl_cool = GPIO_NUM_NC, fl_warm = GPIO_NUM_NC;
+    read_pico_frontlight_pins(&fl_cool, &fl_warm);
+    esp_err_t fl_err = frontlight_init(fl_cool, fl_warm);
+    if (fl_err != ESP_OK && fl_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "frontlight init %s", esp_err_to_name(fl_err));
+    }
     ESP_LOGI(TAG, "Initializing 684x1216 EPD");
     // LUT 用 1K：LCD 路径下 epdiy 走 S3 向量实现，64K 里实际只用到 1K。
     // / 1K LUT: the LCD path uses the S3 vector impl; only 1K of the 64K is used.

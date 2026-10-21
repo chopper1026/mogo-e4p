@@ -224,6 +224,16 @@ void app_settings_set_shelf_recent_sort(bool on);
 /// by default. Turning it off tears the whole stack down and returns NimBLE's memory.
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
+/// 前光：开关、亮度 1..100%、色温 0..100%（0 全暖，50 冷暖同开，100 全冷）。
+/// 设备本地硬件状态，不随设置备份迁移。
+/// Frontlight: on/off, brightness 1..100%, colour temperature 0..100% (0 warm only,
+/// 50 both, 100 cool only). Device-local hardware state, excluded from settings backups.
+bool app_settings_frontlight_on(void);
+void app_settings_set_frontlight_on(bool on);
+uint8_t app_settings_frontlight_brightness(void);
+void app_settings_set_frontlight_brightness(uint8_t percent);
+uint8_t app_settings_frontlight_cct(void);
+void app_settings_set_frontlight_cct(uint8_t percent);
 /// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
 #define APP_BOOK_TRACK_MIN (-15)
 #define APP_BOOK_TRACK_MAX 15

@@ -67,6 +67,8 @@ static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(v
 static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(void)radius;for(int x=0;x<r.width;++x){epd_draw_pixel(r.x+x,r.y,gray,fb);epd_draw_pixel(r.x+x,r.y+r.height-1,gray,fb);}for(int y=0;y<r.height;++y){epd_draw_pixel(r.x,r.y+y,gray,fb);epd_draw_pixel(r.x+r.width-1,r.y+y,gray,fb);}}
 static uint8_t ui_contrast_gray(uint8_t v){return v;}
 static void ui_nav_status(uint8_t *fb){epd_fill_rect((EpdRect){36,29,52,16},0,fb);}
+enum {EPD_DRAW_ALIGN_LEFT=0x2,EPD_DRAW_ALIGN_RIGHT=0x4,EPD_DRAW_ALIGN_CENTER=0x8};
+static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *text,int align,bool inv){(void)fb;(void)x;(void)cy;(void)px;(void)text;(void)align;(void)inv;}
 static bool app_settings_main_fast_refresh(void){return fast;}
 static void *heap_caps_malloc(size_t n,unsigned caps){assert(caps==3&&n<=4096);++allocs;if((int)n>max_bytes)max_bytes=(int)n;if(oom)return NULL;++live;return malloc(n);}
 static void heap_caps_free(void *p){if(p){--live;free(p);}assert(live>=0);}
@@ -74,6 +76,8 @@ static void heap_caps_free(void *p){if(p){--live;free(p);}assert(live>=0);}
 code+='static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}\n'
 header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
+code+=re.search(r'typedef enum \{\s*UI_QUICK_CTL_NONE.*?\} ui_quick_control_t;',header,re.S).group(0)+'\n'
+code+=re.search(r'typedef struct \{.*?\} ui_quick_menu_t;',header,re.S).group(0)+'\n'
 for name in ('ui_read_pixel','ui_image_bw_rect','icon_nibble','ui_draw_icon'):
     code+=function('main/ui/ui_kit.c',name)
 code+=body('main/ui/ui_quick_menu.c')+body('main/ui/ui_click_feedback.c')
@@ -82,16 +86,21 @@ static void patterned(void){for(size_t i=0;i<BYTES;++i)frame[i]=(uint8_t)(i*13u+
 int main(void){
  for(rotation=0;rotation<4;++rotation){
   for(int policy=0;policy<3;++policy){
-   patterned();int before=allocs;ui_quick_menu_draw(frame,true,false);
-   assert(allocs==before&&!live);int grays=0;
-   for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
-    bool mask=y<UI_QUICK_HEIGHT&&layer_pixel(x,y,epd_rotated_display_width());
-    uint8_t p=pixel(frame,x,y);
-    if(!mask)assert(p==pixel(saved,x,y));
-    else grays+=p!=0&&p!=255;
+   for(int fl=0;fl<2;++fl){
+    ui_quick_menu_t menu={0};menu.frontlight=fl;menu.fl_on=fl;menu.fl_bri=60;menu.fl_cct=30;
+    const int layer_height=fl?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT;
+    patterned();int before=allocs;ui_quick_menu_draw(frame,&menu,true,false);
+    assert(allocs==before&&!live);int grays=0;
+    for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
+     bool mask=y<layer_height&&layer_pixel(x,y,epd_rotated_display_width(),layer_height);
+     uint8_t p=pixel(frame,x,y);
+     if(!mask)assert(p==pixel(saved,x,y));
+     else grays+=p!=0&&p!=255;
+    }
+    assert(grays>1000);
+    assert(ui_quick_menu_rect(&menu).height==layer_height);
+    memcpy(again,frame,BYTES);memcpy(frame,saved,BYTES);ui_quick_menu_draw(frame,&menu,true,false);assert(!memcmp(frame,again,BYTES));
    }
-   assert(grays>1000);
-   memcpy(again,frame,BYTES);memcpy(frame,saved,BYTES);ui_quick_menu_draw(frame,true,false);assert(!memcmp(frame,again,BYTES));
   }
   for(fast=false;;fast=true){
    patterned();ui_click_feedback_begin(frame);

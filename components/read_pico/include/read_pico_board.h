@@ -46,6 +46,10 @@ i2c_master_bus_handle_t read_pico_i2c_bus(void);
 sy7636a_handle_t read_pico_sy7636a(void);
 fca9555_handle_t read_pico_fca9555(void);
 
+/// 前光冷/暖 PWM 引脚；没有前光的板返回 GPIO_NUM_NC。
+/// / Frontlight cool/warm PWM pins; boards without a frontlight return GPIO_NUM_NC.
+void read_pico_frontlight_pins(gpio_num_t* cool, gpio_num_t* warm);
+
 typedef struct {
     uint16_t ioe_input;
     uint16_t ioe_output;

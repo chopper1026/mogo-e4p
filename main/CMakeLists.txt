@@ -1,5 +1,6 @@
 set(main_requires
     read_pico
+    frontlight
     read_pico_transfer
     read_pico_search
     espressif__qrcode

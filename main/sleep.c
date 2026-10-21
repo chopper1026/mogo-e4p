@@ -46,6 +46,7 @@
 #include "cache_wake_restore.h"
 #include "display.h"
 #include "e0470_epaper_waveform.h"
+#include "frontlight.h"
 #include "ota_online.h"
 #include "time_service.h"
 #include "driver/gpio.h"
@@ -126,6 +127,9 @@ void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc) {
 // 触摸、加速度计都在常开 3V3 上，ESP 浅睡或 EN 拉低都不会断它们的电，必须主动送进最低功耗态。
 // Touch and accelerometer sit on the always-on 3V3; neither light sleep nor EN low cuts them, so park them explicitly.
 static void periph_suspend(bool host_off) {
+    // 前光最先灭：锁屏图已经上屏，接下来不应再照在面板上。
+    // Frontlight first: the lock image is already on the panel and should not stay lit.
+    frontlight_suspend();
     if (read_pico_buzzer_score_busy()) (void)read_pico_buzzer_score_stop();
     esp_err_t ioe = read_pico_ioe_sleep(host_off);
     if (ioe != ESP_OK) ESP_LOGW(TAG, "ioe sleep %s", esp_err_to_name(ioe));
@@ -141,6 +145,9 @@ static void periph_suspend(bool host_off) {
 // Deep-sleeping touch only wakes via TP_RST; the accelerometer comes back with its pre-sleep config.
 static void periph_resume(void) {
     (void)read_pico_ioe_wake();
+    // 醒后恢复用户睡前的前光状态；切换失败也继续叫醒触摸与加速度计。
+    // Restore the user's frontlight state; wake touch/accelerometer even if it fails.
+    frontlight_resume();
     if (s_tp != NULL && cst836u_get_mode(s_tp) == CST836U_MODE_DEEPSLEEP) {
         esp_err_t err = cst836u_wake(s_tp);
         if (err != ESP_OK) ESP_LOGW(TAG, "touch wake %s", esp_err_to_name(err));
@@ -457,6 +464,7 @@ esp_err_t app_sync_time_to_pmu(void) {
 void app_restart_host(void) {
     (void)app_sync_time_to_pmu();
     pmu_selftest_prepare_powerdown();
+    frontlight_suspend();
     esp_err_t err = read_pico_pmu_action(PMU_ACTION_HOST_NORMAL_RESTART, 250, 0x5052);
     ESP_LOGI(TAG, "normal restart: %s", esp_err_to_name(err));
     if (err != ESP_OK) esp_restart();

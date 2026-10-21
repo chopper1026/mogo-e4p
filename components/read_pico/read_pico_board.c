@@ -742,6 +742,13 @@ void read_pico_clear_ioe_int(void) {
     (void)fca9555_clear_int(s_ioe);
 }
 
+void read_pico_frontlight_pins(gpio_num_t* cool, gpio_num_t* warm) {
+    // S3 原板没有前光；快捷层据此隐藏前光卡片。
+    // The original S3 board has no frontlight, so the quick layer hides its card.
+    if (cool != NULL) *cool = GPIO_NUM_NC;
+    if (warm != NULL) *warm = GPIO_NUM_NC;
+}
+
 static bool s_mode_parked;
 
 esp_err_t read_pico_ioe_sleep(bool host_off) {

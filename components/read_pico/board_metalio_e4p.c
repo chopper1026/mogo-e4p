@@ -454,6 +454,13 @@ const EpdBoardDefinition epd_board_read_pico = {
 
 i2c_master_bus_handle_t read_pico_i2c_bus(void) { return s_i2c_bus; }
 
+void read_pico_frontlight_pins(gpio_num_t* cool, gpio_num_t* warm) {
+    // Metalio V1.3/1.4：冷光 GPIO6，暖光 GPIO7，原厂 20 kHz PWM。
+    // Metalio V1.3/1.4: cool GPIO6, warm GPIO7, vendor 20 kHz PWM.
+    if (cool != NULL) *cool = GPIO_NUM_6;
+    if (warm != NULL) *warm = GPIO_NUM_7;
+}
+
 sy7636a_handle_t read_pico_sy7636a(void) { return NULL; }
 
 fca9555_handle_t read_pico_fca9555(void) { return s_ioe; }

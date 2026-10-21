@@ -1,12 +1,18 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；三个主页模式统一灰阶和清晰边框。
- * English: A shallow full-width top layer with rounded bottom corners and four unlabeled circles; all main modes share grayscale and clear borders.
- * 用户修订：恢复实心灰阶控件，不再生成液态玻璃或缓存底图；展开与按键都只做像素绘制。
- * User revision: restore solid grayscale controls without liquid glass or cached backdrops; opening and presses only paint pixels.
+ * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板在圆钮下方常驻一块
+ * 实心前光卡片，开关、亮度、色温三件套下拉即见。
+ * English: A shallow full-width top layer with rounded bottom corners and four
+ * unlabeled circles; boards with a frontlight keep a solid card below them, so
+ * its switch, brightness and colour temperature are visible as soon as it opens.
+ * 用户修订：恢复实心灰阶控件，不再生成液态玻璃或缓存底图；前光三件套常驻，
+ * 不再需要第二次点按展开。
+ * User revision: restore solid grayscale controls without liquid glass or cached
+ * backdrops; the three frontlight controls stay visible without a second tap.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
 #include "ui_quick_menu.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include "ui_kit.h"
 #include "ui_nav.h"
@@ -31,11 +37,11 @@ static uint8_t pixel(uint8_t *fb, int x, int y) {
     return (epd_get_pixel(px, py, epd_width(), epd_height(), fb) >> 4) * 17u;
 }
 
-static bool layer_pixel(int x, int y, int width) {
+static bool layer_pixel(int x, int y, int width, int height) {
     const int r = 56;
-    if (y < UI_QUICK_HEIGHT - r || (x >= r && x < width - r)) return true;
+    if (y < height - r || (x >= r && x < width - r)) return true;
     int dx = x < r ? x - r : x - (width - r - 1);
-    int dy = y - (UI_QUICK_HEIGHT - r - 1);
+    int dy = y - (height - r - 1);
     return dx * dx + dy * dy < r * r;
 }
 
@@ -55,6 +61,8 @@ static void lock_icon(uint8_t *fb, int cx, int cy) {
     }
     ui_fill_rect_fast((EpdRect){cx - 1, cy + 8, 3, 7}, UI_GRAY_BLACK, fb);
 }
+
+/* ---- 圆键 / Circle keys ---- */
 
 static void draw_badge(uint8_t *fb,int button,bool active) {
     if(button>1||!active)return;
@@ -78,6 +86,93 @@ static void draw_key(uint8_t *fb,int button,bool active,bool pressed) {
     }
 }
 
+/* ---- 前光卡片 / Frontlight card ---- */
+
+static EpdRect fl_card_rect(void) {
+    return (EpdRect){UI_QUICK_FL_CARD_X, UI_QUICK_FL_CARD_Y,
+                     UI_QUICK_FL_CARD_W, UI_QUICK_FL_CARD_H};
+}
+static EpdRect fl_row_rect(ui_quick_control_t control) {
+    // 行矩形内缩到卡片边框以内，局部重画不会擦掉圆角描边。
+    // Row rectangles stay inside the card border so local repaints never erase its rounded outline.
+    if (control == UI_QUICK_CTL_ON) return (EpdRect){40, 226, 604, 52};
+    if (control == UI_QUICK_CTL_BRIGHTNESS) return (EpdRect){40, 278, 604, 64};
+    if (control == UI_QUICK_CTL_CCT) return (EpdRect){40, 342, 604, 80};
+    return (EpdRect){0};
+}
+static EpdRect fl_switch_rect(void) {
+    return (EpdRect){UI_QUICK_FL_SWITCH_X, UI_QUICK_FL_SWITCH_Y,
+                     UI_QUICK_FL_SWITCH_W, UI_QUICK_FL_SWITCH_H};
+}
+static int fl_thumb_x(uint8_t value) {
+    return UI_QUICK_FL_TRACK_X + (UI_QUICK_FL_TRACK_W * value) / 100;
+}
+
+// 胶囊开关：关为浅灰轨、滑块在左；开为黑轨、白滑块在右。
+// Pill switch: light track with the knob left when off, black track with the knob right when on.
+static void draw_switch(uint8_t *fb, bool on) {
+    EpdRect r = fl_switch_rect();
+    ui_fill_round_rect(fb, r, r.height / 2, on ? 0x00 : 0xe6);
+    ui_draw_round_rect(fb, r, r.height / 2, 0x38);
+    const int cx = on ? r.x + r.width - r.height / 2 : r.x + r.height / 2;
+    const int cy = r.y + r.height / 2;
+    epd_fill_circle(cx, cy, 16, UI_GRAY_WHITE, fb);
+    epd_draw_circle(cx, cy, 16, 0x38, fb);
+    epd_draw_circle(cx, cy, 15, 0x38, fb);
+}
+
+static void draw_slider(uint8_t *fb, int track_y, uint8_t value) {
+    const EpdRect track = {UI_QUICK_FL_TRACK_X, track_y, UI_QUICK_FL_TRACK_W, UI_QUICK_FL_TRACK_H};
+    ui_fill_round_rect(fb, track, UI_QUICK_FL_TRACK_H / 2, 0xcc);
+    const int tx = fl_thumb_x(value);
+    if (tx > track.x) {
+        ui_fill_round_rect(fb, (EpdRect){track.x, track_y, tx - track.x, UI_QUICK_FL_TRACK_H},
+                           UI_QUICK_FL_TRACK_H / 2, UI_GRAY_BLACK);
+    }
+    const int cy = track_y + UI_QUICK_FL_TRACK_H / 2;
+    epd_fill_circle(tx, cy, UI_QUICK_FL_THUMB_R, UI_GRAY_WHITE, fb);
+    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R, 0x38, fb);
+    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R - 1, 0x38, fb);
+}
+
+static void draw_percent(uint8_t *fb, int cy, uint8_t value) {
+    char text[8];
+    snprintf(text, sizeof(text), "%u%%", (unsigned)value);
+    ui_text_fixed_vc(fb, 624, cy, 28, text, EPD_DRAW_ALIGN_RIGHT, false);
+}
+
+static void draw_fl_row(uint8_t *fb, const ui_quick_menu_t *menu, ui_quick_control_t control) {
+    const EpdRect row = fl_row_rect(control);
+    if (row.width <= 0) return;
+    ui_fill_rect_fast(row, UI_GRAY_WHITE, fb);
+    if (control == UI_QUICK_CTL_ON) {
+        ui_draw_icon(fb, 66, 252, 36, UI_ICON_SUN, UI_GRAY_BLACK);
+        ui_text_fixed_vc(fb, 92, 252, 30, "前光", EPD_DRAW_ALIGN_LEFT, false);
+        draw_switch(fb, menu->fl_on);
+    } else if (control == UI_QUICK_CTL_BRIGHTNESS) {
+        ui_text_fixed_vc(fb, 60, 294, 28, "亮度", EPD_DRAW_ALIGN_LEFT, false);
+        draw_percent(fb, 294, menu->fl_bri);
+        draw_slider(fb, UI_QUICK_FL_BRI_TRACK_Y, menu->fl_bri);
+    } else if (control == UI_QUICK_CTL_CCT) {
+        ui_text_fixed_vc(fb, 60, 358, 28, "色温", EPD_DRAW_ALIGN_LEFT, false);
+        draw_percent(fb, 358, menu->fl_cct);
+        draw_slider(fb, UI_QUICK_FL_CCT_TRACK_Y, menu->fl_cct);
+        ui_text_fixed_vc(fb, 60, 404, 22, "暖", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed_vc(fb, 624, 404, 22, "冷", EPD_DRAW_ALIGN_RIGHT, false);
+    }
+}
+
+static void draw_fl_card(uint8_t *fb, const ui_quick_menu_t *menu) {
+    const EpdRect card = fl_card_rect();
+    ui_fill_round_rect(fb, card, UI_QUICK_FL_CARD_RADIUS, UI_GRAY_WHITE);
+    ui_draw_round_rect(fb, card, UI_QUICK_FL_CARD_RADIUS, 0x50);
+    ui_draw_round_rect(fb, (EpdRect){card.x + 1, card.y + 1, card.width - 2, card.height - 2},
+                       UI_QUICK_FL_CARD_RADIUS - 1, 0x50);
+    draw_fl_row(fb, menu, UI_QUICK_CTL_ON);
+    draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
+    draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
+}
+
 void ui_quick_menu_end(void) {}
 
 bool ui_quick_menu_draw_button(uint8_t *fb,int button,bool active,bool pressed,EpdRect *dirty) {
@@ -88,19 +183,37 @@ bool ui_quick_menu_draw_button(uint8_t *fb,int button,bool active,bool pressed,E
     return true;
 }
 
+bool ui_quick_menu_draw_control(uint8_t *fb, const ui_quick_menu_t *menu,
+                                ui_quick_control_t control, EpdRect *dirty) {
+    if (!fb || !menu || !menu->frontlight || !dirty) return false;
+    const EpdRect row = fl_row_rect(control);
+    if (row.width <= 0) return false;
+    draw_fl_row(fb, menu, control);
+    *dirty = row;
+    return true;
+}
+
 void ui_quick_menu_draw_status(uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){0,0,epd_rotated_display_width(),76},UI_GRAY_WHITE,fb);
     ui_nav_status(fb);
 }
 
-void ui_quick_menu_draw(uint8_t *fb,bool wifi,bool bluetooth) {
+EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
+    const int height = menu != NULL && menu->frontlight
+        ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
+    return (EpdRect){0, 0, UI_LOCK_WIDTH, height};
+}
+
+void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool bluetooth) {
     if(!fb)return;
     const int width = epd_rotated_display_width();
     const int height = epd_rotated_display_height();
+    const int layer_height = menu != NULL && menu->frontlight
+        ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
     // 每个像素只采一次原图，直接合成灰阶，不让主页快刷模式把菜单变成点阵。
     // Sample each underlay pixel once and compose grays directly, independently of fast main-page rendering.
-    for (int y = 0; y < UI_QUICK_HEIGHT && y < height; ++y) for (int x = 0; x < width; ++x) {
-        if (!layer_pixel(x, y, width)) continue;
+    for (int y = 0; y < layer_height && y < height; ++y) for (int x = 0; x < width; ++x) {
+        if (!layer_pixel(x, y, width, layer_height)) continue;
         unsigned tint = 238;
         for (int i = 0; i < 4; ++i) {
             int dx = x - center_x(i), dy = y - UI_QUICK_CIRCLE_Y;
@@ -126,13 +239,16 @@ void ui_quick_menu_draw(uint8_t *fb,bool wifi,bool bluetooth) {
             epd_draw_circle(cx + 30, UI_QUICK_CIRCLE_Y - 30, 5, 0x50, fb);
         }
     }
-    ui_fill_round_rect(fb, (EpdRect){width / 2 - 26, 240, 52, 6}, 3, 0x70);
+    // 前光卡片在圆钮下方常驻；没有前光的板保持原来的 264 高度。
+    // The frontlight card stays below the circles; boards without one keep the original 264 height.
+    if (menu != NULL && menu->frontlight) draw_fl_card(fb, menu);
+    ui_fill_round_rect(fb, (EpdRect){width / 2 - 26, layer_height - 24, 52, 6}, 3, 0x70);
     // 只画遮罩内的双像素轮廓，顶部直角、底部圆角，不越过下层边界。
     // Draw a two-pixel outline within the mask: square top, rounded bottom, no underlay leakage.
-    for (int y = 0; y < UI_QUICK_HEIGHT && y < height; ++y) for (int x = 0; x < width; ++x) {
-        if (layer_pixel(x, y, width) && (x < 2 || x >= width - 2 || y < 2 ||
-            y >= UI_QUICK_HEIGHT - 2 || !layer_pixel(x - 2, y, width) ||
-            !layer_pixel(x + 2, y, width) || !layer_pixel(x, y + 2, width)))
+    for (int y = 0; y < layer_height && y < height; ++y) for (int x = 0; x < width; ++x) {
+        if (layer_pixel(x, y, width, layer_height) && (x < 2 || x >= width - 2 || y < 2 ||
+            y >= layer_height - 2 || !layer_pixel(x - 2, y, width, layer_height) ||
+            !layer_pixel(x + 2, y, width, layer_height) || !layer_pixel(x, y + 2, width, layer_height)))
             epd_draw_pixel(x, y, 0x38, fb);
     }
 }

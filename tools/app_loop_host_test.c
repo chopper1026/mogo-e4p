@@ -85,12 +85,18 @@ static bool main_source_visible, main_target_visible;
 static bool media_test, sd_font, saved_sd_font;
 static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, loss_step;
+static bool fl_ready, fl_on;
+static uint8_t fl_bri=40, fl_cct=50;
+static int fl_applies, fl_control_draws, fl_row_du, fl_row_gl, quick_gl_height;
 int E0470_WAVEFORM;
 int E0470_FOLLOW_WAVEFORM;
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108){assert(a.width==108&&a.y==102&&w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
-    if (a.height==UI_QUICK_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
+    if (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
+    if (a.width==604&&(a.y==226||a.y==278||a.y==342)) {
+        if(m==MODE_GL16)++fl_row_gl;else if(m==MODE_DU)++fl_row_du;
+    }
     if (a.y==1120) assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU&&a.height==48&&a.width==50);
     return update_display_area_with(h,w,m,a);
 }
@@ -101,7 +107,9 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 }
 static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
-    assert(a.x==0&&a.y==0&&a.width==684&&a.height==UI_QUICK_HEIGHT);++quick_gl;
+    assert(a.x==0&&a.y==0&&a.width==684&&
+           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT));++quick_gl;
+    quick_gl_height=a.height;
     // 快捷层展开刷新阻塞期间，用户抬手并快速点按 Wi-Fi 圆键；三帧都在队列里。
     // While the quick layer's opening refresh blocks, the user lifts and taps Wi-Fi fast.
     if (tap_during_present) {
@@ -112,9 +120,19 @@ enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void
     }
     return update_display_area_with(h,w,m,a);
 }
-void ui_quick_menu_draw(uint8_t *fb,bool wifi,bool bluetooth) {(void)fb;(void)wifi;(void)bluetooth;++quick_draws;}
+void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool bluetooth) {(void)fb;(void)menu;(void)wifi;(void)bluetooth;++quick_draws;}
 void ui_quick_menu_end(void) {}
 void ui_quick_menu_draw_status(uint8_t *fb) {(void)fb;++quick_status_draws;}
+EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
+    return (EpdRect){0,0,684,menu->frontlight?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
+}
+bool ui_quick_menu_draw_control(uint8_t *fb,const ui_quick_menu_t *menu,
+                                ui_quick_control_t control,EpdRect *dirty) {
+    (void)fb;(void)menu;++fl_control_draws;
+    *dirty=(EpdRect){40, control==UI_QUICK_CTL_ON?226:control==UI_QUICK_CTL_BRIGHTNESS?278:342,
+                     604, control==UI_QUICK_CTL_ON?52:control==UI_QUICK_CTL_BRIGHTNESS?64:80};
+    return true;
+}
 bool ui_quick_menu_draw_button(uint8_t *fb,int button,bool active,bool pressed,EpdRect *dirty) {
  (void)fb;(void)active;assert(button>=0&&button<4);++quick_button_draws;quick_press_draws+=pressed;
  *dirty=(EpdRect){(button*2+1)*684/8-54,102,108,108};return true;
@@ -123,6 +141,16 @@ void ble_pt_reconnect_recent(void) {assert(ble_enabled);++quick_recent_requests;
 void ble_pt_cancel_recent(void) {assert(!ble_enabled);}
 bool app_settings_ble_turner(void) {return ble_enabled;}
 void app_settings_set_ble_turner(bool enabled) {ble_enabled=enabled;}
+bool app_settings_frontlight_on(void) {return fl_on;}
+void app_settings_set_frontlight_on(bool on) {fl_on=on;}
+uint8_t app_settings_frontlight_brightness(void) {return fl_bri;}
+void app_settings_set_frontlight_brightness(uint8_t percent) {fl_bri=percent;}
+uint8_t app_settings_frontlight_cct(void) {return fl_cct;}
+void app_settings_set_frontlight_cct(uint8_t percent) {fl_cct=percent;}
+bool frontlight_ready(void) {return fl_ready;}
+esp_err_t frontlight_apply(bool on,uint8_t brightness,uint8_t cct) {
+    fl_on=on;fl_bri=brightness;fl_cct=cct;++fl_applies;return ESP_OK;
+}
 void ble_pt_reset_failure(void) {++ble_resets;}
 bool ble_pt_pop_key(ble_pt_event_t *e) {(void)e;return false;}
 bool ble_pt_pop_raw(ble_pt_raw_t *e) {(void)e;return false;}
@@ -241,6 +269,7 @@ static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
+    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_row_du=fl_row_gl=quick_gl_height=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
@@ -557,6 +586,19 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
+    // 前光卡片常驻：开关和两条滑杆只刷一行，拖动 DU、松手 GL16，收起按 460 高度擦除。
+    // The frontlight card is always present: switch and sliders repaint one row, drag=DU,
+    // release=GL16, and closing erases by the 460px height.
+    reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(584,253,1,0);add(0,0,0,0);
+    add(399,318,1,0);add(512,318,1,0);add(0,0,0,0);
+    add(399,382,1,0);add(0,0,0,0);
+    add(300,430,1,0);add(300,300,1,0);add(0,0,0,0);run();
+    assert(fl_on&&fl_bri==80&&fl_cct==60);
+    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT);
+    assert(fl_control_draws>=6&&fl_row_du>=3&&fl_row_gl>=3);
+    puts("frontlight card: persistent switch/brightness/CCT rows, DU drag, GL16 settle, commit on release and 460px close passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.
