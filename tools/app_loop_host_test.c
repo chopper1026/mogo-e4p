@@ -87,18 +87,30 @@ static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, loss_step;
 static bool fl_ready, fl_on;
 static uint8_t fl_bri=40, fl_cct=50;
-static int fl_applies, fl_control_draws, fl_row_du, fl_row_gl, quick_gl_height;
+static int fl_applies, fl_control_draws, fl_row_du, fl_row_gl, fl_row_padded, fl_key_gl, quick_gl_height;
 int E0470_WAVEFORM;
 int E0470_FOLLOW_WAVEFORM;
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
-    if(a.height==108){assert(a.width==108&&a.y==102&&w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
+    if(a.height==108&&a.width==108){
+        assert(a.width==108&&a.y==102);
+        if(m==MODE_GL16)++fl_key_gl;
+        else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
+    }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
     if (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
-    if (a.width==604&&(a.y==226||a.y==278||a.y==342)) {
+    if (a.width==604&&(a.y==UI_QUICK_FL_BRI_ROW_Y||a.y==UI_QUICK_FL_CCT_ROW_Y)) {
         if(m==MODE_GL16)++fl_row_gl;else if(m==MODE_DU)++fl_row_du;
     }
     if (a.y==1120) assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU&&a.height==48&&a.width==50);
     return update_display_area_with(h,w,m,a);
+}
+enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const void*w,int m,EpdRect a,
+                                                  int pad_lines,int pad_col_bytes) {
+    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_ROW_Y||a.y==UI_QUICK_FL_CCT_ROW_Y)){
+        assert(m==MODE_DU&&w==&E0470_FOLLOW_WAVEFORM&&pad_lines==1&&pad_col_bytes==1);
+        ++fl_row_padded;
+    }
+    return update_display_area_diff_with(h,w,m,a);
 }
 enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area) {
  const void *owner=nav_armed;nav_armed=NULL;
@@ -129,12 +141,13 @@ EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
 bool ui_quick_menu_draw_control(uint8_t *fb,const ui_quick_menu_t *menu,
                                 ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_control_draws;
-    *dirty=(EpdRect){40, control==UI_QUICK_CTL_ON?226:control==UI_QUICK_CTL_BRIGHTNESS?278:342,
-                     604, control==UI_QUICK_CTL_ON?52:control==UI_QUICK_CTL_BRIGHTNESS?64:80};
+    if(control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)return false;
+    *dirty=(EpdRect){40, control==UI_QUICK_CTL_BRIGHTNESS?UI_QUICK_FL_BRI_ROW_Y:UI_QUICK_FL_CCT_ROW_Y,
+                     604, control==UI_QUICK_CTL_BRIGHTNESS?UI_QUICK_FL_BRI_ROW_H:UI_QUICK_FL_CCT_ROW_H};
     return true;
 }
-bool ui_quick_menu_draw_button(uint8_t *fb,int button,bool active,bool pressed,EpdRect *dirty) {
- (void)fb;(void)active;assert(button>=0&&button<4);++quick_button_draws;quick_press_draws+=pressed;
+bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
+ (void)fb;(void)menu;(void)active;assert(button>=0&&button<4);++quick_button_draws;quick_press_draws+=pressed;
  *dirty=(EpdRect){(button*2+1)*684/8-54,102,108,108};return true;
 }
 void ble_pt_reconnect_recent(void) {assert(ble_enabled);++quick_recent_requests;}
@@ -269,7 +282,7 @@ static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
-    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_row_du=fl_row_gl=quick_gl_height=0;
+    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_row_du=fl_row_gl=fl_row_padded=fl_key_gl=quick_gl_height=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
@@ -586,19 +599,19 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
-    // 前光卡片常驻：开关和两条滑杆只刷一行，拖动 DU、松手 GL16，收起按 460 高度擦除。
-    // The frontlight card is always present: switch and sliders repaint one row, drag=DU,
-    // release=GL16, and closing erases by the 460px height.
+    // 第四枚圆钮是前光开关，卡片只有两条大滑杆：开关点按 GL16 定稿，滑杆拖动 DU、松手 GL16，收起按 480 高度擦除。
+    // The fourth circle is the frontlight switch and the card holds only the two large sliders:
+    // a switch tap settles with GL16, sliders use DU then GL16, and closing erases by 480px.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
-    add(584,253,1,0);add(0,0,0,0);
-    add(399,318,1,0);add(512,318,1,0);add(0,0,0,0);
-    add(399,382,1,0);add(0,0,0,0);
-    add(300,430,1,0);add(300,300,1,0);add(0,0,0,0);run();
+    add(598,156,1,0);add(0,0,0,0);
+    add(399,300,1,0);add(512,300,1,0);add(0,0,0,0);
+    add(399,398,1,0);add(0,0,0,0);
+    add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==80&&fl_cct==60);
     assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT);
-    assert(fl_control_draws>=6&&fl_row_du>=3&&fl_row_gl>=3);
-    puts("frontlight card: persistent switch/brightness/CCT rows, DU drag, GL16 settle, commit on release and 460px close passed");
+    assert(fl_key_gl==1&&fl_control_draws>=4&&fl_row_du>=2&&fl_row_gl>=2&&fl_row_padded>=2);
+    puts("frontlight: fourth-circle switch, full-width slider rows, DU drag, GL16 settle, commit on release and 480px close passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.

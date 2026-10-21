@@ -5,8 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc97 本地 / 2026-10-21
 
-- 下拉快捷栏新增常驻前光控制：开关、1–100% 亮度、0–100% 色温（0 全暖、50 冷暖同开、100 全冷），拖动实时生效、松手或点选才保存；浅睡灭灯、唤醒恢复，无前光的板保持四键布局。
-  The pull-down quick layer now keeps frontlight controls visible: on/off, 1–100% brightness and 0–100% colour temperature (0 warm, 50 both, 100 cool), applied while dragging and persisted on release or tap. Light sleep blanks the light, wake restores it, and boards without a frontlight keep the four-key layout.
+- 下拉快捷栏的前光控制改为第四枚圆钮开关：开灯为黑底白太阳，熄灭为浅底黑太阳，与旁边图标同粗细；锁屏图标移出快捷栏。下方亮度、色温换成整行可点的大滑杆（14px 轨道、22px 滑块）并去掉右侧百分比，拖动实时生效、松手或点选才保存。滑杆拖动改为带脏区膨胀的差分刷新，减少圆圈上下边缘的浅残影，松手仍用 GL16 定稿。滑杆不再自动开灯，灯灭时只记录数值，必须点圆钮才亮；浅睡灭灯、唤醒恢复，无前光的板保留锁屏圆钮和四键布局。
+  The pull-down quick layer now uses its fourth circle as the frontlight switch: black with a white sun when on and light with a black sun when off, matching the neighbouring glyph weight, replacing the lock icon. Brightness and colour temperature become full-row sliders with a 14px track and 22px knob without percentage labels, applied while dragging and persisted on release or tap. Slider drags now use dilated dirty masks to cut the light ghost along the knob's top and bottom edges, while release still settles with GL16. Sliders never turn the light on by themselves; with the light off they only record values and the circle must be tapped. Light sleep blanks the light, wake restores it, and boards without a frontlight keep the lock circle and the four-key layout.
 - 修复「关机睡眠 = 仅浅睡」下锁屏唤醒后整个主页刷新变慢的问题。浅睡唤醒过程会把 CACHE_L1 的总线仲裁/时钟门控等四个配置寄存器清零而系统不恢复，喂行产能下降约 20%，20 MHz 扫描第一刷欠载后像素钟被永久降到 12 MHz。现在每次浅睡醒来把开机快照的配置写回，唤醒后主页刷新保持 20 MHz 原速。
   Fix the whole-home-page slowdown after a lock wake under the light-only shutdown style. The light-sleep wake path clears four CACHE_L1 configuration words (bus arbitration and clock gating) that nothing restores, cutting the EPD feed capacity by ~20%; the first 20 MHz scan underruns and the pixel clock stays at 12 MHz. The snapshot is written back after every wake, keeping post-wake refreshes at full 20 MHz speed.
 

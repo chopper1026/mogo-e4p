@@ -463,10 +463,12 @@ static enum EpdDrawError hl_update_padded(
         }
     }
     full = full || ((mode & 0xF) == MODE_GL16 && !allow_gl16_diff);
-    // 只有 GL16 差分需要膨胀：DU/GC16 与全像素刷新保持原节奏。
-    // Dilate GL16 differentials only; DU/GC16 and full-pixel updates keep their cadence.
-    const int pad_l = !full && (mode & 0xF) == MODE_GL16 ? pad_lines : 0;
-    const int pad_c = !full && (mode & 0xF) == MODE_GL16 ? pad_col_bytes : 0;
+    // 显式传入的 padding 一律生效；默认差分出口由 hl_update 只给 GL16 传 1,1，
+    // 所以 DU 仍保持原节奏，只有主动要求膨胀的调用（滑杆拖动）才扩边。
+    // Explicit padding always applies; hl_update passes 1,1 for GL16 only, so
+    // ordinary DU keeps its cadence and only callers that ask for dilation expand.
+    const int pad_l = !full ? pad_lines : 0;
+    const int pad_c = !full ? pad_col_bytes : 0;
     // 比较完成后只切换一次扫描档，避免快刷前先切 FULL 再切 FAST。
     // Select scan timing once after comparison, without a FULL-to-FAST round trip before fast updates.
     use_scan_for(waveform, mode);
@@ -484,7 +486,11 @@ static enum EpdDrawError hl_update(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode, bool full,
     const EpdRect* area, bool allow_gl16_diff
 ) {
-    return hl_update_padded(hl, waveform, mode, full, area, allow_gl16_diff, 1, 1);
+    // 默认出口只给 GL16 差分扩边，DU 仍按原节奏；需要擦细线残影的调用走 padded API。
+    // The default exit dilates GL16 differentials only; callers that clean thin-line ghosts use the padded API.
+    const bool gl16 = (mode & 0xF) == MODE_GL16;
+    return hl_update_padded(hl, waveform, mode, full, area, allow_gl16_diff,
+                            gl16 ? 1 : 0, gl16 ? 1 : 0);
 }
 
 static enum EpdDrawError update_display_mode_unlocked(

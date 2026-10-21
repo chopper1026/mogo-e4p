@@ -1,18 +1,19 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板在圆钮下方常驻一块
- * 实心前光卡片，开关、亮度、色温三件套下拉即见。
+ * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成
+ * 太阳开关，并在下方常驻亮度、色温两条大滑杆。开关与滑杆互不代劳：灯关着时
+ * 调档只记数值，必须点亮图标才会开灯。
  * English: A shallow full-width top layer with rounded bottom corners and four
- * unlabeled circles; boards with a frontlight keep a solid card below them, so
- * its switch, brightness and colour temperature are visible as soon as it opens.
- * 用户修订：恢复实心灰阶控件，不再生成液态玻璃或缓存底图；前光三件套常驻，
- * 不再需要第二次点按展开。
- * User revision: restore solid grayscale controls without liquid glass or cached
- * backdrops; the three frontlight controls stay visible without a second tap.
+ * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
+ * circle and keep two large brightness/colour-temperature sliders below. The
+ * switch is the only way on: adjusting a slider while off records the value
+ * without turning the light on.
+ * 用户修订：锁屏图标移出快捷栏；细轨和小滑块换成整行可点的大滑杆。
+ * User revision: drop the lock icon from the quick layer and replace the thin
+ * tracks and small knobs with full-row, large sliders.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
 #include "ui_quick_menu.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include "ui_kit.h"
 #include "ui_nav.h"
@@ -22,7 +23,7 @@ static EpdRect key_rect(int button) {
     return (EpdRect){center_x(button)-UI_QUICK_RADIUS,UI_QUICK_CIRCLE_Y-UI_QUICK_RADIUS,
                      2*UI_QUICK_RADIUS,2*UI_QUICK_RADIUS};
 }
-static const ui_icon_t s_icons[]={UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_REFRESH_CW,UI_ICON_LOCK};
+static const ui_icon_t s_icons[]={UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_REFRESH_CW};
 
 // 根据当前旋转读取逻辑像素；和图形接口相同，画点保持半字节邻居。
 // Read logical pixels using the current rotation; drawing preserves the neighboring nibble like the graphics API.
@@ -71,18 +72,29 @@ static void draw_badge(uint8_t *fb,int button,bool active) {
     epd_draw_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,0x50,fb);
 }
 
-// 实心圆键：活动态沿用原176灰，其余为244灰；按压只加内圈。
-// Solid key: active uses the original 176 gray, others 244; a press only adds the inner ring.
-static void draw_key(uint8_t *fb,int button,bool active,bool pressed) {
+// 实心圆键：活动态沿用原176灰，其余为244灰；按压只加内圈。前光开关单独用
+// 黑底白太阳表示开灯、浅底黑太阳表示熄灭，和旁边圆钮共用同一套图形粗细。
+// Solid key: active uses the original 176 gray, others 244; a press only adds the
+// inner ring. The frontlight switch alone turns black with a white sun when on and
+// keeps a light face with a black sun when off, matching the neighbouring glyph weight.
+static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool active,bool pressed) {
     int cx=center_x(button);
-    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,active?0xb0:0xf4,fb);
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,0x38,fb);
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,0x38,fb);
+    const bool frontlight_key=button==3&&menu!=NULL&&menu->frontlight;
+    const bool dark_face=frontlight_key&&active;
+    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,
+                    dark_face?UI_GRAY_BLACK:active?0xb0:0xf4,fb);
+    const uint8_t edge=dark_face?UI_GRAY_BLACK:0x38;
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,edge,fb);
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,edge,fb);
     if(button<3) ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,s_icons[button],UI_GRAY_BLACK);
+    else if(frontlight_key)
+        ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,UI_ICON_SUN,
+                     active?UI_GRAY_WHITE:UI_GRAY_BLACK);
     else lock_icon(fb,cx,UI_QUICK_CIRCLE_Y);
     if(pressed){
-        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-7,UI_GRAY_BLACK,fb);
-        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-8,UI_GRAY_BLACK,fb);
+        const uint8_t ring=dark_face?UI_GRAY_WHITE:UI_GRAY_BLACK;
+        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-7,ring,fb);
+        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-8,ring,fb);
     }
 }
 
@@ -95,30 +107,14 @@ static EpdRect fl_card_rect(void) {
 static EpdRect fl_row_rect(ui_quick_control_t control) {
     // 行矩形内缩到卡片边框以内，局部重画不会擦掉圆角描边。
     // Row rectangles stay inside the card border so local repaints never erase its rounded outline.
-    if (control == UI_QUICK_CTL_ON) return (EpdRect){40, 226, 604, 52};
-    if (control == UI_QUICK_CTL_BRIGHTNESS) return (EpdRect){40, 278, 604, 64};
-    if (control == UI_QUICK_CTL_CCT) return (EpdRect){40, 342, 604, 80};
+    if (control == UI_QUICK_CTL_BRIGHTNESS)
+        return (EpdRect){40, UI_QUICK_FL_BRI_ROW_Y, 604, UI_QUICK_FL_BRI_ROW_H};
+    if (control == UI_QUICK_CTL_CCT)
+        return (EpdRect){40, UI_QUICK_FL_CCT_ROW_Y, 604, UI_QUICK_FL_CCT_ROW_H};
     return (EpdRect){0};
-}
-static EpdRect fl_switch_rect(void) {
-    return (EpdRect){UI_QUICK_FL_SWITCH_X, UI_QUICK_FL_SWITCH_Y,
-                     UI_QUICK_FL_SWITCH_W, UI_QUICK_FL_SWITCH_H};
 }
 static int fl_thumb_x(uint8_t value) {
     return UI_QUICK_FL_TRACK_X + (UI_QUICK_FL_TRACK_W * value) / 100;
-}
-
-// 胶囊开关：关为浅灰轨、滑块在左；开为黑轨、白滑块在右。
-// Pill switch: light track with the knob left when off, black track with the knob right when on.
-static void draw_switch(uint8_t *fb, bool on) {
-    EpdRect r = fl_switch_rect();
-    ui_fill_round_rect(fb, r, r.height / 2, on ? 0x00 : 0xe6);
-    ui_draw_round_rect(fb, r, r.height / 2, 0x38);
-    const int cx = on ? r.x + r.width - r.height / 2 : r.x + r.height / 2;
-    const int cy = r.y + r.height / 2;
-    epd_fill_circle(cx, cy, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, cy, 16, 0x38, fb);
-    epd_draw_circle(cx, cy, 15, 0x38, fb);
 }
 
 static void draw_slider(uint8_t *fb, int track_y, uint8_t value) {
@@ -133,32 +129,21 @@ static void draw_slider(uint8_t *fb, int track_y, uint8_t value) {
     epd_fill_circle(tx, cy, UI_QUICK_FL_THUMB_R, UI_GRAY_WHITE, fb);
     epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R, 0x38, fb);
     epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R - 1, 0x38, fb);
-}
-
-static void draw_percent(uint8_t *fb, int cy, uint8_t value) {
-    char text[8];
-    snprintf(text, sizeof(text), "%u%%", (unsigned)value);
-    ui_text_fixed_vc(fb, 624, cy, 28, text, EPD_DRAW_ALIGN_RIGHT, false);
+    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R - 2, 0x38, fb);
 }
 
 static void draw_fl_row(uint8_t *fb, const ui_quick_menu_t *menu, ui_quick_control_t control) {
     const EpdRect row = fl_row_rect(control);
     if (row.width <= 0) return;
     ui_fill_rect_fast(row, UI_GRAY_WHITE, fb);
-    if (control == UI_QUICK_CTL_ON) {
-        ui_draw_icon(fb, 66, 252, 36, UI_ICON_SUN, UI_GRAY_BLACK);
-        ui_text_fixed_vc(fb, 92, 252, 30, "前光", EPD_DRAW_ALIGN_LEFT, false);
-        draw_switch(fb, menu->fl_on);
-    } else if (control == UI_QUICK_CTL_BRIGHTNESS) {
-        ui_text_fixed_vc(fb, 60, 294, 28, "亮度", EPD_DRAW_ALIGN_LEFT, false);
-        draw_percent(fb, 294, menu->fl_bri);
+    if (control == UI_QUICK_CTL_BRIGHTNESS) {
+        ui_text_fixed_vc(fb, 60, 252, 30, "亮度", EPD_DRAW_ALIGN_LEFT, false);
         draw_slider(fb, UI_QUICK_FL_BRI_TRACK_Y, menu->fl_bri);
     } else if (control == UI_QUICK_CTL_CCT) {
-        ui_text_fixed_vc(fb, 60, 358, 28, "色温", EPD_DRAW_ALIGN_LEFT, false);
-        draw_percent(fb, 358, menu->fl_cct);
+        ui_text_fixed_vc(fb, 60, 350, 30, "色温", EPD_DRAW_ALIGN_LEFT, false);
         draw_slider(fb, UI_QUICK_FL_CCT_TRACK_Y, menu->fl_cct);
-        ui_text_fixed_vc(fb, 60, 404, 22, "暖", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_fixed_vc(fb, 624, 404, 22, "冷", EPD_DRAW_ALIGN_RIGHT, false);
+        ui_text_fixed_vc(fb, 60, 430, 22, "暖", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed_vc(fb, 624, 430, 22, "冷", EPD_DRAW_ALIGN_RIGHT, false);
     }
 }
 
@@ -168,16 +153,16 @@ static void draw_fl_card(uint8_t *fb, const ui_quick_menu_t *menu) {
     ui_draw_round_rect(fb, card, UI_QUICK_FL_CARD_RADIUS, 0x50);
     ui_draw_round_rect(fb, (EpdRect){card.x + 1, card.y + 1, card.width - 2, card.height - 2},
                        UI_QUICK_FL_CARD_RADIUS - 1, 0x50);
-    draw_fl_row(fb, menu, UI_QUICK_CTL_ON);
     draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
     draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
 }
 
 void ui_quick_menu_end(void) {}
 
-bool ui_quick_menu_draw_button(uint8_t *fb,int button,bool active,bool pressed,EpdRect *dirty) {
+bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
     if(!fb||!dirty||button<0||button>=4||epd_rotated_display_width()<UI_LOCK_WIDTH||epd_rotated_display_height()<UI_QUICK_HEIGHT)return false;
-    draw_key(fb,button,active,pressed);
+    if(menu!=NULL&&menu->frontlight&&button==3)active=menu->fl_on;
+    draw_key(fb,button,menu,active,pressed);
     draw_badge(fb,button,active);
     *dirty=key_rect(button);
     return true;
@@ -218,7 +203,9 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
         for (int i = 0; i < 4; ++i) {
             int dx = x - center_x(i), dy = y - UI_QUICK_CIRCLE_Y;
             if (dx * dx + dy * dy <= UI_QUICK_RADIUS * UI_QUICK_RADIUS) {
-                tint = (i == 0 && wifi) || (i == 1 && bluetooth) ? 176 : 244;
+                const bool active = (i == 0 && wifi) || (i == 1 && bluetooth) ||
+                    (i == 3 && menu != NULL && menu->frontlight && menu->fl_on);
+                tint = active ? 176 : 244;
                 break;
             }
         }
@@ -229,15 +216,10 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
     // Keep the system time/signature/battery legible on white; share navigation's 44px Lucide line icons.
     ui_quick_menu_draw_status(fb);
     for (int i = 0; i < 4; ++i) {
-        int cx = center_x(i);
-        epd_draw_circle(cx, UI_QUICK_CIRCLE_Y, UI_QUICK_RADIUS, 0x38, fb);
-        epd_draw_circle(cx, UI_QUICK_CIRCLE_Y, UI_QUICK_RADIUS - 1, 0x38, fb);
-        if (i < 3) ui_draw_icon(fb, cx, UI_QUICK_CIRCLE_Y, 44, s_icons[i], UI_GRAY_BLACK);
-        else lock_icon(fb, cx, UI_QUICK_CIRCLE_Y);
-        if ((i == 0 && wifi) || (i == 1 && bluetooth)) {
-            epd_fill_circle(cx + 30, UI_QUICK_CIRCLE_Y - 30, 5, UI_GRAY_WHITE, fb);
-            epd_draw_circle(cx + 30, UI_QUICK_CIRCLE_Y - 30, 5, 0x50, fb);
-        }
+        bool active = (i == 0 && wifi) || (i == 1 && bluetooth) ||
+            (i == 3 && menu != NULL && menu->frontlight && menu->fl_on);
+        draw_key(fb, i, menu, active, false);
+        draw_badge(fb, i, active);
     }
     // 前光卡片在圆钮下方常驻；没有前光的板保持原来的 264 高度。
     // The frontlight card stays below the circles; boards without one keep the original 264 height.

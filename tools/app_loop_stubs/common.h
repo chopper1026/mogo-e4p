@@ -37,6 +37,7 @@ static inline void app_loop_log_sink(const char *fmt, ...) { (void)fmt; }
 void guard_draw_result(EpdiyHighlevelState*, enum EpdDrawError);
 enum EpdDrawError update_display_area_with(EpdiyHighlevelState*, const void*, int, EpdRect);
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*, const void*, int, EpdRect);
+enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*, const void*, int, EpdRect, int, int);
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*, const void*, int, EpdRect);
 enum EpdDrawError update_display_full(EpdiyHighlevelState*);
 enum EpdDrawError update_display_mode(EpdiyHighlevelState*, int);

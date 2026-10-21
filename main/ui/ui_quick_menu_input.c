@@ -11,7 +11,7 @@
 
 // 圆键之后的卡片命中编号；ui_quick_menu_pressed 只把 0..3 当作按住的圆键。
 // Card hit ids follow the circles; ui_quick_menu_pressed only treats 0..3 as a held key.
-enum { HIT_SWITCH = 4, HIT_BRIGHTNESS = 5, HIT_CCT = 6 };
+enum { HIT_BRIGHTNESS = 4, HIT_CCT = 5 };
 
 static int center_x(int button) { return (button * 2 + 1) * UI_LOCK_WIDTH / 8; }
 
@@ -23,16 +23,10 @@ static int circle_hit(int x, int y) {
     return -1;
 }
 
-static bool in_rect(int x, int y, EpdRect r) {
-    return x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
-}
-
 static int hit_test(const ui_quick_menu_t *menu, int x, int y) {
     int key = circle_hit(x, y);
     if (key >= 0) return key;
     if (!menu->frontlight) return -1;
-    if (in_rect(x, y, (EpdRect){UI_QUICK_FL_SWITCH_X, UI_QUICK_FL_SWITCH_Y,
-                                UI_QUICK_FL_SWITCH_W, UI_QUICK_FL_SWITCH_H})) return HIT_SWITCH;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
         y >= UI_QUICK_FL_BRI_HIT_Y0 && y <= UI_QUICK_FL_BRI_HIT_Y1) return HIT_BRIGHTNESS;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
@@ -134,9 +128,8 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         const uint8_t value = slider_value(menu->hit, x);
         if (menu->hit == HIT_BRIGHTNESS) menu->fl_bri = value;
         else menu->fl_cct = value;
-        // 灯关着时碰滑杆自动开灯，否则用户拖了看不到任何变化。
-        // Touching a slider while off turns the light on, or the drag would have no visible effect.
-        menu->fl_on = true;
+        // 滑杆只记录数值，不替开关开灯；灯灭时拖动只更新下次点亮要用的档位。
+        // A slider only records the value and never acts as the switch; with the light off it queues the level for the next on.
         menu->drag = menu->hit == HIT_BRIGHTNESS
             ? UI_QUICK_CTL_BRIGHTNESS : UI_QUICK_CTL_CCT;
         event->control = menu->drag;
@@ -154,16 +147,18 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
     } else if (ctx->released) {
         menu->tracking = false;
         if (menu->open && !menu->moved) {
-            if (menu->hit >= 0 && menu->hit < 4 && circle_hit(x, y) == menu->hit) {
-                static const ui_quick_action_t actions[] = {
-                    UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
-                };
-                event->action = actions[menu->hit];
-            } else if (menu->hit == HIT_SWITCH) {
+            if (menu->hit == 3 && menu->frontlight) {
+                // 第四枚圆钮就是前光开关：点按翻转，并作为一次立即提交。
+                // The fourth circle is the frontlight switch: a tap flips it and commits immediately.
                 menu->fl_on = !menu->fl_on;
                 event->control = UI_QUICK_CTL_ON;
                 event->value = menu->fl_on ? 1 : 0;
                 event->commit = true;
+            } else if (menu->hit >= 0 && menu->hit < 4 && circle_hit(x, y) == menu->hit) {
+                static const ui_quick_action_t actions[] = {
+                    UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
+                };
+                event->action = actions[menu->hit];
             } else if (menu->drag != UI_QUICK_CTL_NONE) {
                 event->control = menu->drag;
                 event->value = menu->drag == UI_QUICK_CTL_BRIGHTNESS

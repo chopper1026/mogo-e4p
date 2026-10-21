@@ -144,16 +144,16 @@ static const app_desc_t* s_presented_main;
 static ui_quick_menu_t s_quick;
 static unsigned s_quick_status;
 static int s_quick_pressed=-1;
-// 上一次推上屏的快捷层高度；收起前光卡片后按旧高度擦除，避免 224..460 残留。
-// Height last presented; closing the frontlight card erases by the old height so 224..460 cannot remain.
+// 上一次推上屏的快捷层高度；收起前光卡片后按旧高度擦除，避免 224..480 残留。
+// Height last presented; closing the frontlight card erases by the old height so 224..480 cannot remain.
 static int s_quick_height;
 // 回放期间只更新硬件，整批结束后再按最终值刷一行；否则一次拖动会被每个积压帧各刷一遍。
 // During replay only hardware follows; one row is flushed at the end, or a single drag would present every queued frame.
 static bool s_fl_pending;
 static bool s_fl_pending_commit;
 static ui_quick_control_t s_fl_pending_control;
-// 屏幕上开关当前画出的状态；滑杆自动开灯时要连带重画 ON 行。
-// The switch state currently painted; auto-on from a slider must repaint the ON row too.
+// 屏幕上第四枚圆钮当前画出的开灯状态；点按翻转后据此决定是否重画。
+// The frontlight state currently painted on the fourth circle; a tap uses it to decide the repaint.
 static bool s_fl_shown_on;
 static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current);
 // 快捷层只持有预览值；落盘只发生在松手、点选或关闭/读错时，一次拖动只写一遍 NVS。
@@ -204,15 +204,17 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     s_fl_pending = false;
     s_fl_pending_commit = false;
     s_fl_pending_control = UI_QUICK_CTL_NONE;
-    s_fl_shown_on = s_quick.fl_on;
     unsigned status=quick_status();
     if(full&&s_quick.open){
         // 已合成的页面直接全刷，只还原圆键按压，不重排底页或重算玻璃。
         // Refresh the composed framebuffer directly, restoring only the pressed tile without underlay layout or glass regeneration.
         for(int i=0;i<4;++i){
-            bool active=i<2&&(status&(1u<<i)),was_active=i<2&&(s_quick_status&(1u<<i));
+            bool active=i<2?(status&(1u<<i))!=0
+                :i==3&&s_quick.frontlight&&s_quick.fl_on;
+            bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+                :i==3&&s_quick.frontlight&&s_fl_shown_on;
             if(i==s_quick_pressed||active!=was_active){
-                EpdRect dirty;(void)ui_quick_menu_draw_button(ctx->fb,i,active,false,&dirty);
+                EpdRect dirty;(void)ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,false,&dirty);
             }
         }
         if((status^s_quick_status)&6u)ui_quick_menu_draw_status(ctx->fb);
@@ -221,6 +223,7 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
         if(!s_quick.open)ui_quick_menu_end();
         else ui_quick_menu_draw(ctx->fb,&s_quick,status&1u,status&2u);
     }
+    s_fl_shown_on = s_quick.fl_on;
     s_quick_status=status;
     s_quick_pressed=-1;
     const int quick_height = ui_quick_menu_rect(&s_quick).height;
@@ -248,11 +251,13 @@ static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
     int pressed=ui_quick_menu_pressed(&s_quick);
     enum EpdDrawError error=EPD_DRAW_SUCCESS;
     for(int i=0;i<4;++i){
-        bool active=i<2&&(status&(1u<<i));
-        bool was_active=i<2&&(s_quick_status&(1u<<i));
+        bool active=i<2?(status&(1u<<i))!=0
+            :i==3&&s_quick.frontlight&&s_quick.fl_on;
+        bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+            :i==3&&s_quick.frontlight&&s_fl_shown_on;
         if(active==was_active&&(pressed==i)==(s_quick_pressed==i))continue;
         EpdRect dirty;
-        if(ui_quick_menu_draw_button(ctx->fb,i,active,pressed==i,&dirty)){
+        if(ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,pressed==i,&dirty)){
             error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,dirty);
             guard_draw_result(ctx->hl,error);
             if(error!=EPD_DRAW_SUCCESS)break;
@@ -267,7 +272,7 @@ static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
     if(error!=EPD_DRAW_SUCCESS){
         quick_reset();app_present(ctx,current,APP_REDRAW_FULL);return;
     }
-    s_quick_status=status;s_quick_pressed=pressed;
+    s_quick_status=status;s_fl_shown_on=s_quick.fl_on;s_quick_pressed=pressed;
 }
 
 static void quick_toggle_wifi(void) {
@@ -290,33 +295,29 @@ static void quick_toggle_wifi(void) {
 }
 static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
-// 前光事件只动卡片的一行：拖动走 DU，松手/点选走 GL16 定稿，随后才写 NVS。
-// A frontlight event touches one card row: DU while dragging, GL16 on release or tap, then NVS.
+// 前光事件只动它自己的控件：开关点按重画第四枚圆钮，滑杆走本行 DU、松手 GL16 定稿，随后才写 NVS。
+// A frontlight event touches only its own control: a switch tap repaints the fourth circle, while a slider uses DU and settles with GL16 on release, then writes NVS.
 static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
                                      const ui_quick_event_t *event) {
     EpdRect dirty;
-    if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
-    // 滑杆把灯自动打开时，开关状态也变了；把 ON 行并进同一次刷新。
-    // A slider turning the light on also changes the switch, so fold the ON row into the same refresh.
-    const bool on_changed = event->control != UI_QUICK_CTL_ON && s_quick.fl_on != s_fl_shown_on;
-    if (on_changed) {
-        EpdRect on_dirty;
-        if (ui_quick_menu_draw_control(ctx->fb, &s_quick, UI_QUICK_CTL_ON, &on_dirty)) {
-            const int x1 = dirty.x < on_dirty.x ? dirty.x : on_dirty.x;
-            const int y1 = dirty.y < on_dirty.y ? dirty.y : on_dirty.y;
-            const int x2a = dirty.x + dirty.width, x2b = on_dirty.x + on_dirty.width;
-            const int y2a = dirty.y + dirty.height, y2b = on_dirty.y + on_dirty.height;
-            const int x2 = x2a > x2b ? x2a : x2b;
-            const int y2 = y2a > y2b ? y2a : y2b;
-            dirty = (EpdRect){x1, y1, x2 - x1, y2 - y1};
-        }
+    enum EpdDrawError error = EPD_DRAW_SUCCESS;
+    if (event->control == UI_QUICK_CTL_ON) {
+        if (!ui_quick_menu_draw_button(ctx->fb, &s_quick, 3, s_quick.fl_on, false, &dirty)) return;
+        s_fl_shown_on = s_quick.fl_on;
+        error = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, dirty);
+        guard_draw_result(ctx->hl, error);
+    } else {
+        if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
+        // 拖动帧是 DU 差分，必须显式扩脏行/脏列：圆圈上下边缘每次只变一两像素，
+        // 不扩边会留下浅残影；松手仍走 GL16 定稿清干净。
+        // Drag frames are DU differentials and must dilate dirty rows/columns:
+        // the circle's top and bottom edges change by a pixel or two and otherwise
+        // leave a light ghost. Release still settles with GL16.
+        error = event->commit
+            ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, dirty)
+            : update_display_area_diff_padded(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty, 1, 1);
+        guard_draw_result(ctx->hl, error);
     }
-    s_fl_shown_on = s_quick.fl_on;
-    const bool settle = event->commit || on_changed;
-    enum EpdDrawError error = update_display_area_diff_with(
-        ctx->hl, settle ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
-        settle ? MODE_GL16 : MODE_DU, dirty);
-    guard_draw_result(ctx->hl, error);
     if (error != EPD_DRAW_SUCCESS) {
         quick_reset();
         app_present(ctx, current, APP_REDRAW_FULL);

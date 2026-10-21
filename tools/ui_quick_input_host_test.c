@@ -45,48 +45,61 @@ int main(void){
  open();assert(feed(0,0,0,false,false,false,true).action==UI_QUICK_CLOSE&&!menu.open);
  puts("PASS: 32/33px edge, 72px/1500ms limits, diagonal rejection, upward/outside/back dismissal, multitouch/error/drag cancellation and consumed release");
 
- // 前光卡片常驻：开关、亮度、色温都直接命中；滑杆 1% 步进，松手才提交。
- // The frontlight card is always visible: switch, brightness and CCT hit directly;
- // sliders step by 1% and only commit on release.
+ // 第四枚圆钮是前光开关，卡片只留两条整行可点的大滑杆；灯灭时滑杆不代开关开灯。
+ // The fourth circle is the frontlight switch and the card keeps two full-row sliders;
+ // while the light is off a slider records its value without switching the light on.
  ui_quick_menu_set_frontlight(&menu,true,false,40,50);
  open();
- ui_quick_event_t e=feed(584,253,1,true,false,true,true);
+ ui_quick_event_t e=feed(598,156,1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_NONE&&!menu.fl_on);
- e=feed(584,253,0,false,true,true,true);
+ e=feed(598,156,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&e.commit&&menu.fl_on);
- e=feed(584,253,1,true,false,true,true);
- e=feed(584,253,0,false,true,true,true);
+ // 熄灭后再拖滑杆：数值更新，灯仍灭。
+ // Drag after switching off: the value follows, the light stays off.
+ e=feed(598,156,1,true,false,true,true);
+ e=feed(598,156,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&e.commit&&!menu.fl_on);
- e=feed(399,318,1,true,false,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==60&&!e.commit&&menu.fl_on);
- e=feed(512,318,1,false,false,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&!e.commit);
- e=feed(512,318,0,false,true,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&e.commit&&menu.fl_bri==80);
- e=feed(399,382,1,true,false,true,true);
- assert(e.control==UI_QUICK_CTL_CCT&&e.value==60&&!e.commit);
- e=feed(399,382,0,false,true,true,true);
+ e=feed(399,300,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==60&&!e.commit&&!menu.fl_on);
+ e=feed(512,300,1,false,false,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&!e.commit&&!menu.fl_on);
+ e=feed(512,300,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&e.commit&&menu.fl_bri==80&&!menu.fl_on);
+ // 整行可点：落在标签高度也能直接定位到滑杆档位。
+ // The whole row is a hit target, so the label line positions the slider directly.
+ e=feed(300,232,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==42&&!menu.fl_on);
+ e=feed(300,232,0,false,true,true,true);
+ assert(e.commit&&menu.fl_bri==42&&!menu.fl_on);
+ // 重新点亮后色温照常提交。
+ // After switching on again, CCT commits as usual.
+ e=feed(598,156,1,true,false,true,true);
+ e=feed(598,156,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&menu.fl_on);
+ e=feed(399,398,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_CCT&&e.value==60&&!e.commit&&menu.fl_on);
+ e=feed(399,398,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.value==60&&e.commit&&menu.fl_cct==60);
  // 按住滑杆向上拖不应把整层收起；松手仍提交最后一档。
  // Dragging a slider upward must not dismiss the layer; release still commits the last step.
- e=feed(399,382,1,true,false,true,true);
- e=feed(399,300,1,false,false,true,true);
+ e=feed(399,398,1,true,false,true,true);
+ e=feed(399,330,1,false,false,true,true);
  assert(e.action==UI_QUICK_NONE&&menu.open);
- e=feed(399,300,0,false,true,true,true);
+ e=feed(399,330,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.commit&&menu.open);
- e=feed(300,430,1,true,false,true,true);
+ e=feed(300,500,1,true,false,true,true);
  e=feed(300,300,1,false,false,true,true);
  assert(e.action==UI_QUICK_CLOSE&&!menu.open);
- puts("PASS: frontlight switch, 1%-step brightness/CCT sliders, auto-on, drag protection and release commit");
+ puts("PASS: fourth circle toggles the frontlight, sliders never auto-on, full-row hit areas, 1%-step commit and drag protection");
 
- // 没有前光的板：卡片区域不命中，层高仍是 264。
- // Boards without a frontlight ignore the card area and keep the 264px height.
+ // 没有前光的板：第四枚仍是锁屏，卡片区域不命中，层高仍是 264。
+ // Boards without a frontlight keep the lock on the fourth circle, ignore the card area and stay 264px tall.
  ui_quick_menu_set_frontlight(&menu,false,true,40,50);
  open();
- assert(feed(584,253,1,true,false,true,true).control==UI_QUICK_CTL_NONE);
- assert(feed(584,253,0,false,true,true,true).control==UI_QUICK_CTL_NONE&&menu.open);
- assert(feed(300,300,1,true,false,true,true).action==UI_QUICK_NONE);
+ assert(feed(598,156,1,true,false,true,true).action==UI_QUICK_NONE);
+ assert(feed(598,156,0,false,true,true,true).action==UI_QUICK_LOCK);
+ assert(feed(300,300,1,true,false,true,true).control==UI_QUICK_CTL_NONE);
  assert(feed(300,300,0,false,true,true,true).action==UI_QUICK_CLOSE);
- puts("PASS: no-frontlight boards keep the four-key 264px layer and ignore card hits");
+ puts("PASS: no-frontlight boards keep the lock key, the 264px layer and ignore card hits");
  return 0;
 }
