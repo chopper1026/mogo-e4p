@@ -211,7 +211,9 @@ void ui_wallpaper_cache_commit(const uint8_t *fb) {
     if (!file) return;
     bool good=fwrite(&h,1,sizeof(h),file)==sizeof(h) && fwrite(fb,1,WALL_LOCK_BYTES,file)==WALL_LOCK_BYTES;
     if (fclose(file)) good=false;
-    if (good && !rename(WALL_LOCK_CACHE ".tmp",WALL_LOCK_CACHE)) return;
+    // FatFs 的 rename 不覆盖同名目标，换壁纸后必须先删旧缓存。
+    // FatFs rename does not overwrite an existing name; drop the old cache before a new wallpaper.
+    if (good){(void)remove(WALL_LOCK_CACHE);if(!rename(WALL_LOCK_CACHE ".tmp",WALL_LOCK_CACHE))return;}
     (void)remove(WALL_LOCK_CACHE ".tmp");
 }
 

@@ -29,8 +29,11 @@ bool continuous_du_init(void);
 int64_t esp_timer_get_time(void);
 void vTaskDelay(int);
 #define pdMS_TO_TICKS(x) (x)
-#define ESP_LOGI(...) ((void)0)
-#define ESP_LOGE(...) ((void)0)
+// 日志桩必须消费参数，否则只用于日志的计时变量会被判成未使用。
+// The log stub must consume its arguments or timing locals used only in logs read as unused.
+static inline void app_loop_log_sink(const char *fmt, ...) { (void)fmt; }
+#define ESP_LOGI(...) app_loop_log_sink(__VA_ARGS__)
+#define ESP_LOGE(...) app_loop_log_sink(__VA_ARGS__)
 void guard_draw_result(EpdiyHighlevelState*, enum EpdDrawError);
 enum EpdDrawError update_display_area_with(EpdiyHighlevelState*, const void*, int, EpdRect);
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*, const void*, int, EpdRect);

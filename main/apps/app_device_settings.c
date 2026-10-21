@@ -428,7 +428,7 @@ static void bookmark_preview_prepare(const uint8_t *background) {
     if(!s_bookmark_preview_base)return;
     uint8_t *canvas=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(canvas)memcpy(canvas,s_bookmark_preview_base,bytes);
-    if(canvas && book_lock_bookmark_draw(canvas,s_wallpapers[s_wallpaper_selected].path))s_bookmark_preview=canvas;
+    if(canvas && book_lock_bookmark_preview(canvas,s_wallpapers[s_wallpaper_selected].path))s_bookmark_preview=canvas;
     else free(canvas);
 }
 static void wallpaper_scan(void) {
@@ -1912,7 +1912,10 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if (!strcmp(s_bookmark_picker?app_settings_bookmark_path():app_settings_wallpaper_path(), path)) {
                 app_settings_set_lock_style(s_bookmark_picker?3:1);
                 s_page = SETTINGS_LOCK_STYLE;
+                // 先释放预览缓冲，再按可用内存预建图层缓存；锁屏时只做合成。
+                // Release the preview buffers first, then prebuild the layer cache so a lock only composites.
                 bookmark_preview_release();
+                if (s_bookmark_picker) book_lock_bookmark_prepare(path);
             }
         }
         s_wallpaper_confirm = false;

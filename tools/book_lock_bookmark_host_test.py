@@ -17,6 +17,7 @@ u=r'''
 #include <strings.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <utime.h>
 #include "png.h"
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
@@ -24,14 +25,30 @@ u=r'''
 #define BOOK_IMAGE_FILE_MAX (50u*1024u*1024u)
 typedef struct {int x,y,width,height;}EpdRect;
 enum {EPD_ROT_PORTRAIT=1,EPD_ROT_INVERTED_PORTRAIT=2,EPD_ROT_INVERTED_LANDSCAPE=3};
+#ifdef MIRROR
+// 产品几何：逻辑684x1216落在1216x684的倒置竖屏缓冲里。/ Product geometry: logical 684x1216 stored in a 1216x684 inverted-portrait buffer.
+#define PANEL_W 1216
+#define PANEL_H 684
+#define PANEL_ROT 2
+#else
+#define PANEL_W 684
+#define PANEL_H 1216
+#define PANEL_ROT 0
+#endif
 static unsigned budget=8u*1024u*1024u;
 static size_t heap_caps_get_free_size(unsigned flags){(void)flags;return budget;}
 static void *heap_caps_malloc(size_t n,unsigned flags){(void)flags;return budget>=n?malloc(n):NULL;}
-static int epd_get_rotation(void){return 0;}
-static int epd_width(void){return 684;}
-static int epd_height(void){return 1216;}
+static int epd_get_rotation(void){return PANEL_ROT;}
+static int epd_width(void){return PANEL_W;}
+static int epd_height(void){return PANEL_H;}
 static uint8_t epd_get_pixel(int x,int y,int w,int h,const uint8_t *fb){assert(x>=0&&y>=0&&x<w&&y<h);int i=y*w+x;return ((fb[i/2]>>(i%2?4:0))&15)<<4;}
-static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){assert(x>=0&&y>=0&&x<684&&y<1216);int i=y*684+x;fb[i/2]=(fb[i/2]& (i%2?15:240))|((gray>>4)<<(i%2?4:0));}
+static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
+ int px=x,py=y;
+#ifdef MIRROR
+ px=y;py=PANEL_H-1-x;
+#endif
+ assert(px>=0&&py>=0&&px<PANEL_W&&py<PANEL_H);int i=py*PANEL_W+px;
+ fb[i/2]=(fb[i/2]& (i%2?15:240))|((gray>>4)<<(i%2?4:0));}
 
 static void *cover_alloc(size_t n){return heap_caps_malloc(n,0);}
 static void decode_yield(unsigned at){(void)at;}
@@ -114,8 +131,36 @@ int main(int argc,char **argv){
  uint8_t header[24];assert(fread(header,1,sizeof(header),good)==sizeof(header));fclose(good);
  assert(fwrite(header,1,sizeof(header),bad)==sizeof(header));fclose(bad);
  assert(!book_lock_bookmark_draw(fb,invalid)&&!memcmp(fb,original,BYTES));
+ // 图层缓存：首绘写入，再绘命中且像素完全一致；缓存损坏后回退重解并重写。
+ // Layer cache: the first draw stores it, the second hits it with identical pixels; a corrupt cache falls back and is rewritten.
+ // 先给样本固定mtime并复制出同尺寸同mtime的别名，验证路径参与缓存键。
+ // Pin the sample's mtime and copy an alias with the same size and mtime so the path-keyed check is exercised.
+ struct utimbuf fixed={.actime=1600000000,.modtime=1600000000};assert(!utime(argv[2],&fixed));
+ char alias[512];snprintf(alias,sizeof(alias),"%s/alias.png",argv[1]);
+ FILE *src=fopen(argv[2],"rb"),*dst=fopen(alias,"wb");assert(src&&dst);
+ for(int c;(c=fgetc(src))!=EOF;)fputc(c,dst);fclose(src);assert(!fclose(dst));
+ assert(!utime(alias,&fixed));
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_draw(fb,argv[2])&&!book_lock_bookmark_cached());
+ uint8_t *first=malloc(BYTES);assert(first);memcpy(first,fb,BYTES);
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
+ // 别名路径同尺寸同mtime，仍必须重解而只读预览不回写，样本缓存保持有效。
+ // The alias shares size and mtime but must still decode; the read-only preview stores nothing, so the sample cache stays valid.
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_preview(fb,alias)&&!book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
+ FILE *cache=fopen(LOCK_LAYER_ROOT "/locks/bookmark-layer.bin","r+b");assert(cache);
+ assert(fseek(cache,-1,SEEK_END)==0);int ch=fgetc(cache);assert(ch!=EOF&&fseek(cache,-1,SEEK_END)==0);
+ assert(fputc(ch^0xff,cache)!=EOF&&fclose(cache)==0);
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_draw(fb,argv[2])&&!book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
+ memset(fb,0xaa,BYTES);
+ assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
+ free(first);
  free(fb);free(original);
- puts("PASS: real PNG alpha/premultiplication, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, low-memory fallback and no internal-RAM allocation");
+ puts("PASS: real PNG alpha/premultiplication, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
 }
 '''
 def chunk(k,b):return struct.pack('>I',len(b))+k+b+struct.pack('>I',zlib.crc32(k+b))
@@ -129,7 +174,13 @@ with tempfile.TemporaryDirectory() as d:
  if not vendor.exists():vendor=Path('/private/tmp/kiikoread-rc90-lock-build-20261011/managed_components/espressif__libpng/libpng')
  (d/'pnglibconf.h').write_bytes((vendor/'scripts/pnglibconf.h.prebuilt').read_bytes())
  names='png pngerror pngget pngmem pngpread pngread pngrio pngrtran pngrutil pngset pngtrans pngwrite pngwio pngwtran pngwutil'.split()
- subprocess.run(['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm','-o',str(d/'test')],check=True)
- args=[str(d/'test'),str(d),str(d/'fixture.png'),str(d/'white.png')]
- if os.environ.get('BOOKMARK_SAMPLE') and os.environ.get('BOOKMARK_BACKGROUND'):args += [os.environ['BOOKMARK_BACKGROUND'],os.environ['BOOKMARK_SAMPLE']]
- subprocess.run(args,check=True)
+ base=['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-DLOCK_LAYER_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm']
+ # 同一套断言跑两遍：通用几何(rotation 0)走 pixel()/epd_draw_pixel，产品几何走直写快速路径。
+ # The same assertions run twice: generic geometry (rotation 0) uses pixel()/epd_draw_pixel, product geometry uses the direct fast path.
+ for variant,extra in (('generic',[]),('mirror',['-DMIRROR'])):
+  exe=str(d/('test_'+variant))
+  subprocess.run(base+extra+['-o',exe],check=True)
+  args=[exe,str(d),str(d/'fixture.png'),str(d/'white.png')]
+  if os.environ.get('BOOKMARK_SAMPLE') and os.environ.get('BOOKMARK_BACKGROUND'):args += [os.environ['BOOKMARK_BACKGROUND'],os.environ['BOOKMARK_SAMPLE']]
+  subprocess.run(args,check=True)
+  print(variant,'ok')

@@ -62,8 +62,11 @@ bool lock_screen_save(const uint8_t *frame){
         .style=app_settings_lock_style(),.checksum=checksum(frame),.wallpaper=wallpaper_key()};
     bool ok=fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(frame,1,FRAME_BYTES,f)==FRAME_BYTES&&fflush(f)==0;
     if(fclose(f))ok=false;
-    if(ok&&rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0)return true;
-    (void)remove(LOCK_ART_PATH ".tmp");return false;
+    // FatFs 的 rename 遇到同名目标返回 FR_EXIST，不会覆盖：先删旧图再改名，否则换样式后缓存永远不更新。
+    // FatFs rename returns FR_EXIST instead of overwriting: drop the old art first or the cache never updates after a style change.
+    if(ok){(void)remove(LOCK_ART_PATH);ok=rename(LOCK_ART_PATH ".tmp",LOCK_ART_PATH)==0;}
+    if(!ok)(void)remove(LOCK_ART_PATH ".tmp");
+    return ok;
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);

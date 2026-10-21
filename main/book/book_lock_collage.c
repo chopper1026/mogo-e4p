@@ -281,7 +281,9 @@ static void cache_write(const char *path, lock_cache_t header, const uint8_t *da
     bool good = fwrite(&header, 1, sizeof(header), file) == sizeof(header) &&
                 fwrite(data, 1, header.bytes, file) == header.bytes;
     if (fclose(file)) good = false;
-    if (good && !rename(temporary, path)) return;
+    // FatFs 的 rename 不覆盖同名目标，换拼贴后必须先删旧缓存。
+    // FatFs rename does not overwrite an existing name; drop the old cache before a new collage.
+    if (good){(void)remove(path);if(!rename(temporary, path))return;}
     (void)remove(temporary);
 }
 static bool cache_header(FILE *file, lock_cache_t *header, uint64_t key) {

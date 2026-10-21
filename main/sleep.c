@@ -458,6 +458,9 @@ void enter_lock_and_sleep(
 ) {
     bool feedback_visible = s_lock_feedback_visible;
     s_lock_feedback_visible = false;
+    // 分段计时：准备/字体/画面/清屏/出图/按键空闲六段，面板两段除以帧数可反推扫描档。
+    // Stage timing: prep/font/art/clear/present/key-idle; the two panel stages divided by their frame counts reveal the scan profile.
+    const int64_t lock_t_start = esp_timer_get_time();
     // Refuse to interrupt an active upload. The caller repaints its page when
     // this function returns, and the user can lock again after the transfer.
     // 后台对时同样先取消：它没有上传任务，锁屏不该被一次后台对时拖住。
@@ -470,6 +473,7 @@ void enter_lock_and_sleep(
         ESP_LOGW(TAG, "lock postponed while transfer is busy");
         return;
     }
+    const int64_t lock_t_prep = esp_timer_get_time();
     uint8_t* framebuffer = epd_hl_get_framebuffer(hl);
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
     // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
@@ -481,6 +485,7 @@ void enter_lock_and_sleep(
     bool system_lock = ticket || lock_style == 2 || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
     if (system_lock) app_font_begin_lock(&lock_font);
+    const int64_t lock_t_font = esp_timer_get_time();
     // 阅读票根独占锁屏画布：始终先画最近书籍封面，再叠票根；自定义壁纸只属于壁纸模式。
     // Ticket mode owns the lock canvas: book cover first, ticket on top. Custom wallpaper is wallpaper-only.
     bool lock_drawn = ticket
@@ -491,19 +496,41 @@ void enter_lock_and_sleep(
         epd_hl_set_all_white(hl);
         ui_draw_full_image(framebuffer, lock_4bpp_bin_start);
     }
+    const int64_t lock_t_art = esp_timer_get_time();
+    int64_t lock_t_clear = lock_t_art, lock_t_panel = lock_t_art;
+    // 透明书封的画布就是"当前页面+叠加图"，与面板真实状态一致，可以直接差分整屏GC16；
+    // 其他样式把画布刷成了白底，必须先 epd_clear 让面板变白，from-white 的LUT才成立。
+    // The transparent cover's canvas is the current page plus the overlay, matching the real panel, so a
+    // differential full GC16 is valid; other styles reset the canvas to white and need the clear first.
+    bool keep_page = lock_style == 3 && lock_drawn;
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (feedback_visible) result = update_display_full(hl);
     if (!feedback_visible || result != EPD_DRAW_SUCCESS) {
-        // 反馈成功时不再重复清白；GC16从真实圆锁历史输出。自动/其他样式/失败保留原清屏。
-        // A successful badge needs no second white clear; GC16 uses its true history. Idle/other/fault paths retain original clearing.
-        epd_poweron();
-        epd_clear();
-        result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
-    }
+        if (keep_page) {
+            lock_t_clear = esp_timer_get_time();
+            result = update_display_full(hl);
+            lock_t_panel = esp_timer_get_time();
+        } else {
+            // 反馈成功时不再重复清白；GC16从真实圆锁历史输出。自动/其他样式/失败保留原清屏。
+            // A successful badge needs no second white clear; GC16 uses its true history. Idle/other/fault paths retain original clearing.
+            epd_poweron();
+            epd_clear();
+            lock_t_clear = esp_timer_get_time();
+            result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
+            lock_t_panel = esp_timer_get_time();
+        }
+    } else lock_t_clear = lock_t_panel = esp_timer_get_time();
     if (lock_style == 2 && lock_drawn && result == EPD_DRAW_SUCCESS) book_lock_collage_cache_commit(framebuffer);
     if (lock_style == 1 && lock_drawn && result == EPD_DRAW_SUCCESS) ui_wallpaper_cache_commit(framebuffer);
 
     app_lock_wait_key_idle(800);
+    const int64_t lock_t_key = esp_timer_get_time();
+    ESP_LOGI(TAG, "lock timing style=%u drawn=%d prep=%lld font=%lld art=%lld clear=%lld gc16=%lld panel=%lld keyidle=%lld total=%lld ms",
+        (unsigned)lock_style, (int)lock_drawn,
+        (long long)((lock_t_prep - lock_t_start) / 1000), (long long)((lock_t_font - lock_t_prep) / 1000),
+        (long long)((lock_t_art - lock_t_font) / 1000), (long long)((lock_t_clear - lock_t_art) / 1000),
+        (long long)((lock_t_panel - lock_t_clear) / 1000), (long long)((lock_t_panel - lock_t_art) / 1000),
+        (long long)((lock_t_key - lock_t_panel) / 1000), (long long)((lock_t_key - lock_t_start) / 1000));
     // 锁屏先浅睡，十分钟后进入深睡；关机睡眠"仅浅睡"无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
     // Locks light-sleep first and deep-sleeps after ten minutes; shutdown style "light-only" sleeps without a deadline and never powers off. Key wake uses the saved page checkpoint.
     ESP_LOGI(TAG, "lock LIGHT");
@@ -529,13 +556,20 @@ void enter_lock_and_sleep(
     if (system_lock) app_font_end_lock(&lock_font);
     read_pico_transfer_resume_after_sleep();
 
-    // 参考帧和屏幕都归零，回到主循环后由当前页自己画一遍，不必知道是哪一页。
-    // Zero the reference frame and the panel; the current page redraws after the loop resumes, without knowing which page it is.
+    // 锁屏出图成功时面板和back都停在锁屏画面上：让当前页做一次整屏差分GC16，把叠加图擦回原页面即可。
+    // 不清白、不做78帧盲刷，面板不会先白一次再把锁屏图重画一遍；只有出图失败才回到原来的清白重建。
+    // After a successful lock the panel and back both hold the lock image: the page's full differential
+    // GC16 removes the overlay. No blind clear, so the panel is never whitened and the lock art is never
+    // repainted. Only a failed lock present falls back to the original white rebuild.
     read_pico_pmu_drain_events();
-    epd_poweron();
-    epd_clear();
-    epd_hl_set_all_white(hl);
+    const bool keep_panel = result == EPD_DRAW_SUCCESS;
+    if (!keep_panel) {
+        epd_poweron();
+        epd_clear();
+        epd_hl_set_all_white(hl);
+    }
     read_pico_pmu_drain_events();
+    ESP_LOGI(TAG, "unlocked keep_panel=%d", (int)keep_panel);
     // 唤醒键的按下/释放属于锁屏，不能在下一次轮询里变成新的短按再锁一次。
     // The wake press/release belongs to the lock; it must not become a new short press on the next poll and lock again.
     read_pico_pmu_consume_key_press();

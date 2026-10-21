@@ -669,6 +669,7 @@ static bool lock_light_only(void) {
 }
 
 static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+    const int64_t lock_prepare_start = esp_timer_get_time();
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
@@ -679,6 +680,10 @@ static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedbac
         resume.fullscreen = fullscreen;
     }
     (void)pico_boot_save_resume(&resume);
+    // 锁屏前落盘（阅读进度/票根统计/恢复点）在画面之前，单独计时。
+    // Pre-lock persistence (progress, ticket stats, resume point) runs before the lock art; time it separately.
+    ESP_LOGI(TAG, "lock prepare feedback=%d total=%lldms", (int)feedback,
+             (long long)((esp_timer_get_time() - lock_prepare_start) / 1000));
 }
 static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool restart) {
     prepare_lock(ctx, current, false);
