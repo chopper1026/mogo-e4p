@@ -43,6 +43,7 @@
 #include "book_lock_collage.h"
 #include "book_lock_bookmark.h"
 #include "book_ticket.h"
+#include "cache_wake_restore.h"
 #include "display.h"
 #include "e0470_epaper_waveform.h"
 #include "ota_online.h"
@@ -221,6 +222,10 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms) {
     if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_KEY;
+    // 首次浅睡前抓 CACHE_L1 配置快照；之后每次醒来写回，喂行产能才回得来。
+    // Snapshot CACHE_L1 before the first light sleep; restore on every wake so
+    // the feed capacity comes back with it.
+    cache_wake_restore_snapshot();
     bool pickup = acc != NULL && app_settings_pickup_wake();
     bool acc_armed = false;
     const int64_t deadline_us = timeout_ms
@@ -330,6 +335,12 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t time
         int64_t t0 = esp_timer_get_time();
         esp_err_t sleep_error = esp_light_sleep_start();
         int64_t dt_ms = (esp_timer_get_time() - t0) / 1000;
+        // 唤醒路径不恢复 CACHE_L1 仲裁/门控配置，必须在任何刷新前写回。
+        // The wake path never restores the CACHE_L1 arbitration/gating words;
+        // write them back before any refresh can run.
+        if (sleep_error == ESP_OK) {
+            cache_wake_restore_apply();
+        }
         read_pico_clear_ioe_int();
         if (read_pico_pmu_take_key_wakeup()) {
             wake = APP_WAKE_KEY;
