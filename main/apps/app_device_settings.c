@@ -2397,10 +2397,13 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
         EpdRect area = {0, top, UI_LOCK_WIDTH, UI_NAV_REFRESH_END - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
+        // 脏区向外扩 1 行/1 字节，让差分跳过的白底邻像素重新走 GL16 白推，擦掉旧分隔线残影。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
+        // Dilate the dirty masks by one row/byte so skipped white neighbours run the GL16
+        // white tick again and old divider residue is erased.
         const EpdWaveform *wave=app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL
             ? display_main_normal_waveform():&E0470_WAVEFORM;
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area));
+        guard_draw_result(ctx->hl, update_display_area_diff_padded(ctx->hl,wave,MODE_GL16,area,1,1));
         return true;
     }
     if (s_page != SETTINGS_UPGRADE) return false;

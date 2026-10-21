@@ -43,11 +43,9 @@ static const EpdWaveformMode* s_bw_modes[]={&s_bw_mode};
 static EpdWaveform s_bw_waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=s_bw_modes};
 static bool s_bw_ready;
 _Static_assert(MAIN_EXIT_FRAMES <= E0470_GL16_FRAMES, "soft water must fit endpoint cleanup");
-// E4P 左侧大块内容在 4 帧补推下仍会留灰；水波纹把 37 相剩余相位全部用于向白推动。
-// 书架退出保持原 4 帧，避免改变它的节奏。
-// E4P still retained gray on large left-edge content with four extra pushes; water uses
-// every remaining phase of the 37-phase table for whitening. Shelf exit keeps its original four frames.
-#define WATER_ERASE_EXTRA_FRAMES (E0470_GL16_FRAMES - E0470_FULL_DU_FRAMES)
+// 水波纹在 DU 段之后额外补 6 相向白推动；书架退出保持原 4 帧。
+// Water adds six extra white pushes after the DU segment; shelf exit keeps its original four frames.
+#define WATER_ERASE_EXTRA_FRAMES 6
 _Static_assert(WATER_ERASE_EXTRA_FRAMES >= MAIN_ERASE_EXTRA_FRAMES, "water whitening must not be weaker than shelf exit");
 
 static int endpoint_action(const EpdWaveformPhases* bw, int f, int to, int from, int extra) {

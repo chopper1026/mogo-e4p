@@ -36,8 +36,8 @@ esp_err_t read_pico_init(read_pico_handle_t* hw) {
     // / CD is on the FCA9555; probe after board I2C is up.
     read_pico_sd_start_probe();
     epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
-    // 板级默认 12MHz，锁到实测稳定的 18MHz；消隐和 CKV 一起按新频率重解。
-    // / Board default is 12 MHz; lock to the bench-stable 18 MHz and re-solve blanking/CKV.
+    // 当前取 20MHz：8-bit 总线下正好 16 µs 一行，与波形标定的 11090 µs 对齐。
+    // / 20 MHz gives the vendor's 16 µs line on the 8-bit bus, matching the 11090 µs setpoint.
     read_pico_epd_set_pclk(READ_PICO_PCLK_MHZ);
     esp_log_level_set("epdiy", ESP_LOG_WARN);
     epd_set_vcom(READ_PICO_VCOM_MV);

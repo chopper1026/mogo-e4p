@@ -113,6 +113,12 @@ enum EpdDrawError update_display_area_diff_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 );
+/// 差分刷新并把脏行/脏列向外扩，让差分跳过的邻像素重新走 LUT，用于擦除细线残影。
+/// Differential update with dilated dirty masks so skipped neighbours run the LUT again.
+enum EpdDrawError update_display_area_diff_padded(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
+    EpdRect area, int pad_lines, int pad_col_bytes
+);
 /// 阅读页可选的真实错相 GL16 翻页，使用面板原厂灰阶表；缺相位时回退现有 GL16，扫描失败重建真实基准。
 /// Optional staggered GL16 reader turn using the vendor table; fall back on missing phases and rebuild the baseline after failure.
 enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect area,

@@ -185,8 +185,71 @@ EpdRect _inverse_rotated_area(uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     return rotated;
 }
 
+// 把脏行/脏列向外扩一圈：差分本来会跳过的邻像素重新进入驱动，白底补推才能擦掉
+// 面板上残留的细线。只在指定路径启用，避免所有局部刷新都多驱动一圈。
+// Dilate the dirty line/column masks so neighbours the differential would skip are
+// driven again; the GL16 white tick can then erase thin residue. Callers opt in so
+// ordinary partial updates keep their original cost.
+static void dilate_dirty_masks(
+    EpdiyHighlevelState* state, EpdRect area, int pad_lines, int pad_col_bytes
+) {
+    if (state == NULL || (pad_lines <= 0 && pad_col_bytes <= 0)) return;
+
+    const int fb_h = epd_height();
+    const int fb_w = epd_width();
+    const int y0 = area.y < 0 ? 0 : area.y;
+    const int y1 = area.y + area.height > fb_h ? fb_h : area.y + area.height;
+
+    if (pad_lines > 0 && y1 > y0) {
+        uint8_t* mark = heap_caps_malloc((size_t)fb_h, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (mark != NULL) {
+            memset(mark, 0, (size_t)fb_h);
+            for (int y = y0; y < y1; ++y) {
+                if (!state->dirty_lines[y]) continue;
+                int lo = y - pad_lines;
+                int hi = y + pad_lines;
+                if (lo < y0) lo = y0;
+                if (hi >= y1) hi = y1 - 1;
+                memset(mark + lo, 1, (size_t)(hi - lo + 1));
+            }
+            for (int y = y0; y < y1; ++y) {
+                if (mark[y]) state->dirty_lines[y] = true;
+            }
+            heap_caps_free(mark);
+        }
+    }
+
+    int x_start, x_stop;
+    epd_difference_column_range(area, &x_start, &x_stop);
+    const int col_bytes = fb_w / 2;
+    int c0 = x_start / 2;
+    int c1 = x_stop / 2;
+    if (c0 < 0) c0 = 0;
+    if (c1 > col_bytes) c1 = col_bytes;
+
+    if (pad_col_bytes > 0 && c1 > c0) {
+        uint8_t* mark = heap_caps_malloc((size_t)col_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (mark != NULL) {
+            memset(mark, 0, (size_t)col_bytes);
+            for (int c = c0; c < c1; ++c) {
+                if (!state->dirty_columns[c]) continue;
+                int lo = c - pad_col_bytes;
+                int hi = c + pad_col_bytes;
+                if (lo < c0) lo = c0;
+                if (hi >= c1) hi = c1 - 1;
+                memset(mark + lo, 0xFF, (size_t)(hi - lo + 1));
+            }
+            for (int c = c0; c < c1; ++c) {
+                if (mark[c]) state->dirty_columns[c] = 0xFF;
+            }
+            heap_caps_free(mark);
+        }
+    }
+}
+
 static enum EpdDrawError hl_update_area(
-    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, bool force_full,
+    int pad_lines, int pad_col_bytes
 ) {
     assert(state != NULL);
     // Not right to rotate here since this copies part of buffer directly
@@ -209,6 +272,8 @@ static enum EpdDrawError hl_update_area(
         state->dirty_lines,
         state->dirty_columns
     );
+
+    if (!force_full) dilate_dirty_masks(state, area, pad_lines, pad_col_bytes);
 
     if (force_full) {
         int x_start, x_stop;
@@ -300,13 +365,27 @@ static enum EpdDrawError hl_update_area(
 enum EpdDrawError epd_hl_update_area(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, false);
+    return hl_update_area(state, mode, temperature, area, false, 0, 0);
+}
+
+enum EpdDrawError epd_hl_update_area_padded(
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area,
+    int pad_lines, int pad_col_bytes
+) {
+    return hl_update_area(state, mode, temperature, area, false, pad_lines, pad_col_bytes);
+}
+
+enum EpdDrawError epd_hl_update_screen_padded(
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature,
+    int pad_lines, int pad_col_bytes
+) {
+    return hl_update_area(state, mode, temperature, epd_full_screen(), false, pad_lines, pad_col_bytes);
 }
 
 enum EpdDrawError epd_hl_update_area_full(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 ) {
-    return hl_update_area(state, mode, temperature, area, true);
+    return hl_update_area(state, mode, temperature, area, true, 0, 0);
 }
 
 void epd_hl_set_all_white(EpdiyHighlevelState* state) {

@@ -144,6 +144,22 @@ enum EpdDrawError epd_hl_update_area(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area
 );
 
+/// 差分刷新时把脏行/脏列向外扩 pad_lines 行、pad_col_bytes 字节（每字节 2 像素）。
+/// 用于让差分跳过的邻像素重新走 LUT，擦掉面板上的细线残留。
+/// Differential update with the dirty masks dilated by `pad_lines` rows and
+/// `pad_col_bytes` bytes (two pixels each), so skipped neighbours run the LUT again.
+enum EpdDrawError epd_hl_update_area_padded(
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area,
+    int pad_lines, int pad_col_bytes
+);
+
+/// 整屏差分刷新并膨胀脏区，参数含义同 `epd_hl_update_area_padded()`。
+/// Full-screen differential update with dilated dirty masks; see `epd_hl_update_area_padded()`.
+enum EpdDrawError epd_hl_update_screen_padded(
+    EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature,
+    int pad_lines, int pad_col_bytes
+);
+
 /// 区域内强制脏行/脏列，未变化的白像素也会走 LUT（GL16 白底补推用）。
 enum EpdDrawError epd_hl_update_area_full(
     EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area

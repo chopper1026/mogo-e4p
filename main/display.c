@@ -334,7 +334,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             // 低内存仍一次输出整张目标；不退回分段等待或更改真实back。
             // Low memory still presents the whole target once, without serial waiting or a fabricated baseline.
             epd_hl_waveform(hl,display_main_normal_waveform());
-            *result=epd_hl_update_area(hl,MODE_GL16,25,body_area);
+            *result=epd_hl_update_area_padded(hl,MODE_GL16,25,body_area,1,1);
         }
     } else if (water && changing_page && changed) {
         // 水波纹直接输出最终灰阶图，不先刷黑白、不追加整页灰阶；横条并入同一次扫描，
@@ -355,13 +355,15 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         if (*result == EPD_DRAW_NO_PHASES_AVAILABLE) {
             use_scan_for(body_wave, MODE_GL16);
             epd_hl_waveform(hl, body_wave);
-            *result = epd_hl_update_area(hl, MODE_GL16, 25, ripple);
+            *result = epd_hl_update_area_padded(hl, MODE_GL16, 25, ripple, 1, 1);
         }
         // 主页面动画不长期保留相位缓存，避免与联网和阅读资源争用。
         // Release main-animation LUTs instead of competing with networking and reader resources.
         e0470_page_turn_release();
     } else if (!changed) *result = EPD_DRAW_SUCCESS;
     else *result = body_full ? epd_hl_update_area_full(hl, body_mode, 25, body_area)
+                            : body_mode == MODE_GL16
+                            ? epd_hl_update_area_padded(hl, body_mode, 25, body_area, 1, 1)
                             : epd_hl_update_area(hl, body_mode, 25, body_area);
     if (cache) {
         main_band_copy(hl, cache, true);
@@ -373,7 +375,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             // Retain calibrated transitions without scaling pulses by gray distance; equal grays need no repeated drive.
             epd_hl_waveform(hl, display_main_gray_waveform());
             use_scan_for(display_main_gray_waveform(), MODE_GL16);
-            *result = epd_hl_update_area(hl, MODE_GL16, 25, gray);
+            *result = epd_hl_update_area_padded(hl, MODE_GL16, 25, gray, 1, 1);
         }
     }
     s_main_band_count = 0;
@@ -413,9 +415,9 @@ static bool main_before_update(EpdiyHighlevelState* hl, enum EpdDrawError* resul
 // changes, so content is not lost. Full-pixel is so unchanged pixels also run
 // the LUT; otherwise the gray floor will not clear. FOLLOW DU has only a DU
 // table and does not count or promote.
-static enum EpdDrawError hl_update(
+static enum EpdDrawError hl_update_padded(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode, bool full,
-    const EpdRect* area, bool allow_gl16_diff
+    const EpdRect* area, bool allow_gl16_diff, int pad_lines, int pad_col_bytes
 ) {
     // 已显示主页面的局部封面或滚动更新同样向内裁剪，防止32列对齐带出小横条。
     // Local cover or scroll updates on an already displayed main page use the same inward crop, excluding the marker after alignment.
@@ -461,16 +463,28 @@ static enum EpdDrawError hl_update(
         }
     }
     full = full || ((mode & 0xF) == MODE_GL16 && !allow_gl16_diff);
+    // 只有 GL16 差分需要膨胀：DU/GC16 与全像素刷新保持原节奏。
+    // Dilate GL16 differentials only; DU/GC16 and full-pixel updates keep their cadence.
+    const int pad_l = !full && (mode & 0xF) == MODE_GL16 ? pad_lines : 0;
+    const int pad_c = !full && (mode & 0xF) == MODE_GL16 ? pad_col_bytes : 0;
     // 比较完成后只切换一次扫描档，避免快刷前先切 FULL 再切 FAST。
     // Select scan timing once after comparison, without a FULL-to-FAST round trip before fast updates.
     use_scan_for(waveform, mode);
     enum EpdDrawError result;
     if (area != NULL) {
         result = full ? epd_hl_update_area_full(hl, mode, 25, *area)
-                    : epd_hl_update_area(hl, mode, 25, *area);
-    } else result = full ? epd_hl_update_screen_full(hl, mode, 25) : epd_hl_update_screen(hl, mode, 25);
+                    : epd_hl_update_area_padded(hl, mode, 25, *area, pad_l, pad_c);
+    } else result = full ? epd_hl_update_screen_full(hl, mode, 25)
+                         : epd_hl_update_screen_padded(hl, mode, 25, pad_l, pad_c);
 
     return protected_area && result != EPD_DRAW_SUCCESS ? main_recover(hl, result) : result;
+}
+
+static enum EpdDrawError hl_update(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode, bool full,
+    const EpdRect* area, bool allow_gl16_diff
+) {
+    return hl_update_padded(hl, waveform, mode, full, area, allow_gl16_diff, 1, 1);
 }
 
 static enum EpdDrawError update_display_mode_unlocked(
@@ -531,7 +545,7 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
     const bool settle = !ordinary && APP_UI_FAST_GL16_SETTLE_EVERY > 0 &&
                         s_page_refreshes % APP_UI_FAST_GL16_SETTLE_EVERY == 0;
     enum EpdDrawError result = settle ? epd_hl_update_screen_full(hl, MODE_GL16, 25)
-                                      : epd_hl_update_screen(hl, MODE_GL16, 25);
+                                      : epd_hl_update_screen_padded(hl, MODE_GL16, 25, 1, 1);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     rails_keepalive();
     return result;
@@ -636,6 +650,19 @@ static enum EpdDrawError update_display_area_diff_with_unlocked(
     epd_poweron();
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, true);
+    epd_hl_waveform(hl, &E0470_WAVEFORM);
+    rails_keepalive();
+    return result;
+}
+
+static enum EpdDrawError update_display_area_diff_padded_unlocked(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
+    EpdRect area, int pad_lines, int pad_col_bytes
+) {
+    epd_poweron();
+    epd_hl_waveform(hl, waveform);
+    enum EpdDrawError result = hl_update_padded(hl, waveform, mode, false, &area, true,
+                                                pad_lines, pad_col_bytes);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     rails_keepalive();
     return result;
@@ -920,6 +947,20 @@ enum EpdDrawError update_display_area_diff_with(
     bool held = pico_online_display_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_diff_with_unlocked(hl, waveform, mode, area);
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
+
+enum EpdDrawError update_display_area_diff_padded(
+    EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
+    EpdRect area, int pad_lines, int pad_col_bytes
+) {
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    enum EpdDrawError result = display_needs_full()
+        ? update_display_full_unlocked(hl)
+        : update_display_area_diff_padded_unlocked(hl, waveform, mode, area, pad_lines, pad_col_bytes);
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();
     return result;

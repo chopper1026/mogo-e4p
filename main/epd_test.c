@@ -90,7 +90,7 @@ void epd_test_run(EpdiyHighlevelState* hl, uint8_t* fb) {
     EpdRect area = {.x = w / 2 - 40, .y = h - 160, .width = 80, .height = 80};
     for (int i = 0; i < 20; i++) {
         epd_fill_rect(area, (i & 1) ? 15 : 0, fb);
-        err = epd_hl_update_area(hl, MODE_GL16, 25, area);
+        err = epd_hl_update_area_padded(hl, MODE_GL16, 25, area, 1, 1);
         if (err != EPD_DRAW_SUCCESS) {
             ESP_LOGE(TAG, "GL16 update %d failed: 0x%x", i, (unsigned)err);
             break;
