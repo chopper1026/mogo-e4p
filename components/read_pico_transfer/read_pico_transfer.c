@@ -642,6 +642,18 @@ esp_err_t read_pico_transfer_save_wifi(const char *ssid, const char *password) {
     clear_secret(&next, sizeof(next)); release_config(); return err;
 }
 
+// 扫描与连接共用同一国家码：驱动默认 "01" 只覆盖 1–11，12/13 信道的路由器会
+// 出现在扫描列表里，却在连接时找不到。设置失败不阻断，保留驱动默认值。
+// Scan and connect share one country: the driver default "01" covers 1–11 only, so
+// APs on channels 12/13 appear in the scan list but cannot be joined. Keep the driver
+// default when the call fails.
+static void apply_wifi_country(void) {
+    wifi_country_t country = {.cc = "CN", .schan = 1, .nchan = 13,
+                              .policy = WIFI_COUNTRY_POLICY_MANUAL};
+    esp_err_t err = esp_wifi_set_country(&country);
+    if (err != ESP_OK) ESP_LOGW("transfer", "wifi country setup: %s", esp_err_to_name(err));
+}
+
 static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     if (!utc_seconds) return ESP_ERR_INVALID_ARG;
     *utc_seconds = 0;
@@ -692,6 +704,9 @@ static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     if (err != ESP_OK) goto time_cleanup;
     err = esp_wifi_set_storage(WIFI_STORAGE_RAM); if (err != ESP_OK) goto time_cleanup;
     err = esp_wifi_set_mode(WIFI_MODE_STA); if (err != ESP_OK) goto time_cleanup;
+    // 与扫描页一致：12/13 信道的路由器也要能连上。
+    // Match the scan page so routers on channels 12/13 can still be joined.
+    apply_wifi_country();
     err = esp_wifi_set_config(WIFI_IF_STA, &wifi); if (err != ESP_OK) goto time_cleanup;
     clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto time_cleanup;
@@ -777,6 +792,76 @@ bool read_pico_transfer_take_time_sync(uint32_t *utc_seconds) {
     return *utc_seconds != 0;
 }
 
+/* ---- 射频设置 / Radio setup ---- */
+// 热点优先用 1/6/11 中最空闲的一路：启动前以 STA 短扫一次再切回 AP。
+// 扫描失败或没有结果时保留信道 1；20 MHz 邻道互相干扰，按 ±2 计入负载。
+// Prefer the quietest of channels 1/6/11: scan briefly as a STA before the AP starts,
+// then switch back. Fall back to channel 1 on failure; adjacent 20 MHz channels
+// interfere, so APs within ±2 channels count toward the load.
+static uint8_t choose_ap_channel(void) {
+    static const uint8_t candidates[] = {1, 6, 11};
+    uint8_t best = candidates[0];
+    unsigned best_load = ~0u;
+    int best_strongest = 0;
+    esp_netif_t *sta_netif = NULL;
+    wifi_ap_record_t *records = NULL;
+    wifi_scan_config_t scan = {0};
+    bool started = false;
+    esp_err_t err = ESP_OK;
+    if ((err = transfer_create_netif(false, &sta_netif)) != ESP_OK) goto done;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) goto done;
+    apply_wifi_country();
+    if ((err = esp_wifi_start()) != ESP_OK) goto done;
+    started = true;
+    // Hosted WiFi may need one scheduler turn after start before accepting scan RPCs.
+    vTaskDelay(pdMS_TO_TICKS(120));
+    scan.scan_time.active.min = 60;
+    scan.scan_time.active.max = 90;
+    err = esp_wifi_scan_start(&scan, true);
+    if (err != ESP_OK) {
+        (void)esp_wifi_scan_stop();
+        (void)esp_wifi_clear_ap_list();
+        vTaskDelay(pdMS_TO_TICKS(180));
+        err = esp_wifi_scan_start(&scan, true);
+    }
+    if (err != ESP_OK) goto done;
+    uint16_t found = 0;
+    if ((err = esp_wifi_scan_get_ap_num(&found)) != ESP_OK) goto done;
+    if (!found) { best_load = 0; goto done; }
+    uint16_t capacity = found > READ_PICO_TRANSFER_SCAN_MAX ? READ_PICO_TRANSFER_SCAN_MAX : found;
+    records = heap_caps_calloc(capacity, sizeof(*records), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!records) records = heap_caps_calloc(capacity, sizeof(*records), MALLOC_CAP_8BIT);
+    if (!records) { err = ESP_ERR_NO_MEM; goto done; }
+    if ((err = esp_wifi_scan_get_ap_records(&capacity, records)) != ESP_OK) goto done;
+    for (size_t c = 0; c < sizeof(candidates); ++c) {
+        const int channel = candidates[c];
+        unsigned load = 0;
+        int strongest = -128;
+        for (uint16_t i = 0; i < capacity; ++i) {
+            const int primary = records[i].primary;
+            if (primary < channel - 2 || primary > channel + 2) continue;
+            ++load;
+            if (records[i].rssi > strongest) strongest = records[i].rssi;
+        }
+        if (load < best_load || (load == best_load && strongest < best_strongest)) {
+            best_load = load;
+            best_strongest = strongest;
+            best = (uint8_t)channel;
+        }
+    }
+done:
+    if (records) heap_caps_free(records);
+    if (started) {
+        esp_err_t stop_err = esp_wifi_stop();
+        if (stop_err != ESP_OK) ESP_LOGW("transfer", "ap channel scan stop: %s", esp_err_to_name(stop_err));
+    }
+    if (sta_netif) esp_netif_destroy_default_wifi(sta_netif);
+    if (err != ESP_OK) ESP_LOGW("transfer", "ap channel scan: %s, channel=%u",
+                                esp_err_to_name(err), (unsigned)best);
+    else ESP_LOGI("transfer", "ap channel=%u load=%u", (unsigned)best, (unsigned)best_load);
+    return best;
+}
+
 esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PICO_TRANSFER_SCAN_MAX], size_t *count) {
     if (!cancel_time_sync(true)) return ESP_ERR_INVALID_STATE;
     if (!out || !count) return ESP_ERR_INVALID_ARG;
@@ -818,9 +903,7 @@ esp_err_t read_pico_transfer_scan_wifi(read_pico_transfer_network_t out[READ_PIC
     err = esp_wifi_set_mode(WIFI_MODE_STA); if (err != ESP_OK) goto cleanup;
     // 覆盖中国 2.4 GHz 的 1–13 信道；设置失败不阻断扫描，保留驱动默认值。
     // Cover CN 2.4 GHz channels 1–13. A backend that cannot set country keeps its default.
-    wifi_country_t country = {.cc = "CN", .schan = 1, .nchan = 13, .policy = WIFI_COUNTRY_POLICY_MANUAL};
-    esp_err_t country_err = esp_wifi_set_country(&country);
-    if (country_err != ESP_OK) ESP_LOGW("transfer", "wifi country setup: %s", esp_err_to_name(country_err));
+    apply_wifi_country();
     stage = "wifi-start";
     err = esp_wifi_start(); if (err != ESP_OK) goto cleanup;
     started = true;
@@ -1951,7 +2034,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         err = esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP); if (err != ESP_OK) goto fail;
         snprintf((char *)wifi.ap.ssid, sizeof(wifi.ap.ssid), "kiikoread-%02X%02X", mac[4], mac[5]);
         strcpy((char *)wifi.ap.password, READ_PICO_TRANSFER_PASSWORD);
-        wifi.ap.ssid_len = strlen((char *)wifi.ap.ssid); wifi.ap.channel = 1;
+        wifi.ap.ssid_len = strlen((char *)wifi.ap.ssid);
         wifi.ap.max_connection = 1; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
         portENTER_CRITICAL(&s_lock); strcpy(s_status.ssid, (char *)wifi.ap.ssid); portEXIT_CRITICAL(&s_lock);
     } else {
@@ -1965,6 +2048,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         wifi.sta.pmf_cfg.capable = true;
         wifi.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
     }
+    clear_secret(&saved, sizeof(saved));
     err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, &s_events);
     if (err != ESP_OK) goto fail;
     if (cfg->mode == READ_PICO_TRANSFER_MODE_STA) {
@@ -1972,9 +2056,6 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         if (err != ESP_OK) goto fail;
     }
     err = esp_wifi_set_storage(WIFI_STORAGE_RAM); if (err != ESP_OK) goto fail;
-    err = esp_wifi_set_mode(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
-    err = esp_wifi_set_config(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
-    clear_secret(&wifi, sizeof(wifi)); clear_secret(&saved, sizeof(saved));
     if (!cfg->network_only) {
         s_buffer = heap_caps_malloc(16384, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!s_buffer) { err = ESP_ERR_NO_MEM; goto fail; }
@@ -2024,6 +2105,16 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         err = httpd_register_uri_handler(s_http, &routes[i]); if (err != ESP_OK) goto fail;
     }
     }
+    // 热点在网页任务预留之后再扫信道，避免扫描内存与 HTTP 任务争内部堆。
+    // Pick the AP channel after the HTTP task is reserved so the scan does not compete
+    // with task creation for internal heap.
+    if (cfg->mode == READ_PICO_TRANSFER_MODE_AP) wifi.ap.channel = choose_ap_channel();
+    // 与扫描页一致：12/13 信道的路由器也要能连上。
+    // Match the scan page so routers on channels 12/13 can still be joined.
+    apply_wifi_country();
+    err = esp_wifi_set_mode(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
+    err = esp_wifi_set_config(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
+    clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
     s_started = true;
     if (cfg->mode == READ_PICO_TRANSFER_MODE_STA && !cfg->network_only) {
