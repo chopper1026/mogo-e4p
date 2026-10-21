@@ -35,7 +35,7 @@ main=s[s.index('    if (y<160 || y>=UI_NAV_TOP || ev->x0<36',start):s.index('\ns
 assert main.endswith('}')
 main=main[:-1]
 enum=s[s.index('typedef enum { SETTINGS_MAIN'):s.index('} settings_page_t;')+len('} settings_page_t;')]
-macros='\n'.join(re.findall(r'^#define SETTINGS_(?:ROW_H|WIRELESS_ROWS|DISPLAY_ROWS|PERSONAL_ROWS|WIRELESS_Y|DISPLAY_Y|PERSONAL_Y|MAINTENANCE_Y)[^\n]*',s,re.M))
+macros='\n'.join(re.findall(r'^#define SETTINGS_(?:ROW_H|WIRELESS_ROWS|DISPLAY_ROWS|PERSONAL_ROWS|MAINTENANCE_ROWS|WIRELESS_Y|DISPLAY_Y|PERSONAL_Y|MAINTENANCE_Y)[^\n]*',s,re.M))
 layout=s[s.index('typedef struct {\n    EpdRect size, preview;'):s.index('static system_font_layout_t system_font_layout(')]
 unit=r'''
 #include <assert.h>
@@ -69,7 +69,7 @@ static void app_settings_set_font_path(const char*p){++reader_writes;if(!write_f
 static void app_font_activate_system(void){++system_activations;}
 static void ui_text_set_system_scale(bool b){assert(b);}
 static int s_font_page,s_main_scroll,s_style_scroll,s_ble_scroll,s_ble_learning;
-static bool s_font_sync_confirm,s_config_confirm,s_boot_pending;
+static bool s_font_sync_confirm,s_config_confirm,s_boot_pending,s_panel_repair_pending;
 static char s_font_sync_path[192],s_notice[96],s_ble_notice[96],s_ble_feedback[96];
 static int font_scans,profile_edits,wifi_requests;
 static bool home_full;
@@ -81,8 +81,7 @@ static void app_settings_set_home_full_refresh(bool v){home_full=v;}
 static void profile_editor_open(bool signature){assert(signature);++profile_edits;}
 #define UI_NAV_TOP 1096
 '''+enum+'\nstatic settings_page_t s_page;\n'+macros+'''
-#define SETTINGS_SCROLL_MAX (SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H-UI_NAV_TOP+12)
-static void upgrade_open(void){s_page=SETTINGS_UPGRADE;}
+#define SETTINGS_SCROLL_MAX (SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H-UI_NAV_TOP+12)
 '''+fn('settings_stacked')+'\n'+fn('settings_profile_height')+'\n'+fn('settings_main_row_height')+'\n'+layout+fn('system_font_layout')+'\n'+fn('system_font_item_rect')+'\n'+fn('system_font_sync_button')+'\n'
 unit+='static app_redraw_t font_tap(int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+modal+choose+'return APP_REDRAW_NONE;}\n'
 unit+='static app_redraw_t modal_swipe(void){ui_gesture_event_t e={UI_GESTURE_SWIPE_U,400,700};const ui_gesture_event_t*ev=&e;'+modal+'return APP_REDRAW_NONE;}\n'
@@ -104,18 +103,19 @@ int main(void){
    const int destinations[][6]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP},
      {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3},
-     {SETTINGS_UPGRADE,SETTINGS_CONFIG,SETTINGS_BOOT}};
+     {SETTINGS_CONFIG,-4,SETTINGS_BOOT}};
    for(int group=0;group<4;++group)for(int i=0;i<counts[group];++i){
-     s_page=SETTINGS_MAIN;int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
+     s_page=SETTINGS_MAIN;s_panel_repair_pending=false;int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
      main_tap(&ctx,300,500);
      if(destinations[group][i]>=0)assert((int)s_page==destinations[group][i]);
      else if(destinations[group][i]==-1)assert(ctx.request_app==&app_transfer);
      else if(destinations[group][i]==-2)assert(s_page==SETTINGS_MAIN);
+     else if(destinations[group][i]==-4)assert(s_panel_repair_pending&&s_page==SETTINGS_MAIN);
      else assert(profile_edits>0);
      s_page=SETTINGS_MAIN;assert(main_tap(&ctx,10,500)==APP_REDRAW_NONE&&s_page==SETTINGS_MAIN);
    }
    s_main_scroll=SETTINGS_SCROLL_MAX;s_page=SETTINGS_MAIN;
-   int last=SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H-1-s_main_scroll;
+   int last=SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H-1-s_main_scroll;
    assert(last<UI_NAV_TOP&&main_tap(&ctx,300,last)==APP_REDRAW_PAGE&&s_page==SETTINGS_BOOT);
  }
  scale=100;s_page=SETTINGS_SYSTEM_FONT;s_font_page=0;s_main_scroll=0;s_font_sync_confirm=false;

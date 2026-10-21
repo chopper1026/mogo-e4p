@@ -284,6 +284,11 @@ static void draw_upgrade_notes(uint8_t *fb) {
 static EpdRect upgrade_confirm_button(bool online, bool accept) {
     return (EpdRect){accept ? 364 : 60, online ? 842 : 613, 260, 64};
 }
+// 系统升级入口暂时关闭：联网升级流程还没改好，设置主页不露出这一行。页面代码整体保留，
+// 重新开放时恢复“升级和恢复”分组里的这一行和触摸映射即可。
+// The system-upgrade entry is closed until the online update flow is finished, so the settings page
+// hides its row. The page code stays; re-enabling needs only the row and its touch mapping back.
+static void upgrade_open(void) __attribute__((unused));
 static void upgrade_open(void) {
     (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
     pico_online_get_status(&s_update);
@@ -307,7 +312,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
 #define SETTINGS_PERSONAL_ROWS 4
-#define SETTINGS_MAINTENANCE_ROWS 4
+#define SETTINGS_MAINTENANCE_ROWS 3
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -1452,9 +1457,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机"};
-    const int maintenance_icons[]={12,8,17,13};
+    const char *maintenance_labels[]={"保存与恢复","屏幕修复","BOOT 刷机"};
+    const char *maintenance_values[]={"配置","清除条纹","电脑刷机"};
+    const int maintenance_icons[]={8,17,13};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
@@ -2304,9 +2309,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
-        if(row==0)upgrade_open();
-        else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
-        else if(row==2){
+        if(row==0){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
+        else if(row==1){
             // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；点一下就整屏盲刷
             // 一遍，然后自己把当前页面（含底栏）推回面板。
             // A power cut mid-refresh leaves the panel half-driven, and an ordinary differential
