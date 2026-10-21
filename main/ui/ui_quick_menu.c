@@ -72,29 +72,23 @@ static void draw_badge(uint8_t *fb,int button,bool active) {
     epd_draw_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,0x50,fb);
 }
 
-// 实心圆键：活动态沿用原176灰，其余为244灰；按压只加内圈。前光开关单独用
-// 黑底白太阳表示开灯、浅底黑太阳表示熄灭，和旁边圆钮共用同一套图形粗细。
+// 实心圆键：活动态沿用原176灰，其余为244灰；按压只加内圈。前光开关与旁边圆钮
+// 共用同一套灰阶，开灯是活动灰底黑太阳，熄灭是浅底黑太阳。
 // Solid key: active uses the original 176 gray, others 244; a press only adds the
-// inner ring. The frontlight switch alone turns black with a white sun when on and
-// keeps a light face with a black sun when off, matching the neighbouring glyph weight.
+// inner ring. The frontlight switch shares the same grays as its neighbours, with a
+// black sun on both the active gray and the light face.
 static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool active,bool pressed) {
     int cx=center_x(button);
     const bool frontlight_key=button==3&&menu!=NULL&&menu->frontlight;
-    const bool dark_face=frontlight_key&&active;
-    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,
-                    dark_face?UI_GRAY_BLACK:active?0xb0:0xf4,fb);
-    const uint8_t edge=dark_face?UI_GRAY_BLACK:0x38;
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,edge,fb);
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,edge,fb);
+    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,active?0xb0:0xf4,fb);
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,0x38,fb);
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,0x38,fb);
     if(button<3) ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,s_icons[button],UI_GRAY_BLACK);
-    else if(frontlight_key)
-        ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,UI_ICON_SUN,
-                     active?UI_GRAY_WHITE:UI_GRAY_BLACK);
+    else if(frontlight_key) ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,UI_ICON_SUN,UI_GRAY_BLACK);
     else lock_icon(fb,cx,UI_QUICK_CIRCLE_Y);
     if(pressed){
-        const uint8_t ring=dark_face?UI_GRAY_WHITE:UI_GRAY_BLACK;
-        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-7,ring,fb);
-        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-8,ring,fb);
+        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-7,UI_GRAY_BLACK,fb);
+        epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-8,UI_GRAY_BLACK,fb);
     }
 }
 

@@ -295,8 +295,11 @@ static void quick_toggle_wifi(void) {
 }
 static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
-// 前光事件只动它自己的控件：开关点按重画第四枚圆钮，滑杆走本行 DU、松手 GL16 定稿，随后才写 NVS。
-// A frontlight event touches only its own control: a switch tap repaints the fourth circle, while a slider uses DU and settles with GL16 on release, then writes NVS.
+// 前光事件只动它自己的控件：开关点按与旁边圆钮同走基础表 DU 重画第四枚圆钮，
+// 滑杆走本行 DU、松手 GL16 定稿，随后才写 NVS。
+// A frontlight event touches only its own control: a switch tap repaints the fourth
+// circle with the same base-table DU as its neighbours, while a slider uses DU per
+// frame and settles with GL16 on release, then writes NVS.
 static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
                                      const ui_quick_event_t *event) {
     EpdRect dirty;
@@ -304,7 +307,7 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
     if (event->control == UI_QUICK_CTL_ON) {
         if (!ui_quick_menu_draw_button(ctx->fb, &s_quick, 3, s_quick.fl_on, false, &dirty)) return;
         s_fl_shown_on = s_quick.fl_on;
-        error = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, dirty);
+        error = update_display_area_diff_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
         guard_draw_result(ctx->hl, error);
     } else {
         if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;

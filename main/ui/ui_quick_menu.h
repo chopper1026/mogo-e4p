@@ -5,12 +5,12 @@
  * unlabeled circles; boards with a frontlight use the fourth circle as its
  * switch and keep two large brightness/colour-temperature sliders below. All
  * main modes share grayscale and clear borders.
- * 用户修订：锁屏图标移出快捷栏；第四枚圆钮用黑底白太阳表示开灯、浅底黑太阳
+ * 用户修订：锁屏图标移出快捷栏；第四枚圆钮用活动灰底黑太阳表示开灯、浅底黑太阳
  * 表示熄灭，卡片只留两条加粗滑杆且不显示百分比。滑杆不自动开灯，灯关时调档
  * 只记录数值。
  * User revision: drop the lock icon from the quick layer; the fourth circle is
- * the frontlight switch, black with a white sun when on and light with a black
- * sun when off, and the card keeps only the two heavier sliders without
+ * the frontlight switch, on the active gray with a black sun when on and on the
+ * light face when off, and the card keeps only the two heavier sliders without
  * percentage labels. Sliders never turn the light on by themselves, so an off
  * light only records the new values.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
@@ -106,10 +106,10 @@ void ui_quick_menu_draw(uint8_t *fb, const ui_quick_menu_t *menu, bool wifi, boo
 /// 当前按住的圆键，取消/滑出/释放或按住卡片时为-1。/ The held key, or -1 after cancellation, movement, release or a card press.
 int ui_quick_menu_pressed(const ui_quick_menu_t *menu);
 /// 重画实心圆键并叠加状态点/圆内按压，不分配、不模糊、不排字。第四枚圆钮按
-/// `menu->frontlight` 画太阳或锁；前光板开灯为黑底白太阳，熄灭为浅底黑太阳。
+/// `menu->frontlight` 画太阳或锁；前光板开灯为活动灰底黑太阳，熄灭为浅底黑太阳。
 /// Repaint a solid key with its state badge and interior press, without allocating,
 /// blurring or shaping text. The fourth circle shows a sun on frontlight boards
-/// (or the lock elsewhere); the light-on face is black with a white sun.
+/// (or the lock elsewhere); the light-on face is the active gray under a black sun.
 bool ui_quick_menu_draw_button(uint8_t *fb, const ui_quick_menu_t *menu, int button,
                                bool active, bool pressed, EpdRect *dirty);
 /// 只重画卡片的一行并返回受影响的矩形，供滑杆拖动局刷。
