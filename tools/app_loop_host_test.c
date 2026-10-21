@@ -23,13 +23,28 @@ bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f
 #include <stdio.h>
 #include <string.h>
 
+void touch_sampler_test_enable(bool active);
+void touch_sampler_test_push(uint32_t t_ms, uint16_t x, uint16_t y, uint8_t count);
+
 const app_desc_t app_book = {.title="book"};
 const app_desc_t app_transfer = {.title="transfer"};
 static int power_open_draws, power_controls_draws, power_final_draws;
 static int power_trigger_step = -1, shutdowns, restarts;
 static bool staged_shutdown;
+int64_t esp_timer_get_time(void);
+static bool power_tap_during_draw;
 EpdRect ui_power_dialog_rect(void) {return (EpdRect){0,0,684,1216};}
-void ui_power_dialog_draw(uint8_t* fb,const ui_power_dialog_t *dialog) {(void)fb;(void)dialog;++power_open_draws;}
+void ui_power_dialog_draw(uint8_t* fb,const ui_power_dialog_t *dialog) {
+ (void)fb;(void)dialog;++power_open_draws;
+ // 电源弹窗展开的整屏 GL16 阻塞期间，用户快速点按“重启”；两帧都在队列里。
+ // While the dialog's opening full-screen GL16 blocks, the user taps Restart fast.
+ if (power_tap_during_draw) {
+    power_tap_during_draw = false;
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    touch_sampler_test_push(now, UI_POWER_RESTART_X, UI_POWER_BUTTON_Y, 1);
+    touch_sampler_test_push(now + 10, 0, 0, 0);
+ }
+}
 void ui_power_dialog_draw_controls(uint8_t* fb,const ui_power_dialog_t *dialog,EpdRect dirty) {(void)fb;(void)dialog;(void)dirty;++power_controls_draws;}
 void ui_power_dialog_end(void) {}
 void ui_power_final_draw(uint8_t* fb,bool restarting) {(void)fb;(void)restarting;++power_final_draws;}
@@ -84,8 +99,17 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
  enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
  nav_armed=owner;return result;
 }
+static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     assert(a.x==0&&a.y==0&&a.width==684&&a.height==UI_QUICK_HEIGHT);++quick_gl;
+    // 快捷层展开刷新阻塞期间，用户抬手并快速点按 Wi-Fi 圆键；三帧都在队列里。
+    // While the quick layer's opening refresh blocks, the user lifts and taps Wi-Fi fast.
+    if (tap_during_present) {
+        tap_during_present = false;
+        touch_sampler_test_push(30,0,0,0);
+        touch_sampler_test_push(40,85,156,1);
+        touch_sampler_test_push(50,0,0,0);
+    }
     return update_display_area_with(h,w,m,a);
 }
 void ui_quick_menu_draw(uint8_t *fb,bool wifi,bool bluetooth) {(void)fb;(void)wifi;(void)bluetooth;++quick_draws;}
@@ -533,6 +557,18 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
+    // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
+    // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
+    // press edge and toggles exactly once.
+    reset();saved_wifi=true;first.on_gesture=gesture;
+    touch_sampler_test_enable(true);
+    touch_sampler_test_push(10,300,20,1);
+    touch_sampler_test_push(20,300,110,1);
+    tap_during_present=true;
+    run();
+    assert(wifi_starts==1&&!wifi_stops&&!touch_calls&&quick_gl==1&&quick_draws==1);
+    touch_sampler_test_enable(false);tap_during_present=false;
+    puts("quick layer replay: a tap buffered during the opening refresh keeps its press edge");
     // 反馈必须早于页面保存/后台收尾；下一页与自动休眠不显示主动锁屏徽标。
     // Acknowledgement precedes saves/joins; consumed page turns and idle sleep omit it.
     for(int policy=0;policy<3;++policy){
@@ -567,6 +603,14 @@ int main(void) {
     add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);run();
     assert(power_open_draws==1&&!power_controls_draws&&!shutdowns&&!restarts);
     puts("PASS: real loop and power recognizer: DU-only contact, release commits off/staged sleep/restart once, cancel restores full navigation, touch/multitouch errors and entry-held suppression");
+    // 采样回放：电源弹窗展开的整屏刷新期间快速点按“重启”，按下沿不能丢。
+    // Sampler replay: a fast Restart tap during the dialog's opening refresh keeps its press edge.
+    reset();power_trigger_step=1;time_step=3000000;
+    touch_sampler_test_enable(true);power_tap_during_draw=true;
+    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(restarts==1&&!shutdowns&&power_final_draws==1&&!touch_calls);
+    touch_sampler_test_enable(false);power_tap_during_draw=false;
+    puts("power dialog replay: a tap buffered during the opening refresh keeps its press edge");
     reset();enable_main_tabs();first.owns_keys=true;first.on_main_key=root_key_tap;root_key_taps=0;time_step=100000;
     add(0,0,0,0);add(240,1500,1,0);add(0,0,0,0);run();assert(root_key_taps==1&&!keys[1]);
     reset();enable_main_tabs();first.owns_keys=true;first.on_main_key=root_key_tap;root_key_taps=0;time_step=300000;

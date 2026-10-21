@@ -253,6 +253,28 @@ static void quick_toggle_wifi(void) {
 }
 static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
+// 快捷层单帧输入：识别并执行动作；本帧由快捷层持有输入时返回 true。
+// 正常 tick 与采样回放共用同一入口，回放不能只看最后一帧，否则按下沿会丢。
+// One quick-layer input frame: recognize and run the action; true when the layer owns
+// the frame. The normal tick and sampler replay share it so replay never drops a press edge.
+static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lock_requested) {
+    ui_quick_action_t action;
+    bool owned = ui_quick_menu_feed(&s_quick, ctx,
+        current->render && !current->holds_pmu && !usb_storage_active() && !pico_online_busy(),
+        &action);
+    if (owned) ctx->consumed = true;
+    if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(ctx, current, false);
+    else if (action == UI_QUICK_WIFI) quick_toggle_wifi();
+    else if (action == UI_QUICK_BLUETOOTH) {
+        bool enable = !app_settings_ble_turner();
+        app_settings_set_ble_turner(enable);
+        if (enable) ble_pt_reconnect_recent();
+        else { ble_pt_cancel_recent(); ble_pt_sync(false); }
+    } else if (action == UI_QUICK_FULL) quick_present(ctx, current, true);
+    else if (action == UI_QUICK_LOCK) *lock_requested = true;
+    return owned;
+}
+
 static void main_present_finished(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_DONE || !main_page_ready(ctx, app)) s_presented_main = NULL;
     else if (redraw != APP_REDRAW_NONE) s_presented_main = app;
@@ -785,6 +807,9 @@ void app_loop_run(const app_loop_config_t* config) {
         int64_t frame_ms = esp_timer_get_time() / 1000;
         bool replayed = false;
         bool pressed = false, released = false;
+        bool quick_lock_requested = false;
+        bool quick_input_owned = false;
+        ui_power_action_t replay_power_action = UI_POWER_ACTION_NONE;
 #if CONFIG_TOUCH_DIAG
         int64_t td_gap_ms = td_last_read_us ? (esp_timer_get_time() - td_last_read_us) / 1000 : 0;
         td_last_read_us = esp_timer_get_time();
@@ -812,7 +837,39 @@ void app_loop_run(const app_loop_config_t* config) {
                     frame_to_touch(&f, &touch);
                     ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
-                    dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK, menu_open);
+                    // 快捷层与电源弹窗都按帧回放：只在排空后喂最后一帧会丢掉按下沿，
+                    // 快速点按需要再点一次才生效。弹窗动作留到本 tick 的弹窗分支执行。
+                    // Replay the quick layer and the power dialog frame by frame: feeding
+                    // only the last frame drops press edges, so a fast tap needs a second
+                    // click. A dialog action runs in this tick's dialog branch.
+                    if (power_dialog_open) {
+                        ctx.consumed = false;
+                        EpdRect dirty;
+                        ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
+                        if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
+                            ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
+                            enum EpdDrawError result = update_display_area_diff_with(
+                                ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
+                            guard_draw_result(ctx.hl, result);
+                            if (result != EPD_DRAW_SUCCESS) {
+                                power_dialog_open = false;
+                                ui_power_dialog_end();
+                                ui_power_dialog_reset(&power_dialog, touch.touched);
+                                app_present(&ctx, current, APP_REDRAW_FULL);
+                            }
+                        } else if (action != UI_POWER_ACTION_NONE) {
+                            replay_power_action = action;
+                        }
+                        ctx.consumed = true;
+                    } else if (!menu_open) {
+                        quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested);
+                        if (quick_input_owned) {
+                            held_key = -1;
+                            cancel_gesture(&ctx, current, &gesture);
+                        }
+                    }
+                    dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK,
+                                           power_dialog_open || quick_input_owned || menu_open);
                     was_touched = touch.touched;
 #if CONFIG_TOUCH_DIAG
                     n++;
@@ -898,8 +955,6 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         bool selected_from_menu = false;
         const bool power_input_owned = power_dialog_open;
-        bool quick_lock_requested = false;
-        bool quick_input_owned = false;
 
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
@@ -932,24 +987,11 @@ void app_loop_run(const app_loop_config_t* config) {
                 quick_input_owned=s_quick.open;
             }
             else {
-                ui_quick_action_t action;
-                quick_input_owned = ui_quick_menu_feed(&s_quick, &ctx,
-                    current->render && !current->holds_pmu && !usb_storage_active() && !pico_online_busy(), &action);
+                quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested);
                 if (quick_input_owned) {
                     held_key = -1;
                     cancel_gesture(&ctx, current, &gesture);
-                    ctx.consumed = true;
                 }
-                if (action == UI_QUICK_OPEN || action == UI_QUICK_CLOSE) quick_present(&ctx, current, false);
-                else if (action == UI_QUICK_WIFI) {
-                    quick_toggle_wifi();
-                } else if (action == UI_QUICK_BLUETOOTH) {
-                    bool enable=!app_settings_ble_turner();
-                    app_settings_set_ble_turner(enable);
-                    if(enable)ble_pt_reconnect_recent();
-                    else {ble_pt_cancel_recent();ble_pt_sync(false);}
-                } else if (action == UI_QUICK_FULL) quick_present(&ctx, current, true);
-                else if (action == UI_QUICK_LOCK) quick_lock_requested = true;
             }
             quick_buttons_present(&ctx,current);
         }
@@ -958,6 +1000,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.consumed = false;
             EpdRect dirty;
             ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
+            if (action == UI_POWER_ACTION_NONE) action = replay_power_action;
             if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
                 ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
                 enum EpdDrawError result = update_display_area_diff_with(
