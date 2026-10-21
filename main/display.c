@@ -37,6 +37,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "frontlight.h"
 #include "settings.h"
 
 #include <string.h>
@@ -60,6 +61,11 @@ void display_set_bulk_io(bool active) {
 // Keep HV rails for an eight-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
 #define RAILS_IDLE_TIMEOUT_MS 8000
 
+// 前光点亮时只保留100ms：光照会加速像素电荷泄漏，窗口越短暴露越少；100ms 仍够跨过一手势内的连续帧。
+// Hold for only 100 ms while the frontlight is lit: light speeds up pixel-charge leakage, and 100 ms still
+// bridges the consecutive frames of one gesture.
+#define RAILS_IDLE_TIMEOUT_LIT_MS 100
+
 // 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
 // 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
 static int64_t rails_deadline_ms;
@@ -71,7 +77,8 @@ void rails_keepalive(void) {
     // 包括无变化和失败返回：释放像素驱动，不增加扫描或全刷。
     // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
     drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
-    rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
+    rails_deadline_ms = now_ms +
+        (frontlight_on() ? RAILS_IDLE_TIMEOUT_LIT_MS : RAILS_IDLE_TIMEOUT_MS);
     pico_online_display_end(held);
 }
 

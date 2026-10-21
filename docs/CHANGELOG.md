@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc97 本地 / 2026-10-21
 
+- 修复开启前光后画面从灯带一侧缓慢发灰的问题。前光点亮时面板高压轨（VCOM/VSH）在每次刷新后只保留 100 ms，不再保留 8 秒：光照会加速像素电荷泄漏，轨断得越早灰化越慢。灯灭时仍保留 8 秒；开灯时每次刷新多约 80 ms 上电时间。
+  Fix the slow graying that spread in from the light strip while the front light was on. With the light lit, the panel HV rails (VCOM/VSH) now stay up for only 100 ms after each refresh instead of 8 s: light accelerates pixel-charge leakage, so dropping the rails sooner slows the graying. The 8 s hold remains with the light off; lit refreshes pay roughly 80 ms more for the TPS65185 power-up.
+
 - 下拉快捷栏的前光控制改为第四枚圆钮开关：开灯为黑底白太阳，熄灭为浅底黑太阳，与旁边图标同粗细；锁屏图标移出快捷栏。下方亮度、色温换成整行可点的大滑杆（14px 轨道、22px 滑块）并去掉右侧百分比，拖动实时生效、松手或点选才保存。滑杆拖动改为带脏区膨胀的差分刷新，减少圆圈上下边缘的浅残影，松手仍用 GL16 定稿。滑杆不再自动开灯，灯灭时只记录数值，必须点圆钮才亮；浅睡灭灯、唤醒恢复，无前光的板保留锁屏圆钮和四键布局。
   The pull-down quick layer now uses its fourth circle as the frontlight switch: black with a white sun when on and light with a black sun when off, matching the neighbouring glyph weight, replacing the lock icon. Brightness and colour temperature become full-row sliders with a 14px track and 22px knob without percentage labels, applied while dragging and persisted on release or tap. Slider drags now use dilated dirty masks to cut the light ghost along the knob's top and bottom edges, while release still settles with GL16. Sliders never turn the light on by themselves; with the light off they only record values and the circle must be tapped. Light sleep blanks the light, wake restores it, and boards without a frontlight keep the lock circle and the four-key layout.
 - 修复「关机睡眠 = 仅浅睡」下锁屏唤醒后整个主页刷新变慢的问题。浅睡唤醒过程会把 CACHE_L1 的总线仲裁/时钟门控等四个配置寄存器清零而系统不恢复，喂行产能下降约 20%，20 MHz 扫描第一刷欠载后像素钟被永久降到 12 MHz。现在每次浅睡醒来把开机快照的配置写回，唤醒后主页刷新保持 20 MHz 原速。

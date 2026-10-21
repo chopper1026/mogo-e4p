@@ -25,6 +25,7 @@ static int turn_tick_us = 21000;
 void e0470_page_turn_set_tick_us(int us) { turn_tick_us = us; }
 int e0470_page_turn_tick_us(void) { return turn_tick_us; }
 bool app_settings_main_fast_refresh(void) {return false;}
+bool frontlight_on(void) {return false;}
 int epd_width(void) {return 1216;}
 int epd_height(void) {return 684;}
 enum EpdRotation epd_get_rotation(void) {return EPD_ROT_INVERTED_PORTRAIT;}

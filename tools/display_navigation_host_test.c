@@ -24,6 +24,7 @@ static app_main_refresh_mode_t main_mode=APP_MAIN_REFRESH_FAST;
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) {return main_mode;}
 static int exit_calls;
 bool app_settings_main_fast_refresh(void) {return main_mode==APP_MAIN_REFRESH_FAST;}
+bool frontlight_on(void) {return false;}
 const EpdWaveform* display_main_shelf_exit_waveform(void) {return &main_exit;}
 const EpdWaveform* display_main_gray_waveform(void) {return &main_gray;}
 const EpdWaveform* display_main_water_waveform(void) {return &main_water;}
