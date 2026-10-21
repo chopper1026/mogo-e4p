@@ -602,14 +602,14 @@ static int reader_margin_for_level(int level, int current, int px, int tracking_
 static EpdRect progress_rect(void) {
     // 阅读页没有右侧菜单按钮；进度信息应和页眉分隔线一样铺满内容宽度。
     // 页脚整体贴底：带上沿 = 正文底（UI_BAR_TOP+39=1135），高 57 到 1192。进度条 =
-    // track.y+8（1143–1155），章节名行顶 = track.y+27（行底约 1186，距屏底 30px），条距
+    // track.y+8（1143–1155），章节名行顶 = track.y+27（28px 行底 1190，距屏底 26px），条距
     // 正文保持 8px。正文底、页脚刷新带、绘制基准共用本矩形；39 为页脚贴底下调量，
     // 调整时须与 reader_area/body_rect 的 bottom 三处联动。
     // The reader has no right-hand menu button; the footer spans the full content width.
     // The whole footer hugs the bottom edge: band top = body bottom (1135), height 57 to 1192;
-    // bar at track.y+8 (1143–1155), chapter text top at track.y+27 (bottom ≈1186, 30 px above
-    // the screen edge), keeping the 8 px body-to-bar gap. Body bottom, refresh band and drawing
-    // origin share this rect; 39 is the footer drop — keep the two bottoms above in sync.
+    // bar at track.y+8 (1143–1155), chapter text top at track.y+27 (28 px line ends at 1190,
+    // 26 px above the screen edge), keeping the 8 px body-to-bar gap. Body bottom, refresh band
+    // and drawing origin share this rect; 39 is the footer drop — keep the two bottoms above in sync.
     return (EpdRect){36, UI_BAR_TOP + 39, UI_LOCK_WIDTH - 72, UI_BAR_H - 39};
 }
 static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
@@ -3624,7 +3624,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         if (bar.width) ui_fill_round_rect(fb, bar, 5, UI_GRAY_BLACK);
         char chapter_name[72] = {0};
         reader_footer_chapter_name(chapter_name, sizeof(chapter_name));
-        const int footer_px = 24;
+        const int footer_px = 28;
         char progress[48];
         snprintf(progress, sizeof(progress), "%u/%u · 全书 %u%%",
                  (unsigned)page + 1, (unsigned)book_layout_page_count(), percent(page));
