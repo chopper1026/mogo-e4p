@@ -10,8 +10,3 @@ const EpdWaveform* display_reader_text_waveform(void);
 /// Full reader pages: vendor GL16 sequences with the main-page water whitening for
 /// pure-white targets only.
 const EpdWaveform* display_reader_page_waveform(void);
-
-/// 阅读水波纹：原厂 GL16 序列，纯白目标只保留 DU 的擦白次数（黑→白 18 次）。
-/// Reader water ripple: vendor GL16 sequences with only the DU erase count for
-/// pure-white targets (18 pulses for black→white).
-const EpdWaveform* display_reader_water_waveform(void);

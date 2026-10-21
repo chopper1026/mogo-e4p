@@ -20,7 +20,6 @@ const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1},
 static const EpdWaveform main_gray = {4}, main_exit = {5}, main_water = {6}, main_bw = {7}, main_acrylic = {8}, main_acrylic_clean = {9};
 static const EpdWaveform reader_soft = {10};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
-const EpdWaveform* display_reader_water_waveform(void) {return &reader_soft;}
 static app_main_refresh_mode_t main_mode=APP_MAIN_REFRESH_FAST;
 app_main_refresh_mode_t app_settings_main_refresh_mode(void) {return main_mode;}
 static int exit_calls;
@@ -184,6 +183,16 @@ enum EpdDrawError epd_hl_update_area(EpdiyHighlevelState* state, enum EpdDrawMod
 }
 enum EpdDrawError epd_hl_update_area_full(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area) {
     assert(temperature == 25); return draw(state, mode, true, &area);
+}
+// 测试桩不模拟脏区膨胀，按普通差分处理。
+// The stub does not model dirty-mask dilation and treats both as ordinary differentials.
+enum EpdDrawError epd_hl_update_area_padded(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, EpdRect area, int pad_lines, int pad_col_bytes) {
+    (void)pad_lines; (void)pad_col_bytes;
+    assert(temperature == 25); return draw(state, mode, false, &area);
+}
+enum EpdDrawError epd_hl_update_screen_padded(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature, int pad_lines, int pad_col_bytes) {
+    (void)pad_lines; (void)pad_col_bytes;
+    assert(temperature == 25); return draw(state, mode, false, NULL);
 }
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState* state, enum EpdDrawMode mode, int temperature) {
     memset(state->back_fb, 255, BYTES);
