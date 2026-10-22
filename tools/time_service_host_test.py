@@ -175,5 +175,5 @@ int main(void){uint32_t utc=0;
 with tempfile.TemporaryDirectory(prefix='kiiko-clock-test-',dir='/private/tmp') as folder:
  for name,unit in [('restore',restore),('scheduler',scheduler),('lease',lease),('ntp',ntp)]:
   c=Path(folder)/(name+'.c');binary=Path(folder)/name;c.write_text(unit)
-  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',str(c),'-o',str(binary)],check=True)
+  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g',str(c),'-o',str(binary)],check=True)
   subprocess.run([str(binary)],check=True)

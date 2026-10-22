@@ -68,5 +68,5 @@ int main(void){uint8_t pixels[82*82];
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-avatar-',dir='/private/tmp') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',str(c),'-o',str(binary)],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g',str(c),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)

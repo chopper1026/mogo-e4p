@@ -75,6 +75,6 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='pico-vertical-test-') as directory:
     work = Path(directory)
     (work / 'test.c').write_text(unit, encoding='utf-8')
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-isysroot', '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     str(work / 'test.c'), '-o', str(work / 'test')], check=True)
     subprocess.run([str(work / 'test')], check=True)

@@ -135,5 +135,5 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
 '''
 with tempfile.TemporaryDirectory(dir='/private/tmp') as d:
  c=Path(d)/'test.c';exe=Path(d)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-pthread','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-pthread',str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True,timeout=30)

@@ -174,6 +174,6 @@ int main(void){
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     c, exe = Path(folder) / 'test.c', Path(folder) / 'test'
     c.write_text(unit)
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-isysroot', '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',
+    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

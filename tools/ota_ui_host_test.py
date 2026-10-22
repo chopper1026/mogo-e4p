@@ -220,6 +220,6 @@ assert not any(name in render_body for name in ("pico_online_check(", "pico_onli
 with tempfile.TemporaryDirectory() as folder:
     source, binary = Path(folder)/"test.c", Path(folder)/"test"
     source.write_text(unit)
-    subprocess.run(["cc", "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+    subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                     "-I"+str(root/"tools/ui_gesture_stubs"), "-I"+str(root/"tools/ota_stubs"), "-I"+str(root/"main"), str(source), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

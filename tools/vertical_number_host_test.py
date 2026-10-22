@@ -112,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix='pico-vertical-number-') as directory:
         (work / name).write_text(text, encoding='utf-8')
     (work / 'assets.c').write_text(ASSETS, encoding='utf-8')
     (work / 'test.c').write_text(UNIT, encoding='utf-8')
-    flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-isysroot', '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk', # GCC 13 会把 ttf_font.c 里既有的 snprintf 告警升级成错误。
+    flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', # GCC 13 会把 ttf_font.c 里既有的 snprintf 告警升级成错误。
              '-Wno-error=format-truncation',
              '-I' + str(work), '-I' + str(ROOT / 'main/font'), '-I' + str(ROOT / 'main/ui'),
              '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]

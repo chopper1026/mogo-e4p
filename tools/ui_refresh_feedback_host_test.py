@@ -567,7 +567,7 @@ with tempfile.TemporaryDirectory() as folder:
         source, binary = Path(folder) / (name + ".c"), Path(folder) / name
         source.write_text(unit)
         extras = [str(root / "main/ui/ui_image_dither.c")] if name == "image-bw" else []
-        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                         "-I" + str(root),
                         str(source), *extras, "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)

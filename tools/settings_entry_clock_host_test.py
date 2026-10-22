@@ -168,5 +168,5 @@ assert 'ui_wallpaper_draw_rounded' not in s and 'read_pico_transfer_get_saved_wi
 assert 'prepare_inline_image' not in branch and 'kick_prep' not in branch
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
  d=Path(folder);c=d/'test.c';exe=d/'test';c.write_text(unit)
- subprocess.run(['cc','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)

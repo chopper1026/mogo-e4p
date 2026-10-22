@@ -147,7 +147,6 @@ int main(void){
 with tempfile.TemporaryDirectory() as folder:
     src = Path(folder) / 'test.c'
     src.write_text(unit)
-    flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
-             '-isysroot', '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk']
+    flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function']
     subprocess.run(flags + [str(src), '-o', str(Path(folder) / 'test')], check=True)
     subprocess.run([str(Path(folder) / 'test')], check=True)

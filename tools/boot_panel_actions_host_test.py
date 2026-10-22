@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix='kiikoread-boot-panel-') as directory:
     (work/'freertos/task.h').write_text('')
     for name, unit in [('boot', BOOT), ('actions', ACTIONS)]:
         (work/f'{name}.c').write_text(unit, encoding='utf-8')
-        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',
+        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g',
                         '-I'+str(work),'-I'+str(CRASH),'-I'+str(CRASH/'include'),
                         str(work/f'{name}.c'),'-o',str(work/name)],check=True)
         subprocess.run([str(work/name)],check=True)

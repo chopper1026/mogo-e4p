@@ -155,7 +155,6 @@ int main(int argc,char **argv){
 '''
     (p/'test.c').write_text(unit)
     flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function',
-           '-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',
            '-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'),
            '-I'+str(ROOT/'components/read_pico_pmu/include'),'-I'+str(ROOT/'main/book')]
     subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)

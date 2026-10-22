@@ -55,7 +55,7 @@ int __DECLARE_RCC_ATOMIC_ENV __attribute__((unused));
 #include <hal/gdma_channel.h>
 
 /* S31/P4：LCD 挂 AXI-GDMA；S3：AHB-GDMA。通道与描述符对齐须一致。 */
-#if defined(SOC_GDMA_TRIG_PERIPH_LCD0_BUS) && (SOC_GDMA_TRIG_PERIPH_LCD0_BUS == SOC_GDMA_BUS_AXI)
+#if defined(SOC_GDMA_TRIG_PERIPH_LCD0_BUS) && defined(SOC_GDMA_BUS_AXI) && (SOC_GDMA_TRIG_PERIPH_LCD0_BUS == SOC_GDMA_BUS_AXI)
 #define LCD_GDMA_NEW_CHANNEL gdma_new_axi_channel
 #define LCD_GDMA_DESC_ALIGN 8
 typedef dma_descriptor_align8_t lcd_dma_desc_t;
@@ -758,7 +758,7 @@ static esp_err_t allocate_lcd_buffers() {
     uint32_t dma_flags = MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA;
 
     /* AXI-GDMA burst=64 时 buffer 也按 64 对齐；AHB 描述符仍用 LCD_GDMA_DESC_ALIGN */
-#if defined(SOC_GDMA_TRIG_PERIPH_LCD0_BUS) && (SOC_GDMA_TRIG_PERIPH_LCD0_BUS == SOC_GDMA_BUS_AXI)
+#if defined(SOC_GDMA_TRIG_PERIPH_LCD0_BUS) && defined(SOC_GDMA_BUS_AXI) && (SOC_GDMA_TRIG_PERIPH_LCD0_BUS == SOC_GDMA_BUS_AXI)
     const size_t bb_align = 64;
 #else
     const size_t bb_align = LCD_GDMA_DESC_ALIGN;

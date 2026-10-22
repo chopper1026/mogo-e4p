@@ -85,5 +85,5 @@ assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
 assert 's_cover_batch_present_pending = false;' in function('present',book)
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:
     d=Path(directory);c=d/'batch.c';exe=d/'batch';c.write_text(unit)
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
