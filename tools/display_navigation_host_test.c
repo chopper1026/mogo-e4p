@@ -297,7 +297,7 @@ int main(void) {
         assert(!gray_calls && !full_calls && !gc_calls && !clears && !nav_draws && !allocations);
         assert(hl.waveform == &E0470_WAVEFORM && scan == READ_PICO_EPD_SCAN_FULL);
     }
-    now_us += 9000000; rails_idle_check(now_us / 1000);
+    now_us += 200000; rails_idle_check(now_us / 1000);
     display_main_transition_cancel(); assert(calls == 200); assert_final();
     begin(&owner_a); assert(calls == 200); assert_final();
 

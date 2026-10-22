@@ -21,6 +21,8 @@
  * User revision: ordinary shelf chrome and art share each scan phase, with soft outer text, calibrated covers/furniture and directional whitespace erasure; never reveal regions serially. Only the marker may change within frozen navigation; retain common fault recovery.
  * 用户修订：纯文字水波纹改回面板原厂GL16表，保留每种灰阶转换的前导擦除；文字表只用于普通纯文字翻页，8带/11090us、目标灰阶和故障恢复保持。
  * User revision: pure-text ripple returns to the vendor GL16 table with each transition's leading erase; the text table serves ordinary text turns only, retaining eight bands/11090us, target grays and recovery.
+ * 用户修订：高压轨不再保留8秒，前后光场景统一在每次刷新后只保留100ms，空闲即断VCOM/VSH。
+ * User revision: drop the eight-second rail hold; with the light on or off, keep VCOM/VSH only 100 ms after each output and release them on idle.
 
  */
 
@@ -37,7 +39,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "frontlight.h"
 #include "settings.h"
 
 #include <string.h>
@@ -57,14 +58,10 @@ void display_set_bulk_io(bool active) {
     ESP_LOGI(TAG, "bulk I/O scan margin %s", active ? "on" : "off");
 }
 
-// 高压轨在连续操作间保留8秒，避免反复500ms放电；像素驱动在每轮结束时立即释放。
-// Keep HV rails for an eight-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
-#define RAILS_IDLE_TIMEOUT_MS 8000
-
-// 前光点亮时只保留100ms：光照会加速像素电荷泄漏，窗口越短暴露越少；100ms 仍够跨过一手势内的连续帧。
-// Hold for only 100 ms while the frontlight is lit: light speeds up pixel-charge leakage, and 100 ms still
-// bridges the consecutive frames of one gesture.
-#define RAILS_IDLE_TIMEOUT_LIT_MS 100
+// 高压轨在每次刷新后只保留100ms：够跨过一手势内的连续帧，空闲时不再长时间挂着VCOM/VSH；像素驱动在每轮结束时立即释放。
+// Keep HV rails for only 100 ms after each output: enough to bridge consecutive frames of one gesture without
+// holding VCOM/VSH while idle; release pixel drive after every output.
+#define RAILS_IDLE_TIMEOUT_MS 100
 
 // 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
 // 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
@@ -77,8 +74,7 @@ void rails_keepalive(void) {
     // 包括无变化和失败返回：释放像素驱动，不增加扫描或全刷。
     // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
     drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
-    rails_deadline_ms = now_ms +
-        (frontlight_on() ? RAILS_IDLE_TIMEOUT_LIT_MS : RAILS_IDLE_TIMEOUT_MS);
+    rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
     pico_online_display_end(held);
 }
 

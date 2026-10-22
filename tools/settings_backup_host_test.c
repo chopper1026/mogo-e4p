@@ -21,12 +21,12 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v21 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v21; legacy fixtures drop them all. */
+/* v15..v25 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v25; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
-                            sizeof(settings_backup_double_t))
+                            sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -90,14 +90,15 @@ static uint8_t loaded_keys[3];
 static bool has_keys[3];
 static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
+static uint8_t loaded_idle;static bool has_idle;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
 static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
  if(!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR)) {
@@ -114,15 +115,16 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) { (void)h
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
-// 去掉 v24 才有的本地扩展块，把文件还原成上游 v20 及更早的尾部布局。
-// Drop the v24-only local extension blocks to leave an upstream v20-or-earlier tail layout.
+// 去掉 v24/v25 才有的本地扩展块，把文件还原成上游 v20 及更早的尾部布局。
+// Drop the v24/v25 local extension blocks to leave an upstream v20-or-earlier tail layout.
 static void strip_local_extension_blocks(FILE *f) {
     const long local_at = (long)(sizeof(settings_backup_v1_t) + 7 +
         sizeof(settings_backup_profile_t) + sizeof(settings_backup_keys_t) + sizeof(settings_backup_hold_t) +
         sizeof(settings_backup_indent_adjust_t) + sizeof(settings_backup_weight_t) + sizeof(settings_backup_wifi_t) +
         sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
-                                   sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t));
+                                   sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
+                                   sizeof(settings_backup_volume_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -184,6 +186,14 @@ int main(void) {
     app_settings_set_reader_key_preset(1);assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     assert(app_settings_system_contrast() == 100);
     assert(app_settings_book_line_spacing() == 130); /* New installations start at the middle slider stop. */
+    // 默认 5 分钟；存过 0（关闭）必须保留，不能被默认值覆盖。
+    // The default is five minutes; a stored 0 (off) must survive the default.
+    has_idle=false;app_settings_init();assert(app_settings_auto_lock_minutes()==5);
+    loaded_idle=0;has_idle=true;app_settings_init();assert(app_settings_auto_lock_minutes()==0);
+    loaded_idle=1;app_settings_init();assert(app_settings_auto_lock_minutes()==1);
+    has_idle=false;
+    // 关机样式默认仅浅睡。/ Shutdown style defaults to light-only.
+    assert(app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT);
 
     assert(app_settings_book_indent_adjust()==0);
     app_settings_set_book_indent_adjust(-20);assert(loaded_adjust==0);
@@ -254,6 +264,7 @@ int main(void) {
     s_reader_full_pages = 5;
     s_reader_turn_effect = 1;
     s_reader_power_turn = true;
+    s_reader_volume_turn = true;
     s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
     app_settings_set_reader_open_fullscreen(false); /* v18 band remembers windowed entries */
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_MARK); /* v19 band carries the heading style */
@@ -364,6 +375,7 @@ int main(void) {
     s_reader_full_pages = 15;
     s_reader_turn_effect = 0;
     s_reader_power_turn = false;
+    s_reader_volume_turn = false;
     s_reader_statusbar = true;
     s_reader_open_fullscreen = true; /* dirty value must come back from the backup */
     s_shelf_style = 2;
@@ -396,6 +408,7 @@ int main(void) {
     assert(s_book_px == 62 && s_book_tracking == 8 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
+    assert(app_settings_reader_volume_turn());
     assert(!app_settings_reader_open_fullscreen());
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_MARK);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
@@ -445,7 +458,8 @@ int main(void) {
                                                sizeof(settings_backup_wifi_t) + sizeof(settings_backup_background_t) +
                                                sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
-                                   sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t));
+                                   sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
+                                   sizeof(settings_backup_volume_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -500,9 +514,17 @@ int main(void) {
     assert(fseek(saved, 0, SEEK_END) == 0);
     long legacy_end = ftell(saved);
     size_t legacy_tail = (size_t)(legacy_end - local_at);
+    const size_t l_band = sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
+                          sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t);
     uint8_t *legacy_bytes = malloc(legacy_tail ? legacy_tail : 1);
     assert(legacy_bytes);
     assert(fseek(saved, local_at, SEEK_SET) == 0 && fread(legacy_bytes, 1, legacy_tail, saved) == legacy_tail);
+    // L=21 在双击块后没有音量键块：摘掉它，历史块紧跟双击块。
+    // The L=21 layout has no volume block after the double press: drop it so history follows directly.
+    memmove(legacy_bytes + l_band, legacy_bytes + l_band + sizeof(settings_backup_volume_t),
+            legacy_tail - l_band - sizeof(settings_backup_volume_t));
+    legacy_tail -= sizeof(settings_backup_volume_t);
+    legacy_end -= (long)sizeof(settings_backup_volume_t);
     memcpy(legacy_header.magic, "PICOSETL", 8);
     legacy_header.flags[BK_TRACKING] = 2; // 旧本地 0 px / old local 0 px
     legacy_header.flags[BK_MARGIN] = 60;  // 恢复时夹到 48 / clamped to 48 on restore
@@ -595,7 +617,7 @@ int main(void) {
     assert(ftruncate(fileno(saved),v11_end-(long)sizeof(settings_backup_hold_t)-(long)(sizeof(settings_backup_indent_adjust_t)+sizeof(settings_backup_weight_t)))==0&&fclose(saved)==0);
     unsigned prior_wifi=wifi_imports,prior_history=history_restores;
     s_reader_hold_action=APP_READER_KEY_HOME;assert(app_settings_backup_restore()==ESP_OK);
-    assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME && app_settings_main_fast_refresh() && app_settings_book_indent_adjust()==0);
+    assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME && app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER && app_settings_book_indent_adjust()==0);
     assert(wifi_imports==prior_wifi+1&&history_restores==prior_history+1);
     assert(app_settings_reader_key_action(0)==saved_keys.actions[0]&&app_settings_reader_key_action(1)==saved_keys.actions[1]&&app_settings_reader_key_action(2)==saved_keys.actions[2]);
     assert(app_settings_backup_save()==ESP_OK); // Continue v8 conversion from current v11.

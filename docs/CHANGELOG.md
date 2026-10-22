@@ -3,10 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 0.3.3-rc97 本地 / 2026-10-21
+## 0.3.3-rc98 本地 / 2026-10-22
 
-- 修复开启前光后画面从灯带一侧缓慢发灰的问题。前光点亮时面板高压轨（VCOM/VSH）在每次刷新后只保留 100 ms，不再保留 8 秒：光照会加速像素电荷泄漏，轨断得越早灰化越慢。灯灭时仍保留 8 秒；开灯时每次刷新多约 80 ms 上电时间。
-  Fix the slow graying that spread in from the light strip while the front light was on. With the light lit, the panel HV rails (VCOM/VSH) now stay up for only 100 ms after each refresh instead of 8 s: light accelerates pixel-charge leakage, so dropping the rails sooner slows the graying. The 8 s hold remains with the light off; lit refreshes pay roughly 80 ms more for the TPS65185 power-up.
+- 调整两项默认值：无操作自动锁屏默认改为 5 分钟（仍可选 1/5/10 分钟或关闭），关机睡眠默认改为「仅浅睡」——关机后保留锁屏画面、不断电，按键或拿起返回关机前页面。只影响从未保存过该项设置的设备，已保存的选项保持不变；「关闭」现在会作为明确选择持久保存，不再被默认值覆盖。
+  Two defaults changed: idle auto-lock now defaults to five minutes (1/5/10 or off remain selectable), and the power-menu shutdown style defaults to light-only, keeping the lock face and power so a key or pickup returns to the pre-shutdown page. Only devices that never saved these settings are affected; existing choices stay. An explicit "off" is now persisted and no longer overridden by the default.
+
+- 面板高压轨（VCOM/VSH）现在无论前光是否点亮，每次刷新后都只保留 100 ms，空闲即断电，不再保留 8 秒。这保留了开灯时抑制灯带侧发灰的修复，也缩短了灭灯后轨带电的时间；代价是间隔超过 100 ms 的刷新会多约 80 ms 的 TPS65185 上电时间。
+  The panel HV rails (VCOM/VSH) now stay up for only 100 ms after each refresh regardless of the front light, dropping on idle instead of holding for 8 s. This keeps the lit-side graying fix and shortens rail-on time with the light off; refreshes more than 100 ms apart pay roughly 80 ms more for the TPS65185 power-up.
 
 - 下拉快捷栏的前光控制改为第四枚圆钮开关：开灯为黑底白太阳，熄灭为浅底黑太阳，与旁边图标同粗细；锁屏图标移出快捷栏。下方亮度、色温换成整行可点的大滑杆（14px 轨道、22px 滑块）并去掉右侧百分比，拖动实时生效、松手或点选才保存。滑杆拖动改为带脏区膨胀的差分刷新，减少圆圈上下边缘的浅残影，松手仍用 GL16 定稿。滑杆不再自动开灯，灯灭时只记录数值，必须点圆钮才亮；浅睡灭灯、唤醒恢复，无前光的板保留锁屏圆钮和四键布局。
   The pull-down quick layer now uses its fourth circle as the frontlight switch: black with a white sun when on and light with a black sun when off, matching the neighbouring glyph weight, replacing the lock icon. Brightness and colour temperature become full-row sliders with a 14px track and 22px knob without percentage labels, applied while dragging and persisted on release or tap. Slider drags now use dilated dirty masks to cut the light ghost along the knob's top and bottom edges, while release still settles with GL16. Sliders never turn the light on by themselves; with the light off they only record values and the circle must be tapped. Light sleep blanks the light, wake restores it, and boards without a frontlight keep the lock circle and the four-key layout.
@@ -15,6 +18,21 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 暂时隐藏设置页“升级和恢复”里的“系统升级”一行：联网升级流程还没改好，先不开放入口。升级页面（TF 卡与联网）代码保留，重新开放时恢复这一行即可；其余三行位置随之上移，滚动上限同步收紧。
   Temporarily hide the System Upgrade row under Settings → Upgrade & Recovery until the online update flow is finished. The upgrade page code (TF card and online) is kept, so re-enabling only needs the row back; the remaining three rows move up and the scroll limit follows.
+
+- 阅读设置「按键控制」的示意图改为与机身实体顺序一致：最左是圆圈中键，中间是左键，右侧是右键；点击卡片也按新位置进入对应功能列表，三键原有映射不变。
+  The key-control diagram now follows the physical key order: the left circle is the middle key, the middle bar the left key, and the right bar the right key. Tapping a card opens that key's action list, and the existing mappings are unchanged.
+
+- 修复「按键控制」动作列表下方选项点错的问题：列表绘制按 88 像素排、命中按 94 像素算，越靠下越容易点到上一行；七行现在共用同一组 94 像素矩形。
+  Fix the key-action list firing the wrong row: painting laid the seven rows out at an 88 px pitch while hit testing used 94 px, so lower options drifted. Both now share the same 94 px rectangles.
+
+- 「按键控制」在「中键双击」下方新增「音量键翻页」开关，默认关闭。开启后只在阅读正文响应侧键：音量+上一页、音量−下一页，打开设置面板或回到书架时不翻页；一次按下翻一页。开关写入 NVS，配置备份格式升到 v25，旧备份恢复后保持关闭。
+  A volume-key page-turn switch now sits under the middle double press in key controls and is off by default. When on, it only acts in the reader body: volume-up turns back, volume-down forward, one page per press, and panels or the shelf stay inert. The setting is stored in NVS; the settings backup format moves to v25 and older backups restore it off.
+
+- 阅读设置去掉「电源键翻页」这一项，七项按四行双列重排；「按键控制」的说明由「自定义三键」改为「自定义按键」，并移除中键长按下方的操作提示。底层电源键翻页设置和已保存的值保持不变，旧备份仍可正常恢复。
+  Remove the power-key page-turn row from reading settings and reflow the remaining seven items across four two-column rows. The key-control summary now reads “自定义按键”, and the hint below the middle-key hold row is gone. The underlying setting and saved values are unchanged, so older backups still restore.
+
+- 改进「通过 WiFi 对时」：临时连接期间关闭 WiFi 省电并等 120 ms 再连接；短暂掉线会在 15 秒内自动重连最多三次；NTP 等待从 12 秒延长到 20 秒，让 lwIP 在首个服务器无响应后有机会尝试下一个；NTP 服务器首选阿里云固定地址，绕开设备侧域名解析。
+  Improve “sync over WiFi”: disable WiFi power save for the temporary link and give the hosted radio 120 ms before connecting, reconnect up to three times within 15 s after a transient disconnect, and extend the NTP wait from 12 s to 20 s so lwIP can try the next server after the first stays silent. The NTP server list now starts with Aliyun's fixed address to bypass device-side name resolution.
 
 ## 0.3.3-rc97 / 2026-10-18
 

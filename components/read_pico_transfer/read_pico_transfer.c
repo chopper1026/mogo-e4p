@@ -497,12 +497,15 @@ static bool time_sync_cancelled(void) {
 }
 static esp_err_t sync_time_online_impl(uint32_t *utc_seconds);
 static esp_err_t time_sync_ntp(uint32_t *utc_seconds) {
+    // 首选阿里云 NTP 的固定 IP，避开设备侧 DNS 故障；后两个保留域名，DNS 正常时仍可轮换。
+    // Start with Aliyun NTP's fixed address so a device-side DNS failure cannot stall the query;
+    // the remaining entries stay as hostnames for normal rotation.
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(3,
-        ESP_SNTP_SERVER_LIST("ntp.aliyun.com", "time.cloudflare.com", "pool.ntp.org"));
+        ESP_SNTP_SERVER_LIST("203.107.6.88", "162.159.200.123", "ntp.aliyun.com"));
     if (time_sync_cancelled()) return ESP_ERR_INVALID_STATE;
     esp_err_t err = esp_netif_sntp_init(&config);
     if (err != ESP_OK) return err;
-    const int64_t deadline = esp_timer_get_time() + 12000000;
+    const int64_t deadline = esp_timer_get_time() + 20000000;
     do {
         if (time_sync_cancelled()) { err = ESP_ERR_INVALID_STATE; break; }
         err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100));
@@ -711,14 +714,31 @@ static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto time_cleanup;
     wifi_started = true;
+    // 关闭省电并给托管无线一拍再连接：省电会让单次 NTP 回复被错过，托管射频也要等调度器就绪。
+    // Disable power save and give the hosted radio a scheduler turn before connecting: power save can
+    // drop the single NTP reply, and the hosted radio is not ready for connect immediately after start.
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    vTaskDelay(pdMS_TO_TICKS(120));
     err = esp_wifi_connect(); if (err != ESP_OK) goto time_cleanup;
     const int64_t ip_deadline = esp_timer_get_time() + 15000000;
-    EventBits_t bits = 0;
-    while (!(bits & TIME_GOT_IP) && esp_timer_get_time() < ip_deadline) {
+    // 单次 connect 失败不重试会让一次瞬时的断开直接报超时；在截止时间内最多重连三次。
+    // A single connect failure would turn one transient disconnect into a timeout; retry up to three times.
+    unsigned attempts = 1;
+    for (;;) {
         if (time_sync_cancelled()) { err = ESP_ERR_INVALID_STATE; goto time_cleanup; }
-        bits = xEventGroupWaitBits(s_time_events, TIME_GOT_IP, pdFALSE, pdFALSE, pdMS_TO_TICKS(100));
+        EventBits_t bits = xEventGroupWaitBits(s_time_events, TIME_GOT_IP | TIME_DISCONNECTED,
+                                               pdFALSE, pdFALSE, pdMS_TO_TICKS(200));
+        if (bits & TIME_GOT_IP) break;
+        if (esp_timer_get_time() >= ip_deadline) { err = ESP_ERR_TIMEOUT; goto time_cleanup; }
+        if (bits & TIME_DISCONNECTED) {
+            xEventGroupClearBits(s_time_events, TIME_DISCONNECTED);
+            if (attempts >= 3) { err = ESP_ERR_TIMEOUT; goto time_cleanup; }
+            ++attempts;
+            vTaskDelay(pdMS_TO_TICKS(300));
+            err = esp_wifi_connect();
+            if (err != ESP_OK) goto time_cleanup;
+        }
     }
-    if (!(bits & TIME_GOT_IP)) { err = ESP_ERR_TIMEOUT; goto time_cleanup; }
     err = time_sync_ntp(utc_seconds);
 time_cleanup:
     if (wifi_started) esp_wifi_stop();
@@ -739,6 +759,9 @@ static esp_err_t sync_time_online_impl(uint32_t *utc_seconds) {
     read_pico_transfer_get_status(&status);
     if (!s_wifi || status.mode != READ_PICO_TRANSFER_MODE_STA || !status.network_ready ||
         status.state == READ_PICO_TRANSFER_UPLOADING) return ESP_ERR_INVALID_STATE;
+    // 复用在线链路时同样先关省电，避免单次 NTP 回复被吞。
+    // Disable power save on a reused link as well so the single NTP reply is not dropped.
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
     return time_sync_ntp(utc_seconds);
 }
 

@@ -816,15 +816,17 @@ int main(void) {
     assert(!s_reader_footer_pending&&!s_reader_image_refresh_pending&&!s_water_turn_pending&&!s_reader_cleanup&&!s_turns&&!s_du_count);
     test_hold_refresh=false;s_reader_return_home=false;
     s_reader_panel=READER_PANEL_TOOLS;s_page=1;
-    assert(apply_reader_option(&ctx,0)==APP_REDRAW_PAGE&&test_power_turn);
+    // 阅读设置移除了电源键翻页行，开关序号改为 0 状态栏、1 关闭书内图片、2 竖排。
+    // The reading sheet dropped its power-turn row: option 0 is the status bar, 1 in-book images
+    // and 2 vertical text.
+    assert(apply_reader_option(&ctx,0)==APP_REDRAW_PAGE&&!test_reader_statusbar&&s_page==1);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL);
-    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!test_reader_statusbar&&s_page==1);
-    assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
     assert(test_image_preparations==2&&test_reflows==2);
     test_reflow_failures=1;
-    assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
     assert(test_reflows==4&&test_image_preparations==2);
-    assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
     // 上游此断言与其单动作语义矛盾（标志为假仍期待回首页）；按真实语义：标志为假回书架。
     // Upstream's assert contradicts its single-action semantics (a false flag cannot go home);
     // the true behavior: a false flag returns to the shelf, a true one to home.

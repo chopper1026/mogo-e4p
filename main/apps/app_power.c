@@ -287,8 +287,10 @@ static app_redraw_t on_touch(app_ctx_t* ctx, const cst836u_touch_t* touch) {
 }
 
 static app_redraw_t on_tick(app_ctx_t* ctx) {
-    if (!read_pico_rails_on()) return APP_REDRAW_NONE;
+    // 高压轨空闲100ms即断；到轮询点时重新上电，不能因为轨已断就停止轮询。
+    // Rails drop 100 ms after idle; power them back up at each poll instead of stopping the poll.
     if (ctx->now_ms - s_last_poll_ms < PWR_POLL_MS) return APP_REDRAW_NONE;
+    if (!read_pico_rails_on()) epd_poweron();
     s_last_poll_ms = ctx->now_ms;
 
     read_pico_status_t status = { 0 };

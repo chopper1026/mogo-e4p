@@ -15,6 +15,8 @@
  * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换。
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
+ * 用户 2026-10-21 修订：按键控制示意图按本板实体顺序摆成中、左、右（中键最左），中键双击下新增音量键翻页开关。
+ * User revision 2026-10-21: the key sheet follows the board's physical key order (middle, left, right), and a volume-key page-turn switch sits under the middle double press.
  * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
@@ -155,6 +157,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "read_pico_init.h"
+#include "read_pico_board.h"
 #include "read_pico_sd.h"
 #include "read_pico_transfer.h"
 #include "read_pico_search.h"
@@ -2419,18 +2422,14 @@ static void draw_layout_settings(uint8_t* fb) {
 // 用户确认半屏双列布局；绘制与点击共用同一矩形，间隙不穿透。/ Approved two-column half sheet; paint and hit testing share rectangles with inert gaps.
 static EpdRect reading_setting_rect(int index) {
     int extra=reader_ui_extra(56), footer=reader_ui_extra(36);
-    if (index < 0 || index >= 8) return (EpdRect){0, 0, 0, 0};
+    if (index < 0 || index >= 7) return (EpdRect){0, 0, 0, 0};
     int row=index/2;
-    // 四行双列：竖排占第四行右格，与「关闭书内图片」并排；行距收到 104，
-    // 四行底部才仍然留在「完成」之上。
-    // Four two-column rows: the vertical switch takes the fourth row's right cell beside "hide
-    // in-book images", and a 104 pitch keeps every row clear of Done.
+    // 七项排成四行双列：前三行各两格，竖排单独占第四行左格；行距 104，四行底部仍留在「完成」之上。
+    // Seven items fill four two-column rows: three paired rows and a lone vertical switch in the
+    // fourth row's left cell; a 104 pitch keeps every row clear of Done.
     return (EpdRect){36+(index%2)*314,702+row*104-(3-row)*extra-footer,298,98+extra};
 }
 static int reading_settings_top(void) { return 580-reader_ui_extra(204); }
-static EpdRect reading_toggle_rect(int index) {
-    return reading_setting_rect(index == 0 ? 3 : index == 1 ? 5 : index == 2 ? 6 : 7);
-}
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on) {
     ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
     int cx = track.x + (on ? 49 : 20);
@@ -2450,10 +2449,10 @@ static void draw_reading_card(uint8_t *fb, int index, const char *title,
 }
 static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
                                 const char *detail, bool on) {
-    EpdRect row = reading_toggle_rect(index);
+    EpdRect row = reading_setting_rect(index);
     ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
     ui_draw_control_frame(fb, row, 20, 0x68);
-    if (index == 2) {
+    if (detail) {
         // 半宽格放两行：标题与说明各降一号字，开关仍留在右端。
         // A half-width cell carries two lines: title and detail step down a size, the switch stays right.
         ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
@@ -2474,11 +2473,10 @@ static void draw_reading_settings(uint8_t* fb) {
     draw_reading_card(fb, 0, "自动全刷", interval, true);
     draw_reading_card(fb, 1, "翻页效果", app_settings_reader_turn_effect() ? "水波纹" : "普通", true);
     draw_reading_card(fb, 2, "翻页模式", app_settings_reader_vertical_turn() ? "上下翻页" : "左右翻页", false);
-    draw_reading_toggle(fb, 0, "电源键翻页", NULL, app_settings_reader_power_turn());
-    draw_reading_card(fb, 4, "按键控制", "自定义三键", false);
-    draw_reading_toggle(fb, 1, "状态栏", NULL, app_settings_reader_statusbar());
-    draw_reading_toggle(fb, 2, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
-    draw_reading_toggle(fb, 3, "竖排（从右到左）", NULL, app_settings_book_vertical());
+    draw_reading_card(fb, 3, "按键控制", "自定义按键", false);
+    draw_reading_toggle(fb, 4, "状态栏", NULL, app_settings_reader_statusbar());
+    draw_reading_toggle(fb, 5, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
+    draw_reading_toggle(fb, 6, "竖排（从右到左）", NULL, app_settings_book_vertical());
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2534,45 +2532,68 @@ static const char *reader_key_label(app_reader_key_action_t action) {
 #define KEY_HOLD_TOP 772
 #define KEY_DOUBLE_TOP 892
 #define KEY_DOUBLE_HEIGHT 72
-static EpdRect reader_key_card(unsigned key) { return (EpdRect){36 + (int)key * 208, KEY_CARDS_TOP, 196, 114}; }
+#define KEY_VOLUME_TOP 976
+#define KEY_VOLUME_HEIGHT 96
+// 本板盖板三键的物理顺序是中、左、右（中键在最左）；示意图按实体位置摆，
+// 左侧圆圈才是中键。命中测试与绘制共用这张表，逻辑键号不变。
+// This board's cover orders the keys middle, left, right (the middle key is leftmost), so the
+// diagram follows the physical slots: the left circle is the middle key. Painting and hit
+// testing share this table and the logical key indices stay unchanged.
+static const unsigned s_reader_key_slots[3] = {1, 0, 2};
+static EpdRect reader_key_card(unsigned slot) { return (EpdRect){36 + (int)slot * 208, KEY_CARDS_TOP, 196, 114}; }
 static void draw_key_settings(uint8_t *fb) {
     draw_sheet(fb, KEY_SETTINGS_TOP, "按键控制");
     draw_sheet_back(fb, KEY_SETTINGS_TOP);
     static const char *const names[] = {"左键", "中键", "右键"};
-    for (unsigned i = 0; i < 3; ++i) {
-        int cx = 134 + (int)i * 208;
-        if (i == 1) {
+    for (unsigned slot = 0; slot < 3; ++slot) {
+        unsigned key = s_reader_key_slots[slot];
+        int cx = 134 + (int)slot * 208;
+        if (key == 1) {
             epd_draw_circle(cx, KEY_ICON_Y, 25, UI_GRAY_BLACK, fb);
             epd_draw_circle(cx, KEY_ICON_Y, 24, UI_GRAY_BLACK, fb);
         } else ui_fill_round_rect(fb, (EpdRect){cx - 26, KEY_ICON_Y - 3, 52, 6}, 3, UI_GRAY_BLACK);
-        reader_panel_text_vc(fb, cx, KEY_LABEL_Y, 22, names[i], EPD_DRAW_ALIGN_CENTER, false);
-        EpdRect card = reader_key_card(i);
+        reader_panel_text_vc(fb, cx, KEY_LABEL_Y, 22, names[key], EPD_DRAW_ALIGN_CENTER, false);
+        EpdRect card = reader_key_card(slot);
         ui_fill_round_rect(fb, card, 20, 0xf0);
         ui_draw_control_frame(fb, card, 20, 0x58);
         ui_text_box(fb,(EpdRect){card.x+17,card.y+7,card.width-57,36},20,"单击",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){card.x+12,card.y+52,card.width-24,52},24,reader_key_label(app_settings_reader_key_action(i)),EPD_DRAW_ALIGN_CENTER,false);
+        ui_text_box(fb,(EpdRect){card.x+12,card.y+52,card.width-24,52},24,reader_key_label(app_settings_reader_key_action(key)),EPD_DRAW_ALIGN_CENTER,false);
         ui_draw_icon(fb, card.x + card.width - 23, card.y + 24, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     }
     EpdRect hold = {36, KEY_HOLD_TOP, 612, 96};
     ui_fill_round_rect(fb, hold, 20, 0xf0); ui_draw_control_frame(fb, hold, 20, 0x58);
-    ui_text_box(fb,(EpdRect){58,KEY_HOLD_TOP+6,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){322,KEY_HOLD_TOP+6,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
-    ui_draw_icon(fb, 625, KEY_HOLD_TOP + 33, 20, UI_ICON_CHEVRON_DOWN, 0x38);
-    reader_panel_text(fb, 58, KEY_HOLD_TOP + 64, 19, "点击选择长按功能，例如返回主页", EPD_DRAW_ALIGN_LEFT, false);
+    // 说明移除后单行居中，卡片高度与后续行位置不变。
+    // With the hint gone the single row is centered; the card height and later rows stay put.
+    ui_text_box(fb,(EpdRect){58,KEY_HOLD_TOP+24,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,KEY_HOLD_TOP+24,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, KEY_HOLD_TOP + 48, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     EpdRect dbl = {36, KEY_DOUBLE_TOP, 612, KEY_DOUBLE_HEIGHT};
     ui_fill_round_rect(fb, dbl, 20, 0xf0); ui_draw_control_frame(fb, dbl, 20, 0x58);
     ui_text_box(fb,(EpdRect){58,KEY_DOUBLE_TOP+6,238,48},26,"中键双击",EPD_DRAW_ALIGN_LEFT,false);
     ui_text_box(fb,(EpdRect){322,KEY_DOUBLE_TOP+6,270,48},25,reader_key_label(app_settings_reader_double_action()),EPD_DRAW_ALIGN_RIGHT,false);
     ui_draw_icon(fb, 625, KEY_DOUBLE_TOP + 33, 20, UI_ICON_CHEVRON_DOWN, 0x38);
+    bool volume = app_settings_reader_volume_turn();
+    EpdRect vol = {36, KEY_VOLUME_TOP, 612, KEY_VOLUME_HEIGHT};
+    ui_fill_round_rect(fb, vol, 20, 0xf0); ui_draw_control_frame(fb, vol, 20, 0x58);
+    ui_text_box(fb,(EpdRect){58,KEY_VOLUME_TOP+24,300,48},26,"音量键翻页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){330,KEY_VOLUME_TOP+24,196,48},25,volume?"开启":"关闭",EPD_DRAW_ALIGN_RIGHT,false);
+    draw_reading_switch(fb,(EpdRect){556,KEY_VOLUME_TOP+28,69,39},volume);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
+}
+// 动作列表卡片：绘制与命中共用同一条矩形，行距 94。此前绘制按 88 排、命中按 94，
+// 越靠下的选项点到的行和看到的行对不上。
+// Action-list cards share one rectangle at a 94 px pitch; painting used 88 while hit testing used
+// 94, so lower rows fired on a different action than the one shown.
+static EpdRect reader_key_action_card(int index) {
+    return (EpdRect){36, 390 + index * 94, 612, 78};
 }
 static void draw_key_picker(uint8_t *fb) {
     static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能", "中键双击功能"};
     draw_sheet(fb, 270, titles[s_reader_key_pick < 5 ? s_reader_key_pick : 0]);
     draw_sheet_back(fb, 270);
     for (int i = 0; i < APP_READER_KEY_COUNT; ++i) {
-        EpdRect card = {36, 390 + i * 88, 612, 78};
+        EpdRect card = reader_key_action_card(i);
         bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action()
                        : s_reader_key_pick == 4 ? app_settings_reader_double_action()
                        : app_settings_reader_key_action(s_reader_key_pick)) == i;
@@ -5409,16 +5430,12 @@ static app_redraw_t reader_manual_refresh(app_ctx_t* ctx) {
 
 static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     (void)ctx;
-    if (kind == 0) {
-        app_settings_set_reader_power_turn(!app_settings_reader_power_turn());
-        return APP_REDRAW_PAGE;
-    }
-    if (!s_text || kind < 1 || kind > 3) return APP_REDRAW_NONE;
-    bool previous = kind == 1 ? app_settings_reader_statusbar() :
-                    kind == 2 ? app_settings_reader_hide_images() : app_settings_book_vertical();
+    if (!s_text || kind < 0 || kind > 2) return APP_REDRAW_NONE;
+    bool previous = kind == 0 ? app_settings_reader_statusbar() :
+                    kind == 1 ? app_settings_reader_hide_images() : app_settings_book_vertical();
     // 重新开启插图时，先补齐尺寸；文件读取必须在绘制锁外。
     // Probe missing dimensions before re-enabling images, outside the drawing lock.
-    if (kind == 2 && previous) for (size_t i = 0; i < s_block_count; ++i) {
+    if (kind == 1 && previous) for (size_t i = 0; i < s_block_count; ++i) {
         blk_t *block = &s_blocks[i];
         if (block->image < 0 || (size_t)block->image >= s_image_count ||
             (block->image_width && block->image_height)) continue;
@@ -5431,8 +5448,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     lock_draw();
     size_t off = book_layout_page_start_offset(s_page);
     invalidate_prep();
-    if (kind == 1) app_settings_set_reader_statusbar(!previous);
-    else if (kind == 2) {
+    if (kind == 0) app_settings_set_reader_statusbar(!previous);
+    else if (kind == 1) {
         app_settings_set_reader_hide_images(!previous);
         book_layout_set_images_visible(previous);
     } else {
@@ -5450,8 +5467,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
-        if (kind == 1) app_settings_set_reader_statusbar(previous);
-        else if (kind == 2) {
+        if (kind == 0) app_settings_set_reader_statusbar(previous);
+        else if (kind == 1) {
             app_settings_set_reader_hide_images(previous);
             book_layout_set_images_visible(!previous);
         } else {
@@ -5674,11 +5691,11 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         app_settings_set_reader_turn_effect(!app_settings_reader_turn_effect());
     } else if (ui_rect_hit(reading_setting_rect(2), x, y)) {
         s_reader_panel = READER_PANEL_TURN_SETTINGS;
-    } else if (ui_rect_hit(reading_setting_rect(4), x, y)) {
+    } else if (ui_rect_hit(reading_setting_rect(3), x, y)) {
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
     } else {
-        for (int i = 0; i < 4; ++i)
-            if (ui_rect_hit(reading_toggle_rect(i), x, y)) return apply_reader_option(ctx, i);
+        for (int i = 0; i < 3; ++i)
+            if (ui_rect_hit(reading_setting_rect(4 + i), x, y)) return apply_reader_option(ctx, i);
         return APP_REDRAW_NONE;
     }
     invalidate_prep();
@@ -5798,7 +5815,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (ui_rect_hit((EpdRect){36, top + 29, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
             s_reader_panel = picker ? READER_PANEL_KEY_SETTINGS : READER_PANEL_REFRESH_SETTINGS;
         else if (picker) {
-            for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit((EpdRect){36, 390 + i * 94, 612, 78}, x, y)) {
+            for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit(reader_key_action_card(i), x, y)) {
                 bool saved = s_reader_key_pick == 3 ? app_settings_set_reader_hold_action(i)
                     : s_reader_key_pick == 4 ? app_settings_set_reader_double_action(i)
                     : app_settings_set_reader_key_action(s_reader_key_pick, i);
@@ -5811,8 +5828,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             }
             return APP_REDRAW_NONE;
         } else {
-            for (unsigned i = 0; i < 3; ++i) if (ui_rect_hit(reader_key_card(i), x, y)) {
-                s_reader_key_pick = i;
+            for (unsigned slot = 0; slot < 3; ++slot) if (ui_rect_hit(reader_key_card(slot), x, y)) {
+                s_reader_key_pick = s_reader_key_slots[slot];
                 s_reader_key_error[0] = 0;
                 s_reader_panel = READER_PANEL_KEY_PICKER;
                 return APP_REDRAW_PAGE;
@@ -5827,6 +5844,10 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_reader_key_pick = 4;
                 s_reader_key_error[0] = 0;
                 s_reader_panel = READER_PANEL_KEY_PICKER;
+                return APP_REDRAW_PAGE;
+            }
+            if (ui_rect_hit((EpdRect){36, KEY_VOLUME_TOP, 612, KEY_VOLUME_HEIGHT}, x, y)) {
+                app_settings_set_reader_volume_turn(!app_settings_reader_volume_turn());
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
@@ -7138,6 +7159,30 @@ static int book_remote_direction(void) {
     }
     return direction;
 }
+// 音量键翻页：侧键低电平为按下，只取按下沿，一次按一下翻一页；面板或书架不响应。
+// Volume-key turns: the side keys read low when pressed; only the press edge counts, one turn per
+// press, and panels or the shelf stay inert.
+#define READER_VOLUME_POLL_MS 30
+static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
+    static int64_t s_poll_ms;
+    static uint8_t s_last_keys = 0xff;
+    if (!app_settings_reader_volume_turn() || !app_book_reader_body_visible()) {
+        s_last_keys = 0xff;
+        return APP_REDRAW_NONE;
+    }
+    if (ctx->now_ms - s_poll_ms < READER_VOLUME_POLL_MS) return APP_REDRAW_NONE;
+    s_poll_ms = ctx->now_ms;
+    uint8_t keys = 0;
+    if (read_pico_read_volume_keys(&keys) != ESP_OK) {
+        s_last_keys = 0xff;
+        return APP_REDRAW_NONE;
+    }
+    uint8_t edges = (uint8_t)(keys & ~s_last_keys);
+    s_last_keys = keys;
+    if (!edges) return APP_REDRAW_NONE;
+    s_stats_activity_ms = ctx->now_ms;
+    return turn_page(ctx, (edges & READ_PICO_VOLUME_UP) ? -1 : 1);
+}
 static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t indent=reader_indent_hold_tick(ctx);
     if(indent!=APP_REDRAW_NONE)return indent;
@@ -7176,6 +7221,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             return turn_page(ctx, ble_dir);
         }
     }
+    app_redraw_t volume = reader_volume_tick(ctx);
+    if (volume != APP_REDRAW_NONE) return volume;
     if (s_reader_notice[0] && ctx->now_ms >= s_reader_notice_until) {
         s_reader_notice[0] = 0;
         if (s_view == READING) {

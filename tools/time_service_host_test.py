@@ -157,7 +157,7 @@ typedef struct {int count;const char *servers[3];} esp_sntp_config_t;
 #define ESP_SNTP_SERVER_LIST(...) {__VA_ARGS__}
 #define ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(n,list) {.count=n,.servers=list}
 static bool time_sync_cancelled(void){return s_time_cancel;}
-static int esp_netif_sntp_init(esp_sntp_config_t *c){assert(c->count==3&&!strcmp(c->servers[0],"ntp.aliyun.com"));++inits;return init_error;}
+static int esp_netif_sntp_init(esp_sntp_config_t *c){assert(c->count==3&&!strcmp(c->servers[0],"203.107.6.88"));++inits;return init_error;}
 static int esp_netif_sntp_sync_wait(int ms){mono+=ms*1000;++waits;if(waits==cancel_at)s_time_cancel=true;return waits==success_at?ESP_OK:ESP_ERR_TIMEOUT;}
 static void esp_netif_sntp_deinit(void){++deinits;}
 '''+function('time_sync_ntp',root/'components/read_pico_transfer/read_pico_transfer.c')+r'''
@@ -166,10 +166,10 @@ int main(void){uint32_t utc=0;
  reset();success_at=2;assert(time_sync_ntp(&utc)==ESP_OK&&utc==wall&&inits==1&&deinits==1&&waits==2);
  reset();s_time_cancel=true;assert(time_sync_ntp(&utc)==ESP_ERR_INVALID_STATE&&!inits&&!deinits);
  reset();cancel_at=2;assert(time_sync_ntp(&utc)==ESP_ERR_INVALID_STATE&&deinits==1&&mono==200000);
- reset();assert(time_sync_ntp(&utc)==ESP_ERR_TIMEOUT&&deinits==1&&mono==12000000);
+ reset();assert(time_sync_ntp(&utc)==ESP_ERR_TIMEOUT&&deinits==1&&mono==20000000);
  reset();init_error=ESP_FAIL;assert(time_sync_ntp(&utc)==ESP_FAIL&&!deinits&&!waits);
  reset();success_at=1;wall=1;assert(time_sync_ntp(&utc)==ESP_ERR_INVALID_RESPONSE&&deinits==1);
- puts("PASS: actual SNTP helper has one init/deinit, valid UTC only,100ms cancellation checkpoints and12s bounded timeout; failed init never tears down an unowned singleton");
+ puts("PASS: actual SNTP helper has one init/deinit, valid UTC only,100ms cancellation checkpoints and20s bounded timeout; failed init never tears down an unowned singleton");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-clock-test-',dir='/private/tmp') as folder:

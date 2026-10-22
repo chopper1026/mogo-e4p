@@ -26,8 +26,8 @@ void app_settings_init(void);
 app_sleep_mode_t app_settings_sleep_mode(void);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
-/// 电源菜单"关机"的方式。彻底关机：立即断电，长按开机；先浅后深：锁屏浅睡十分钟后断电，短按开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
-/// Power-menu shutdown style. Full: immediate power-off, long-press boots; staged: lock, light-sleep ten minutes, then power off, short-press boots; light-only: lock sleeps forever without powering off, key/pickup returns.
+/// 电源菜单"关机"的方式。默认仅浅睡；彻底关机：立即断电，长按开机；先浅后深：锁屏浅睡十分钟后断电，短按开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
+/// Power-menu shutdown style, light-only by default. Full: immediate power-off, long-press boots; staged: lock, light-sleep ten minutes, then power off, short-press boots; light-only: lock sleeps forever without powering off, key/pickup returns.
 typedef enum {
     APP_SHUTDOWN_FULL = 0,
     APP_SHUTDOWN_STAGED = 1,
@@ -58,7 +58,7 @@ app_main_refresh_mode_t app_settings_main_refresh_mode(void);
 void app_settings_set_main_refresh_mode(app_main_refresh_mode_t mode);
 /// 黑白渲染路径的开关；快刷撤下后恒为 false，仅保留内部判断。/ Monochrome path flag; always false now that fast refresh is retired.
 bool app_settings_main_fast_refresh(void);
-/// 无操作自动锁屏分钟数：0 关闭，1/5/10。/ Idle lock timeout: off, 1/5/10 minutes.
+/// 无操作自动锁屏分钟数：0 关闭，1/5/10；默认 5 分钟。/ Idle lock timeout: off, 1/5/10; five minutes by default.
 uint8_t app_settings_auto_lock_minutes(void);
 void app_settings_set_auto_lock_minutes(uint8_t minutes);
 /// 自动对时开关（默认开）。开机/唤醒后距上次成功对时超过阈值才联网校时，深睡期间不可能对时。
@@ -136,6 +136,10 @@ void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);
+/// 阅读正文里用侧键音量键翻页：音量+上一页、音量-下一页；默认关闭。
+/// Turn pages with the side volume keys in the reader body: up goes back, down forward; off by default.
+bool app_settings_reader_volume_turn(void);
+void app_settings_set_reader_volume_turn(bool on);
 /// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
 bool app_settings_reader_statusbar(void);
 void app_settings_set_reader_statusbar(bool on);

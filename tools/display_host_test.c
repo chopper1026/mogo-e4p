@@ -332,18 +332,16 @@ int main(void) {
     assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
                                         (EpdRect){0,160,16,16}) == EPD_DRAW_SUCCESS);
     old_releases = drive_releases;
-    assert(drive_active);
-    rails_idle_check(20049); assert(drive_releases == old_releases);
-    rails_idle_check(20050); assert(drive_active && drive_releases == old_releases + 1);
-    rails_idle_check(20099); assert(drive_releases == old_releases + 1);
-    rails_idle_check(20100); assert(!drive_active && drive_releases == old_releases + 2);
     unsigned old_offs = poweroffs;
-    rails_idle_check(27999); assert(poweroffs == old_offs && drive_releases == old_releases + 2);
-    rails_idle_check(28000); assert(poweroffs == old_offs + 1);
-    rails_idle_check(28001); assert(poweroffs == old_offs + 1);
+    assert(drive_active);
+    rails_idle_check(20049); assert(drive_releases == old_releases && poweroffs == old_offs);
+    rails_idle_check(20050); assert(drive_active && drive_releases == old_releases + 1 && poweroffs == old_offs);
+    rails_idle_check(20099); assert(drive_releases == old_releases + 1 && poweroffs == old_offs);
+    rails_idle_check(20100); assert(!drive_active && drive_releases == old_releases + 2 && poweroffs == old_offs + 1);
+    rails_idle_check(20101); assert(poweroffs == old_offs + 1);
     assert(draws == old_draws && clears == old_clears);
     assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES));
-    puts("idle drive release: no-change output, bounded I2C retry, no extra scans and unchanged HV burst timeout passed");
+    puts("idle drive release: no-change output, bounded I2C retry, no extra scans and unchanged 100 ms HV timeout passed");
     puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
 }
 

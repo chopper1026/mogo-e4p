@@ -65,6 +65,7 @@
 #define NVS_KEY_READER_FULL "rd_gc16"
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
+#define NVS_KEY_VOLUME_TURN "rd_volume"
 // 状态栏显隐新键；rd_immersive 是旧「全屏沉浸」位，仅作老固件升级迁移与降级回写。/ New
 // status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
 #define NVS_KEY_STATUS "rd_status"
@@ -101,7 +102,10 @@
 #define MEDIA_DIR_MAX 96
 
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
-static app_shutdown_style_t s_shutdown_style = APP_SHUTDOWN_FULL;
+// 关机默认仅浅睡：锁屏画面保留、不断电，按键/拿起返回关机前页面。
+// Shutdown defaults to light-only: the lock face stays on and power is kept, so a key or
+// pickup returns to the page shown before shutdown.
+static app_shutdown_style_t s_shutdown_style = APP_SHUTDOWN_LIGHT;
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -128,6 +132,7 @@ static uint8_t s_reader_full_pages = 15;
 static uint8_t s_reader_turn_effect;
 static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
 static bool s_reader_power_turn;
+static bool s_reader_volume_turn;
 static bool s_reader_statusbar = true;
 // 打开图书的全屏偏好：默认全屏（沿用历史行为），用户切换后记忆。/ Full-screen preference when
 // opening a book: full screen by default (historical behavior), remembered once toggled.
@@ -178,7 +183,9 @@ static uint8_t book_title_size_snap(unsigned px) {
 static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
-static uint8_t s_auto_lock_minutes;
+// 默认无操作 5 分钟自动锁屏。
+// Default idle lock is five minutes.
+static uint8_t s_auto_lock_minutes = 5;
 // 自动对时默认开：与设置页开关、time_sync 服务共用同一份运行状态。
 // Auto sync defaults on and shares one runtime copy with the settings page and time_sync.
 static bool s_auto_time_sync = true;
@@ -247,7 +254,11 @@ void app_settings_init(void) {
     raw = 0;
 
     raw = 0;
-    if (nvs_get_u8(h, NVS_KEY_AUTO_LOCK, &raw) == ESP_OK && (raw == 1 || raw == 5 || raw == 10)) s_auto_lock_minutes = raw;
+    // 0 是用户明确选的“关闭”，必须和“没存过”区分开，否则会被默认 5 分钟覆盖。
+    // A stored 0 is the user's explicit "off" and must be honored, or the five-minute default
+    // would override it.
+    if (nvs_get_u8(h, NVS_KEY_AUTO_LOCK, &raw) == ESP_OK && (raw == 0 || raw == 1 || raw == 5 || raw == 10))
+        s_auto_lock_minutes = raw;
     if (nvs_get_u8(h, NVS_KEY_AUTO_TIME, &raw) == ESP_OK) s_auto_time_sync = raw != 0;
     else s_auto_time_sync = true;
     if (nvs_get_u32(h, NVS_KEY_TSYNC_AT, &s_time_sync_last) != ESP_OK) s_time_sync_last = 0;
@@ -315,6 +326,8 @@ void app_settings_init(void) {
         s_reader_turn_effect = reader_turn_effect;
     uint8_t power_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
+    uint8_t volume_turn = 0;
+    if (nvs_get_u8(h, NVS_KEY_VOLUME_TURN, &volume_turn) == ESP_OK) s_reader_volume_turn = volume_turn == 1;
     // 状态栏显隐：新键优先；老固件只有沉浸位，沉浸=1 迁移为隐藏，两键皆无则默认显示。
     // Status visibility prefers the new key; firmwares before it only had the immersive bit,
     // where 1 meant hidden. With neither key present the bar defaults to shown.
@@ -745,6 +758,12 @@ void app_settings_set_reader_power_turn(bool on) {
     s_reader_power_turn = on;
     nvs_put_u8(NVS_KEY_POWER_TURN, on ? 1 : 0);
 }
+bool app_settings_reader_volume_turn(void) { return s_reader_volume_turn; }
+void app_settings_set_reader_volume_turn(bool on) {
+    if (s_reader_volume_turn == on) return;
+    s_reader_volume_turn = on;
+    nvs_put_u8(NVS_KEY_VOLUME_TURN, on ? 1 : 0);
+}
 bool app_settings_reader_statusbar(void) { return s_reader_statusbar; }
 void app_settings_set_reader_statusbar(bool on) {
     if (s_reader_statusbar == on) return;
@@ -1099,6 +1118,17 @@ static bool backup_double_valid(const settings_backup_double_t *dbl) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)dbl->checksum[i] << (8 * i);
     return dbl->action < APP_READER_KEY_COUNT && stored == backup_double_checksum(dbl);
 }
+// v25 追加音量键翻页；旧备份回落关闭。
+// V25 appends the volume-key turn switch; older backups fall back to off.
+typedef struct { uint8_t on, checksum[4]; } settings_backup_volume_t;
+static uint32_t backup_volume_checksum(const settings_backup_volume_t *volume) {
+    return (2166136261u ^ volume->on) * 16777619u;
+}
+static bool backup_volume_valid(const settings_backup_volume_t *volume) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)volume->checksum[i] << (8 * i);
+    return volume->on <= 1 && stored == backup_volume_checksum(volume);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1124,9 +1154,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O 为本合并格式。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O are this merge.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P 为本合并格式。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P are this merge.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1206,9 +1236,9 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    // v24：上游 rac96/97 的 bookmark 与字距偏移 + 本地题头/中键双击扩展。
-    // v24: upstream rc96/97 bookmark and tracking offset plus the local heading/double-press extensions.
-    memcpy(backup.magic, "PICOSETO", sizeof(backup.magic));
+    // v25：在 v24 的 bookmark/题头/中键双击尾部再追加音量键翻页。
+    // v25: appends the volume-key turn switch to the v24 bookmark/heading/double-press tail.
+    memcpy(backup.magic, "PICOSETP", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1285,6 +1315,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_double_t double_action = {.action = s_reader_double_action};
     uint32_t double_hash = backup_double_checksum(&double_action);
     for (unsigned i = 0; i < 4; ++i) double_action.checksum[i] = (uint8_t)(double_hash >> (8 * i));
+    settings_backup_volume_t volume = {.on = s_reader_volume_turn ? 1 : 0};
+    uint32_t volume_hash = backup_volume_checksum(&volume);
+    for (unsigned i = 0; i < 4; ++i) volume.checksum[i] = (uint8_t)(volume_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1309,8 +1342,8 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
-    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action。
-    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action.
+    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns。
+    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns.
     settings_backup_background_t bookmark = {0};
     strlcpy(bookmark.path,s_bookmark,sizeof(bookmark.path));
     uint32_t bookmark_hash=backup_background_checksum(&bookmark);
@@ -1320,6 +1353,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&title_style, 1, sizeof(title_style), file) == sizeof(title_style);
     if (ok) ok = fwrite(&title_size, 1, sizeof(title_size), file) == sizeof(title_size);
     if (ok) ok = fwrite(&double_action, 1, sizeof(double_action), file) == sizeof(double_action);
+    if (ok) ok = fwrite(&volume, 1, sizeof(volume), file) == sizeof(volume);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1410,6 +1444,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_title_style_t title_style = {.style = APP_BOOK_TITLE_STYLE_DEFAULT};
     settings_backup_title_size_t title_size = {.px = APP_BOOK_TITLE_SIZE_DEFAULT};
     settings_backup_double_t double_action = {.action = APP_READER_KEY_NONE};
+    settings_backup_volume_t volume = {.on = 0};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1497,6 +1532,7 @@ esp_err_t app_settings_backup_restore(void) {
         if (ok && version >= 23) ok = fread(&title_size, 1, sizeof(title_size), file) == sizeof(title_size) && backup_title_size_valid(&title_size);
         if (ok && version >= 24) ok = fread(&double_action, 1, sizeof(double_action), file) == sizeof(double_action) && backup_double_valid(&double_action);
     }
+    if (ok && version >= 25) ok = fread(&volume, 1, sizeof(volume), file) == sizeof(volume) && backup_volume_valid(&volume);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1557,6 +1593,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BLE_TURNER, (profile.home_full_refresh & 8) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
@@ -1647,6 +1684,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_full_pages = f[BK_FULL_PAGES];
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
+    s_reader_volume_turn = volume.on != 0;
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_reader_open_fullscreen = open_full.open_full == 1;
     s_book_title_style = title_style.style;

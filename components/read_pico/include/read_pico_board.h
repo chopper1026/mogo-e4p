@@ -88,6 +88,11 @@ esp_err_t read_pico_get_ioe_status(read_pico_status_t* status);
 /// / Sequential 8-register read; refreshes CFG/INV cache. Footer Read and page enter.
 esp_err_t read_pico_get_ioe_status_full(read_pico_status_t* status);
 int read_pico_ioe_int_level(void);
+/// 侧键音量键：bit0 音量+，bit1 音量-，1 为按下。原板没有侧键，返回不支持。
+/// / Side volume keys: bit0 up, bit1 down, 1 = pressed. The original board has none.
+#define READ_PICO_VOLUME_UP 0x01
+#define READ_PICO_VOLUME_DOWN 0x02
+esp_err_t read_pico_read_volume_keys(uint8_t* pressed);
 /// 读取低有效卡座 CD；通信失败时不改输出，调用方不得将失败解释为拔卡。
 /// / Read active-low slot CD; leave output untouched on failure, which is not card removal.
 esp_err_t read_pico_sd_detect(bool* present);

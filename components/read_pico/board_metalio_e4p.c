@@ -497,6 +497,19 @@ const read_pico_i2c_census_t* read_pico_i2c_census(void) { return &s_census; }
 
 int read_pico_ioe_int_level(void) { return gpio_get_level(BOARD_IOE_INT) ? 1 : 0; }
 
+esp_err_t read_pico_read_volume_keys(uint8_t* pressed) {
+    if (pressed == NULL) return ESP_ERR_INVALID_ARG;
+    *pressed = 0;
+    if (!s_ioe_ok) return ESP_ERR_INVALID_STATE;
+    uint8_t p1 = 0;
+    esp_err_t err = fca9555_read_input(s_ioe, 1, &p1);
+    if (err != ESP_OK) return err;
+    // P10/P11 低有效；P10 音量+，P11 音量-。/ P10/P11 are active low: P10 up, P11 down.
+    if ((p1 & IOE_BIT(IO_VOL_UP)) == 0) *pressed |= READ_PICO_VOLUME_UP;
+    if ((p1 & IOE_BIT(IO_VOL_DOWN)) == 0) *pressed |= READ_PICO_VOLUME_DOWN;
+    return ESP_OK;
+}
+
 static esp_err_t fill_ioe_status(read_pico_status_t* status, bool refresh_cfg) {
     (void)refresh_cfg;
     if (status == NULL) return ESP_ERR_INVALID_ARG;

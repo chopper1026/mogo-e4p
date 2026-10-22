@@ -580,6 +580,12 @@ fca9555_handle_t read_pico_fca9555(void) {
     return s_ioe;
 }
 
+esp_err_t read_pico_read_volume_keys(uint8_t* pressed) {
+    if (pressed == NULL) return ESP_ERR_INVALID_ARG;
+    *pressed = 0;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 static read_pico_i2c_census_t s_census;
 
 static const struct {
