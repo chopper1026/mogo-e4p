@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import hashlib, json, shutil, sys
-from verify_flash_bundle import check
+from verify_flash_bundle import PAGES_ORIGIN, check
 ROOT=Path(__file__).resolve().parents[1]
 def package(build: Path, output: Path):
     config=(build/'config/sdkconfig.h').read_text()
@@ -34,7 +34,7 @@ def package(build: Path, output: Path):
     shutil.copy2(build/'Read_Pico.bin',output/upgrade_name)
     shutil.copy2(build/'Read_Pico.bin',output/'Pico-update.bin')
     release={'schema':1,'version':version,'project':'Read_Pico','board':'RDP-G01-W','layout':'pico-dual-4m-v1',
-        'minimum_base_version':'0.3.3-rc72','url':f'https://wegooo-cell.github.io/read-pico-reader/{upgrade_name}',
+        'minimum_base_version':'0.3.3-rc72','url':PAGES_ORIGIN+upgrade_name,
         'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),
         'notes':'1. 锁屏设置读取失败时直接进入系统，不拦截启动\n2. 修复字间距反复回跳至-11px，点按和拖动均支持±15px\n3. 修复段距按钮及目录章节名粗细不一、抗锯齿问题'}
     (output/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')

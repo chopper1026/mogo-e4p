@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 
-REPO = 'https://github.com/wegooo-cell/read-pico-reader/releases/download/'
+REPO = 'https://github.com/chopper1026/mogo-e4p/releases/download/'
 
 def hydrate(source: Path, output: Path) -> None:
     catalog = source / 'release-assets.json'

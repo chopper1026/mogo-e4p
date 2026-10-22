@@ -18,6 +18,10 @@ EXPECTED = {
     "ota_data_initial.bin": (0xD10000, 0xD12000),
 }
 
+# 发布仓库的 Pages 站点；打包写清单与校验清单共用这一份，避免两处漂移。
+# Pages origin of the release repository, shared by the feed writer and the validator so they cannot drift.
+PAGES_ORIGIN = "https://chopper1026.github.io/mogo-e4p/"
+
 
 def check_archived_releases(folder: Path, current_partitions: Path | None = None) -> list[dict]:
     # 历史版本只引用原正式固件，并核对每个完整刷机部件的大小、地址与校验值。
@@ -124,7 +128,7 @@ def check(folder: Path) -> None:
     assert feed["schema"] == 1 and feed["version"] == version and feed["project"] == project
     assert feed["board"] == "RDP-G01-W" and feed["layout"] == capability["layout"]
     assert feed["minimum_base_version"] == capability["minimum_base_version"]
-    assert feed["url"] in (f"https://wegooo-cell.github.io/read-pico-reader/{upgrade_name}", f"https://kiikoread.com/{upgrade_name}")
+    assert feed["url"] in (f"{PAGES_ORIGIN}{upgrade_name}", f"https://kiikoread.com/{upgrade_name}")
     assert feed["size"] == len(image) and feed["sha256"] == hashlib.sha256(image).hexdigest()
     assert (folder / "Pico-update.bin").read_bytes() == image
     assert (folder / upgrade_name).read_bytes() == image
