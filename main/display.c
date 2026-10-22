@@ -699,12 +699,12 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     epd_poweron();
     // 水波纹使用面板原厂GL16表：每种灰阶转换保留前导擦除，灰阶由原厂脉冲校准；
-    // 纯白目标仍是原厂的 18 次擦白，不追加主页白列的尾部补推。
+    // 纯白目标仍是原厂的 18 次擦白，只把裁表砍掉的 to=0 推黑补回原厂 18 次。
     // Ripple uses the vendor GL16 table: every gray transition keeps its leading erase
-    // and factory-calibrated gray pulses. Pure white still takes the vendor's 18 erases,
-    // without the main-page column's tail pushes.
+    // and factory-calibrated gray pulses, pure white keeps the vendor's 18 erases, and
+    // only to=0 regains the 18 black pushes the trim had cut.
     enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir,
-        &E0470_WAVEFORM, E0470_TURN_FAST_BANDS);
+        display_reader_water_waveform(), E0470_TURN_FAST_BANDS);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
     rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) return result;

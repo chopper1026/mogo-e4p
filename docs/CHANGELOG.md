@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc98 本地 / 2026-10-22
 
+- 修复翻页后正文笔画偏灰：裁表时只砍了黑色饱和段，旧字擦白保留 18~24 次，新字推黑却只剩 13 次。普通翻页、整页阅读输出与水波纹现在都把「白底→黑」补回原厂 18 次推黑，占用各自的前导保持相，37 相和翻页时间不变；水波纹仍是 8 带、44 拍。
+  Fix gray-looking text after a page turn: the trimmed table kept 18–24 erases for the old glyphs but only 13 black pushes for the new ones. Ordinary turns, full-page reader output and water turns now restore the vendor's 18 black pushes for white-to-black using each row's leading holds; the 37 phases and turn time stay the same, and water keeps its eight-band 44-tick turn.
+
 - 调整两项默认值：无操作自动锁屏默认改为 5 分钟（仍可选 1/5/10 分钟或关闭），关机睡眠默认改为「仅浅睡」——关机后保留锁屏画面、不断电，按键或拿起返回关机前页面。只影响从未保存过该项设置的设备，已保存的选项保持不变；「关闭」现在会作为明确选择持久保存，不再被默认值覆盖。
   Two defaults changed: idle auto-lock now defaults to five minutes (1/5/10 or off remain selectable), and the power-menu shutdown style defaults to light-only, keeping the lock face and power so a key or pickup returns to the pre-shutdown page. Only devices that never saved these settings are affected; existing choices stay. An explicit "off" is now persisted and no longer overridden by the default.
 
