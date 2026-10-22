@@ -19,6 +19,7 @@
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "epd_display.h"
 #include "epdiy.h"
@@ -53,6 +54,11 @@
 #define BOARD_I2C_SDA GPIO_NUM_0
 #define BOARD_I2C_SCL GPIO_NUM_1
 #define BOARD_IOE_INT GPIO_NUM_2
+// 上键是机身顶部那颗实体键，接在 S31 的 BOOT 脚上，低有效；esp32s3 没有 61 号脚。
+// The up key is the top-edge physical key on the S31 BOOT pin, active low; esp32s3 has no GPIO61.
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+#define BOARD_UP_KEY GPIO_NUM_61
+#endif
 
 #define BOARD_TCA_ADDR 0x20
 #define BOARD_TPS_ADDR 0x68
@@ -508,6 +514,32 @@ esp_err_t read_pico_read_volume_keys(uint8_t* pressed) {
     if ((p1 & IOE_BIT(IO_VOL_UP)) == 0) *pressed |= READ_PICO_VOLUME_UP;
     if ((p1 & IOE_BIT(IO_VOL_DOWN)) == 0) *pressed |= READ_PICO_VOLUME_DOWN;
     return ESP_OK;
+}
+
+esp_err_t read_pico_read_up_key(bool* pressed) {
+    if (pressed == NULL) return ESP_ERR_INVALID_ARG;
+    *pressed = false;
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    // 第一次读才配置，避免没人用到时占用 BOOT 脚；上拉、无中断，轮询去抖。
+    // Configure on first read so an unused key leaves the BOOT pin alone; pull-up, no IRQ,
+    // debounced by polling.
+    static bool s_ready;
+    if (!s_ready) {
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << (unsigned)BOARD_UP_KEY,
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        if (gpio_config(&io) != ESP_OK) return ESP_FAIL;
+        s_ready = true;
+    }
+    *pressed = gpio_get_level(BOARD_UP_KEY) == 0;
+    return ESP_OK;
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 static esp_err_t fill_ioe_status(read_pico_status_t* status, bool refresh_cfg) {

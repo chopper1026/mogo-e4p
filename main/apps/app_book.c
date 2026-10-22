@@ -17,6 +17,9 @@
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
  * 用户 2026-10-21 修订：按键控制示意图按本板实体顺序摆成中、左、右（中键最左），中键双击下新增音量键翻页开关。
  * User revision 2026-10-21: the key sheet follows the board's physical key order (middle, left, right), and a volume-key page-turn switch sits under the middle double press.
+ * 用户 2026-10-22 修订：中键双击行与中键长按同高；音量键翻页上方新增上键单击，列表超出视口一行时按行滚动。
+ * User revision 2026-10-22: the double-press row matches the hold row, a new up-key single press sits above the
+ * volume-key switch, and the list scrolls a whole row at a time because it outgrows the viewport by one row.
  * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
@@ -2529,11 +2532,26 @@ static const char *reader_key_label(app_reader_key_action_t action) {
 #define KEY_ICON_Y 545
 #define KEY_LABEL_Y 600
 #define KEY_CARDS_TOP 632
-#define KEY_HOLD_TOP 772
-#define KEY_DOUBLE_TOP 892
-#define KEY_DOUBLE_HEIGHT 72
-#define KEY_VOLUME_TOP 976
-#define KEY_VOLUME_HEIGHT 96
+// 四行同高：中键长按、中键双击、上键单击、音量键翻页。视口正好三行，
+// 滚动按整行对齐，卡片永远不会被切开。
+// Four rows share one height: middle hold, middle double press, up-key single press and the
+// volume switch. The viewport holds exactly three rows and scrolling snaps to a row, so no
+// card is ever cut in half.
+#define KEY_ROW_TOP 772
+#define KEY_ROW_HEIGHT 96
+#define KEY_ROW_GAP 12
+#define KEY_ROW_PITCH (KEY_ROW_HEIGHT + KEY_ROW_GAP)
+#define KEY_ROW_VISIBLE 3
+#define KEY_ROW_VIEW_HEIGHT (KEY_ROW_VISIBLE * KEY_ROW_HEIGHT + (KEY_ROW_VISIBLE - 1) * KEY_ROW_GAP)
+#define KEY_ROW_COUNT 4
+#define KEY_ROW_MAX_SCROLL ((KEY_ROW_COUNT - KEY_ROW_VISIBLE) * KEY_ROW_PITCH)
+// 行序号也决定拾取项：0 中键长按、1 中键双击、2 上键单击、3 音量键翻页。
+// The row index doubles as the picker key: 0 hold, 1 double press, 2 up key, 3 volume switch.
+static int s_key_scroll;
+static bool s_key_drag;
+static EpdRect reader_key_row_rect(int row) {
+    return (EpdRect){36, KEY_ROW_TOP - s_key_scroll + row * KEY_ROW_PITCH, 612, KEY_ROW_HEIGHT};
+}
 // 本板盖板三键的物理顺序是中、左、右（中键在最左）；示意图按实体位置摆，
 // 左侧圆圈才是中键。命中测试与绘制共用这张表，逻辑键号不变。
 // This board's cover orders the keys middle, left, right (the middle key is leftmost), so the
@@ -2541,6 +2559,27 @@ static const char *reader_key_label(app_reader_key_action_t action) {
 // testing share this table and the logical key indices stay unchanged.
 static const unsigned s_reader_key_slots[3] = {1, 0, 2};
 static EpdRect reader_key_card(unsigned slot) { return (EpdRect){36 + (int)slot * 208, KEY_CARDS_TOP, 196, 114}; }
+// 视口外的整行不画；滚动量总是整行，所以不会出现半张卡片。
+// Rows outside the viewport are skipped; the offset is always whole rows, so no card is partial.
+static void draw_key_row(uint8_t *fb, int row) {
+    static const char *const names[] = {"中键长按", "中键双击", "上键单击", "音量键翻页"};
+    EpdRect card = reader_key_row_rect(row);
+    if (card.y + card.height <= KEY_ROW_TOP || card.y >= KEY_ROW_TOP + KEY_ROW_VIEW_HEIGHT) return;
+    ui_fill_round_rect(fb, card, 20, 0xf0);
+    ui_draw_control_frame(fb, card, 20, 0x58);
+    if (row == 3) {
+        bool on = app_settings_reader_volume_turn();
+        ui_text_box(fb,(EpdRect){58,card.y+24,300,48},26,names[row],EPD_DRAW_ALIGN_LEFT,false);
+        ui_text_box(fb,(EpdRect){330,card.y+24,196,48},25,on?"开启":"关闭",EPD_DRAW_ALIGN_RIGHT,false);
+        draw_reading_switch(fb,(EpdRect){556,card.y+28,69,39},on);
+        return;
+    }
+    app_reader_key_action_t action = row == 0 ? app_settings_reader_hold_action()
+        : row == 1 ? app_settings_reader_double_action() : app_settings_reader_up_action();
+    ui_text_box(fb,(EpdRect){58,card.y+24,238,48},26,names[row],EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,card.y+24,270,48},25,reader_key_label(action),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, card.y + 48, 20, UI_ICON_CHEVRON_DOWN, 0x38);
+}
 static void draw_key_settings(uint8_t *fb) {
     draw_sheet(fb, KEY_SETTINGS_TOP, "按键控制");
     draw_sheet_back(fb, KEY_SETTINGS_TOP);
@@ -2560,24 +2599,8 @@ static void draw_key_settings(uint8_t *fb) {
         ui_text_box(fb,(EpdRect){card.x+12,card.y+52,card.width-24,52},24,reader_key_label(app_settings_reader_key_action(key)),EPD_DRAW_ALIGN_CENTER,false);
         ui_draw_icon(fb, card.x + card.width - 23, card.y + 24, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     }
-    EpdRect hold = {36, KEY_HOLD_TOP, 612, 96};
-    ui_fill_round_rect(fb, hold, 20, 0xf0); ui_draw_control_frame(fb, hold, 20, 0x58);
-    // 说明移除后单行居中，卡片高度与后续行位置不变。
-    // With the hint gone the single row is centered; the card height and later rows stay put.
-    ui_text_box(fb,(EpdRect){58,KEY_HOLD_TOP+24,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){322,KEY_HOLD_TOP+24,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
-    ui_draw_icon(fb, 625, KEY_HOLD_TOP + 48, 20, UI_ICON_CHEVRON_DOWN, 0x38);
-    EpdRect dbl = {36, KEY_DOUBLE_TOP, 612, KEY_DOUBLE_HEIGHT};
-    ui_fill_round_rect(fb, dbl, 20, 0xf0); ui_draw_control_frame(fb, dbl, 20, 0x58);
-    ui_text_box(fb,(EpdRect){58,KEY_DOUBLE_TOP+6,238,48},26,"中键双击",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){322,KEY_DOUBLE_TOP+6,270,48},25,reader_key_label(app_settings_reader_double_action()),EPD_DRAW_ALIGN_RIGHT,false);
-    ui_draw_icon(fb, 625, KEY_DOUBLE_TOP + 33, 20, UI_ICON_CHEVRON_DOWN, 0x38);
-    bool volume = app_settings_reader_volume_turn();
-    EpdRect vol = {36, KEY_VOLUME_TOP, 612, KEY_VOLUME_HEIGHT};
-    ui_fill_round_rect(fb, vol, 20, 0xf0); ui_draw_control_frame(fb, vol, 20, 0x58);
-    ui_text_box(fb,(EpdRect){58,KEY_VOLUME_TOP+24,300,48},26,"音量键翻页",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){330,KEY_VOLUME_TOP+24,196,48},25,volume?"开启":"关闭",EPD_DRAW_ALIGN_RIGHT,false);
-    draw_reading_switch(fb,(EpdRect){556,KEY_VOLUME_TOP+28,69,39},volume);
+    for (int row = 0; row < KEY_ROW_COUNT; ++row) draw_key_row(fb, row);
+    reader_panel_text_vc(fb, 342, 1112, 21, "上下滑动查看更多", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2589,13 +2612,14 @@ static EpdRect reader_key_action_card(int index) {
     return (EpdRect){36, 390 + index * 94, 612, 78};
 }
 static void draw_key_picker(uint8_t *fb) {
-    static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能", "中键双击功能"};
-    draw_sheet(fb, 270, titles[s_reader_key_pick < 5 ? s_reader_key_pick : 0]);
+    static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能", "中键双击功能", "上键单击功能"};
+    draw_sheet(fb, 270, titles[s_reader_key_pick < 6 ? s_reader_key_pick : 0]);
     draw_sheet_back(fb, 270);
     for (int i = 0; i < APP_READER_KEY_COUNT; ++i) {
         EpdRect card = reader_key_action_card(i);
         bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action()
                        : s_reader_key_pick == 4 ? app_settings_reader_double_action()
+                       : s_reader_key_pick == 5 ? app_settings_reader_up_action()
                        : app_settings_reader_key_action(s_reader_key_pick)) == i;
         ui_fill_round_rect(fb, card, 20, selected ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
@@ -5693,6 +5717,8 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_reader_panel = READER_PANEL_TURN_SETTINGS;
     } else if (ui_rect_hit(reading_setting_rect(3), x, y)) {
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
+        s_key_scroll = 0;
+        s_key_drag = false;
     } else {
         for (int i = 0; i < 3; ++i)
             if (ui_rect_hit(reading_setting_rect(4 + i), x, y)) return apply_reader_option(ctx, i);
@@ -5818,6 +5844,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit(reader_key_action_card(i), x, y)) {
                 bool saved = s_reader_key_pick == 3 ? app_settings_set_reader_hold_action(i)
                     : s_reader_key_pick == 4 ? app_settings_set_reader_double_action(i)
+                    : s_reader_key_pick == 5 ? app_settings_set_reader_up_action(i)
                     : app_settings_set_reader_key_action(s_reader_key_pick, i);
                 if (!saved) {
                     copy_text(s_reader_key_error, sizeof(s_reader_key_error), "保存失败，请重试");
@@ -5834,20 +5861,15 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_reader_panel = READER_PANEL_KEY_PICKER;
                 return APP_REDRAW_PAGE;
             }
-            if (ui_rect_hit((EpdRect){36, KEY_HOLD_TOP, 612, 96}, x, y)) {
-                s_reader_key_pick = 3;
+            for (int row = 0; row < KEY_ROW_COUNT; ++row) {
+                if (!ui_rect_hit(reader_key_row_rect(row), x, y)) continue;
+                if (row == 3) {
+                    app_settings_set_reader_volume_turn(!app_settings_reader_volume_turn());
+                    return APP_REDRAW_PAGE;
+                }
+                s_reader_key_pick = 3 + (unsigned)row;
                 s_reader_key_error[0] = 0;
                 s_reader_panel = READER_PANEL_KEY_PICKER;
-                return APP_REDRAW_PAGE;
-            }
-            if (ui_rect_hit((EpdRect){36, KEY_DOUBLE_TOP, 612, KEY_DOUBLE_HEIGHT}, x, y)) {
-                s_reader_key_pick = 4;
-                s_reader_key_error[0] = 0;
-                s_reader_panel = READER_PANEL_KEY_PICKER;
-                return APP_REDRAW_PAGE;
-            }
-            if (ui_rect_hit((EpdRect){36, KEY_VOLUME_TOP, 612, KEY_VOLUME_HEIGHT}, x, y)) {
-                app_settings_set_reader_volume_turn(!app_settings_reader_volume_turn());
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
@@ -6778,6 +6800,33 @@ static app_redraw_t title_style_scroll_gesture(app_ctx_t *ctx, const ui_gesture_
     s_mode = MODE_GL16;
     return APP_REDRAW_AREA;
 }
+// 按键控制列表比视口多一行：纵向手势按整行滚动，落点始终对齐行边界。
+// The key-control list outgrows its viewport by one row: a vertical gesture scrolls whole rows and
+// always lands on a row boundary.
+static app_redraw_t key_settings_scroll_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    if (ev->y0 < KEY_ROW_TOP || ev->y0 >= KEY_ROW_TOP + KEY_ROW_VIEW_HEIGHT) return APP_REDRAW_NONE;
+    if (s_key_drag) {
+        if (ev->type != UI_GESTURE_MOVE) s_key_drag = false;
+        return APP_REDRAW_NONE;
+    }
+    int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
+    int distance = dy < 0 ? -dy : dy;
+    if (ev->type == UI_GESTURE_MOVE) {
+        int across = dx < 0 ? -dx : dx;
+        if (distance < 108 || distance <= across) return APP_REDRAW_NONE;
+    }
+    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
+    int next = s_key_scroll + (up ? KEY_ROW_PITCH : -KEY_ROW_PITCH);
+    if (next < 0) next = 0;
+    if (next > KEY_ROW_MAX_SCROLL) next = KEY_ROW_MAX_SCROLL;
+    if (ev->type == UI_GESTURE_MOVE) s_key_drag = true;
+    if (next == s_key_scroll) return APP_REDRAW_NONE;
+    s_key_scroll = next;
+    render(ctx, ctx->fb);
+    s_area = (EpdRect){0, KEY_ROW_TOP, UI_LOCK_WIDTH, KEY_ROW_VIEW_HEIGHT};
+    s_mode = MODE_GL16;
+    return APP_REDRAW_AREA;
+}
 
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     bool indent_handled=false;
@@ -6808,6 +6857,20 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_SWIPE_U ||
             ev->type == UI_GESTURE_SWIPE_D)
             return title_style_scroll_gesture(ctx, ev);
+    }
+    if (s_view == READING && s_reader_panel == READER_PANEL_KEY_SETTINGS) {
+        // TAP 仍交给 action_at 选行；这里只接管列表视口内的纵向滚动与手势收尾。
+        // TAP still picks a row in action_at; only vertical scrolling inside the list viewport
+        // and gesture ends land here.
+        if (ev->type == UI_GESTURE_PRESS) {
+            s_pressed_control = -1;
+            s_key_drag = false;
+            return APP_REDRAW_NONE;
+        }
+        if (ev->type == UI_GESTURE_CANCEL) { s_key_drag = false; return APP_REDRAW_NONE; }
+        if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_SWIPE_U ||
+            ev->type == UI_GESTURE_SWIPE_D)
+            return key_settings_scroll_gesture(ctx, ev);
     }
     if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;
     bool input_feedback = false;
@@ -7183,6 +7246,38 @@ static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
     s_stats_activity_ms = ctx->now_ms;
     return turn_page(ctx, (edges & READ_PICO_VOLUME_UP) ? -1 : 1);
 }
+// 上键单击：按下沿去抖，松开时仍在短按窗口内才执行；按住不会重复触发。
+// Up-key single press: debounce the press edge and fire on release inside the short-press window;
+// holding the key never repeats.
+#define READER_UP_KEY_DEBOUNCE_MS 30
+#define READER_UP_KEY_LONG_MS 1000
+static app_redraw_t reader_up_key_tick(app_ctx_t* ctx) {
+    static int64_t s_poll_ms;
+    static bool s_down;
+    static int64_t s_down_ms;
+    app_reader_key_action_t action = app_settings_reader_up_action();
+    if (action == APP_READER_KEY_NONE || !app_book_reader_body_visible()) {
+        s_down = false;
+        return APP_REDRAW_NONE;
+    }
+    if (ctx->now_ms - s_poll_ms < READER_VOLUME_POLL_MS) return APP_REDRAW_NONE;
+    s_poll_ms = ctx->now_ms;
+    bool pressed = false;
+    if (read_pico_read_up_key(&pressed) != ESP_OK) {
+        s_down = false;
+        return APP_REDRAW_NONE;
+    }
+    if (pressed) {
+        if (!s_down) { s_down = true; s_down_ms = ctx->now_ms; }
+        return APP_REDRAW_NONE;
+    }
+    if (!s_down) return APP_REDRAW_NONE;
+    s_down = false;
+    int64_t held = ctx->now_ms - s_down_ms;
+    if (held < READER_UP_KEY_DEBOUNCE_MS || held >= READER_UP_KEY_LONG_MS) return APP_REDRAW_NONE;
+    s_stats_activity_ms = ctx->now_ms;
+    return reader_key_action(ctx, action);
+}
 static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t indent=reader_indent_hold_tick(ctx);
     if(indent!=APP_REDRAW_NONE)return indent;
@@ -7223,6 +7318,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     }
     app_redraw_t volume = reader_volume_tick(ctx);
     if (volume != APP_REDRAW_NONE) return volume;
+    app_redraw_t up_key = reader_up_key_tick(ctx);
+    if (up_key != APP_REDRAW_NONE) return up_key;
     if (s_reader_notice[0] && ctx->now_ms >= s_reader_notice_until) {
         s_reader_notice[0] = 0;
         if (s_view == READING) {

@@ -18,6 +18,8 @@ typedef struct {int unused;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
 enum {READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TURN_SETTINGS,READER_PANEL_KEY_SETTINGS};
 static int s_reader_panel, s_turns, invalidates, toggles[3], full_pages = 10, effect;
+static int s_key_scroll;
+static bool s_key_drag;
 static bool ui_rect_hit(EpdRect r,unsigned x,unsigned y){return x>=(unsigned)r.x&&x<(unsigned)(r.x+r.width)&&y>=(unsigned)r.y&&y<(unsigned)(r.y+r.height);}
 static unsigned app_settings_reader_full_pages(void){return full_pages;}
 static void app_settings_set_reader_full_pages(unsigned n){full_pages=n;}

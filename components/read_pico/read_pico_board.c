@@ -586,6 +586,12 @@ esp_err_t read_pico_read_volume_keys(uint8_t* pressed) {
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t read_pico_read_up_key(bool* pressed) {
+    if (pressed == NULL) return ESP_ERR_INVALID_ARG;
+    *pressed = false;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 static read_pico_i2c_census_t s_census;
 
 static const struct {

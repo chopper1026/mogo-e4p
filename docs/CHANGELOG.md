@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc98 本地 / 2026-10-22
 
+- 「按键控制」新增「上键单击」：机身顶部那颗实体上键在阅读正文里可设为上一页、下一页、阅读工具栏、切换全屏、返回主页、手动全刷或不操作，默认不操作，随配置备份保存。中键双击行改成与中键长按同高的整行样式；列表因此比可视区多一行，上下滑动整行查看，面板高度与底部「完成」按钮位置不变。
+  The key sheet gains an up-key single press: the top-edge physical key can be mapped, in the reader body only, to previous/next page, the reading toolbar, full screen, home, a manual full refresh or no action (the default), and the mapping is part of the settings backup. The middle double-press row now matches the hold row's full-height style; the list therefore outgrows its viewport by one row and scrolls a whole row at a time, keeping the sheet height and the Done button where they were.
+
 - 修复翻页后正文笔画偏灰：裁表时只砍了黑色饱和段，旧字擦白保留 18~24 次，新字推黑却只剩 13 次。普通翻页、整页阅读输出与水波纹现在都把「白底→黑」补回原厂 18 次推黑，占用各自的前导保持相，37 相和翻页时间不变；水波纹仍是 8 带、44 拍。
   Fix gray-looking text after a page turn: the trimmed table kept 18–24 erases for the old glyphs but only 13 black pushes for the new ones. Ordinary turns, full-page reader output and water turns now restore the vendor's 18 black pushes for white-to-black using each row's leading holds; the 37 phases and turn time stay the same, and water keeps its eight-band 44-tick turn.
 

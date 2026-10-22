@@ -93,6 +93,9 @@ int read_pico_ioe_int_level(void);
 #define READ_PICO_VOLUME_UP 0x01
 #define READ_PICO_VOLUME_DOWN 0x02
 esp_err_t read_pico_read_volume_keys(uint8_t* pressed);
+/// 机身顶部上键：true 为按下。原板没有这颗键，返回不支持。
+/// / Top-edge up key: true while pressed. The original board has none.
+esp_err_t read_pico_read_up_key(bool* pressed);
 /// 读取低有效卡座 CD；通信失败时不改输出，调用方不得将失败解释为拔卡。
 /// / Read active-low slot CD; leave output untouched on failure, which is not card removal.
 esp_err_t read_pico_sd_detect(bool* present);

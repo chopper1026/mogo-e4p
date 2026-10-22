@@ -75,6 +75,7 @@
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
 #define NVS_KEY_DOUBLE_ACTION "rd_key_dbl"
+#define NVS_KEY_UP_ACTION "rd_key_up"
 #define NVS_KEY_READER_KEYS_V2 "rd_keys_v2"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_BLE_TURNER "ble_turn"
@@ -142,6 +143,7 @@ static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
 static uint8_t s_reader_hold_action = APP_READER_KEY_HOME;
 static uint8_t s_reader_double_action = APP_READER_KEY_NONE;
+static uint8_t s_reader_up_action = APP_READER_KEY_NONE;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
@@ -355,6 +357,9 @@ void app_settings_init(void) {
     uint8_t double_action = APP_READER_KEY_NONE;
     s_reader_double_action = nvs_get_u8(h, NVS_KEY_DOUBLE_ACTION, &double_action) == ESP_OK && double_action < APP_READER_KEY_COUNT
         ? double_action : APP_READER_KEY_NONE;
+    uint8_t up_action = APP_READER_KEY_NONE;
+    s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK && up_action < APP_READER_KEY_COUNT
+        ? up_action : APP_READER_KEY_NONE;
     uint8_t keys_v2 = 0;
     bool migrate_reader_defaults = nvs_get_u8(h, NVS_KEY_READER_KEYS_V2, &keys_v2) != ESP_OK || keys_v2 != 1;
     bool old_default_hold = migrate_reader_defaults && s_reader_hold_action == APP_READER_KEY_REFRESH &&
@@ -816,7 +821,7 @@ app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
 }
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action) {
-    return key < 5 && action >= 0 && action < APP_READER_KEY_COUNT;
+    return key < 6 && action >= 0 && action < APP_READER_KEY_COUNT;
 }
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action) {
     if (key >= 3 || !app_settings_reader_key_action_allowed(key, action)) return false;
@@ -851,6 +856,18 @@ bool app_settings_set_reader_double_action(app_reader_key_action_t action) {
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err == ESP_OK) s_reader_double_action = action;
+    return err == ESP_OK;
+}
+app_reader_key_action_t app_settings_reader_up_action(void) { return (app_reader_key_action_t)s_reader_up_action; }
+bool app_settings_set_reader_up_action(app_reader_key_action_t action) {
+    if (!app_settings_reader_key_action_allowed(5, action)) return false;
+    if (s_reader_up_action == action) return true;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_UP_ACTION, action);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err == ESP_OK) s_reader_up_action = action;
     return err == ESP_OK;
 }
 void app_settings_set_reader_key_preset(unsigned preset) {
@@ -1129,6 +1146,17 @@ static bool backup_volume_valid(const settings_backup_volume_t *volume) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)volume->checksum[i] << (8 * i);
     return volume->on <= 1 && stored == backup_volume_checksum(volume);
 }
+// v26 追加更新上键单击；旧备份回落「不操作」。
+// V26 appends the up-key single press; older backups fall back to no action.
+typedef struct { uint8_t action, checksum[4]; } settings_backup_up_t;
+static uint32_t backup_up_checksum(const settings_backup_up_t *up) {
+    return (2166136261u ^ up->action) * 16777619u;
+}
+static bool backup_up_valid(const settings_backup_up_t *up) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)up->checksum[i] << (8 * i);
+    return up->action < APP_READER_KEY_COUNT && stored == backup_up_checksum(up);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1154,9 +1182,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P 为本合并格式。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P are this merge.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1236,9 +1264,9 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    // v25：在 v24 的 bookmark/题头/中键双击尾部再追加音量键翻页。
-    // v25: appends the volume-key turn switch to the v24 bookmark/heading/double-press tail.
-    memcpy(backup.magic, "PICOSETP", sizeof(backup.magic));
+    // v26：在 v25 的音量键翻页尾部再追加上键单击。
+    // v26: appends the up-key single press to the v25 volume-key turn tail.
+    memcpy(backup.magic, "PICOSETQ", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1318,6 +1346,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_volume_t volume = {.on = s_reader_volume_turn ? 1 : 0};
     uint32_t volume_hash = backup_volume_checksum(&volume);
     for (unsigned i = 0; i < 4; ++i) volume.checksum[i] = (uint8_t)(volume_hash >> (8 * i));
+    settings_backup_up_t up_action = {.action = s_reader_up_action};
+    uint32_t up_hash = backup_up_checksum(&up_action);
+    for (unsigned i = 0; i < 4; ++i) up_action.checksum[i] = (uint8_t)(up_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1342,8 +1373,8 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
-    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns。
-    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns.
+    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns、26 up action。
+    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns, 26 up action.
     settings_backup_background_t bookmark = {0};
     strlcpy(bookmark.path,s_bookmark,sizeof(bookmark.path));
     uint32_t bookmark_hash=backup_background_checksum(&bookmark);
@@ -1354,6 +1385,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&title_size, 1, sizeof(title_size), file) == sizeof(title_size);
     if (ok) ok = fwrite(&double_action, 1, sizeof(double_action), file) == sizeof(double_action);
     if (ok) ok = fwrite(&volume, 1, sizeof(volume), file) == sizeof(volume);
+    if (ok) ok = fwrite(&up_action, 1, sizeof(up_action), file) == sizeof(up_action);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1445,6 +1477,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_title_size_t title_size = {.px = APP_BOOK_TITLE_SIZE_DEFAULT};
     settings_backup_double_t double_action = {.action = APP_READER_KEY_NONE};
     settings_backup_volume_t volume = {.on = 0};
+    settings_backup_up_t up_action = {.action = APP_READER_KEY_NONE};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1533,6 +1566,7 @@ esp_err_t app_settings_backup_restore(void) {
         if (ok && version >= 24) ok = fread(&double_action, 1, sizeof(double_action), file) == sizeof(double_action) && backup_double_valid(&double_action);
     }
     if (ok && version >= 25) ok = fread(&volume, 1, sizeof(volume), file) == sizeof(volume) && backup_volume_valid(&volume);
+    if (ok && version >= 26) ok = fread(&up_action, 1, sizeof(up_action), file) == sizeof(up_action) && backup_up_valid(&up_action);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1594,6 +1628,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
@@ -1685,6 +1720,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_volume_turn = volume.on != 0;
+    s_reader_up_action = up_action.action;
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_reader_open_fullscreen = open_full.open_full == 1;
     s_book_title_style = title_style.style;

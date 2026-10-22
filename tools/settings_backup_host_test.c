@@ -21,12 +21,13 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v25 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v25; legacy fixtures drop them all. */
+/* v15..v26 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v26; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
-                            sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t))
+                            sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + \
+                            sizeof(settings_backup_up_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -115,8 +116,8 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) { (void)h
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
-// 去掉 v24/v25 才有的本地扩展块，把文件还原成上游 v20 及更早的尾部布局。
-// Drop the v24/v25 local extension blocks to leave an upstream v20-or-earlier tail layout.
+// 去掉 v24/v25/v26 才有的本地扩展块，把文件还原成上游 v20 及更早的尾部布局。
+// Drop the v24/v25/v26 local extension blocks to leave an upstream v20-or-earlier tail layout.
 static void strip_local_extension_blocks(FILE *f) {
     const long local_at = (long)(sizeof(settings_backup_v1_t) + 7 +
         sizeof(settings_backup_profile_t) + sizeof(settings_backup_keys_t) + sizeof(settings_backup_hold_t) +
@@ -124,7 +125,7 @@ static void strip_local_extension_blocks(FILE *f) {
         sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
-                                   sizeof(settings_backup_volume_t));
+                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -265,6 +266,7 @@ int main(void) {
     s_reader_turn_effect = 1;
     s_reader_power_turn = true;
     s_reader_volume_turn = true;
+    s_reader_up_action = APP_READER_KEY_PREV;
     s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
     app_settings_set_reader_open_fullscreen(false); /* v18 band remembers windowed entries */
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_MARK); /* v19 band carries the heading style */
@@ -376,6 +378,7 @@ int main(void) {
     s_reader_turn_effect = 0;
     s_reader_power_turn = false;
     s_reader_volume_turn = false;
+    s_reader_up_action = APP_READER_KEY_NONE;
     s_reader_statusbar = true;
     s_reader_open_fullscreen = true; /* dirty value must come back from the backup */
     s_shelf_style = 2;
@@ -409,6 +412,7 @@ int main(void) {
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
     assert(app_settings_reader_volume_turn());
+    assert(app_settings_reader_up_action() == APP_READER_KEY_PREV);
     assert(!app_settings_reader_open_fullscreen());
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_MARK);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
@@ -459,7 +463,7 @@ int main(void) {
                                                sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
-                                   sizeof(settings_backup_volume_t));
+                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -487,11 +491,13 @@ int main(void) {
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
     app_settings_set_reader_open_fullscreen(false);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
+    app_settings_set_reader_up_action(APP_READER_KEY_NEXT);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_PLAIN);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_DEFAULT);
     assert(app_settings_reader_open_fullscreen());
     assert(app_settings_reader_double_action() == APP_READER_KEY_NONE);
+    assert(app_settings_reader_up_action() == APP_READER_KEY_NONE);
     assert(app_settings_backup_save() == ESP_OK);
     // 旧本地 L=21：18 open_full、19 title_style、20 title_size、21 double_action，且无 bookmark。
     // Old local L=21: 18 open_full, 19 title_style, 20 title_size, 21 double_action, without bookmark.
@@ -519,12 +525,14 @@ int main(void) {
     uint8_t *legacy_bytes = malloc(legacy_tail ? legacy_tail : 1);
     assert(legacy_bytes);
     assert(fseek(saved, local_at, SEEK_SET) == 0 && fread(legacy_bytes, 1, legacy_tail, saved) == legacy_tail);
-    // L=21 在双击块后没有音量键块：摘掉它，历史块紧跟双击块。
-    // The L=21 layout has no volume block after the double press: drop it so history follows directly.
-    memmove(legacy_bytes + l_band, legacy_bytes + l_band + sizeof(settings_backup_volume_t),
-            legacy_tail - l_band - sizeof(settings_backup_volume_t));
-    legacy_tail -= sizeof(settings_backup_volume_t);
-    legacy_end -= (long)sizeof(settings_backup_volume_t);
+    // L=21 在双击块后没有音量键与上键块：摘掉它们，历史块紧跟双击块。
+    // The L=21 layout has neither the volume nor the up-key block after the double press: drop
+    // both so history follows directly.
+    const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t);
+    memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
+            legacy_tail - l_band - dropped_blocks);
+    legacy_tail -= dropped_blocks;
+    legacy_end -= (long)dropped_blocks;
     memcpy(legacy_header.magic, "PICOSETL", 8);
     legacy_header.flags[BK_TRACKING] = 2; // 旧本地 0 px / old local 0 px
     legacy_header.flags[BK_MARGIN] = 60;  // 恢复时夹到 48 / clamped to 48 on restore
@@ -685,7 +693,8 @@ int main(void) {
     assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
     assert(app_settings_reader_hold_action()==APP_READER_KEY_NONE&&app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     assert(app_settings_reader_key_action_allowed(4,APP_READER_KEY_TOOLS));
-    assert(!app_settings_reader_key_action_allowed(5,APP_READER_KEY_TOOLS));
+    assert(app_settings_reader_key_action_allowed(5,APP_READER_KEY_TOOLS));
+    assert(!app_settings_reader_key_action_allowed(6,APP_READER_KEY_TOOLS));
     assert(!app_settings_reader_key_action_allowed(0,APP_READER_KEY_COUNT));
     app_settings_set_reader_key_preset(1);
     s_book_px = 70;
