@@ -10,6 +10,8 @@
  * User revision: persist short key mappings; backup v11 adds a checked hold action; older backups without a hold mapping default to home. Five reading stroke levels are sealed in backup v13.
  * 用户修订：首行缩进微调-20..20px单独持久化，备份v12追加校验块；旧备份恢复0，不更改密码凭据。
  * User revision: persist a -20..20px indent adjustment; v12 adds a checked block, legacy backups default to zero and leave PIN credentials intact.
+ * 用户修订：备份v27追加书内字体、竖排正文与完整关机三态；旧备份回落开启/横排/扩展位。
+ * User revision: backup v27 appends book fonts, vertical text and the full shutdown states; older backups fall back to on/horizontal/the extension bit.
  * NVS load/store. A failed open keeps the deep-sleep default; the
  * partition is not erased.
  */
@@ -1161,6 +1163,36 @@ static bool backup_up_valid(const settings_backup_up_t *up) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)up->checksum[i] << (8 * i);
     return up->action < APP_READER_KEY_COUNT && stored == backup_up_checksum(up);
 }
+// v27 追加书内字体、竖排正文与完整关机方式；旧备份回落开启、横排与扩展位。
+// V27 appends embedded book fonts, vertical body text and the full shutdown style;
+// older backups fall back to on, horizontal and the extension bit.
+typedef struct { uint8_t on, checksum[4]; } settings_backup_book_fonts_t;
+static uint32_t backup_book_fonts_checksum(const settings_backup_book_fonts_t *fonts) {
+    return (2166136261u ^ fonts->on) * 16777619u;
+}
+static bool backup_book_fonts_valid(const settings_backup_book_fonts_t *fonts) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)fonts->checksum[i] << (8 * i);
+    return fonts->on <= 1 && stored == backup_book_fonts_checksum(fonts);
+}
+typedef struct { uint8_t on, checksum[4]; } settings_backup_book_vertical_t;
+static uint32_t backup_book_vertical_checksum(const settings_backup_book_vertical_t *vertical) {
+    return (2166136261u ^ vertical->on) * 16777619u;
+}
+static bool backup_book_vertical_valid(const settings_backup_book_vertical_t *vertical) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)vertical->checksum[i] << (8 * i);
+    return vertical->on <= 1 && stored == backup_book_vertical_checksum(vertical);
+}
+typedef struct { uint8_t style, checksum[4]; } settings_backup_shutdown_style_t;
+static uint32_t backup_shutdown_style_checksum(const settings_backup_shutdown_style_t *style) {
+    return (2166136261u ^ style->style) * 16777619u;
+}
+static bool backup_shutdown_style_valid(const settings_backup_shutdown_style_t *style) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)style->checksum[i] << (8 * i);
+    return style->style <= APP_SHUTDOWN_LIGHT && stored == backup_shutdown_style_checksum(style);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1186,9 +1218,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1268,9 +1300,9 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    // v26：在 v25 的音量键翻页尾部再追加上键单击。
-    // v26: appends the up-key single press to the v25 volume-key turn tail.
-    memcpy(backup.magic, "PICOSETQ", sizeof(backup.magic));
+    // v27：在 v26 的上键单击尾部再追加书内字体、竖排正文与完整关机方式。
+    // v27: appends embedded book fonts, vertical body text and the full shutdown style to v26.
+    memcpy(backup.magic, "PICOSETR", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1300,8 +1332,8 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(backup.fonts_dir, s_fonts_dir, sizeof(backup.fonts_dir));
     backup_seal(&backup);
     uint8_t idle_index = s_auto_lock_minutes == 1 ? 1 : s_auto_lock_minutes == 5 ? 2 : s_auto_lock_minutes == 10 ? 3 : 0;
-    // 备份扩展字节 bit0 只有一档：仅浅睡降级为先浅后深，恢复时不丢"不断电"意图之外的信息。
-    // The backup extension has one bit here: light-only degrades to staged, nothing else is lost.
+    // 扩展字节 bit0 仍只记「非彻底关机」供旧固件读取；v27 另用独立块保存完整三态。
+    // Extension bit 0 still records "not full off" for older firmware; v27 keeps all three states in its own block.
     uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_shutdown_style != APP_SHUTDOWN_FULL ? 1 : 0) | (idle_index << 1) | ((uint8_t)s_main_refresh << 3)};
     uint32_t extension_hash = backup_shutdown_checksum(&backup, s_book_indent,
                                                         s_book_rule_offset, extension[2]);
@@ -1353,6 +1385,15 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_up_t up_action = {.action = s_reader_up_action};
     uint32_t up_hash = backup_up_checksum(&up_action);
     for (unsigned i = 0; i < 4; ++i) up_action.checksum[i] = (uint8_t)(up_hash >> (8 * i));
+    settings_backup_book_fonts_t book_fonts = {.on = s_book_fonts ? 1 : 0};
+    uint32_t book_fonts_hash = backup_book_fonts_checksum(&book_fonts);
+    for (unsigned i = 0; i < 4; ++i) book_fonts.checksum[i] = (uint8_t)(book_fonts_hash >> (8 * i));
+    settings_backup_book_vertical_t book_vertical = {.on = s_book_vertical ? 1 : 0};
+    uint32_t book_vertical_hash = backup_book_vertical_checksum(&book_vertical);
+    for (unsigned i = 0; i < 4; ++i) book_vertical.checksum[i] = (uint8_t)(book_vertical_hash >> (8 * i));
+    settings_backup_shutdown_style_t shutdown_style = {.style = (uint8_t)s_shutdown_style};
+    uint32_t shutdown_style_hash = backup_shutdown_style_checksum(&shutdown_style);
+    for (unsigned i = 0; i < 4; ++i) shutdown_style.checksum[i] = (uint8_t)(shutdown_style_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1377,8 +1418,8 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
-    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns、26 up action。
-    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns, 26 up action.
+    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns、26 up action、27 book fonts/vertical/shutdown。
+    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns, 26 up action, 27 book fonts/vertical/shutdown.
     settings_backup_background_t bookmark = {0};
     strlcpy(bookmark.path,s_bookmark,sizeof(bookmark.path));
     uint32_t bookmark_hash=backup_background_checksum(&bookmark);
@@ -1390,6 +1431,9 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&double_action, 1, sizeof(double_action), file) == sizeof(double_action);
     if (ok) ok = fwrite(&volume, 1, sizeof(volume), file) == sizeof(volume);
     if (ok) ok = fwrite(&up_action, 1, sizeof(up_action), file) == sizeof(up_action);
+    if (ok) ok = fwrite(&book_fonts, 1, sizeof(book_fonts), file) == sizeof(book_fonts);
+    if (ok) ok = fwrite(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical);
+    if (ok) ok = fwrite(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1482,6 +1526,9 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_double_t double_action = {.action = APP_READER_KEY_NONE};
     settings_backup_volume_t volume = {.on = 0};
     settings_backup_up_t up_action = {.action = APP_READER_KEY_NONE};
+    settings_backup_book_fonts_t book_fonts = {.on = 1};
+    settings_backup_book_vertical_t book_vertical = {.on = 0};
+    settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_FULL};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1560,8 +1607,8 @@ esp_err_t app_settings_backup_restore(void) {
         if (ok && version >= 20) ok = fread(&title_size, 1, sizeof(title_size), file) == sizeof(title_size) && backup_title_size_valid(&title_size);
         if (ok && version >= 21) ok = fread(&double_action, 1, sizeof(double_action), file) == sizeof(double_action) && backup_double_valid(&double_action);
     } else {
-        // 上游/新格式：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action。
-        // Upstream/new layout: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action.
+        // 上游/新格式：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action；25 音量键、26 上键、27 书内字体/竖排/关机方式。
+        // Upstream/new layout: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action; 25 volume, 26 up key, 27 book fonts/vertical/shutdown.
         if (ok && version >= 18) ok = fread(&bookmark, 1, sizeof(bookmark), file) == sizeof(bookmark) &&
             backup_background_valid(&bookmark) && backup_path_valid(bookmark.path, sizeof(bookmark.path));
         if (ok && version >= 21) ok = fread(&open_full, 1, sizeof(open_full), file) == sizeof(open_full) && backup_open_full_valid(&open_full);
@@ -1571,6 +1618,9 @@ esp_err_t app_settings_backup_restore(void) {
     }
     if (ok && version >= 25) ok = fread(&volume, 1, sizeof(volume), file) == sizeof(volume) && backup_volume_valid(&volume);
     if (ok && version >= 26) ok = fread(&up_action, 1, sizeof(up_action), file) == sizeof(up_action) && backup_up_valid(&up_action);
+    if (ok && version >= 27) ok = fread(&book_fonts, 1, sizeof(book_fonts), file) == sizeof(book_fonts) && backup_book_fonts_valid(&book_fonts);
+    if (ok && version >= 27) ok = fread(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical) && backup_book_vertical_valid(&book_vertical);
+    if (ok && version >= 27) ok = fread(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style) && backup_shutdown_style_valid(&shutdown_style);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1614,6 +1664,11 @@ esp_err_t app_settings_backup_restore(void) {
     if (profile.avatar[0] && !backup_file_exists(profile.avatar, false)) profile.avatar[0] = 0;
     strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
     strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
+    // v27 用独立块保存完整三态；旧备份仍按扩展 bit0 回落（仅浅睡降级为先浅后深）。
+    // V27 keeps all three shutdown states in its own block; older backups still read extension
+    // bit 0, where light-only degrades to staged.
+    const app_shutdown_style_t shutdown_mode = version >= 27 ? (app_shutdown_style_t)shutdown_style.style
+        : ((staged_shutdown & 1) ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL);
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
@@ -1624,7 +1679,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, hold.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_DOUBLE_ACTION, double_action.action);
     BACKUP_SET_U8(NVS_KEY_SLEEP, BK_SLEEP);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE, staged_shutdown & 1);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE, (uint8_t)shutdown_mode);
     uint8_t idle_values[] = {0, 1, 5, 10};
     uint8_t idle_minutes = idle_values[(staged_shutdown >> 1) & 3];
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_LOCK, idle_minutes);
@@ -1633,6 +1688,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
@@ -1702,7 +1759,9 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_antialias = antialias;
     const uint8_t *f = backup.flags;
     s_sleep = (app_sleep_mode_t)f[BK_SLEEP];
-    s_shutdown_style = (staged_shutdown & 1) ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL;
+    s_shutdown_style = shutdown_mode;
+    s_book_fonts = book_fonts.on != 0;
+    s_book_vertical = book_vertical.on != 0;
     s_auto_lock_minutes = idle_minutes;
     s_ble_turner = (profile.home_full_refresh & 8) != 0;
     s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;

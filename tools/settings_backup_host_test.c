@@ -27,7 +27,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
                             sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + \
-                            sizeof(settings_backup_up_t))
+                            sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
+                            sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -125,7 +126,9 @@ static void strip_local_extension_blocks(FILE *f) {
         sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
-                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
+                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
+                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
+                                   sizeof(settings_backup_shutdown_style_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -463,7 +466,9 @@ int main(void) {
                                                sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t));
     const long local_band = (long)(sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) +
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
-                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
+                                   sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
+                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
+                                   sizeof(settings_backup_shutdown_style_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -525,10 +530,12 @@ int main(void) {
     uint8_t *legacy_bytes = malloc(legacy_tail ? legacy_tail : 1);
     assert(legacy_bytes);
     assert(fseek(saved, local_at, SEEK_SET) == 0 && fread(legacy_bytes, 1, legacy_tail, saved) == legacy_tail);
-    // L=21 在双击块后没有音量键与上键块：摘掉它们，历史块紧跟双击块。
-    // The L=21 layout has neither the volume nor the up-key block after the double press: drop
-    // both so history follows directly.
-    const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t);
+    // L=21 在双击块后没有音量键、上键与 v27 块：摘掉它们，历史块紧跟双击块。
+    // The L=21 layout has none of the volume, up-key or v27 blocks after the double press: drop
+    // them so history follows directly.
+    const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
+                                  sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
+                                  sizeof(settings_backup_shutdown_style_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -907,6 +914,58 @@ int main(void) {
     assert(!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/marker.png"));
     assert(app_settings_backup_save()==ESP_OK);s_bookmark[0]=0;s_lock_style=0;
     assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_style()==0&&!app_settings_bookmark_path()[0]);
+    // v27：书内字体、竖排正文与完整关机方式往返保存；旧 v26 备份缺少这些块时回落开启/横排/扩展位。
+    // V27 round-trips book fonts, vertical text and every shutdown state; a v26 backup without
+    // those blocks falls back to on, horizontal and the extension bit.
+    app_settings_set_book_fonts(false);
+    app_settings_set_book_vertical(true);
+    app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT);
+    assert(app_settings_backup_save() == ESP_OK);
+    app_settings_set_book_fonts(true);
+    app_settings_set_book_vertical(false);
+    app_settings_set_shutdown_style(APP_SHUTDOWN_FULL);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(!app_settings_book_fonts() && app_settings_book_vertical() &&
+           app_settings_shutdown_style() == APP_SHUTDOWN_LIGHT);
+    saved = fopen(BACKUP_FILE, "r+b");
+    assert(saved && fread(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fread(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fread(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    const long v26_tail_at = ftell(saved);
+    assert(fseek(saved, 0, SEEK_END) == 0);
+    size_t v26_tail = (size_t)(ftell(saved) - v26_tail_at);
+    uint8_t *v26_bytes = malloc(v26_tail);
+    assert(v26_bytes && fseek(saved, v26_tail_at, SEEK_SET) == 0 &&
+           fread(v26_bytes, 1, v26_tail, saved) == v26_tail);
+    const long v27_at = (long)(sizeof(settings_backup_keys_t) + sizeof(settings_backup_hold_t) +
+        sizeof(settings_backup_indent_adjust_t) + sizeof(settings_backup_weight_t) + sizeof(settings_backup_wifi_t) +
+        sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + sizeof(settings_backup_background_t) +
+        sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) +
+        sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
+    const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
+                              sizeof(settings_backup_shutdown_style_t);
+    assert(v26_tail > (size_t)v27_at + v27_blocks);
+    memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
+    v26_tail -= v27_blocks;
+    memcpy(legacy_header.magic, "PICOSETQ", 8);
+    backup_seal(&legacy_header);
+    uint32_t v26_ext_hash = backup_shutdown_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2]);
+    for (int i = 0; i < 4; ++i) legacy_ext[i + 3] = (uint8_t)(v26_ext_hash >> (8 * i));
+    uint32_t v26_profile_hash = backup_profile_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2], &saved_profile);
+    for (int i = 0; i < 4; ++i) saved_profile.checksum[i] = (uint8_t)(v26_profile_hash >> (8 * i));
+    rewind(saved);
+    assert(fwrite(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fwrite(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fwrite(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    assert(fwrite(v26_bytes, 1, v26_tail, saved) == v26_tail);
+    free(v26_bytes);
+    assert(fflush(saved) == 0 && ftruncate(fileno(saved), v26_tail_at + (long)v26_tail) == 0 && fclose(saved) == 0);
+    app_settings_set_book_fonts(true);
+    app_settings_set_book_vertical(false);
+    app_settings_set_shutdown_style(APP_SHUTDOWN_FULL);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_book_fonts() && !app_settings_book_vertical() &&
+           app_settings_shutdown_style() == APP_SHUTDOWN_STAGED);
     // 所有阅读字号都可保存与备份恢复，范围外仍使用默认48。
     // Every reader size survives settings/backup restore; out-of-range values still use default 48.
     for(int px=18;px<=90;++px){

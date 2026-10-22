@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 0.3.3-rc98 本地 / 2026-10-23
+
+- 配置备份升到 v27：「书内自带字体」「竖排正文」和关机方式三态（彻底 / 先浅后深 / 仅浅睡）现在都会保存并恢复。此前恢复后书内字体会回到开启、竖排会回到横排，「仅浅睡」会被恢复成「先浅后深」。旧备份仍可读取，缺少这些块时回落开启、横排和原扩展位。
+  The settings backup is now v27: embedded book fonts, vertical body text and all three shutdown styles (full off, staged, light-only) are saved and restored. Previously a restore reset book fonts to on, vertical text to horizontal, and light-only to staged. Older backups remain readable and fall back to on, horizontal and the old extension bit when those blocks are absent.
+
 ## 0.3.3-rc98 本地 / 2026-10-22
 
 - 「按键控制」的动作列表新增「前光开关」：可绑给左/中/右键短按、中键长按、中键双击或上键单击，按一次开灯、再按一次关灯；开灯沿用下拉快捷栏记住的亮度与色温，没有前光的板保持不操作。列表从七行变为八行，行距相应收紧，底部提示与「返回」按钮位置不变；旧配置和备份里的动作编号不变。
