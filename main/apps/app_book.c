@@ -20,6 +20,9 @@
  * 用户 2026-10-22 修订：中键双击行与中键长按同高；音量键翻页上方新增上键单击，列表超出视口一行时按行滚动。
  * User revision 2026-10-22: the double-press row matches the hold row, a new up-key single press sits above the
  * volume-key switch, and the list scrolls a whole row at a time because it outgrows the viewport by one row.
+ * 用户 2026-10-22 修订：按键控制的动作列表新增「前光开关」，可绑给任一单键、长按、双击或上键。
+ * User revision 2026-10-22: the key-control action list gains a frontlight toggle that can be bound
+ * to any short key, the middle hold, the middle double press or the up key.
  * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
@@ -155,6 +158,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "frontlight.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -2522,7 +2526,18 @@ static void draw_turn_settings(uint8_t *fb) {
 }
 
 static const char *reader_key_label(app_reader_key_action_t action) {
-    static const char *const labels[] = {"上一页", "下一页", "阅读工具栏", "切换全屏", "返回主页", "手动全刷", "不操作"};
+    static const char *const labels[APP_READER_KEY_COUNT] = {
+        [APP_READER_KEY_PREV] = "上一页",
+        [APP_READER_KEY_NEXT] = "下一页",
+        [APP_READER_KEY_TOOLS] = "阅读工具栏",
+        [APP_READER_KEY_FULLSCREEN] = "切换全屏",
+        [APP_READER_KEY_HOME] = "返回主页",
+        [APP_READER_KEY_REFRESH] = "手动全刷",
+        [APP_READER_KEY_NONE] = "不操作",
+        // 旧测试固件存过的 7 是已撤销动作，按不操作显示。/ Stored 7 is the withdrawn action and reads as no-op.
+        [APP_READER_KEY_LEGACY_BACK] = "不操作",
+        [APP_READER_KEY_FRONTLIGHT] = "前光开关",
+    };
     return labels[action >= 0 && action < APP_READER_KEY_COUNT ? action : APP_READER_KEY_NONE];
 }
 // 面板只占下方三分之二；双击说明收在动作列表里，页面上不再重复。
@@ -2604,28 +2619,44 @@ static void draw_key_settings(uint8_t *fb) {
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
-// 动作列表卡片：绘制与命中共用同一条矩形，行距 94。此前绘制按 88 排、命中按 94，
-// 越靠下的选项点到的行和看到的行对不上。
-// Action-list cards share one rectangle at a 94 px pitch; painting used 88 while hit testing used
-// 94, so lower rows fired on a different action than the one shown.
+// 动作列表的显示顺序；前光开关排在「不操作」前，存储值仍按枚举原值。
+// Display order for the action list; the frontlight toggle sits before "no action" while
+// stored values keep the enum's own numbering.
+static const app_reader_key_action_t s_reader_key_order[] = {
+    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
+    APP_READER_KEY_FULLSCREEN, APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
+    APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_NONE,
+};
+#define READER_KEY_ACTION_ROWS ((int)(sizeof(s_reader_key_order) / sizeof(s_reader_key_order[0])))
+#define KEY_ACTION_TOP 390
+#define KEY_ACTION_PITCH 86
+#define KEY_ACTION_HEIGHT 78
+// 动作列表卡片：绘制与命中共用同一条矩形。八行时行距收到 86，底部提示行仍留在
+// 「返回」按钮上方；此前绘制按 88 排、命中按 94，越靠下越容易点错。
+// Action-list cards share one rectangle; eight rows tighten the pitch to 86 so the hint line
+// still clears the Back button. Painting once used 88 while hit testing used 94, so lower rows
+// fired on a different action than the one shown.
 static EpdRect reader_key_action_card(int index) {
-    return (EpdRect){36, 390 + index * 94, 612, 78};
+    return (EpdRect){36, KEY_ACTION_TOP + index * KEY_ACTION_PITCH, 612, KEY_ACTION_HEIGHT};
 }
+_Static_assert(KEY_ACTION_TOP + (READER_KEY_ACTION_ROWS - 1) * KEY_ACTION_PITCH + KEY_ACTION_HEIGHT < 1141,
+               "key action rows must clear the footer button");
 static void draw_key_picker(uint8_t *fb) {
     static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能", "中键双击功能", "上键单击功能"};
     draw_sheet(fb, 270, titles[s_reader_key_pick < 6 ? s_reader_key_pick : 0]);
     draw_sheet_back(fb, 270);
-    for (int i = 0; i < APP_READER_KEY_COUNT; ++i) {
+    app_reader_key_action_t current = s_reader_key_pick == 3 ? app_settings_reader_hold_action()
+        : s_reader_key_pick == 4 ? app_settings_reader_double_action()
+        : s_reader_key_pick == 5 ? app_settings_reader_up_action()
+        : app_settings_reader_key_action(s_reader_key_pick);
+    for (int i = 0; i < READER_KEY_ACTION_ROWS; ++i) {
+        app_reader_key_action_t action = s_reader_key_order[i];
         EpdRect card = reader_key_action_card(i);
-        bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action()
-                       : s_reader_key_pick == 4 ? app_settings_reader_double_action()
-                       : s_reader_key_pick == 5 ? app_settings_reader_up_action()
-                       : app_settings_reader_key_action(s_reader_key_pick)) == i;
-        ui_fill_round_rect(fb, card, 20, selected ? 0xd8 : UI_GRAY_WHITE);
+        ui_fill_round_rect(fb, card, 20, current == action ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
-        reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_key_label(i), EPD_DRAW_ALIGN_LEFT, false);
+        reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_key_label(action), EPD_DRAW_ALIGN_LEFT, false);
         epd_draw_circle(608, card.y + 39, 11, 0x38, fb);
-        if (selected) epd_fill_circle(608, card.y + 39, 6, UI_GRAY_BLACK, fb);
+        if (current == action) epd_fill_circle(608, card.y + 39, 6, UI_GRAY_BLACK, fb);
     }
     reader_panel_text_vc(fb, 342, 1112, 20, s_reader_key_error[0] ? s_reader_key_error : "从底部上滑可随时打开阅读工具栏", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
@@ -5841,11 +5872,12 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (ui_rect_hit((EpdRect){36, top + 29, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
             s_reader_panel = picker ? READER_PANEL_KEY_SETTINGS : READER_PANEL_REFRESH_SETTINGS;
         else if (picker) {
-            for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit(reader_key_action_card(i), x, y)) {
-                bool saved = s_reader_key_pick == 3 ? app_settings_set_reader_hold_action(i)
-                    : s_reader_key_pick == 4 ? app_settings_set_reader_double_action(i)
-                    : s_reader_key_pick == 5 ? app_settings_set_reader_up_action(i)
-                    : app_settings_set_reader_key_action(s_reader_key_pick, i);
+            for (int i = 0; i < READER_KEY_ACTION_ROWS; ++i) if (ui_rect_hit(reader_key_action_card(i), x, y)) {
+                app_reader_key_action_t action = s_reader_key_order[i];
+                bool saved = s_reader_key_pick == 3 ? app_settings_set_reader_hold_action(action)
+                    : s_reader_key_pick == 4 ? app_settings_set_reader_double_action(action)
+                    : s_reader_key_pick == 5 ? app_settings_set_reader_up_action(action)
+                    : app_settings_set_reader_key_action(s_reader_key_pick, action);
                 if (!saved) {
                     copy_text(s_reader_key_error, sizeof(s_reader_key_error), "保存失败，请重试");
                     return APP_REDRAW_PAGE;
@@ -7047,6 +7079,16 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         case APP_READER_KEY_HOME: return reader_return(ctx);
         case APP_READER_KEY_FULLSCREEN: return toggle_reader_fullscreen(ctx);
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
+        case APP_READER_KEY_FRONTLIGHT: {
+            // 前光开关只驱动灯，不重画正文；无前光的板保持不操作。
+            // The frontlight toggle only drives the light without repainting the body; boards
+            // without one stay a no-op.
+            if (!frontlight_ready()) return APP_REDRAW_NONE;
+            const bool on = !app_settings_frontlight_on();
+            app_settings_set_frontlight_on(on);
+            (void)frontlight_apply(on, app_settings_frontlight_brightness(), app_settings_frontlight_cct());
+            return APP_REDRAW_NONE;
+        }
         case APP_READER_KEY_TOOLS:
             s_reader_slider = -1;
             toggle_reader_tools_panel();

@@ -5,6 +5,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc98 本地 / 2026-10-22
 
+- 「按键控制」的动作列表新增「前光开关」：可绑给左/中/右键短按、中键长按、中键双击或上键单击，按一次开灯、再按一次关灯；开灯沿用下拉快捷栏记住的亮度与色温，没有前光的板保持不操作。列表从七行变为八行，行距相应收紧，底部提示与「返回」按钮位置不变；旧配置和备份里的动作编号不变。
+  The key-control action list gains a frontlight toggle, bindable to any short key, the middle hold, the middle double press or the up key: one press lights it and the next turns it off, using the brightness and colour temperature the pull-down quick layer remembers, while boards without a frontlight keep it a no-op. The list grows from seven to eight rows at a tighter pitch, keeping the hint and Back button in place and leaving existing action numbers in saved settings and backups unchanged.
+
+- 前光亮度上限降到原厂满输出的 30%：滑杆仍为 1–100%，已保存的亮度值不变，但拉满时的实际占空比只有此前的 30%，整条滑杆仍连续可调；亮度数字不再另设新档。
+  The frontlight brightness ceiling drops to 30% of the factory full output: the slider still spans 1–100% and saved values are unchanged, but a full slider now drives 30% of the previous duty and the whole range stays continuously adjustable, with no new levels added to the saved value.
+
 - 「按键控制」新增「上键单击」：机身顶部那颗实体上键在阅读正文里可设为上一页、下一页、阅读工具栏、切换全屏、返回主页、手动全刷或不操作，默认不操作，随配置备份保存。中键双击行改成与中键长按同高的整行样式；列表因此比可视区多一行，上下滑动整行查看，面板高度与底部「完成」按钮位置不变。
   The key sheet gains an up-key single press: the top-edge physical key can be mapped, in the reader body only, to previous/next page, the reading toolbar, full screen, home, a manual full refresh or no action (the default), and the mapping is part of the settings backup. The middle double-press row now matches the hold row's full-height style; the list therefore outgrows its viewport by one row and scrolls a whole row at a time, keeping the sheet height and the Done button where they were.
 

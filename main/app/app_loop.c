@@ -367,9 +367,18 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
         &event);
     if (owned) ctx->consumed = true;
     if (event.action == UI_QUICK_OPEN || event.action == UI_QUICK_CLOSE) {
-        // 收起前把预览值落盘：权限变化或 USB 抢占导致的关闭也走这里。
-        // Persist previews before closing, including permission changes or USB preemption.
-        if (event.action == UI_QUICK_CLOSE) quick_frontlight_persist();
+        if (event.action == UI_QUICK_OPEN) {
+            // 阅读键可以直接开关前光；开层前读回设置，预览和关层落盘都不会写成旧状态。
+            // A reading key can toggle the frontlight directly; reload the settings before opening
+            // so neither the preview nor the close-time write resurrects a stale state.
+            ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),
+                                         app_settings_frontlight_brightness(), app_settings_frontlight_cct());
+            s_fl_shown_on = s_quick.fl_on;
+        } else {
+            // 收起前把预览值落盘：权限变化或 USB 抢占导致的关闭也走这里。
+            // Persist previews before closing, including permission changes or USB preemption.
+            quick_frontlight_persist();
+        }
         quick_present(ctx, current, false);
     }
     else if (event.action == UI_QUICK_WIFI) quick_toggle_wifi();

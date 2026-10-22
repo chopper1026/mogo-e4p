@@ -197,6 +197,11 @@ typedef enum {
     APP_READER_KEY_HOME, ///< 返回主页（本次开书来源） / Return to the opening origin
     APP_READER_KEY_REFRESH, ///< 手动全刷 / Manual full refresh
     APP_READER_KEY_NONE, ///< 不操作 / No action
+    /// 本地测试固件把 7 存成已撤销的「返回」动作；保留占位，免得旧值在升级后被读成前光开关。
+    /// Local test builds stored 7 for a withdrawn back action; keep it reserved so a stale
+    /// value never turns into the frontlight toggle.
+    APP_READER_KEY_LEGACY_BACK,
+    APP_READER_KEY_FRONTLIGHT, ///< 开关前光 / Toggle the frontlight
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.

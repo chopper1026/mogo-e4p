@@ -420,6 +420,14 @@ static app_reader_key_action_t test_double_action=APP_READER_KEY_NONE;
 static app_reader_key_action_t app_settings_reader_hold_action(void){return test_hold_action;}
 static app_reader_key_action_t app_settings_reader_double_action(void){return test_double_action;}
 static app_reader_key_action_t app_settings_reader_key_action(unsigned key){return test_keys[key];}
+static bool test_frontlight_on,test_frontlight_ready=true;
+static int test_frontlight_applies;
+static bool frontlight_ready(void){return test_frontlight_ready;}
+static bool app_settings_frontlight_on(void){return test_frontlight_on;}
+static void app_settings_set_frontlight_on(bool on){test_frontlight_on=on;}
+static uint8_t app_settings_frontlight_brightness(void){return 40;}
+static uint8_t app_settings_frontlight_cct(void){return 50;}
+static esp_err_t frontlight_apply(bool on,uint8_t brightness,uint8_t cct){(void)brightness;(void)cct;test_frontlight_on=on;++test_frontlight_applies;return 0;}
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 // 题头预留区 stub：提取的排版函数会调用，宿主不验证题头像素。

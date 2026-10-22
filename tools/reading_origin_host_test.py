@@ -60,6 +60,16 @@ static app_redraw_t turn_page(app_ctx_t *ctx,int d){(void)ctx;(void)d;return APP
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static void invalidate_prep(void){}
+static bool s_fl_on;
+static int s_fl_applies;
+static bool frontlight_ready(void){return true;}
+static bool app_settings_frontlight_on(void){return s_fl_on;}
+static void app_settings_set_frontlight_on(bool on){s_fl_on=on;}
+static unsigned char app_settings_frontlight_brightness(void){return 40;}
+static unsigned char app_settings_frontlight_cct(void){return 50;}
+static int frontlight_apply(bool on,unsigned char brightness,unsigned char cct){
+ (void)brightness;(void)cct;s_fl_on=on;++s_fl_applies;return 0;
+}
 '''
 unit+='\n'.join(function(n,book) for n in ['reader_return','toggle_reader_tools_panel','reader_key_action','reader_key_label'])
 unit+=r'''
@@ -89,6 +99,12 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
  strcpy(book.path,"/sdcard/books/Novel/a.epub");fail_open=true;ev.type=UI_GESTURE_PRESS;on_gesture(&ctx,&ev);
  ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&nav==-1);fail_open=false;
  assert(!strcmp(reader_key_label(APP_READER_KEY_HOME),"返回主页"));
+ assert(!strcmp(reader_key_label(APP_READER_KEY_FRONTLIGHT),"前光开关"));
+ // 前光开关只驱动灯，不重画正文；再按一次关灯。
+ // The frontlight toggle only drives the light and requests no redraw; a second press turns it off.
+ s_fl_on=false;s_fl_applies=0;
+ assert(reader_key_action(&ctx,APP_READER_KEY_FRONTLIGHT)==APP_REDRAW_NONE&&s_fl_on&&s_fl_applies==1);
+ assert(reader_key_action(&ctx,APP_READER_KEY_FRONTLIGHT)==APP_REDRAW_NONE&&!s_fl_on&&s_fl_applies==2);
  for(int via_key=0;via_key<2;++via_key)for(int from_home=0;from_home<2;++from_home){
   s_view=READING;s_reader_panel=READER_PANEL_TOOLS;s_reader_return_home=from_home;
   nav=-1;ctx.leaf=99;int before=freed;

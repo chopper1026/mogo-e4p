@@ -3,11 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：前光双路 PWM 实现。色温只改变两路权重，亮度是较强一路的目标占空比；
- * 50% 即原厂「冷暖同开」，因此向中间调色温时总输出会上升。
+ * 50% 即原厂「冷暖同开」，因此向中间调色温时总输出会上升；该占空比再乘 30%
+ * 输出上限，滑杆拉满也不到原厂满亮度。
  *
  * English: Dual-channel frontlight implementation. CCT only redistributes the two
  * channel weights while brightness is the stronger channel's target duty; 50% is
- * the vendor's "both on" state, so total output rises toward the middle.
+ * the vendor's "both on" state, so total output rises toward the middle. That duty
+ * is then scaled by a 30% output ceiling, so even a full slider stays below the
+ * vendor's full brightness.
  *
  * 冻结：不写 EPD 电源、VCOM 或面板时序；只用 LEDC。
  * Frozen: never touch EPD power, VCOM or panel timing; LEDC only.
@@ -54,8 +57,12 @@ static void cct_weights(uint8_t cct, uint32_t* warm, uint32_t* cool) {
     *cool = cct >= FRONTLIGHT_CCT_NEUTRAL ? 100u : (uint32_t)cct * 2u;
 }
 
+// 亮度百分比先乘输出上限：滑杆 100% 只给 30% 占空比，避免最高档过亮。
+// Scale the percentage by the output ceiling first: a full slider yields a 30% duty cycle so
+// the top of the range is not glaring.
 static uint32_t scale_duty(uint8_t brightness, uint32_t weight) {
-    return (FRONTLIGHT_DUTY_MAX * (uint32_t)brightness * weight + 5000u) / 10000u;
+    return (FRONTLIGHT_DUTY_MAX * (uint32_t)brightness * weight *
+                FRONTLIGHT_OUTPUT_CEILING_PERCENT + 500000u) / 1000000u;
 }
 
 static esp_err_t write_output(void) {

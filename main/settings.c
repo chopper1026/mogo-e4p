@@ -346,19 +346,23 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
         uint8_t value;
-        // 本地测试固件存过值 7（已撤销的「返回」动作）；钳回不操作。
-        // Local test builds stored value 7 (the withdrawn "back" action); clamp it to no-op.
-        if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK && value < APP_READER_KEY_NONE)
+        // 短按仍不接受「不操作」；前光开关是有效动作，单独放行。
+        // Short presses still reject "no action"; the frontlight toggle is valid and passes on its own.
+        if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK &&
+            (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT))
             s_reader_keys[i] = value;
     }
     uint8_t hold_action = APP_READER_KEY_HOME;
-    s_reader_hold_action = nvs_get_u8(h, NVS_KEY_HOLD_ACTION, &hold_action) == ESP_OK && hold_action < APP_READER_KEY_COUNT
+    s_reader_hold_action = nvs_get_u8(h, NVS_KEY_HOLD_ACTION, &hold_action) == ESP_OK &&
+            hold_action < APP_READER_KEY_COUNT && hold_action != APP_READER_KEY_LEGACY_BACK
         ? hold_action : APP_READER_KEY_HOME;
     uint8_t double_action = APP_READER_KEY_NONE;
-    s_reader_double_action = nvs_get_u8(h, NVS_KEY_DOUBLE_ACTION, &double_action) == ESP_OK && double_action < APP_READER_KEY_COUNT
+    s_reader_double_action = nvs_get_u8(h, NVS_KEY_DOUBLE_ACTION, &double_action) == ESP_OK &&
+            double_action < APP_READER_KEY_COUNT && double_action != APP_READER_KEY_LEGACY_BACK
         ? double_action : APP_READER_KEY_NONE;
     uint8_t up_action = APP_READER_KEY_NONE;
-    s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK && up_action < APP_READER_KEY_COUNT
+    s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK &&
+            up_action < APP_READER_KEY_COUNT && up_action != APP_READER_KEY_LEGACY_BACK
         ? up_action : APP_READER_KEY_NONE;
     uint8_t keys_v2 = 0;
     bool migrate_reader_defaults = nvs_get_u8(h, NVS_KEY_READER_KEYS_V2, &keys_v2) != ESP_OK || keys_v2 != 1;
