@@ -3657,6 +3657,41 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
         }
     }
 }
+// 页脚整行固定一种字体：有卡上字体时跟随阅读字体，否则用内建补充位图。
+// 内建字库缺《》【】等常用标点，按每行覆盖情况换字体会让同一行页脚在两种字号间跳。
+// One face for the whole footer: the card face when one is loaded, otherwise the builtin
+// supplement. The builtin lacks common punctuation such as 《》【】, and choosing the face per
+// line made the same footer jump between two apparent sizes.
+static bool reader_footer_card_face(void) {
+    return ttf_font_ready() && !ttf_font_is_builtin();
+}
+static int reader_footer_width(int px, const char *text) {
+    if (!reader_footer_card_face()) return ui_text_fixed_width_px(px, text);
+    int keep = ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    int width = ttf_text_width_px(px, text);
+    ttf_font_select(keep);
+    return width;
+}
+// 按页脚实际字体量宽再截短：内建字宽比阅读字体窄三成，拿它截完再换字体就会压到页码。
+// Trim against the footer face: the builtin advances are about 30% narrower than the card face,
+// so measuring with the builtin would let the title run into the page counter.
+static void fit_reader_footer_text(char *text, int px, int width) {
+    while (*text && reader_footer_width(px, text) > width) {
+        size_t n = strlen(text) - 1;
+        while (n && ((unsigned char)text[n] & 0xc0) == 0x80) --n;
+        text[n] = 0;
+    }
+}
+static void reader_footer_text(uint8_t *fb, int x, int y_top, int px, const char *text,
+                               enum EpdFontFlags align) {
+    if (!reader_footer_card_face()) {
+        ui_text_fixed(fb, x, y_top, px, text, align, false);
+        return;
+    }
+    int keep = ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    ttf_draw_text_px(fb, x, y_top + ttf_ascender_px(px), px, text, align, UI_INK_BLACK, UI_INK_WHITE);
+    ttf_font_select(keep);
+}
 // 只补画外框：进来的帧缓冲里已经有正文（整页重绘是 draw_reader 先清再画，预绘命中是整帧拷来的）。
 // 这里再清一次会把刚画好的正文整块擦掉，页面上就只剩页眉、页脚和状态栏。
 // Chrome only: the incoming frame already holds the body (draw_reader clears and paints it first;
@@ -3712,13 +3747,16 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         char chapter_line[192];
         snprintf(chapter_line, sizeof(chapter_line), "%s%s",
                  s_save_failed ? "未保存 · " : "", chapter_name);
-        fit_fixed_text(chapter_line, footer_px,
-                       track.width - ui_text_fixed_width_px(footer_px, progress) - 16);
+        fit_reader_footer_text(chapter_line, footer_px,
+                               track.width - reader_footer_width(footer_px, progress) - 16);
         // 页码和全书进度靠右固定，长章节名仅截短左侧；字号不跟随正文设置。
-        // Keep page and book progress right-aligned; trim only long chapter titles and ignore body font settings.
-        ui_text_fixed(fb, track.x, track.y + 27, footer_px, chapter_line, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_fixed(fb, track.x + track.width, track.y + 27, footer_px,
-                      progress, EPD_DRAW_ALIGN_RIGHT, false);
+        // 左右两段同一种字体，页脚不会因为章名里的标点换字体而忽大忽小。
+        // Keep page and book progress right-aligned; trim only long chapter titles and ignore body
+        // font settings. Both halves share one face, so punctuation in the chapter name can no
+        // longer resize the footer.
+        reader_footer_text(fb, track.x, track.y + 27, footer_px, chapter_line, EPD_DRAW_ALIGN_LEFT);
+        reader_footer_text(fb, track.x + track.width, track.y + 27, footer_px,
+                           progress, EPD_DRAW_ALIGN_RIGHT);
     }
     if (s_reader_notice[0]) {
         EpdRect notice = {218, 160, 248, 48};

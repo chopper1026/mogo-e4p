@@ -37,6 +37,9 @@ typedef struct {int x,y,width,height;} EpdRect;
 #define EPD_DRAW_ALIGN_LEFT 0
 #define EPD_DRAW_ALIGN_CENTER 1
 #define EPD_DRAW_ALIGN_RIGHT 2
+// 固件里对齐参数是枚举；桩把宏留给调用点，这里只补类型。
+// The firmware passes an enum; the stubs keep the macros for call sites and add the type here.
+enum EpdFontFlags { EPD_FONT_FLAGS_HOST = 0 };
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_LIGHT 224
@@ -83,11 +86,27 @@ static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *v,int align,bo
 static size_t book_layout_page_count(void){return 47;}
 static int ui_text_title_fit(char *out,int preferred,int width,const char *source){(void)out;(void)preferred;(void)width;(void)source;return preferred;}
 static int ui_content_width(void){return UI_LOCK_WIDTH;}
-static void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *v,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)v;(void)align;(void)inv;++chrome_calls;}
+// 页脚两段各自记一次，用来验证整行走同一种字体、字号固定 28。
+// Record both footer halves so the test can prove one face and a fixed 28 px.
+static bool card_face;
+static int footer_builtin_draws, footer_card_draws, footer_px;
+static void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *v,int align,bool inv){(void)fb;(void)x;(void)y;(void)v;(void)align;(void)inv;++chrome_calls;++footer_builtin_draws;footer_px=px;}
 static int ui_text_fixed_width_px(int px,const char *v){(void)v;return px*2;}
+#define TTF_FONT_SLOT_SYSTEM 0
+#define UI_INK_BLACK 0
+#define UI_INK_WHITE 15
+static bool ttf_font_ready(void){return card_face;}
+static bool ttf_font_is_builtin(void){return !card_face;}
+static int ttf_font_select(int slot){(void)slot;return TTF_FONT_SLOT_SYSTEM;}
+static int ttf_text_width_px(int px,const char *v){(void)v;return px*2;}
+static int ttf_ascender_px(int px){return px*3/4;}
+static void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *v,int align,int fg,int bg){(void)fb;(void)x;(void)y;(void)v;(void)align;(void)fg;(void)bg;++footer_card_draws;footer_px=px;}
 static void fit_fixed_text(char *out,int px,int width){(void)out;(void)px;(void)width;}
 static void copy_text(char *out,size_t cap,const char *in){snprintf(out,cap,"%s",in);}
-static void reader_footer_chapter_name(char *out,size_t cap){snprintf(out,cap,"%s","第二章");}
+// 章名带内建字库缺失的【】，用来证明页脚字体不再随标点变化。
+// The title carries 【】, which the builtin face lacks, proving the footer face no longer
+// follows the punctuation.
+static void reader_footer_chapter_name(char *out,size_t cap){snprintf(out,cap,"%s","第2章【灵葫芦】");}
 static unsigned percent(size_t page){return (unsigned)page*10;}
 // 正文替身：把正文行带写成黑，代表排版已经画好的一页文字。
 // Body stand-in: blacken the body row band, standing for a page the layout already painted.
@@ -107,6 +126,10 @@ static int body_ink(const uint8_t *fb){
 unit += 'int epd_width(void){return 1216;}\n'
 unit += 'int epd_height(void){return 684;}\n'
 unit += function('ui_clear_page', KIT) + '\n'
+unit += function('reader_footer_card_face', BOOK) + '\n'
+unit += function('reader_footer_width', BOOK) + '\n'
+unit += function('fit_reader_footer_text', BOOK) + '\n'
+unit += function('reader_footer_text', BOOK) + '\n'
 unit += function('draw_reader_outer', BOOK) + '\n'
 unit += function('draw_reader', BOOK) + '\n'
 unit += r'''
@@ -139,6 +162,24 @@ int main(void){
     assert(chrome_calls>0);
     assert(body_ink(fb)>0);
     puts("PASS: draw_reader_outer keeps the prefetched body");
+    free(fb);
+    // 三：有卡上字体时页脚两段都走阅读字体，字号固定 28，不受章名标点影响。
+    // Three: with a card face loaded both footer halves use it at a fixed 28 px, independent of
+    // the punctuation in the chapter name.
+    fb=white_frame();
+    s_reader_fullscreen=false;s_reader_panel=READER_PANEL_NONE;
+    card_face=true;footer_builtin_draws=footer_card_draws=0;footer_px=0;
+    draw_reader_outer(fb,2);
+    assert(footer_card_draws==2&&!footer_builtin_draws&&footer_px==28);
+    puts("PASS: footer keeps the reading face at 28 px");
+    free(fb);
+    // 四：没有卡上字体时两段一起退回内建补充位图，仍是 28。
+    // Four: without a card face both halves fall back to the builtin supplement, still 28 px.
+    fb=white_frame();
+    card_face=false;footer_builtin_draws=footer_card_draws=0;footer_px=0;
+    draw_reader_outer(fb,2);
+    assert(footer_builtin_draws==2&&!footer_card_draws&&footer_px==28);
+    puts("PASS: footer falls back to the builtin face at 28 px");
     free(fb);
     return 0;
 }
