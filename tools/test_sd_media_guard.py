@@ -7,7 +7,7 @@ import subprocess
 root = Path(__file__).resolve().parents[1]
 out = root / 'build/sd-media-test'
 out.mkdir(parents=True, exist_ok=True)
-for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h',
+for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h', 'esp_timer.h',
              'freertos/FreeRTOS.h', 'freertos/task.h', 'read_pico_board.h',
              'sdmmc_cmd.h', 'esp_err.h', 'esp_heap_caps.h'):
     p = out / name
@@ -52,8 +52,11 @@ typedef struct { struct { char name[8]; } cid; struct { uint32_t capacity,sector
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void heap_caps_free(void *p){free(p);}
 static esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
+static esp_err_t sdmmc_host_init(void){return ESP_OK;}
+static esp_err_t sdmmc_host_deinit(void){return ESP_OK;}
 static esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card){(void)host;(void)card;return ESP_ERR_TIMEOUT;}
 static esp_err_t sdmmc_read_sectors(sdmmc_card_t *card,void *buffer,size_t start,size_t count){(void)card;(void)buffer;(void)start;(void)count;return ESP_ERR_TIMEOUT;}
+static esp_err_t sdmmc_get_status(sdmmc_card_t *card);
 typedef pthread_mutex_t portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED PTHREAD_MUTEX_INITIALIZER
 #define portENTER_CRITICAL(p) assert(pthread_mutex_lock(p)==0)
@@ -88,6 +91,11 @@ static int mock_mkdir(const char* p,int mode){
     return 0;
 }
 #define mkdir mock_mkdir
+// 板级接口在包含实现文件之前先声明：生成的头文件只占位。
+// Declare the board hook before the implementation include; the generated headers are placeholders.
+bool read_pico_sd_has_cd(void);
+static int64_t mock_us;
+static int64_t esp_timer_get_time(void){return mock_us;}
 #include "../../components/read_pico/read_pico_sd.c"
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。
 // This fixture checks media lifecycle; allocation counting is covered by sd_probe_host_test.
@@ -96,6 +104,9 @@ int f_opendir(FF_DIR *root,const char *path){(void)root;(void)path;return 1;}
 int f_closedir(FF_DIR *root){(void)root;return FR_OK;}
 int ff_mutex_take(int drive){(void)drive;return 1;}
 void ff_mutex_give(int drive){(void)drive;}
+// 板级 CD 存在时软件检测不启用；这里只补链接符号。
+// Soft detect stays off while the board reports a CD pin; this only satisfies the link.
+esp_err_t sdmmc_get_status(sdmmc_card_t *c){(void)c;return ESP_OK;}
 // 测试实际板级检测函数；FCA 读错不应写出“无卡”。/ Exercise real board detect; failed FCA reads must not publish absence.
 #define IOE_SD_CD (1u << 6)
 static void* s_ioe=(void*)1;
@@ -140,7 +151,11 @@ int main(void) {
     assert(read_pico_sd_start_probe()==ESP_OK && mounts==1 && unmounts==0);
     detect_fail=false;
     present=false;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    // 已挂载时一次 CD 抖动不判掉卡；连续确认才失效。
+    // One CD glitch must not drop a mounted card; a sustained absence does.
+    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     assert(!info.mounted && !info.needs_format && !info.capacity_bytes && !info.free_bytes && !info.name[0]);
     assert(unmounts==0 && card==&mock_card);
     present=true;
@@ -152,6 +167,11 @@ int main(void) {
     assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && mounts==2);
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
+    // 挂载途中拔卡同样要连续确认，单次观测不锁存。
+    // Removal during a mount also needs sustained confirmation; one sample must not latch.
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000;
     assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     finish_probe();
@@ -160,6 +180,9 @@ int main(void) {
     // A detection fault after real removal must not let a probe bypass the removal latch.
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000;
     assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     detect_fail=true;
@@ -170,6 +193,11 @@ int main(void) {
     drop_during_mount=true;
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
+    // 挂载过程中卡掉了同样要连续确认，单次观测不算。
+    // A card lost during mount also needs the sustained confirmation; one sample is not enough.
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000;
     assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
     present=true;
     assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE);

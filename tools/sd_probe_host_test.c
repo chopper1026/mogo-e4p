@@ -21,6 +21,9 @@ static uint64_t test_total=1024*512,test_free=768*512;
 static esp_err_t test_info_error=ESP_OK;
 static unsigned space_calls, invalidations;
 static bool fat_locked;
+static int64_t mock_us;
+
+int64_t esp_timer_get_time(void) { return mock_us; }
 
 static sdmmc_card_t test_card = {
     .cid.name = "TEST64G", .csd.capacity = 1024, .csd.sector_size = 512,
@@ -38,10 +41,16 @@ int ff_mutex_take(int drive){assert(drive==0&&!fat_locked);fat_locked=true;retur
 void ff_mutex_give(int drive){assert(drive==0&&fat_locked&&test_fat.free_clst==UINT32_MAX);fat_locked=false;++invalidations;}
 esp_err_t test_host_init(void){return ESP_OK;}
 esp_err_t test_host_deinit(void){return ESP_OK;}
+esp_err_t sdmmc_host_init(void){return ESP_OK;}
+esp_err_t sdmmc_host_deinit(void){return ESP_OK;}
 esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
 esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
 bool read_pico_sd_present(void) { return test_present; }
+// 宿主按「有 CD 脚」跑：软件卡检测的任务与 CMD13 不进入这些用例。
+// The host pretends the board has a CD pin, so the soft-detect task and CMD13 stay out of these cases.
+bool read_pico_sd_has_cd(void) { return true; }
+esp_err_t sdmmc_get_status(sdmmc_card_t *c) { (void)c; return ESP_OK; }
 esp_err_t read_pico_sd_detect(bool* present) {
     if (detect_failure) return ESP_ERR_TIMEOUT;
     *present = test_present;
@@ -108,7 +117,14 @@ int main(void) {
     assert(read_pico_sd_start_probe() == ESP_OK && mount_calls == 1);
     detect_failure = false;
 
+    // 一次 CD 读错不能判掉卡，连续确认才失效。
+    // One bad CD read must not drop the card; a sustained absence does.
     test_present = false;
+    mock_us += 60000;
+    assert(read_pico_sd_get_info(&info) == ESP_OK && info.mounted);
+    mock_us += 60000;
+    assert(read_pico_sd_get_info(&info) == ESP_OK && info.mounted);
+    mock_us += 60000;
     assert(read_pico_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
     test_present = true;
     assert(read_pico_sd_start_probe() == ESP_ERR_INVALID_STATE);
@@ -181,8 +197,15 @@ int main(void) {
     test_free=0;
     assert(read_pico_sd_refresh_space()==ESP_OK);
     assert(read_pico_sd_get_info(&info)==ESP_OK&&info.space_valid&&info.free_bytes==0);
+    // 连续确认后才判掉卡；之前空间统计仍走已挂载的卡。
+    // The card drops only after sustained confirmation; until then space still reads as mounted.
     test_present=false;before_space=space_calls;
-    assert(read_pico_sd_refresh_space()==ESP_ERR_NOT_FOUND&&space_calls==before_space);
+    mock_us+=60000;
+    assert(read_pico_sd_refresh_space()==ESP_OK&&space_calls==before_space+1);
+    mock_us+=60000;
+    assert(read_pico_sd_refresh_space()==ESP_OK&&space_calls==before_space+2);
+    mock_us+=60000;
+    assert(read_pico_sd_refresh_space()==ESP_ERR_NOT_FOUND&&space_calls==before_space+2);
     assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND&&!info.mounted&&!info.space_valid);
     puts("sd_probe: empty boot/insertion, checked CD, bounded settle/fallback, CMD6 busy, OOM, no format suggestion, 256 GiB passed");
     return 0;

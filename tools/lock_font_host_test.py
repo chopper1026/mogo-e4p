@@ -9,19 +9,24 @@ ROOT = Path(__file__).resolve().parents[1]
 FONT = ROOT / 'main/font/app_font_context.c'
 unit = r'''
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #define ESP_OK 0
 #define TTF_FONT_PATH_MAX 288
 #define TTF_FONT_BUILTIN "builtin"
+#define FONT_REJECT_RETRY_US (30 * 1000 * 1000)
 typedef struct {char path[288];bool reading;} app_lock_font_t;
 typedef struct {char path[288];} ttf_font_item_t;
 static bool s_reading,system_face,system_scale,recovery;
 static char s_rejected[TTF_FONT_PATH_MAX],corrupt[288];
 static time_t s_rejected_mtime;
 static off_t s_rejected_size;
+static int64_t s_rejected_us,mock_us;
+static int64_t esp_timer_get_time(void){return mock_us;}
 static int stroke,reading_weight=2;
 static int app_settings_book_weight_fine(void){return reading_weight;}
 static void ttf_set_stroke_adjust_fine(int level){stroke=level;}
@@ -29,10 +34,11 @@ static void ttf_set_stroke_adjust(int level){stroke=level*16;}
 static bool reading_aa=false,aa=true;
 static bool app_settings_book_antialias(void){return reading_aa;}
 static void ttf_set_antialias(bool enabled){aa=enabled;}
-static char chosen[288]="/fonts/system.ttf",reader[288]="/fonts/reader.ttf",active[288]="builtin",missing[288];
+static char chosen[288]="/fonts/system.ttf",reader[288]="/fonts/reader.ttf",active[288]="builtin",missing[288],io_error[288];
 static unsigned opens;
 static int mock_stat(const char *path,struct stat *st){
- if(!*path || !strncmp(path,"/absent/",8) || !strcmp(path,missing))return -1;
+ if(!*path || !strncmp(path,"/absent/",8) || !strcmp(path,missing)){errno=ENOENT;return -1;}
+ if(*io_error && !strcmp(path,io_error)){errno=EIO;return -1;}
  memset(st,0,sizeof(*st));st->st_mode=S_IFREG;st->st_size=100;st->st_mtime=1;return 0;
 }
 #define stat(path,st) mock_stat(path,st)
@@ -40,20 +46,21 @@ static bool pico_boot_recovery(void){return recovery;}
 static const char *app_settings_system_font_path(void){return chosen;}
 static const char *app_settings_font_path(void){return reader;}
 static const char *app_settings_fonts_dir(void){return "/absent/fonts";}
-static bool ttf_font_ready(void){return true;}
+static bool ttf_font_ready(void){return active[0]!=0;}
 static const char *ttf_font_path(void){return active;}
 static bool ttf_font_is_builtin(void){return !strcmp(active,"builtin");}
 static bool ttf_font_path_is_builtin(const char *path){return !*path||!strcmp(path,"builtin");}
 static int ttf_font_count(void){return 0;}
 static void ttf_font_scan(void){}
 static const ttf_font_item_t *ttf_font_item(int index){(void)index;return NULL;}
+static bool ttf_font_open_io_error(void){return false;}
 static int ttf_font_open(const char *path){++opens;if(!strcmp(path,missing)||!strcmp(path,corrupt)){active[0]=0;return -1;}snprintf(active,sizeof(active),"%s",path);return ESP_OK;}
 static int ttf_font_open_builtin(void){return ttf_font_open("builtin");}
 static void ui_text_set_system_font(bool on){system_face=on;}
 static void ui_text_set_system_scale(bool on){system_scale=on;}
 static void ui_nav_status_font_context(bool reading,bool changed){(void)changed;assert(reading==s_reading);}
 '''
-for name in ('font_file', 'system_path', 'activate', 'app_font_activate_system', 'app_font_activate_reading',
+for name in ('font_file', 'live_face', 'system_path', 'activate', 'app_font_activate_system', 'app_font_activate_reading',
              'app_font_retry_active', 'app_font_begin_lock', 'app_font_end_lock'):
     unit += function(name, FONT) + '\n'
 unit += r'''
@@ -95,6 +102,20 @@ int main(void){
  for(int i=0;i<100;++i)assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,chosen)&&opens==before);
  missing[0]=0;
  assert(!strcmp(chosen,"/fonts/system.ttf")&&!strcmp(reader,"/fonts/reader.ttf"));
+ // 卡上读错（EIO）不是文件缺失：保留当前字体，不掉内建也不拉黑。
+ // A card read error (EIO) is not a missing file: keep the live face, no built-in and no blacklist.
+ strcpy(io_error,reader);before=opens;
+ assert(!app_font_activate_reading());
+ assert(!ttf_font_is_builtin()&&!strcmp(active,chosen)&&opens==before&&!s_rejected[0]);
+ io_error[0]=0;assert(app_font_activate_reading()&&!strcmp(active,reader));
+ // 拉黑会过期：卡恢复后同一文件重新尝试，不必等用户换字体。
+ // A rejection expires: the same file is retried once the card recovers, without user action.
+ strcpy(corrupt,reader);active[0]=0;mock_us=0;s_rejected[0]=0;
+ assert(app_font_retry_active()&&ttf_font_is_builtin());
+ corrupt[0]=0;
+ assert(!app_font_retry_active()&&ttf_font_is_builtin());
+ mock_us=FONT_REJECT_RETRY_US+1;
+ assert(app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,reader));
  strcpy(chosen,"/fonts/system.ttf");recovery=true;
  app_font_begin_lock(&saved);assert(ttf_font_is_builtin()&&!system_face);app_font_end_lock(&saved);
  app_font_begin_lock(NULL);app_font_end_lock(NULL);

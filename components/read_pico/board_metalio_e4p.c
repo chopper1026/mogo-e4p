@@ -616,6 +616,10 @@ esp_err_t read_pico_sd_detect(bool* present) {
 
 bool read_pico_sd_present(void) { return true; }
 
+// Metalio 没有卡座 CD 脚，拔卡只能靠存储层的软件检测。
+// No slot CD on Metalio; removal is soft-detected by the storage layer.
+bool read_pico_sd_has_cd(void) { return false; }
+
 void read_pico_clear_ioe_int(void) {
     if (!s_ioe_ok) return;
     (void)fca9555_clear_int(s_ioe);

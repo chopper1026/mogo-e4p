@@ -22,3 +22,5 @@ typedef struct {
 #define GPIO_NUM_NC -1
 
 esp_err_t sdmmc_host_init_slot(int slot, const sdmmc_slot_config_t *config);
+esp_err_t sdmmc_host_init(void);
+esp_err_t sdmmc_host_deinit(void);

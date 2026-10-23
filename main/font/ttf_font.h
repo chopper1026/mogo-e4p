@@ -86,6 +86,9 @@ void ttf_font_set_failure_hook(
 
 esp_err_t ttf_font_init(void);
 esp_err_t ttf_font_open(const char* path);
+/// 上一次 `ttf_font_open` 失败是否来自卡上 I/O（而非文件本身无效）。
+/// Whether the last `ttf_font_open` failed on card I/O rather than an invalid file.
+bool ttf_font_open_io_error(void);
 esp_err_t ttf_font_open_builtin(void);
 bool ttf_font_is_builtin(void);
 bool ttf_font_path_is_builtin(const char* path);

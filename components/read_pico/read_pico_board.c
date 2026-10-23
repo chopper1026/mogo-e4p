@@ -750,6 +750,9 @@ bool read_pico_sd_present(void) {
     return read_pico_sd_detect(&present) == ESP_OK && present;
 }
 
+// 原板有真实卡座 CD，不需要软件检测。/ The original board has a real slot CD; no soft detection needed.
+bool read_pico_sd_has_cd(void) { return true; }
+
 void read_pico_clear_ioe_int(void) {
     (void)fca9555_clear_int(s_ioe);
 }

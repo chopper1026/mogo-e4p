@@ -19,6 +19,7 @@
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -56,10 +57,41 @@ static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool media_invalidated;
 static read_pico_sd_info_t cached_info;
 
+// 已挂载或正在挂载时，一次「不在位」多半是 I2C 读错或触点抖动：连续确认够久才判掉卡。
+// While mounted or mounting, a single "absent" is usually a bad I2C read or contact bounce;
+// latch only after a sustained absence.
+#define SD_CD_CONFIRM_READS 3
+#define SD_CD_CONFIRM_US (120 * 1000)
+static unsigned cd_absent_reads;
+static int64_t cd_absent_since_us;
+
+// 没有卡座 CD 的板子用 CMD13 当软件卡检测：连续失败才判掉卡，成功一次立刻恢复。
+// Boards without a slot CD poll CMD13 as a soft card detect: latch after repeated failures and
+// clear on the first success.
+#define SD_HEALTH_INTERVAL_MS 2000
+#define SD_HEALTH_FAILS 2
+static bool health_absent;
+static unsigned health_fails;
+static bool health_task_started;
+static sdmmc_host_t health_host;
+static sdmmc_slot_config_t health_slot;
+static bool health_host_valid;
+
 // 失效只影响快照，消费者释放句柄前不得卸载卡。/ Invalidation changes snapshots only; consumers must close handles before unmount.
+// 已挂载或正在挂载的卡才需要失效锁存：探测没挂上不算，否则空卡开机后插卡会被锁死。
+// Only a mounted or mounting card needs the removal latch; a failed probe must not latch,
+// or a card inserted after an empty boot would stay locked out.
 static void observe_media_locked(bool present) {
+    if (present) {
+        cd_absent_reads = 0;
+    } else if (cached_info.mounted || probe_state == 1) {
+        if (cd_absent_reads == 0) cd_absent_since_us = esp_timer_get_time();
+        if (++cd_absent_reads < SD_CD_CONFIRM_READS ||
+            esp_timer_get_time() - cd_absent_since_us < SD_CD_CONFIRM_US) return;
+    }
     bool inserted = present && !cached_info.present;
     if (!present && (cached_info.mounted || probe_state == 1)) media_invalidated = true;
+
     // 首次开机无卡时没有文件句柄；后插卡可重新探测。
     // A card inserted after an empty boot has no stale handles and can be probed.
     if (inserted && probe_state == 2 && !media_invalidated && !cached_info.mounted) {
@@ -72,6 +104,71 @@ static void observe_media_locked(bool present) {
         cached_info.present = present;
         cached_info.error = present ? ESP_ERR_INVALID_STATE : ESP_ERR_NOT_FOUND;
     }
+}
+
+// 卷锁内发 CMD13，和文件读写串行；锁被占或超时就不判断，绝不阻塞调用方以外的东西。
+// Issue CMD13 under the volume lock so it serializes with file I/O; when the lock is busy or
+// times out, judge nothing rather than stall anyone.
+// 卡重新插入后是未初始化状态，旧 RCA 的 CMD13 必然超时：判掉卡之后改用一次轻量初始化确认它回来了。
+// A reinserted card is uninitialized, so CMD13 on the old RCA always times out; once the card is
+// considered gone, confirm its return with one lightweight card init instead.
+// 探测期间借用 probe_state 占住忙状态，重挂和探测不会同时动主机。
+// The probe claims probe_state while it runs, so a remount and a probe never touch the host together.
+static void sd_health_tick(void) {
+    sdmmc_card_t* probe = NULL;
+    portENTER_CRITICAL(&state_lock);
+    if (probe_state == 2) { probe = card; probe_state = 1; }
+    portEXIT_CRITICAL(&state_lock);
+    if (probe == NULL) { health_fails = 0; return; }
+    BYTE pdrv = ff_diskio_get_pdrv_card(probe);
+    if (pdrv != 0xff) {
+        bool locked = true;
+#if FF_FS_REENTRANT
+        locked = ff_mutex_take(pdrv) != 0;
+#endif
+        if (locked) {
+            esp_err_t err = sdmmc_get_status(probe);
+            if (err != ESP_OK && health_absent && health_host_valid) {
+                // 拔卡会让 SDMMC 主机停在失败状态：先重开主机再做轻量初始化，否则新插入的卡也问不到。
+                // A yank leaves the SDMMC host in a failed state: reopen it before the light init, or a
+                // freshly inserted card cannot answer either.
+                (void)sdmmc_host_deinit();
+                if (sdmmc_host_init() == ESP_OK &&
+                    sdmmc_host_init_slot(health_host.slot, &health_slot) == ESP_OK) {
+                    sdmmc_card_t scratch;
+                    err = sdmmc_card_init(&health_host, &scratch);
+                }
+            }
+#if FF_FS_REENTRANT
+            ff_mutex_give(pdrv);
+#endif
+            if (err == ESP_OK) {
+                health_fails = 0;
+                health_absent = false;
+            } else if (++health_fails >= SD_HEALTH_FAILS) {
+                health_absent = true;
+            }
+        }
+    }
+    portENTER_CRITICAL(&state_lock);
+    if (probe_state == 1) probe_state = 2;
+    portEXIT_CRITICAL(&state_lock);
+}
+
+static void sd_health_task(void* arg) {
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(SD_HEALTH_INTERVAL_MS));
+        sd_health_tick();
+    }
+}
+
+// 只在没有 CD 脚的板子上起一次；有真实卡座的板子继续走中断式的 checked detect。
+// Start once on boards without a CD pin; boards with a real slot keep using checked detect.
+static void start_health_task(void) {
+    if (health_task_started || read_pico_sd_has_cd()) return;
+    if (xTaskCreate(sd_health_task, "sd_health", 3072, NULL, 2, NULL) == pdPASS)
+        health_task_started = true;
 }
 
 static void publish_info(const read_pico_sd_info_t* info) {
@@ -254,6 +351,11 @@ static esp_err_t mount_card(bool format_if_failed) {
     } else {
         invalidate_mount_space();
         ensure_media_dirs();
+        // 记下挂载用的主机配置，软件卡检测靠它做「卡回来了」的轻量初始化。
+        // Remember the mount host so the soft detect can probe a returning card with a light init.
+        health_host = host;
+        health_slot = slot;
+        health_host_valid = true;
     }
     return err;
 }
@@ -285,6 +387,12 @@ static void probe_task(void* arg) {
     esp_err_t err = mount_card(false);
     fill_info(&info, err);
     if (err == ESP_OK) {
+        // 刚挂上的卡一定在位，清掉上一轮软件检测留下的判断再起后台探测。
+        // A freshly mounted card is present: clear the previous soft-detect verdict before the
+        // background probe starts.
+        health_absent = false;
+        health_fails = 0;
+        start_health_task();
         ESP_LOGI(
             TAG,
             "Mounted %s, capacity=%llu MB, free=%llu MB",
@@ -315,6 +423,7 @@ esp_err_t read_pico_sd_start_probe(void) {
         cached_info.present = true;
         cached_info.error = ESP_ERR_NOT_FINISHED;
         probe_state = 1;
+        cd_absent_reads = 0;
     }
     bool start = err == ESP_OK && probe_state == 1;
     portEXIT_CRITICAL(&state_lock);
@@ -337,6 +446,10 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
     bool present = false;
     esp_err_t detect_err = read_pico_sd_detect(&present);
     portENTER_CRITICAL(&state_lock);
+    // 没有 CD 脚的板子把软件检测结果并进在位判断，后续去抖与锁存完全复用同一条路径。
+    // On boards without a CD pin, fold the soft-detect result into presence so the existing
+    // debounce and latch path stays the only one.
+    if (detect_err == ESP_OK && present && health_absent) present = false;
     if (detect_err == ESP_OK) observe_media_locked(present);
     *info = cached_info;
     esp_err_t err = probe_state == 0 && detect_err != ESP_OK ? detect_err :
@@ -379,6 +492,7 @@ esp_err_t read_pico_sd_remount(void) {
     memset(&cached_info, 0, sizeof(cached_info));
     media_invalidated = false;
     probe_state = 0;
+    cd_absent_reads = 0;
     portEXIT_CRITICAL(&state_lock);
     return read_pico_sd_start_probe();
 }

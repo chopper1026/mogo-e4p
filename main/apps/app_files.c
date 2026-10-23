@@ -361,17 +361,38 @@ static int compare_files(const void *left, const void *right) {
     return strcasecmp(a->name, b->name);
 }
 
+// 扫描遇到卡上读错时稍后自动重扫；一次瞬时读错不该把目录留成空的。
+// Rescan soon after a card read error: one transient failure must not leave the listing empty.
+#define FILE_SCAN_RETRY_MS 1500
+static int64_t s_scan_retry_ms;
+
 static void scan_folder(int folder) {
     if (!files_alloc()) return;
     s_count = s_page = 0;
     s_message[0] = 0;
+    s_scan_retry_ms = 0;
     read_pico_sd_get_info(&s_sd);
     if (!s_sd.mounted) { snprintf(s_message, sizeof(s_message), "TF 卡尚未挂载"); return; }
     const char *root = folder_root(folder);
+    errno = 0;
     DIR *dir = opendir(root);
-    if (!dir) { snprintf(s_message, sizeof(s_message), "目录不存在：%.60s", root); return; }
-    struct dirent *entry;
-    while (s_count < FILE_MAX && (entry = readdir(dir))) {
+    if (!dir) {
+        // 「没有这个目录」和「卡读不出来」不能给同一个结论。
+        // "No such directory" and "the card cannot be read" are different answers.
+        if (errno == ENOENT || errno == ENOTDIR)
+            snprintf(s_message, sizeof(s_message), "目录不存在：%.60s", root);
+        else {
+            snprintf(s_message, sizeof(s_message), "TF 卡读取失败，请稍后重试");
+            s_scan_retry_ms = esp_timer_get_time() / 1000 + FILE_SCAN_RETRY_MS;
+        }
+        return;
+    }
+    int failed = 0;
+    for (;;) {
+        if (s_count >= FILE_MAX) break;
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (!entry) { if (errno) ++failed; break; }
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
         file_item_t *item = &s_files[s_count];
         if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
@@ -384,6 +405,7 @@ static void scan_folder(int folder) {
         } else {
             DIR *probe = opendir(item->path);
             if (probe) { is_dir = true; item->size = 0; closedir(probe); }
+            else { ++failed; continue; }
         }
         if (!is_dir && !is_file) continue;
         if (s_view == FILE_VIEW_MOVE && !is_dir) continue;
@@ -394,6 +416,12 @@ static void scan_folder(int folder) {
         ++s_count;
     }
     closedir(dir);
+    // 多数条目都读不出来才重扫：单个坏条目不该让页面每 1.5 秒重画一次。
+    // Retry only when most entries failed: one odd entry must not repaint the page every 1.5 s.
+    if (failed && (s_count == 0 || failed > s_count)) {
+        s_scan_retry_ms = esp_timer_get_time() / 1000 + FILE_SCAN_RETRY_MS;
+        if (!s_count) snprintf(s_message, sizeof(s_message), "TF 卡读取失败，请稍后重试");
+    }
     qsort(s_files, s_count, sizeof(s_files[0]), compare_files);
     if (folder >= 0 && folder < 3) s_counts[folder] = s_count;
 }
@@ -714,6 +742,12 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             ctx->touch ? ctx->touch->y : 0, ctx->now_ms) == UI_KEYBOARD_CHANGED) return rename_paint(ctx, false);
         return ui_keyboard_idle_tick(ctx->touch && ctx->touch->touched, ctx->now_ms) == UI_KEYBOARD_CHANGED
             ? rename_paint(ctx, false) : APP_REDRAW_NONE;
+    }
+    // 上一次扫描读错时到点自动重扫，用户不用离开再进来。
+    // A scan that hit a read error reschedules itself; the user need not leave and re-enter.
+    if (!s_scan_pending && s_scan_retry_ms && ctx->now_ms >= s_scan_retry_ms) {
+        s_scan_retry_ms = 0;
+        s_scan_pending = true;
     }
     if (!s_scan_pending) {
         if (s_folder<0 && s_sd.mounted && !(ctx->touch && ctx->touch->touched) && ctx->now_ms-s_space_poll_ms>=15000) {

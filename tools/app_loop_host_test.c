@@ -84,7 +84,7 @@ static const void *nav_armed;
 static bool main_source_visible, main_target_visible;
 static bool media_test, sd_font, saved_sd_font;
 static bool mounted_steps[32], present_steps[32];
-static int media_lost, media_ready, builtin_opens, font_opens, probes, loss_step;
+static int media_lost, media_ready, builtin_opens, font_opens, probes, remounts, loss_step;
 static bool fl_ready, fl_on;
 static uint8_t fl_bri=40, fl_cct=50;
 static int fl_applies, fl_control_draws, fl_row_du, fl_row_gl, fl_row_padded, fl_key_gl, quick_gl_height;
@@ -232,6 +232,9 @@ int ttf_font_open(const char*p) {(void)p;font_opens++;sd_font=true;return 0;}
 int ttf_font_open_builtin(void) {assert(media_lost>0);builtin_opens++;sd_font=font_due=false;return 0;}
 int read_pico_sd_get_info(read_pico_sd_info_t*i) {i->present=media_test?present_steps[step]:font_due;i->mounted=media_test?mounted_steps[step]:font_due;return media_test&&!i->mounted?ESP_ERR_INVALID_STATE:0;}
 void read_pico_sd_start_probe(void) {probes++;}
+// 失效后卡回位的自动重挂：宿主用不到真实挂载，只记录调用。
+// Auto-remount once a latched card returns; the host keeps the count without a real mount.
+int read_pico_sd_remount(void) {++remounts;return ESP_ERR_NOT_FINISHED;}
 static void lost(app_ctx_t*c) {(void)c;media_lost++;loss_step=step;}
 static void ready(app_ctx_t*c) {(void)c;media_ready++;}
 EpdRect ui_content_refresh_area(void) {return (EpdRect){0,0,684,1000};}
@@ -286,7 +289,7 @@ static void reset(void) {
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
-    media_test=sd_font=saved_sd_font=false;media_lost=media_ready=builtin_opens=font_opens=probes=0;loss_step=-1;
+    media_test=sd_font=saved_sd_font=false;media_lost=media_ready=builtin_opens=font_opens=probes=remounts=0;loss_step=-1;
     memset(mounted_steps,0,sizeof(mounted_steps));memset(present_steps,0,sizeof(present_steps));
     long_keys=0;
     home_on_touch=home_on_tick=home_on_key=start_second=false;
@@ -497,6 +500,12 @@ int main(void) {
     reset();media_test=sd_font=saved_sd_font=true;mounted_steps[0]=mounted_steps[2]=true;time_step=4000000;first.on_media_lost=lost;
     add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
     assert(media_lost==2&&builtin_opens==2&&!probes&&font_opens==1);
+    // 失效后卡回到位自动重挂一次，挂载完成后只通知页面一次。
+    // A latched card that returns remounts once; completion notifies the page exactly once.
+    reset();media_test=sd_font=true;mounted_steps[0]=true;present_steps[2]=present_steps[3]=true;
+    mounted_steps[3]=true;time_step=1000000;first.on_media_lost=lost;first.on_media_ready=ready;
+    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(media_lost==1&&remounts==1&&media_ready==1);
     reset();idle_minutes=1;time_step=60000000;first.on_before_lock=before_lock;
     add(0,0,0,0);add(0,0,0,0);run();
     assert(idle_locks==1&&before_locks==1&&wake_clean_requests==1); // Real scheduler flushes before automatic lock.

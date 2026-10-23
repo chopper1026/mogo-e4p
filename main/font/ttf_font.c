@@ -18,6 +18,7 @@
 #include "ttf_stroke_filter.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
@@ -693,6 +694,10 @@ const ttf_font_item_t* ttf_font_item(int index) {
     return &s_catalog[index];
 }
 
+// 上一次打开失败是否来自卡上 I/O：这类失败不能当成「文件本身无效」。
+// Whether the last open failed on card I/O, which must not be read as an invalid file.
+static bool s_open_io_error;
+
 static int try_open_path(const char* path) {
     int fd = open(path, O_RDONLY);
     if (fd >= 0) {
@@ -707,7 +712,14 @@ static int open_font_file(const char* preferred) {
         || is_junk_name(font_basename(preferred))) {
         return -1;
     }
-    return try_open_path(preferred);
+    errno = 0;
+    int fd = try_open_path(preferred);
+    // 只记录目标文件自己的失败；随后回退旧字体成功不能把原因抹掉。
+    // Record only the target file's failure; a later successful fallback must not erase it.
+    if (fd < 0) {
+        s_open_io_error = errno == EIO || errno == EINTR || errno == EBUSY || errno == ENODEV;
+    }
+    return fd;
 }
 
 const char* ttf_font_path(void) {
@@ -2535,6 +2547,7 @@ static esp_err_t open_path_here(const char* path) {
         return ttf_font_open_builtin();
     }
 
+    s_open_io_error = false;
     char prev[TTF_FONT_PATH_MAX];
     strlcpy(prev, font_path, sizeof(prev));
     bool had = font_ready;
@@ -2581,6 +2594,10 @@ esp_err_t ttf_font_open(const char* path) {
     s_cur_index = keep;
     s_cur = &s_slots[keep];
     return err;
+}
+
+bool ttf_font_open_io_error(void) {
+    return s_open_io_error;
 }
 
 esp_err_t ttf_font_init(void) {

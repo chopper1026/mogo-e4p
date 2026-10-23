@@ -102,6 +102,9 @@ esp_err_t read_pico_sd_detect(bool* present);
 /// 简化检测；通信失败返回 false。挂载与拔卡判断应使用 checked detect。
 /// / Convenience detection returns false on I/O failure; mounting and removal use checked detect.
 bool read_pico_sd_present(void);
+/// 板子是否真的接了卡座 CD 脚；没有时由存储层用 CMD13 软件检测拔卡。
+/// / Whether the board wires a slot CD pin; without one the storage layer soft-detects removal with CMD13.
+bool read_pico_sd_has_cd(void);
 bool read_pico_rails_on(void);
 /// 刷新结束后释放 MODE/XOE/VCOM_EN，保留高压轨与原电压；已经中性时不访问 I2C，失败返回 false 供重试。
 /// Release MODE/XOE/VCOM_EN after output, retaining HV rails and voltage settings; neutral state does no I2C, false requests a retry.

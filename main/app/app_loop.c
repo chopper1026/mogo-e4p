@@ -134,6 +134,9 @@ void touch_diag_block(const char* src, int64_t t0_us) {
 // SD 卡插上或者刚挂好时，隔一会儿再试一次存在设置里的字体。
 // Retry the saved SD font shortly after a card appears or mounts.
 #define FONT_RETRY_INTERVAL_MS 750
+// 失效锁存后卡回位的自动重挂间隔；重挂本身失败时下次再试。
+// Auto-remount interval once a latched card is back; a failed remount retries next time.
+#define MEDIA_REMOUNT_INTERVAL_MS 2000
 #define MEDIA_POLL_INTERVAL_MS 500
 
 static int64_t s_lock_ignore_until_ms;
@@ -749,13 +752,25 @@ static bool try_load_saved_sd_font(bool allow_probe) {
     return app_font_retry_active();
 }
 
-// 先停文件使用者，再换字体；此处只观察挂载，不卸载也不重新挂载。
-// Stop file consumers before font fallback; observe mounting without unmounting or remounting.
+// 先停文件使用者，再换字体；重挂只发生在失效后卡已回位、句柄都已放开时。
+// Stop file consumers before font fallback; remount only after a latched card is back and
+// every consumer has released its handles.
+static int64_t s_media_remount_ms;
+
 static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
                        bool* mounted, bool* invalidated) {
     if (usb_storage_active()) { *mounted = false; *invalidated = false; return false; }
     read_pico_sd_info_t info = {0};
     esp_err_t err = read_pico_sd_get_info(&info);
+    // 判失效后卡又回到位：消费者已在 lost 里关掉句柄，重挂一次让字体和目录自己回来。
+    // After the latch, a card back in place can be remounted: consumers closed their handles
+    // during the lost notification, so the face and the listings recover by themselves.
+    if (*invalidated && info.present && !info.mounted && err != ESP_ERR_NOT_FINISHED &&
+        ctx->now_ms - s_media_remount_ms >= MEDIA_REMOUNT_INTERVAL_MS) {
+        s_media_remount_ms = ctx->now_ms;
+        (void)read_pico_sd_remount();
+        return false;
+    }
     if (err == ESP_ERR_INVALID_STATE && info.present && !*invalidated) {
         (void)read_pico_sd_start_probe();
         return false;
