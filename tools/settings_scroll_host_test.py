@@ -58,7 +58,7 @@ enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #define UI_NAV_TOP 1096
 #define UI_NAV_REFRESH_END 1088
 #define UI_LOCK_WIDTH 684
-#define SETTINGS_SCROLL_MAX 915
+#define SETTINGS_SCROLL_MAX 833
 typedef int EpdWaveform;
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static const int E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1,settings_soft=2;
@@ -126,7 +126,7 @@ int main(void){
   reset(SETTINGS_MAIN,500);feed(300,300,true,true,0);assert(feed(300,410,true,false,20)==APP_REDRAW_AREA&&s_main_scroll==296);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,300,true,true,0);feed(300,410,true,false,20);assert(s_main_scroll==0);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,800,true,true,0);feed(300,200,true,false,20);assert(s_main_scroll==460);feed(300,200,false,false,40);
-  reset(SETTINGS_MAIN,800);feed(300,800,true,true,0);feed(300,680,true,false,20);assert(s_main_scroll==915);feed(300,680,false,false,40);
+  reset(SETTINGS_MAIN,800);feed(300,800,true,true,0);feed(300,680,true,false,20);assert(s_main_scroll==833);feed(300,680,false,false,40);
   // 多指/故障取消后无额外推进，正常点击恢复；连续多次滑动不产生定稿/周期全刷。
   // Multitouch/fault cancellation adds no motion, taps recover, and repeated swipes add no settling/periodic full refresh.
   reset(SETTINGS_MAIN,0);feed(300,800,true,true,0);touch.count=2;ctx.pressed=false;ui_gesture_event_t canceled;
