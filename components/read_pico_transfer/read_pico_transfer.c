@@ -2143,6 +2143,12 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     // uploads intermittently (1 MB: 9 s → 26 s with 408s). bgn restores 113 KB/s.
     err = esp_wifi_set_protocol(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (err != ESP_OK) ESP_LOGW("transfer", "force bgn protocol: %s", esp_err_to_name(err));
+    // 官方 Metalio 2.0.66 对本板把 STA/AP 发射功率压到 12 dBm；满功率在链路极好
+    // （RSSI −31）时仍每帧 ~30 ms 重试，疑似前端饱和。此处实测验证。
+    // Official Metalio 2.0.66 caps TX power at 12 dBm for this board; at full power the
+    // link still retries ~30 ms per frame even at RSSI −31, suggesting frontend saturation.
+    err = esp_wifi_set_max_tx_power(48); // 0.25 dBm units → 12 dBm / 0.25 dBm 单位 → 12 dBm
+    if (err != ESP_OK) ESP_LOGW("transfer", "cap tx power 12 dBm: %s", esp_err_to_name(err));
     clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
     s_started = true;
