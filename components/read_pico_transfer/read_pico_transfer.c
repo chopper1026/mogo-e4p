@@ -2058,7 +2058,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         snprintf((char *)wifi.ap.ssid, sizeof(wifi.ap.ssid), "kiikoread-%02X%02X", mac[4], mac[5]);
         strcpy((char *)wifi.ap.password, READ_PICO_TRANSFER_PASSWORD);
         wifi.ap.ssid_len = strlen((char *)wifi.ap.ssid);
-        wifi.ap.max_connection = 1; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        wifi.ap.max_connection = 2; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
         portENTER_CRITICAL(&s_lock); strcpy(s_status.ssid, (char *)wifi.ap.ssid); portEXIT_CRITICAL(&s_lock);
     } else {
         memcpy(wifi.sta.ssid, saved.ssid, strlen(saved.ssid));
@@ -2089,9 +2089,9 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     // File metadata and wallpaper settings access NVS; the HTTP stack must remain readable while caches are disabled.
     // 在无线电启动前预留网页任务，避免 WiFi 内存碎片导致任务创建失败。
     // Reserve the HTTP task before starting the radio to avoid WiFi heap fragmentation.
-    http.stack_size = 12288; http.max_uri_handlers = 18; http.max_open_sockets = 3;
+    http.stack_size = 12288; http.max_uri_handlers = 18; http.max_open_sockets = 6;
     http.recv_wait_timeout = 15;
-    http.send_wait_timeout = 15;
+    http.send_wait_timeout = 6;
     http.task_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     http.lru_purge_enable = true;
     ESP_LOGI("transfer", "http start internal free=%u largest=%u psram free=%u",
@@ -2137,6 +2137,12 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     apply_wifi_country();
     err = esp_wifi_set_mode(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
     err = esp_wifi_set_config(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
+    // 传书只用 2.4G b/g/n：S31 的 11ax 与现场路由器协商后发送重传翻倍、上行间歇超时
+    // （实测 1 MB 上传 9 s→26 s 且 408）。bgn 下上行恢复 113 KB/s。
+    // Transfer only needs 2.4G b/g/n: with 11ax the S31 doubles TX retries and stalls
+    // uploads intermittently (1 MB: 9 s → 26 s with 408s). bgn restores 113 KB/s.
+    err = esp_wifi_set_protocol(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    if (err != ESP_OK) ESP_LOGW("transfer", "force bgn protocol: %s", esp_err_to_name(err));
     clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
     s_started = true;

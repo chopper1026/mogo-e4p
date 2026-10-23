@@ -30,15 +30,22 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 # Transfer AP prefers PSRAM network buffers, preserving internal display memory.
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-# Read Pico only serves one browser client and scans nearby access points. The
-# high-throughput defaults reserve tens of kilobytes at esp_wifi_init(), which
-# can starve the hosted WiFi control path after the reader UI has been used.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+# 只服务一个浏览器，但发送/接收批量书本时仍需要足够的帧缓冲形成聚合。
+# 4/8/4 的旧值把实测吞吐压到约 40–90 KB/s；这里取默认档位的一半，兼顾内部堆。
+# One browser client at a time, but bulk book transfers still need enough frame
+# buffers to aggregate. The old 4/8/4 values measured at only 40–90 KB/s; these
+# sit at half the IDF defaults to keep internal heap in reserve.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_RX_BA_WIN=4
+CONFIG_ESP_WIFI_RX_BA_WIN=8
+# TCP 窗口是传书吞吐的直接上限：5760 字节在 60 ms 量级的往返里只有约 90 KB/s。
+# The TCP window is the direct throughput ceiling: 5760 bytes over a ~60 ms
+# turnaround caps transfers near 90 KB/s. 32 KB keeps the backlog in PSRAM.
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
 CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
 CONFIG_ESP_WIFI_IRAM_OPT=n
 CONFIG_ESP_WIFI_RX_IRAM_OPT=n
