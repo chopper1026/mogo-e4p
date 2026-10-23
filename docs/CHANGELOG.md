@@ -3,6 +3,33 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 0.3.3-rc99 / 2026-10-23
+
+正式发布版，汇总 rc98 本地构建的全部改动；逐条细节见下方 rc98 本地条目。
+Official release consolidating the rc98 local builds; per-item details remain under the rc98 local entries below.
+
+- 前光：下拉快捷栏改为圆钮开关加整行大滑杆，亮度上限降到原厂满输出的 30%；按键控制新增「前光开关」动作。浅睡灭灯、唤醒恢复。
+  Frontlight: the quick layer uses a circular switch with full-row sliders, the brightness ceiling drops to 30% of factory output, and key controls gain a frontlight toggle; light sleep blanks it and wake restores it.
+
+- 按键：新增「上键单击」映射和「音量键翻页」开关；按键控制示意图改为与机身实体顺序一致，动作列表扩到八行并修复下方选项点错。
+  Keys: the top key gains a single-press mapping and the side volume keys can turn pages; the key sheet follows the physical order, lists eight actions and no longer fires the wrong row.
+
+- 翻页与刷新：补回原厂 18 次推黑，修复翻页后正文偏灰；面板高压轨改为每次刷新后只保留 100 ms；修复「仅浅睡」唤醒后主页刷新降速。
+  Turns and refresh: the vendor's 18 black pushes are restored so body text stops looking gray, the panel HV rails now drop 100 ms after each refresh, and light-sleep wakes no longer slow the home page.
+
+- 设置：配置备份升到 v27，保存书内字体、竖排正文与三种关机方式；无操作自动锁屏默认 5 分钟，关机默认「仅浅睡」；WiFi 对时更稳定。
+  Settings: backups move to v27 covering embedded book fonts, vertical text and all three shutdown styles; idle lock defaults to five minutes and shutdown to light-only; WiFi time sync is more reliable.
+
+- 设置页不提供「升级和恢复 → 系统升级」入口：OTA 尚未就绪，联网与 TF 卡升级页面代码保留但不可达。
+  The settings page offers no System Upgrade row until OTA is ready; the online and TF-card update pages keep their code but stay unreachable.
+
+## 0.3.3-rc99 本地 / 2026-10-23
+
+- TF 卡：拔卡约 1.5 秒后判为掉卡，阅读页回退内建字体、目录提示读取失败；卡插回后 2 秒内自动重挂，字体和目录自行恢复，不用退出页面或重启。此前本机没有卡座 CD 脚，拔卡后设备一直以为卡还在，只能反复读超时。
+  SD card: removal is detected about 1.5 s after the card leaves the slot, the reader falls back to the built-in face and listings report a read failure; a reinserted card remounts within about 2 s and the face and listings recover without leaving the page or rebooting. This board has no slot CD pin, so previously the device kept assuming the card was present and only produced read timeouts.
+- 阅读页脚：章节名和页码固定使用同一种字体，带《》【】等标点的章节不再让整行页脚变小。
+  Reader footer: the chapter name and page counter always share one face, so titles with 《》【】 no longer shrink the whole footer.
+
 ## 0.3.3-rc98 本地 / 2026-10-23
 
 - 配置备份升到 v27：「书内自带字体」「竖排正文」和关机方式三态（彻底 / 先浅后深 / 仅浅睡）现在都会保存并恢复。此前恢复后书内字体会回到开启、竖排会回到横排，「仅浅睡」会被恢复成「先浅后深」。旧备份仍可读取，缺少这些块时回落开启、横排和原扩展位。
