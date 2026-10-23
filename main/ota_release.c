@@ -50,6 +50,21 @@ int pico_version_compare(const char *a, const char *b) {
     }
     return 0;
 }
+#ifdef CONFIG_PICO_OTA_ALLOW_HTTP
+#define PICO_OTA_HTTP_ALLOWED 1
+#endif
+
+// 本地联调可放行 http:// 前缀；正式构建默认只认 https://。
+// Local testing may allow http:// prefixes; production defaults to https:// only.
+static bool origin_prefix(const char *prefix, size_t *length) {
+    size_t n = strlen(prefix);
+    if (n == 0 || prefix[n - 1] != '/') return false;
+    if (n >= 9 && !strncmp(prefix, "https://", 8)) { *length = n; return true; }
+#ifdef PICO_OTA_HTTP_ALLOWED
+    if (n >= 8 && !strncmp(prefix, "http://", 7)) { *length = n; return true; }
+#endif
+    return false;
+}
 bool pico_release_url_valid(const char *url) {
     // 升级源限定官方 HTTPS 站点或 menuconfig 填写的自建前缀，避免重定向泄漏或被替换为任意下载源。
     // Limit updates to the official HTTPS origins or the configured self-hosted prefix; do not follow arbitrary redirects.
@@ -61,10 +76,10 @@ bool pico_release_url_valid(const char *url) {
     const char *name = NULL;
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
         if (!prefixes[i][0]) continue;
-        size_t n = strlen(prefixes[i]);
-        // 只认以斜杠结尾的 HTTPS 前缀；配置写错就忽略，而不是放宽成任意匹配。
-        // Accept only HTTPS prefixes ending in a slash; a bad setting is ignored, never loosened.
-        if (n < 9 || strncmp(prefixes[i], "https://", 8) || prefixes[i][n - 1] != '/') continue;
+        // 只认以斜杠结尾的已配置前缀；配置写错就忽略，而不是放宽成任意匹配。
+        // Accept only configured prefixes ending in a slash; a bad setting is ignored, never loosened.
+        size_t n;
+        if (!origin_prefix(prefixes[i], &n)) continue;
         if (!strncmp(url, prefixes[i], n)) { name = url + n; break; }
     }
     if (!name) return false;

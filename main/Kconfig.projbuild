@@ -69,4 +69,14 @@ menu "Online update (OTA)"
             slash, e.g. https://ota.example.com/files/. Only one .bin filename
             may follow it, with no query string or subdirectories.
 
+    config PICO_OTA_ALLOW_HTTP
+        bool "Allow plain http:// origins (local OTA testing only)"
+        default n
+        help
+            仅用于本地联调：允许清单与下载前缀使用 http://。仍然只接受上面
+            配置过的前缀，不会放开任意地址。正式发布必须关闭。
+            Local OTA testing only: permits plain http:// origins. Only the
+            configured prefixes above are accepted; arbitrary URLs remain
+            rejected. Must stay off for production releases.
+
 endmenu
