@@ -9,7 +9,9 @@
 #include <pthread.h>
 #include <sched.h>
 #include "../main/ota_online.c"
-static const esp_partition_t running={0x10000,0x400000},inactive={0x910000,0x400000},metadata={0xd10000,0x2000};
+// 与 partitions_16M.csv 的 5 MB 双槽一致；本用例按 CONFIG_IDF_TARGET_ESP32S31 编译。
+// Matches the 5 MB dual slots in partitions_16M.csv; this case builds with CONFIG_IDF_TARGET_ESP32S31.
+static const esp_partition_t running={0x10000,0x500000},inactive={0x510000,0x500000},metadata={0xd000,0x2000};
 static const esp_app_desc_t current={.version="0.3.3-rc78",.project_name="Read_Pico"};
 static uint8_t firmware[4096],written[4096];static char feed[1600];
 static size_t written_size,limit;static int boot_calls,abort_calls,begin_calls,end_error,fail_task;
@@ -90,7 +92,7 @@ int psa_hash_setup(psa_hash_operation_t*h,int alg){assert(alg==PSA_ALG_SHA_256);
 int psa_hash_update(psa_hash_operation_t*h,const void*p,size_t n){(void)p;h->bytes+=n;return PSA_SUCCESS;}
 int psa_hash_finish(psa_hash_operation_t*h,uint8_t*p,size_t cap,size_t*n){assert(cap==32&&h->bytes==4096);memset(p,0,32);*n=32;return PSA_SUCCESS;}
 int psa_hash_abort(psa_hash_operation_t*h){(void)h;return PSA_SUCCESS;}
-static void fixture(void){pico_online_cancel_join();internal_free=131072;internal_block=65536;external_free=1048576;external_block=524288;failed_allocation=0;memset(firmware,0,sizeof(firmware));esp_image_header_t header={.magic=0xe9,.chip_id=9};memcpy(firmware,&header,sizeof(header));esp_app_desc_t desc={.magic_word=ESP_APP_DESC_MAGIC_WORD,.version="0.3.3-rc79",.project_name="Read_Pico"};memcpy(firmware+32,&desc,sizeof(desc));snprintf(feed,sizeof(feed),"{\"schema\":1,\"version\":\"0.3.3-rc79\",\"project\":\"Read_Pico\",\"board\":\"RDP-G01-W\",\"layout\":\"pico-dual-4m-v1\",\"minimum_base_version\":\"0.3.3-rc72\",\"url\":\"https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc79.bin\",\"sha256\":\"%064d\",\"notes\":\"test\",\"size\":4096}",0);limit=4096;bad_layout=same_slot=cancel_read=again=false;written_size=0;boot_calls=abort_calls=begin_calls=end_error=fail_task=0;}
+static void fixture(void){pico_online_cancel_join();internal_free=131072;internal_block=65536;external_free=1048576;external_block=524288;failed_allocation=0;memset(firmware,0,sizeof(firmware));esp_image_header_t header={.magic=0xe9,.chip_id=ESP_CHIP_ID_ESP32S31};memcpy(firmware,&header,sizeof(header));esp_app_desc_t desc={.magic_word=ESP_APP_DESC_MAGIC_WORD,.version="0.3.3-rc79",.project_name="Read_Pico"};memcpy(firmware+32,&desc,sizeof(desc));snprintf(feed,sizeof(feed),"{\"schema\":1,\"version\":\"0.3.3-rc79\",\"project\":\"Read_Pico\",\"board\":\"METALIO-EINK4P\",\"layout\":\"mogo-e4p-dual-5m-v1\",\"minimum_base_version\":\"0.3.3-rc72\",\"url\":\"https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc79.bin\",\"sha256\":\"%064d\",\"notes\":\"test\",\"size\":4096}",0);limit=4096;bad_layout=same_slot=cancel_read=again=false;written_size=0;boot_calls=abort_calls=begin_calls=end_error=fail_task=0;}
 static void check_download(void){wifi_ps=WIFI_PS_MIN_MODEM;ps_disabled=ps_restored=0;assert(pico_online_check()==ESP_OK);assert(pico_online_busy());run();assert(s_status->state==PICO_UPDATE_AVAILABLE&&!pico_online_busy());assert(wifi_ps==WIFI_PS_MIN_MODEM&&ps_disabled==1&&ps_restored==1);assert(pico_online_download()==ESP_OK);run();assert(wifi_ps==WIFI_PS_MIN_MODEM&&ps_disabled==2&&ps_restored==2);}
 // 两个真实线程交错写闪存与推屏，重复验证锁和递归路径。
 // Interleave flash writes and display scans on real threads, including recursive acquisition.

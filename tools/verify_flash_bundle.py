@@ -11,11 +11,28 @@ import re
 from pathlib import Path
 
 
+# 本仓库对应的设备与布局：Mogo E4P（ESP32-S31，16 MB，5 MB 双槽）。
+# Device and layout for this repository: Mogo E4P (ESP32-S31, 16 MB, dual 5 MB slots).
+# 打包与校验共用这一份，布局变化只改这里；校验仍按显式期望值卡住意外布局。
+# Packaging and validation share this block, so a layout change edits one place; validation stays
+# an explicit expectation gate rather than trusting whatever was built.
+LAYOUT = {
+    "board": "METALIO-EINK4P",
+    "layout": "mogo-e4p-dual-5m-v1",
+    "project": "Read_Pico",
+    "chip_id": 0x20,
+    "chip_family": "ESP32-S31",
+    "minimum_base_version": "0.3.3-rc97",
+    "online_ota_base_version": "0.3.3-rc97",
+}
+
+# 每项是 (烧录偏移, 下一区域起点)，差值即该部件的最大字节数。
+# Each entry is (flash offset, start of the next region); the difference is the part's size cap.
 EXPECTED = {
-    "bootloader.bin": (0x0, 0x8000),
-    "partitions.bin": (0x8000, 0x10000),
-    "firmware.bin": (0x10000, 0x410000),
-    "ota_data_initial.bin": (0xD10000, 0xD12000),
+    "bootloader.bin": (0x2000, 0x8000),
+    "partitions.bin": (0x8000, 0x9000),
+    "firmware.bin": (0x10000, 0x510000),
+    "ota_data_initial.bin": (0xD000, 0xF000),
 }
 
 # 发布仓库的 Pages 站点；打包写清单与校验清单共用这一份，避免两处漂移。
@@ -44,9 +61,9 @@ def check_archived_releases(folder: Path, current_partitions: Path | None = None
         manifest = json.loads(manifest_path.read_text())
         assert manifest["version"] == version and manifest.get("new_install_prompt_erase") is True
         assert manifest["pico_ota"]["base_version"] == version
-        assert manifest["pico_ota"]["layout"] == "pico-dual-4m-v1" and manifest["pico_ota"]["rollback"] is True
+        assert manifest["pico_ota"]["layout"] == LAYOUT["layout"] and manifest["pico_ota"]["rollback"] is True
         builds = manifest["builds"]
-        assert len(builds) == 1 and builds[0]["chipFamily"] == "ESP32-S3"
+        assert len(builds) == 1 and builds[0]["chipFamily"] == LAYOUT["chip_family"]
         paths = {name: name for name in EXPECTED}
         paths["firmware.bin"] = f"../../{release['bin']}"
         parts = builds[0]["parts"]
@@ -66,10 +83,10 @@ def check_archived_releases(folder: Path, current_partitions: Path | None = None
             assert expected["size"] == len(data) and expected["sha256"] == hashlib.sha256(data).hexdigest(), (
                 f"historical bytes changed: {version} {name}")
             if name == "firmware.bin":
-                assert data[0] == 0xe9 and struct.unpack_from("<H", data, 12)[0] == 9
+                assert data[0] == 0xe9 and struct.unpack_from("<H", data, 12)[0] == LAYOUT["chip_id"]
                 assert struct.unpack_from("<I", data, 32)[0] == 0xabcd5432
                 assert data[48:80].split(b"\0")[0].decode() == version
-                assert data[80:112].split(b"\0")[0] == b"Read_Pico"
+                assert data[80:112].split(b"\0")[0].decode() == LAYOUT["project"]
                 assert b"PICO_HTTPS_OTA_V1" in data
             elif name == "partitions.bin":
                 assert data == (current_partitions or folder / "partitions.bin").read_bytes(), "historical layout incompatible"
@@ -83,7 +100,7 @@ def check(folder: Path) -> None:
     assert manifest.get("new_install_prompt_erase") is True, "flasher must preserve user data"
     builds = manifest.get("builds")
     assert isinstance(builds, list) and len(builds) == 1
-    assert builds[0].get("chipFamily") == "ESP32-S3"
+    assert builds[0].get("chipFamily") == LAYOUT["chip_family"]
     parts = builds[0].get("parts")
     assert isinstance(parts, list) and len(parts) == len(EXPECTED)
     seen: set[str] = set()
@@ -105,38 +122,40 @@ def check(folder: Path) -> None:
         magic, kind, subtype, address, size, label, _ = struct.unpack_from("<HBBII16sI", table, offset)
         if magic != 0x50aa: break
         entries[label.split(b"\0")[0].decode()] = (kind, subtype, address, size)
-    assert entries.get("ota_0") == (0, 16, 0x10000, 0x400000), "base OTA slot changed"
-    assert entries.get("ota_1") == (0, 17, 0x910000, 0x400000), "inactive OTA slot changed"
-    assert entries.get("otadata") == (1, 0, 0xd10000, 0x2000), "OTA selection metadata changed"
-    assert entries.get("nvs") == (1, 2, 0x9000, 0x5000), "user settings partition changed"
-    assert entries.get("storage") == (1, 129, 0x410000, 0x500000), "user storage partition changed"
+    assert entries.get("ota_0") == (0, 16, 0x10000, 0x500000), "base OTA slot changed"
+    assert entries.get("ota_1") == (0, 17, 0x510000, 0x500000), "inactive OTA slot changed"
+    assert entries.get("otadata") == (1, 0, 0xd000, 0x2000), "OTA selection metadata changed"
+    assert entries.get("nvs") == (1, 2, 0x9000, 0x4000), "user settings partition changed"
+    assert entries.get("storage") == (1, 129, 0xa10000, 0x5f0000), "user storage partition changed"
     image = (folder / "firmware.bin").read_bytes()
-    assert image[0] == 0xe9 and struct.unpack_from("<H", image, 12)[0] == 9, "wrong target chip"
+    assert image[0] == 0xe9 and struct.unpack_from("<H", image, 12)[0] == LAYOUT["chip_id"], "wrong target chip"
     assert struct.unpack_from("<I", image, 32)[0] == 0xabcd5432, "missing app description"
     version = image[48:80].split(b"\0")[0].decode("ascii")
     project = image[80:112].split(b"\0")[0].decode("ascii")
-    assert version == manifest["version"] and project == "Read_Pico", "base version mismatch"
+    assert version == manifest["version"] and project == LAYOUT["project"], "base version mismatch"
     assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+)?", version), "invalid release version"
     capability = manifest.get("pico_ota", {})
-    assert capability.get("layout") == "pico-dual-4m-v1"
+    assert capability.get("layout") == LAYOUT["layout"]
     assert capability.get("base_version") == version and capability.get("rollback") is True
-    assert capability.get("minimum_base_version") == "0.3.3-rc72"
-    assert capability.get("online_ota_base_version") == "0.3.3-rc79"
+    assert capability.get("minimum_base_version") == LAYOUT["minimum_base_version"]
+    assert capability.get("online_ota_base_version") == LAYOUT["online_ota_base_version"]
     assert b"PICO_HTTPS_OTA_V1" in image, "base package cannot perform online upgrades"
     feed = json.loads((folder / "update.json").read_text())
     upgrade_name = f"Pico-update-{version}.bin"
     assert feed["schema"] == 1 and feed["version"] == version and feed["project"] == project
-    assert feed["board"] == "RDP-G01-W" and feed["layout"] == capability["layout"]
+    assert feed["board"] == LAYOUT["board"] and feed["layout"] == capability["layout"]
     assert feed["minimum_base_version"] == capability["minimum_base_version"]
     assert feed["url"] in (f"{PAGES_ORIGIN}{upgrade_name}", f"https://kiikoread.com/{upgrade_name}")
     assert feed["size"] == len(image) and feed["sha256"] == hashlib.sha256(image).hexdigest()
     assert (folder / "Pico-update.bin").read_bytes() == image
     assert (folder / upgrade_name).read_bytes() == image
     print(f"OTA base/TF/feed compatible: {version}, {capability['layout']}")
-    assert (folder / "index.html").is_file()
-    assert (folder / "vendor/web/install-button.js").is_file()
-    assert (folder / "licenses/LUCIDE-ISC.txt").is_file()
-    check_archived_releases(folder)
+    # 只有完整站点目录才核对网页资源；仅打包固件时只验固件与清单。
+    # Check web assets only in a full site tree; bundle-only staging validates firmware and feed.
+    if (folder / "index.html").is_file():
+        assert (folder / "vendor/web/install-button.js").is_file()
+        assert (folder / "licenses/LUCIDE-ISC.txt").is_file()
+        check_archived_releases(folder)
 
 
 if __name__ == "__main__":

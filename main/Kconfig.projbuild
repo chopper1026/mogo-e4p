@@ -37,3 +37,36 @@ menu "Bring-up diagnostics"
             area updates, holding the pattern for 10 seconds.
 
 endmenu
+
+# 联网升级源；保持默认即沿用正式站点，填自建前缀即可接入自己的 OTA 平台。
+# Online update sources; keep the defaults for the public sites, or point at a self-hosted platform.
+menu "Online update (OTA)"
+
+    config PICO_OTA_FEED_URL
+        string "Primary manifest URL"
+        default "https://kiikoread.com/update.json"
+        help
+            设备优先读取的 JSON 清单地址。必须是 HTTPS，服务器不得重定向，
+            响应体不超过 8 KB。
+            Primary manifest URL. Must be HTTPS, the server must not redirect,
+            and the body must stay under 8 KB.
+
+    config PICO_OTA_FEED_FALLBACK_URL
+        string "Fallback manifest URL"
+        default "https://wegooo-cell.github.io/read-pico-reader/update.json"
+        help
+            主源失败后读取的清单地址，要求同上。
+            Manifest read when the primary source fails; same requirements.
+
+    config PICO_OTA_EXTRA_ORIGIN
+        string "Extra download origin prefix (empty disables)"
+        default ""
+        help
+            允许清单引用的额外下载前缀，必须以斜杠结尾，例如
+            https://ota.example.com/files/。前缀之后只允许一个 .bin 文件名，
+            不允许查询串或子目录，避免清单把设备引到任意地址。
+            Extra download prefix a manifest may reference; must end with a
+            slash, e.g. https://ota.example.com/files/. Only one .bin filename
+            may follow it, with no query string or subdirectories.
+
+endmenu

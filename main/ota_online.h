@@ -15,8 +15,25 @@
 #define PICO_OTA_LAYOUT "mogo-e4p-dual-5m-v1"
 #define PICO_OTA_BOARD "METALIO-EINK4P"
 #define PICO_OTA_CAPABILITY "PICO_HTTPS_OTA_V1"
+// 升级源在 menuconfig 中配置；宿主测试不带 sdkconfig，回落到当前正式站点。
+// Sources come from menuconfig; host tests without sdkconfig fall back to the public sites.
+#ifdef CONFIG_PICO_OTA_FEED_URL
+#define PICO_OTA_FEED_URL CONFIG_PICO_OTA_FEED_URL
+#else
 #define PICO_OTA_FEED_URL "https://kiikoread.com/update.json"
+#endif
+#ifdef CONFIG_PICO_OTA_FEED_FALLBACK_URL
+#define PICO_OTA_FEED_FALLBACK_URL CONFIG_PICO_OTA_FEED_FALLBACK_URL
+#else
 #define PICO_OTA_FEED_FALLBACK_URL "https://wegooo-cell.github.io/read-pico-reader/update.json"
+#endif
+// 单槽容量决定清单允许的最大镜像，与 partitions_16M.csv 的 5 MB 槽一致。
+// One slot caps the manifest image size; matches the 5 MB slots in partitions_16M.csv.
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+#define PICO_OTA_SLOT_SIZE 0x500000u
+#else
+#define PICO_OTA_SLOT_SIZE 0x400000u
+#endif
 
 typedef enum { PICO_UPDATE_IDLE, PICO_UPDATE_CHECKING, PICO_UPDATE_AVAILABLE,
                PICO_UPDATE_LATEST, PICO_UPDATE_DOWNLOADING, PICO_UPDATE_READY,

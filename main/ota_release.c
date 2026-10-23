@@ -10,6 +10,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 自建升级平台在 menuconfig 填一个 HTTPS 前缀（含末尾斜杠）；前缀之后仍只允许单个文件名。
+// A self-hosted platform sets one HTTPS prefix (trailing slash) in menuconfig; only a filename may follow it.
+#ifdef CONFIG_PICO_OTA_EXTRA_ORIGIN
+#define PICO_OTA_EXTRA_ORIGIN CONFIG_PICO_OTA_EXTRA_ORIGIN
+#endif
+#ifndef PICO_OTA_EXTRA_ORIGIN
+#define PICO_OTA_EXTRA_ORIGIN ""
+#endif
+
 // 只接收正式版本号，拒绝截断、溢出和未知后缀。/ Accept bounded release versions without truncation or unknown suffixes.
 static bool version_parts(const char *s, unsigned parts[4]) {
     if (!s || !*s || strlen(s) > 32) return false;
@@ -42,15 +51,20 @@ int pico_version_compare(const char *a, const char *b) {
     return 0;
 }
 bool pico_release_url_valid(const char *url) {
-    // 升级源限定官方 HTTPS 站点，避免重定向泄漏或被替换为任意下载源。
-    // Limit updates to the official HTTPS origin; do not follow arbitrary redirects.
+    // 升级源限定官方 HTTPS 站点或 menuconfig 填写的自建前缀，避免重定向泄漏或被替换为任意下载源。
+    // Limit updates to the official HTTPS origins or the configured self-hosted prefix; do not follow arbitrary redirects.
     static const char *const prefixes[] = {
-        "https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/"
+        "https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/",
+        "https://chopper1026.github.io/mogo-e4p/", PICO_OTA_EXTRA_ORIGIN
     };
     if (!url || strlen(url) >= 256) return false;
     const char *name = NULL;
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (!prefixes[i][0]) continue;
         size_t n = strlen(prefixes[i]);
+        // 只认以斜杠结尾的 HTTPS 前缀；配置写错就忽略，而不是放宽成任意匹配。
+        // Accept only HTTPS prefixes ending in a slash; a bad setting is ignored, never loosened.
+        if (n < 9 || strncmp(prefixes[i], "https://", 8) || prefixes[i][n - 1] != '/') continue;
         if (!strncmp(url, prefixes[i], n)) { name = url + n; break; }
     }
     if (!name) return false;
@@ -91,7 +105,7 @@ esp_err_t pico_release_parse(const char *json, size_t length, pico_release_t *re
         field(root, "url", release->url, sizeof(release->url)) &&
         field(root, "sha256", release->sha256, sizeof(release->sha256)) &&
         field(root, "notes", release->notes, sizeof(release->notes)) &&
-        cJSON_IsNumber(size) && size->valuedouble >= 288 && size->valuedouble <= 0x400000 &&
+        cJSON_IsNumber(size) && size->valuedouble >= 288 && size->valuedouble <= PICO_OTA_SLOT_SIZE &&
         size->valuedouble == (uint32_t)size->valuedouble &&
         version_parts(release->version, version) && version_parts(release->minimum_base_version, base) &&
         !strcmp(release->board, PICO_OTA_BOARD) && !strcmp(release->layout, PICO_OTA_LAYOUT) &&

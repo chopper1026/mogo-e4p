@@ -58,7 +58,7 @@ enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #define UI_NAV_TOP 1096
 #define UI_NAV_REFRESH_END 1088
 #define UI_LOCK_WIDTH 684
-#define SETTINGS_SCROLL_MAX 833
+#define SETTINGS_SCROLL_MAX 915
 typedef int EpdWaveform;
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static const int E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1,settings_soft=2;
@@ -75,6 +75,9 @@ static int update_display_area_diff_with(void *hl,const int *wave,enum EpdDrawMo
  (void)hl;assert(wave==&E0470_WAVEFORM||wave==&E0470_FOLLOW_WAVEFORM||wave==&settings_soft);if(s_scroll_present_pending==false&&s_page!=SETTINGS_UPGRADE&&s_page!=SETTINGS_TEXT_EDIT&&s_page!=SETTINGS_PIN_ENTRY)assert(wave==(selected_mode==0?&settings_soft:&E0470_WAVEFORM));++pushes;pushed=area;pushed_mode=mode;return 0;
 }
 static int update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){return update_display_area_diff_with(hl,wave,mode,area);}
+// 主列表滚动走脏区膨胀版本；边界由 display 宿主测试覆盖，这里只转发。
+// The main list scroll uses the dilated variant; the display host test covers its bounds, so forward here.
+static int update_display_area_diff_padded(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area,int pad_y,int pad_x){(void)pad_y;(void)pad_x;return update_display_area_diff_with(hl,wave,mode,area);}
 static void guard_draw_result(void *hl,int status){(void)hl;assert(!status);}
 static void display_main_transition_cancel(void){}
 static EpdRect ui_pinpad_full(void){return(EpdRect){0,0,684,1216};}
@@ -123,7 +126,7 @@ int main(void){
   reset(SETTINGS_MAIN,500);feed(300,300,true,true,0);assert(feed(300,410,true,false,20)==APP_REDRAW_AREA&&s_main_scroll==296);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,300,true,true,0);feed(300,410,true,false,20);assert(s_main_scroll==0);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,800,true,true,0);feed(300,200,true,false,20);assert(s_main_scroll==460);feed(300,200,false,false,40);
-  reset(SETTINGS_MAIN,800);feed(300,800,true,true,0);feed(300,680,true,false,20);assert(s_main_scroll==833);feed(300,680,false,false,40);
+  reset(SETTINGS_MAIN,800);feed(300,800,true,true,0);feed(300,680,true,false,20);assert(s_main_scroll==915);feed(300,680,false,false,40);
   // 多指/故障取消后无额外推进，正常点击恢复；连续多次滑动不产生定稿/周期全刷。
   // Multitouch/fault cancellation adds no motion, taps recover, and repeated swipes add no settling/periodic full refresh.
   reset(SETTINGS_MAIN,0);feed(300,800,true,true,0);touch.count=2;ctx.pressed=false;ui_gesture_event_t canceled;

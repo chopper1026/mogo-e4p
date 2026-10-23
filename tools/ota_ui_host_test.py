@@ -136,6 +136,11 @@ static void guard_draw_result(void *hl,enum EpdDrawError error){(void)hl;assert(
 static enum EpdDrawError update_display_area_diff_with(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area){
  (void)hl;++diff_pushes;pushed_mode=mode;pushed_area=area;pushed_waveform=waveform;return EPD_DRAW_SUCCESS;
 }
+// 主列表滚动使用脏区膨胀版本；边界由 display 宿主测试覆盖，这里只转发。
+// The main list scroll uses the dilated variant; the display host test covers its bounds, so forward here.
+static enum EpdDrawError update_display_area_diff_padded(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area,int pad_y,int pad_x){
+ (void)pad_y;(void)pad_x;return update_display_area_diff_with(hl,waveform,mode,area);
+}
 static enum EpdDrawError update_display_area_full_with(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area){
  ++full_pushes;return update_display_area_diff_with(hl,waveform,mode,area);
 }

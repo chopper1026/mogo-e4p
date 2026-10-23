@@ -8,6 +8,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 配置备份升到 v27：「书内自带字体」「竖排正文」和关机方式三态（彻底 / 先浅后深 / 仅浅睡）现在都会保存并恢复。此前恢复后书内字体会回到开启、竖排会回到横排，「仅浅睡」会被恢复成「先浅后深」。旧备份仍可读取，缺少这些块时回落开启、横排和原扩展位。
   The settings backup is now v27: embedded book fonts, vertical body text and all three shutdown styles (full off, staged, light-only) are saved and restored. Previously a restore reset book fonts to on, vertical text to horizontal, and light-only to staged. Older backups remain readable and fall back to on, horizontal and the old extension bit when those blocks are absent.
 
+- 设置页恢复「升级和恢复 → 系统升级」入口，联网与 TF 卡升级页面重新可用。联网清单允许的镜像上限改为跟随 5 MB 单槽，此前仍按 4 MB 截断；升级源与额外下载域名可在 menuconfig 中配置，默认仍保留 kiikoread.com、GitHub 回退源和本仓库 Pages 下载地址。更新源发布本机固件清单之前，联网检查会提示清单无效。
+  Restore the System Upgrade row under Upgrade & Recovery, making the online and TF-card update pages reachable again. The online manifest image cap now follows the 5 MB slot instead of the old 4 MB limit, and the manifest source plus an extra download origin are configurable in menuconfig, defaulting to kiikoread.com, the GitHub fallback and this repository's Pages download origin. Until the source publishes a manifest for this device, the online check reports an invalid manifest.
+
 ## 0.3.3-rc98 本地 / 2026-10-22
 
 - 「按键控制」的动作列表新增「前光开关」：可绑给左/中/右键短按、中键长按、中键双击或上键单击，按一次开灯、再按一次关灯；开灯沿用下拉快捷栏记住的亮度与色温，没有前光的板保持不操作。列表从七行变为八行，行距相应收紧，底部提示与「返回」按钮位置不变；旧配置和备份里的动作编号不变。
