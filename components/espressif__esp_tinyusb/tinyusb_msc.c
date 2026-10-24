@@ -61,6 +61,7 @@ typedef struct {
     // Storage related
     const storage_medium_t *medium;             /*!< Pointer to the storage medium. */
     tinyusb_msc_mount_point_t mount_point;      /*!< Current mount point type (application or USB host). */
+    bool ejected;                               /*!< Host eject latch for auto_mount_off: TEST UNIT READY reports no medium until START UNIT. / auto_mount_off 下的宿主弹出锁存：重新 START UNIT 前 TEST UNIT READY 报告无介质。 */
     // Optimisation purpose
     uint32_t sector_count;                      /*!< Total number of sectors in the storage medium. */
     uint32_t sector_size;                       /*!< Size of a single sector in bytes. */
@@ -1119,7 +1120,8 @@ bool tud_msc_test_unit_ready_cb(uint8_t lun)
     bool found = _msc_storage_get_by_lun(lun, &storage);
     MSC_EXIT_CRITICAL();
 
-    if (found && (storage != NULL) && (storage->mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB)) {
+    if (found && (storage != NULL) && (storage->mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB) &&
+            !storage->ejected) {
         // Storage media is ready for access by USB host
         return true;
     }
@@ -1156,12 +1158,26 @@ void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_siz
 // - Start = 1 : active mode, if load_eject = 1 : load disk storage
 bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject)
 {
-    (void) lun;
     (void) power_condition;
+
+    msc_storage_obj_t *storage = NULL;
+
+    MSC_ENTER_CRITICAL();
+    bool found = _msc_storage_get_by_lun(lun, &storage);
+    MSC_EXIT_CRITICAL();
+    if (!found || storage == NULL) return true;
 
     if (load_eject && !start) {
         // Eject media from the storage
         msc_storage_mount_to_app();
+        // auto_mount_off suppresses the mount above, so nothing reported the eject and the host
+        // re-polled TEST UNIT READY seconds later and remounted the volume; latch it here.
+        // auto_mount_off 会禁用上面的挂载，弹出因此无人响应、宿主几秒后轮询重挂；在此锁存。
+        storage->ejected = true;
+    } else if (start) {
+        // Host spins the medium up again: clear the eject latch.
+        // 宿主重新启动介质：清除弹出锁存。
+        storage->ejected = false;
     }
     return true;
 }

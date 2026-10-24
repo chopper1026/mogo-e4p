@@ -40,7 +40,7 @@ idf_component_register(
     SRCS ${read_pico_sources}
     INCLUDE_DIRS "include"
     REQUIRES ${read_pico_requires}
-    PRIV_REQUIRES bootloader_support spi_flash freertos esp_timer
+    PRIV_REQUIRES bootloader_support spi_flash freertos esp_timer esp_mm
     # flash_hpm_zb.c 只定义了一个覆盖 IDF weak 符号的表，没有任何
     # 代码引用它，不整包链接的话这个目标文件会被丢掉，覆盖就不生效。
     # flash_hpm_zb.c only defines a weak-symbol override table; keep the whole archive

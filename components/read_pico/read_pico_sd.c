@@ -19,6 +19,8 @@
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
+#include "esp_private/esp_cache_private.h"
 #include "esp_timer.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
@@ -77,6 +79,13 @@ static sdmmc_host_t health_host;
 static sdmmc_slot_config_t health_slot;
 static bool health_host_valid;
 
+// S31 的 SDMMC 中转资格判定：只允许内部 RAM 且满足主机对齐的缓冲直接 DMA。
+// Relay eligibility for S31 SDMMC: only aligned internal-RAM buffers may DMA directly.
+static bool sd_dma_relay_check(int slot, const void* buffer, size_t size) {
+    return esp_ptr_internal(buffer) && sdmmc_host_check_buffer_alignment(slot, buffer, size);
+}
+static void* sd_dma_relay;
+
 // 失效只影响快照，消费者释放句柄前不得卸载卡。/ Invalidation changes snapshots only; consumers must close handles before unmount.
 // 已挂载或正在挂载的卡才需要失效锁存：探测没挂上不算，否则空卡开机后插卡会被锁死。
 // Only a mounted or mounting card needs the removal latch; a failed probe must not latch,
@@ -117,7 +126,10 @@ static void observe_media_locked(bool present) {
 static void sd_health_tick(void) {
     sdmmc_card_t* probe = NULL;
     portENTER_CRITICAL(&state_lock);
-    if (probe_state == 2) { probe = card; probe_state = 1; }
+    // 卡已交给 USB 导出（sync 后 card 为空）或挂载失败时不得占用忙状态，否则提前返回会把它永远卡在 1，退出 USB 后重挂就被拒。
+    // Never claim the busy state when there is no local card (exported to USB after sync, or a failed
+    // mount): the early return would leave probe_state stuck at 1 and refuse the post-USB remount.
+    if (probe_state == 2 && card) { probe = card; probe_state = 1; }
     portEXIT_CRITICAL(&state_lock);
     if (probe == NULL) { health_fails = 0; return; }
     BYTE pdrv = ff_diskio_get_pdrv_card(probe);
@@ -304,6 +316,29 @@ static esp_err_t mount_card(bool format_if_failed) {
     // S31 走 4-bit，40 MHz 有足够带宽；S3 原板 1-bit 只能靠提时钟换带宽。
     // S31 uses 4-bit at 40 MHz; the original S3 board had to trade clock for 1-bit bandwidth.
     host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+
+    // S31 的 SDMMC 拒绝 PSRAM 直接 DMA：准备常驻 4 KiB 内部中转缓冲，SDK 按 8 扇区
+    // 分块搬运，隔离外部 DMA/cache 路径，也省去每次写入的临时 DMA 分配（对齐厂商
+    // PrepareDmaBuffer）。分配失败同样判挂载失败；常驻不释放是因为 health_host 会
+    // 长期复用这份主机配置做软检测探测，释放会留下悬空指针。
+    // S31 SDMMC refuses direct PSRAM DMA: stage through a resident 4 KiB internal buffer
+    // in 8-sector chunks, isolating the external DMA/cache path and removing the per-write
+    // scratch allocation (mirrors the vendor PrepareDmaBuffer). Like the vendor, allocation
+    // failure fails the mount; the buffer stays resident because health_host keeps reusing
+    // this host copy for soft-detect probes, and freeing it would leave a dangling pointer.
+    if (!sd_dma_relay) {
+        size_t alignment = 0;
+        if (esp_cache_get_alignment(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL, &alignment) != ESP_OK || alignment < 4)
+            alignment = 4;
+        sd_dma_relay = heap_caps_aligned_alloc(alignment, 4096, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!sd_dma_relay) {
+            ESP_LOGE(TAG, "SD transfer buffer alloc failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    host.dma_aligned_buffer = sd_dma_relay;
+    host.check_buffer_alignment = sd_dma_relay_check;
+    host.unaligned_multi_block_rw_max_chunk_size = 4096 / 512;
 
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = SD_BUS_WIDTH;

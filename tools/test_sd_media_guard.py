@@ -220,6 +220,13 @@ int main(void) {
     assert(read_pico_sd_get_info(&info)==ESP_FAIL && info.mounted);
     unmount_fail=false;
     assert(read_pico_sd_sync()==ESP_OK && card==NULL);
+    // USB 导出期间 health tick 必须跳过：没有本机卡可探测，也不能占用忙状态挡住退出后的重挂。
+    // While the card is exported to USB the health tick must skip: nothing to probe, and it must
+    // not claim the busy state that would refuse the post-USB remount.
+    for(int i=0;i<3;i++) sd_health_tick();
+    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    finish_probe();
+    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
     pthread_t reader;
     assert(pthread_create(&reader,NULL,snapshot_reader,NULL)==0);
     for(int i=0;i<100;i++) {
