@@ -88,16 +88,38 @@ int main(void) {
     const EpdWaveformPhases* water_table=e0470_waveform_phases(water_wave,MODE_GL16);
     assert(water_wave!=&E0470_WAVEFORM && water_wave->temp_intervals==E0470_WAVEFORM.temp_intervals);
     assert(water_table && water_table->phases==37 && !water_table->phase_times);
-    // 水波纹在 DU 段后补六相向白推动，其余相位保持；中灰到白不得反向压黑。
-    // Water adds six white pushes after the DU segment and holds the rest; gray-to-white must not darken.
+    // 变白端点在 DU 段后补六相；变黑端点 2026-10-24 起用原厂擦除序列并补回 18 次连续推黑。
+    // The white endpoint adds six pushes after the DU segment; since 2026-10-24 the black
+    // endpoint takes the vendor erase sequence with 18 consecutive restored pushes.
     for(int f=0;f<water_table->phases;++f)for(int from=0;from<16;++from)for(int to=0;to<16;++to){
-        int expected=from==to?0:to==0 || to==15?
-            (f<bw->phases?e0470_phase_action(bw,f,to,from):to==15 && f<bw->phases+6?2:0):
-            e0470_phase_action(gray_table,f,to,from);
+        int expected;
+        if(from==to)expected=0;
+        else if(to==15)expected=f<bw->phases?e0470_phase_action(bw,f,15,from):(f<bw->phases+6?2:0);
+        else if(to==0){
+            // 原厂行擦白保留，推黑补到 18 次并右对齐到保持相之前；与组件 boost 同一规则。
+            // Vendor erase stays, pushes restore to 18 right-aligned before the holds; the component boost follows the same rule.
+            expected=e0470_phase_action(gray_table,f,0,from);
+            int erase=0,black=0,first=-1,ordered=1;
+            for(int g=0;g<water_table->phases;++g){
+                int a=e0470_phase_action(gray_table,g,0,from);
+                if(!a)continue;
+                if(first<0)first=g;
+                if(a==1)++black;
+                else if(a==2&&!black)++erase;
+                else ordered=0;
+            }
+            if(ordered&&black&&black<E0470_BOOST_BLACK_PUSHES){
+                int start=first;
+                if(start+erase+E0470_BOOST_BLACK_PUSHES-1>water_table->phases-1-E0470_TRIM_HOLD)
+                    start=water_table->phases-1-E0470_TRIM_HOLD-erase-E0470_BOOST_BLACK_PUSHES+1;
+                expected=f>=start&&f<start+erase?2:f>=start+erase&&f<start+erase+E0470_BOOST_BLACK_PUSHES?1:0;
+            }
+        }
+        else expected=e0470_phase_action(gray_table,f,to,from);
         int action=e0470_phase_action(water_table,f,to,from);
         assert(action==expected);
         if(to==15)assert(action==0 || action==2);
-        if(to==0)assert(action==0 || action==1);
+        if(to==0)assert(action==0 || action==1 || action==2);
     }
     assert(display_main_water_waveform()==water_wave);
     const EpdWaveformPhases* first_table=e0470_waveform_phases(display_main_bw_waveform(),MODE_DU);

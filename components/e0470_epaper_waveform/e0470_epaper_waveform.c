@@ -37,6 +37,13 @@ static inline int lut_get(const uint8_t (*data)[16][4], int f, int to, int from)
     return (data[f][to][from / 4] >> (6 - 2 * (from % 4))) & 3;
 }
 
+// 把一个 2bit 动作原位写回（覆盖，不同于 lut_or 的叠加）。
+// / Overwrite one 2-bit action in place (unlike lut_or, which ORs).
+static inline void lut_set(uint8_t (*data)[16][4], int f, int to, int from, int action) {
+    const int shift = 6 - 2 * (from % 4);
+    data[f][to][from / 4] = (uint8_t)((data[f][to][from / 4] & ~(3 << shift)) | (action << shift));
+}
+
 void e0470_follow_lut_build(int frames, uint8_t (*dst)[16][4]) {
     memset(dst, 0, (size_t)frames * 16 * 4);
     // 两个方向各有自己的满推次数；短表（连续 DU 单帧、连调 dufr n）按表长封顶。
@@ -289,6 +296,42 @@ int e0470_phase_action(const EpdWaveformPhases* phases, int phase, int to, int f
     if ((unsigned)to > 15 || (unsigned)from > 15) return 0;
     const uint8_t* cell = phases->luts + ((size_t)phase * 16 + to) * 4 + from / 4;
     return (*cell >> (6 - 2 * (from % 4))) & 3;
+}
+
+/* ---- 裁表黑段补强 / Black-run boost ---- */
+// 裁表只砍 to!=15 的黑饱和段，正文换字只剩 13 推而旧字擦白有 18~24 次。这里把 to=0
+// 每行补回原厂 18 次连续推黑，占用该行前导保持相；只改写「先擦白后推黑」的整齐行。
+// / The trim shortens only the non-white black saturation, leaving 13 pushes for
+// new glyphs against 18–24 erases. Restore each to=0 row to the vendor's 18
+// consecutive black pushes by consuming leading holds; only tidy
+// [erase then black] rows are rewritten.
+void e0470_boost_black_column(uint8_t (*data)[16][4], int phases) {
+    if (data == NULL || phases <= E0470_TRIM_HOLD) return;
+    const int limit = phases - 1 - E0470_TRIM_HOLD;
+    // from=0 是保持黑底，不进入差分，也不额外驱动。
+    // / from=0 is an unchanged black pixel outside the differential; leave it alone.
+    for (int from = 1; from < 16; ++from) {
+        int first = -1, black = 0, erase = 0, ordered = 1;
+        for (int f = 0; f < phases; ++f) {
+            const int action = lut_get(data, f, 0, from);
+            if (!action) continue;
+            if (first < 0) first = f;
+            if (action == 1) ++black;
+            else if (action == 2) {
+                if (black) ordered = 0;
+                else ++erase;
+            } else ordered = 0;
+        }
+        if (!ordered || !black || black >= E0470_BOOST_BLACK_PUSHES) continue;
+        const int span = erase + E0470_BOOST_BLACK_PUSHES;
+        int start = first;
+        if (start + span - 1 > limit) start = limit - span + 1;
+        if (start < 0) continue;
+        for (int f = 0; f < phases; ++f) lut_set(data, f, 0, from, 0);
+        for (int i = 0; i < erase; ++i) lut_set(data, start + i, 0, from, 2);
+        for (int i = 0; i < E0470_BOOST_BLACK_PUSHES; ++i)
+            lut_set(data, start + erase + i, 0, from, 1);
+    }
 }
 
 void e0470_waveform_init(void) {

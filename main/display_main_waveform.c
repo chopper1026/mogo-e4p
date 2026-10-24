@@ -3,6 +3,12 @@
  * English: Main pages hold equal grays; shelf exit strengthens whitening only toward white. Soft water uses directional endpoints and original intermediate-gray sequences without editing vendor tables or scan timing.
  * 用户修订：快刷亚克力保留校准GL16，移除偏深且慢的试验灰阶；保留同向擦白用于书架分页及退出。
  * User revision: fast acrylic retains calibrated GL16; remove the dark, slow experimental gray drive and keep directional whitening for shelf paging/exit.
+ * 用户 2026-10-24 修订：水波纹变黑端点弃用 DU 直推，改走原厂 GL16 前导擦除并补回 18 次推黑；
+ * 实机确认灰起点文字欠饱和发花，擦白深度照抄原厂/阅读页校准，白端点、相数与拍时序不变。
+ * User revision 2026-10-24: the water black endpoint leaves DU for the vendor GL16
+ * erase-first sequence with 18 restored pushes; on-device gray-start text was
+ * undersaturating. Erase depth reuses the vendor/reader calibration; the white
+ * endpoint, phase count and tick timing are unchanged.
  */
 #include "display_main_waveform.h"
 #include "display_waveform_smooth.h"
@@ -99,10 +105,18 @@ const EpdWaveform* display_main_water_waveform(void) {
         for (int to = 0; to < 16; ++to)
             for (int from = 0; from < 16; ++from)
                 for (int f = 0; f < E0470_GL16_FRAMES; ++f) {
-                    const int action = to == from ? 0 : to == 0 || to == 15
-                        ? endpoint_action(bw, f, to, from, WATER_ERASE_EXTRA_FRAMES) : e0470_phase_action(gl, f, to, from);
+                    // 变白端点保持 DU 直推；变黑端点用原厂 GL16 的先擦白序列，推黑随后统一补足。
+                    // The white endpoint keeps DU drives; the black endpoint takes the vendor
+                    // erase-first sequence, its pushes restored right after the loop.
+                    const int action = to == from ? 0 : to == 15
+                        ? endpoint_action(bw, f, 15, from, WATER_ERASE_EXTRA_FRAMES)
+                        : e0470_phase_action(gl, f, to, from);
                     s_water_data[f][to][from / 4] |= (uint8_t)(action << (6 - 2 * (from % 4)));
                 }
+        // 灰起点文字欠饱和：按原厂/阅读页校准补回 18 次连续推黑，擦白深度不变。
+        // Gray-start text undersaturates: restore 18 consecutive pushes per the
+        // vendor/reader calibration without changing the erase depth.
+        e0470_boost_black_column(s_water_data, E0470_GL16_FRAMES);
         s_water_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
         s_water_ready = true;
     }

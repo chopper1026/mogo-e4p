@@ -285,8 +285,12 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     if (!owner || !hl || !hl->front_fb || !hl->back_fb) return false;
     if (s_main_fault) { *result = main_recover(hl, EPD_DRAW_SUCCESS); return true; }
     if (!main_nav_geometry()) return false;
-    // 8帧整页方案被实机否定；用户接受主页面黑白、亚克力灰阶，黑白改用完整20相。
-    // Hardware rejected whole-page 8-frame output; the user accepted black/white main pages with gray acrylic. Use the full 20-phase black/white table.
+    // 8帧整页方案被实机否定；用户接受主页面黑白、亚克力灰阶。黑白端点原用完整20相DU，
+    // 2026-10-24 起水波纹变黑端点改走原厂擦除序列并补回18次推黑，修复灰起点文字欠饱和。
+    // Hardware rejected whole-page 8-frame output; the user accepted black/white main
+    // pages with gray acrylic. Black endpoints used the full 20-phase DU; since
+    // 2026-10-24 the water black endpoint takes the vendor erase sequence with 18
+    // restored pushes, fixing undersaturated gray-start text.
     main_freeze_navigation(hl, true);
     if (fast) main_normalize_body(hl);
     const bool changed = main_body_changed(hl);

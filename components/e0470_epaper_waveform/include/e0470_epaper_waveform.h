@@ -66,6 +66,11 @@ extern const EpdWaveform E0470_GRAY8_WAVEFORM;
 #define E0470_GC16_FRAMES 36
 #define E0470_GL16_FRAMES 37
 
+/// to=0 补回的原厂连续推黑次数；与 DU / 原厂 GL16 的黑饱和段一致，实机验证的字黑下限。
+/// / Vendor black pushes restored for to=0; matches the DU / vendor GL16 black
+/// saturation run, the panel-verified floor for solid text black.
+#define E0470_BOOST_BLACK_PUSHES 18
+
 /// 帧周期取算法文档第 8 节的设计点 ν≈90Hz。
 /// / Frame period is the §8 design point ν≈90 Hz.
 #define E0470_WAVEFORM_FRAME_US 11090
@@ -99,6 +104,14 @@ const EpdWaveformPhases* e0470_waveform_phases(const EpdWaveform* waveform, int 
 /// 查 (from→to) 在第 phase 相的 2bit 动作：0 保持、1 压黑、2 擦白。
 /// / 2-bit action for (from→to) at `phase`: 0 hold, 1 darken, 2 erase.
 int e0470_phase_action(const EpdWaveformPhases* phases, int phase, int to, int from);
+
+/// 把 to=0 各行被裁掉的推黑补回 E0470_BOOST_BLACK_PUSHES 次连续相位，占用该行前导保持相，
+/// 行尾保留 E0470_TRIM_HOLD 个保持相；只改写「先擦白后推黑」的整齐行，其他形状原样。
+/// data 是 phases 相的运行表（如 E0470_GL16_FRAMES 布局）。
+/// / Restore each to=0 row's trim-cut black pushes to E0470_BOOST_BLACK_PUSHES consecutive
+/// phases by consuming that row's leading holds, keeping E0470_TRIM_HOLD trailing holds;
+/// only tidy [erase then black] rows change. data holds `phases` phases (GL16 layout).
+void e0470_boost_black_column(uint8_t (*data)[16][4], int phases);
 
 /// 生成 E0470_WAVEFORM 与 E0470_FOLLOW_WAVEFORM 的表。必须在第一次刷新之前调用一次。
 /// / Build E0470_WAVEFORM and E0470_FOLLOW_WAVEFORM. Call once before the first refresh.
