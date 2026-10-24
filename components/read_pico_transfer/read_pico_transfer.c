@@ -2058,7 +2058,7 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
         snprintf((char *)wifi.ap.ssid, sizeof(wifi.ap.ssid), "kiikoread-%02X%02X", mac[4], mac[5]);
         strcpy((char *)wifi.ap.password, READ_PICO_TRANSFER_PASSWORD);
         wifi.ap.ssid_len = strlen((char *)wifi.ap.ssid);
-        wifi.ap.max_connection = 2; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        wifi.ap.max_connection = 4; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
         portENTER_CRITICAL(&s_lock); strcpy(s_status.ssid, (char *)wifi.ap.ssid); portEXIT_CRITICAL(&s_lock);
     } else {
         memcpy(wifi.sta.ssid, saved.ssid, strlen(saved.ssid));
@@ -2137,25 +2137,31 @@ esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
     apply_wifi_country();
     err = esp_wifi_set_mode(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
     err = esp_wifi_set_config(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
-    // 传书只用 2.4G b/g/n：S31 的 11ax 与现场路由器协商后发送重传翻倍、上行间歇超时
-    // （实测 1 MB 上传 9 s→26 s 且 408）。bgn 下上行恢复 113 KB/s。
-    // Transfer only needs 2.4G b/g/n: with 11ax the S31 doubles TX retries and stalls
-    // uploads intermittently (1 MB: 9 s → 26 s with 408s). bgn restores 113 KB/s.
-    err = esp_wifi_set_protocol(cfg->mode == READ_PICO_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-    if (err != ESP_OK) ESP_LOGW("transfer", "force bgn protocol: %s", esp_err_to_name(err));
-    // 官方 Metalio 2.0.66 对本板把 STA/AP 发射功率压到 12 dBm；满功率在链路极好
-    // （RSSI −31）时仍每帧 ~30 ms 重试，疑似前端饱和。此处实测验证。
-    // Official Metalio 2.0.66 caps TX power at 12 dBm for this board; at full power the
-    // link still retries ~30 ms per frame even at RSSI −31, suggesting frontend saturation.
-    err = esp_wifi_set_max_tx_power(48); // 0.25 dBm units → 12 dBm / 0.25 dBm 单位 → 12 dBm
-    if (err != ESP_OK) ESP_LOGW("transfer", "cap tx power 12 dBm: %s", esp_err_to_name(err));
+    // 上行走 STA 时与厂商 esp-wifi-connect 一致只用 b/g/n：11ax 与现场路由器协商后
+    // 发送重传翻倍、上行间歇超时（实测 1 MB 上传 9 s→26 s 且 408）。热点保持默认
+    // 协议：厂商 StartRadio 不改 AP 协议，默认档（含 HE）在本板实测吞吐最好。
+    // Force b/g/n on the STA leg only, like the vendor esp-wifi-connect: 11ax negotiation
+    // with local routers doubles TX retries and stalls uploads (1 MB: 9 s → 26 s with 408s).
+    // The hotspot keeps the default protocol: vendor StartRadio leaves it untouched, and
+    // the default (HE included) measures best on this board.
+    if (cfg->mode == READ_PICO_TRANSFER_MODE_STA) {
+        err = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+        if (err != ESP_OK) ESP_LOGW("transfer", "force bgn protocol: %s", esp_err_to_name(err));
+    }
     clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto fail;
+    // 功率与省电必须在 start 之后设置：本 API 明确要求已开机，start 前的功率档由
+    // PHY init 数据决定——此前提前设置从未生效，满功率在本板 RSSI −31 仍每帧
+    // ~30 ms 重试，疑似前端饱和。顺序对齐厂商 StartRadio。
+    // Power and power-save must be set after start: the API requires a started radio and
+    // pre-start power comes from PHY init data — the earlier pre-start call never took
+    // effect, and full power showed ~30 ms retries per frame even at RSSI −31 (likely
+    // frontend saturation). Order matches vendor StartRadio.
+    esp_err_t power_err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (power_err != ESP_OK) ESP_LOGW("transfer", "disable wifi power save: %s", esp_err_to_name(power_err));
+    err = esp_wifi_set_max_tx_power(48); // 0.25 dBm units, vendor kMetalioWifiMaxTxPower / 0.25 dBm 单位，同厂商 kMetalioWifiMaxTxPower
+    if (err != ESP_OK) ESP_LOGW("transfer", "cap tx power 12 dBm: %s", esp_err_to_name(err));
     s_started = true;
-    if (cfg->mode == READ_PICO_TRANSFER_MODE_STA && !cfg->network_only) {
-        esp_err_t power_err = esp_wifi_set_ps(WIFI_PS_NONE);
-        if (power_err != ESP_OK) ESP_LOGW("transfer", "disable wifi power save: %s", esp_err_to_name(power_err));
-    }
     if (cfg->mode == READ_PICO_TRANSFER_MODE_AP) {
         portENTER_CRITICAL(&s_lock);
         s_status.network_ready = true; strcpy(s_status.url, READ_PICO_TRANSFER_URL);

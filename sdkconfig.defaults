@@ -30,25 +30,42 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 # Transfer AP prefers PSRAM network buffers, preserving internal display memory.
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-# 只服务一个浏览器，但发送/接收批量书本时仍需要足够的帧缓冲形成聚合。
-# 4/8/4 的旧值把实测吞吐压到约 40–90 KB/s；这里取默认档位的一半，兼顾内部堆。
-# One browser client at a time, but bulk book transfers still need enough frame
-# buffers to aggregate. The old 4/8/4 values measured at only 40–90 KB/s; these
-# sit at half the IDF defaults to keep internal heap in reserve.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+# 无线参数整体对齐厂商 S31 构建（Metalio-E-INK4-Plus 的 sdkconfig 与
+# docs/ap-file-transfer.md §12）：静态 RX/TX 6、缓存 TX 4、TX BA 窗口 64、
+# 管理缓冲 32，WiFi 热路径代码进 IRAM。
+# Radio settings follow the vendor S31 build (Metalio-E-INK4-Plus sdkconfig and
+# docs/ap-file-transfer.md §12): static RX/TX 6, cache TX 4, TX BA window 64,
+# management buffers 32, and WiFi hot-path code placed in IRAM.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
-CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_RX_BA_WIN=8
-# TCP 窗口是传书吞吐的直接上限：5760 字节在 60 ms 量级的往返里只有约 90 KB/s。
-# The TCP window is the direct throughput ceiling: 5760 bytes over a ~60 ms
-# turnaround caps transfers near 90 KB/s. 32 KB keeps the backlog in PSRAM.
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_RX_BA_WIN=12
+CONFIG_ESP_WIFI_TX_BA_WIN=64
+# TCP 窗口实测过 32 KB 与 64 KB：负载 RTT ~30 ms 时 32 KB 把上行节流在
+# ~865 KB/s 且稳定；64 KB 会让发送端冲爆 WiFi/lwIP 接收缓冲（DYNAMIC_RX 32 个
+# ≈ 48 KB），丢包塌缩到 ~380 KB/s（2026-10-24 实测）。32 KB 是本板甜点值，
+# 缓冲在 PSRAM。厂商的 5760 字节按热点直连 RTT 调优，经路由器的链路不适用。
+# Both 32 KB and 64 KB windows were measured: with a ~30 ms under-load RTT the
+# 32 KB window paces uploads at a stable ~865 KB/s, while 64 KB lets the sender
+# overflow the WiFi/lwIP RX buffers (DYNAMIC_RX 32 ≈ 48 KB) and collapse to
+# ~380 KB/s from loss-driven congestion-window drops (measured 2026-10-24).
+# 32 KB is this board's sweet spot; buffers live in PSRAM. The vendor's 5760
+# bytes is tuned for direct-hotspot RTT and does not apply over a router.
 CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
-CONFIG_ESP_WIFI_MGMT_SBUF_NUM=16
-CONFIG_ESP_WIFI_IRAM_OPT=n
-CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+# WiFi 重传与乱序下保住上行吞吐：接收消息队列与乱序重组预算加深，SACK、
+# SO_RCVBUF 打开，与厂商 S31 参考值一致；12 段重组预算仍远小于 32 KB 窗口。
+# Preserve upload throughput under retransmission and reordering: deepen the
+# TCP receive mailbox and the out-of-order budget, enable SACK and SO_RCVBUF,
+# matching the vendor S31 reference; the 12-pbuf budget stays inside the
+# 32 KB receive window.
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=12
+CONFIG_LWIP_TCP_SACK_OUT=y
+CONFIG_LWIP_SO_RCVBUF=y
+CONFIG_ESP_WIFI_MGMT_SBUF_NUM=32
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=1024
 

@@ -23,7 +23,15 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 设置页不提供「升级和恢复 → 系统升级」入口：OTA 尚未就绪，联网与 TF 卡升级页面代码保留但不可达。
   The settings page offers no System Upgrade row until OTA is ready; the online and TF-card update pages keep their code but stay unreachable.
 
+## 0.3.3-rc100 本地 / 2026-10-24
+
+- WiFi 传输提速：对齐原厂 Metalio S31 无线实现——b/g/n 只强制 STA，热点保留默认协议；TX 功率上限（≈12 dBm）与关省电改到 esp_wifi_start() 之后设置，此前写在 start 前从未生效，满功率触发前端饱和重传；SDMMC 为 S31 增加 4 KiB 内部 DMA 中转缓冲（PSRAM 数据按 8 扇区分块搬运）；lwIP/WiFi 编译配置对齐原厂（TX BA 窗口 64、静态 RX/TX 6、缓存 TX 4、IRAM 优化、管理缓冲 32）。TCP 窗口实测后保持 32 KB：负载 RTT ~30 ms 下稳定 ~865 KB/s，64 KB 会冲爆接收缓冲塌缩到 ~380 KB/s。实测 16 MB 上传从 ~113 KB/s 提升到 ~810–907 KB/s。
+  WiFi transfer speedup by aligning with the vendor Metalio S31 radio implementation: b/g/n is forced on STA only while the hotspot keeps the default protocol; the TX-power cap (≈12 dBm) and power-save disable move after esp_wifi_start()—the earlier pre-start calls never took effect and full power caused frontend-saturation retries; SDMMC gains a 4 KiB internal DMA relay for S31 (PSRAM data staged in 8-sector chunks); and the lwIP/WiFi build settings match the vendor build (TX BA window 64, static RX/TX 6, cache TX 4, IRAM optimisation, management buffers 32). The TCP window stays 32 KB after measurement: ~865 KB/s stable at the ~30 ms under-load RTT, while 64 KB overflows the RX buffers and collapses to ~380 KB/s. Measured 16 MB uploads improve from ~113 KB/s to ~810–907 KB/s.
+
 ## 0.3.3-rc99 本地 / 2026-10-24
+
+- USB 读卡两处修复：板端结束读卡后 TF 卡不再一直显示未挂载（后台 CMD13 掉卡检测在卡交给 USB 期间不再占用挂载状态机，退出后本机重挂可正常执行）；电脑安全弹出后磁盘不再几秒后自动重新挂载（MSC 组件锁存 SCSI 弹出并报告无介质，板端结束读卡后本机恢复）。
+  USB card-reader fixes: ending USB on the device no longer leaves the TF card stuck unmounted (the background CMD13 health poll no longer claims the mount state machine while the card is exported to USB, so the post-USB remount runs), and a safe eject on the computer no longer remounts the disk seconds later (the MSC component latches the SCSI eject and TEST UNIT READY reports no medium until USB mode ends on the device).
 
 - 待机「先浅后深」唤醒修复：脉冲断电后硬件只能长按开机，锁屏满 10 分钟不再断电，改为进入主机深睡——面板画面保留，短按电源键即重启回到锁屏与阅读位置（有密码时先验证）。菜单「关机」仍为彻底断电，长按约 1 秒开机，行为不变。
   Staged standby wake fix: after pulse power-off the hardware only boots on a long hold, so after ten locked minutes the device no longer powers down—it enters a host deep sleep with the lock image retained, and a short power-key press reboots back to the lock face and reading position (PIN verification first when enabled). The power menu's 关机 still cuts power completely and needs a ~1 s hold, unchanged.
