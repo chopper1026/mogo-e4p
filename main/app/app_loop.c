@@ -953,6 +953,7 @@ void app_loop_run(const app_loop_config_t* config) {
         bool quick_lock_requested = false;
         bool quick_input_owned = false;
         ui_power_action_t replay_power_action = UI_POWER_ACTION_NONE;
+        EpdRect replay_power_dirty = {0};
 #if CONFIG_TOUCH_DIAG
         int64_t td_gap_ms = td_last_read_us ? (esp_timer_get_time() - td_last_read_us) / 1000 : 0;
         td_last_read_us = esp_timer_get_time();
@@ -990,16 +991,13 @@ void app_loop_run(const app_loop_config_t* config) {
                         EpdRect dirty;
                         ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
                         if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
-                            ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
-                            enum EpdDrawError result = update_display_area_diff_with(
-                                ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
-                            guard_draw_result(ctx.hl, result);
-                            if (result != EPD_DRAW_SUCCESS) {
-                                power_dialog_open = false;
-                                ui_power_dialog_end();
-                                ui_power_dialog_reset(&power_dialog, touch.touched);
-                                app_present(&ctx, current, APP_REDRAW_FULL);
-                            }
+                            // 回放只攒 dirty 不推屏：一次扫描 55–90ms 而触摸帧 5ms 一帧，逐帧推
+                            // 屏永远追不上手指，滑块越拖越落后。排空后统一推一次合并区域。
+                            // Replay only accumulates the dirty rect: one scan costs 55-90 ms while
+                            // touch frames arrive every 5 ms, so per-frame pushes never catch the
+                            // finger and the slider falls further behind. One merged push after the drain.
+                            replay_power_dirty = replay_power_dirty.height > 0
+                                ? ui_rect_union(replay_power_dirty, dirty) : dirty;
                         } else if (action != UI_POWER_ACTION_NONE) {
                             replay_power_action = action;
                         }
@@ -1029,6 +1027,21 @@ void app_loop_run(const app_loop_config_t* config) {
                     s_fl_pending = false;
                     s_fl_pending_commit = false;
                     s_fl_pending_control = UI_QUICK_CTL_NONE;
+                }
+                // 排空后统一推一次电源弹窗滑块；动作仍延迟到本 tick 的弹窗分支执行。
+                // Push the power-dialog slider once after the drain; actions still defer to this tick's dialog branch.
+                if (power_dialog_open && replay_power_action == UI_POWER_ACTION_NONE &&
+                    replay_power_dirty.height > 0) {
+                    ui_power_dialog_draw_controls(ctx.fb, &power_dialog, replay_power_dirty);
+                    enum EpdDrawError result = update_display_area_diff_with(
+                        ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, replay_power_dirty);
+                    guard_draw_result(ctx.hl, result);
+                    if (result != EPD_DRAW_SUCCESS) {
+                        power_dialog_open = false;
+                        ui_power_dialog_end();
+                        ui_power_dialog_reset(&power_dialog, touch.touched);
+                        app_present(&ctx, current, APP_REDRAW_FULL);
+                    }
                 }
                 replayed = true;
                 frame_ms = esp_timer_get_time() / 1000;

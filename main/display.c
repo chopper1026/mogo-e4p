@@ -656,6 +656,13 @@ static enum EpdDrawError update_display_area_diff_with_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
+    // 触摸笔迹的 8 帧跟随 DU 固定走 FAST 档（一行 10µs 对 16µs）；否则档位由上一轮
+    // 推屏遗留，滑块等跟手区域时而 11ms/帧、时而 6.9ms/帧。其余波形不改档位。
+    // The 8-frame FOLLOW DU for touch ink always uses the FAST profile (10 µs/line vs 16);
+    // otherwise the profile is whatever the previous push left, so tracking areas alternate
+    // between 11 ms and 6.9 ms per frame. Other waveforms leave the profile untouched.
+    if ((mode & 0xF) == MODE_DU && waveform == &E0470_FOLLOW_WAVEFORM)
+        use_scan_for(waveform, mode);
     epd_poweron();
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, true);

@@ -7,6 +7,7 @@
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 EpdRect ui_content_refresh_area(void);
+EpdRect ui_rect_union(EpdRect a, EpdRect b);
 static inline void ui_text_set_system_scale(bool enabled) { (void)enabled; }
 static inline void ui_text_set_system_font(bool enabled) { (void)enabled; }
 
