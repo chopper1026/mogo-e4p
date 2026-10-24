@@ -1175,33 +1175,12 @@ void app_loop_run(const app_loop_config_t* config) {
                     if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
                 } else if (action == UI_POWER_ACTION_SHUTDOWN) {
-                    app_shutdown_style_t style = app_settings_shutdown_style();
-                    if (style == APP_SHUTDOWN_FULL) {
-                        power_dialog_open = false;
-                        ui_power_dialog_end();
-                        ui_power_dialog_reset(&power_dialog, false);
-                        run_power_action(&ctx, current, false);
-                    } else {
-                        power_dialog_open = false;
-                        ui_power_dialog_end();
-                        ui_power_dialog_reset(&power_dialog, false);
-                        prepare_lock(&ctx, current, true);
-                        extern const app_desc_t app_book;
-                        main_lock_boundary();
-                        // 先浅后深走十分钟阶梯；仅浅睡不断电，按键/拿起回到关机前页面。
-                        // Staged walks the ten-minute ladder; light-only never powers off and key/pickup returns.
-                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
-                                             current == &app_book && app_book_reader_body_visible(),
-                                             style == APP_SHUTDOWN_LIGHT);
-                        display_request_full_refresh();
-                        ctx.now_ms = esp_timer_get_time() / 1000;
-                        last_input_ms = ctx.now_ms;
-                        poll_media(&ctx, current, &media_mounted, &media_invalidated);
-                        last_media_poll_ms = ctx.now_ms;
-                        ctx.pressed = false;
-                        ctx.released = false;
-                        app_present(&ctx, current, APP_REDRAW_PAGE);
-                    }
+                    power_dialog_open = false;
+                    ui_power_dialog_end();
+                    ui_power_dialog_reset(&power_dialog, false);
+                    // 「关机」固定立即断电；先浅后深只决定锁屏后的十分钟阶梯，与本按钮无关。
+                    // 关机 always powers off immediately; the staged style only governs the lock ladder.
+                    run_power_action(&ctx, current, false);
                 } else if (action == UI_POWER_ACTION_RESTART) {
                     power_dialog_open = false;
                     ui_power_dialog_end();

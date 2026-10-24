@@ -240,7 +240,9 @@ void app_settings_init(void) {
     }
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
-        s_shutdown_style = raw <= APP_SHUTDOWN_LIGHT ? (app_shutdown_style_t)raw : APP_SHUTDOWN_FULL;
+        // 「彻底断电」档已移除：旧值与未知值并入先浅后深（锁屏阶梯相同）。
+        // The full-off style is gone: legacy and unknown values merge into staged (identical lock ladder).
+        s_shutdown_style = raw == APP_SHUTDOWN_LIGHT ? APP_SHUTDOWN_LIGHT : APP_SHUTDOWN_STAGED;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -481,7 +483,7 @@ void app_settings_set_sleep_mode(app_sleep_mode_t mode) {
 
 app_shutdown_style_t app_settings_shutdown_style(void) { return s_shutdown_style; }
 void app_settings_set_shutdown_style(app_shutdown_style_t style) {
-    if (style > APP_SHUTDOWN_LIGHT) style = APP_SHUTDOWN_FULL;
+    if (style != APP_SHUTDOWN_STAGED && style != APP_SHUTDOWN_LIGHT) style = APP_SHUTDOWN_STAGED;
     if (style == s_shutdown_style) return;
     s_shutdown_style = style;
     // 旧固件把值 2（仅浅睡）读成 false（彻底关机），降级安全。/ Old firmware reads 2 (light-only) as false (full off): a safe downgrade.
@@ -1332,8 +1334,8 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(backup.fonts_dir, s_fonts_dir, sizeof(backup.fonts_dir));
     backup_seal(&backup);
     uint8_t idle_index = s_auto_lock_minutes == 1 ? 1 : s_auto_lock_minutes == 5 ? 2 : s_auto_lock_minutes == 10 ? 3 : 0;
-    // 扩展字节 bit0 仍只记「非彻底关机」供旧固件读取；v27 另用独立块保存完整三态。
-    // Extension bit 0 still records "not full off" for older firmware; v27 keeps all three states in its own block.
+    // 扩展字节 bit0 仍记「非彻底关机」供旧固件读取（现恒为 1）；v27 独立块只写先浅后深/仅浅睡。
+    // Extension bit 0 still records "not full off" for older firmware (always 1 now); the v27 block only writes staged/light-only.
     uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_shutdown_style != APP_SHUTDOWN_FULL ? 1 : 0) | (idle_index << 1) | ((uint8_t)s_main_refresh << 3)};
     uint32_t extension_hash = backup_shutdown_checksum(&backup, s_book_indent,
                                                         s_book_rule_offset, extension[2]);
@@ -1528,7 +1530,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_up_t up_action = {.action = APP_READER_KEY_NONE};
     settings_backup_book_fonts_t book_fonts = {.on = 1};
     settings_backup_book_vertical_t book_vertical = {.on = 0};
-    settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_FULL};
+    settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_STAGED};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1664,11 +1666,14 @@ esp_err_t app_settings_backup_restore(void) {
     if (profile.avatar[0] && !backup_file_exists(profile.avatar, false)) profile.avatar[0] = 0;
     strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
     strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
-    // v27 用独立块保存完整三态；旧备份仍按扩展 bit0 回落（仅浅睡降级为先浅后深）。
-    // V27 keeps all three shutdown states in its own block; older backups still read extension
-    // bit 0, where light-only degrades to staged.
-    const app_shutdown_style_t shutdown_mode = version >= 27 ? (app_shutdown_style_t)shutdown_style.style
+    // v27 用独立块保存关机方式；旧备份仍按扩展 bit0 回落（仅浅睡降级为先浅后深）。
+    // 「彻底断电」档已移除：备份里读到的旧值并入先浅后深，仅浅睡原样保留。
+    // V27 keeps the shutdown style in its own block; older backups still read extension bit 0,
+    // where light-only degrades to staged. The removed full-off style merges into staged from
+    // any backup; light-only survives as is.
+    app_shutdown_style_t shutdown_mode = version >= 27 ? (app_shutdown_style_t)shutdown_style.style
         : ((staged_shutdown & 1) ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL);
+    if (shutdown_mode != APP_SHUTDOWN_LIGHT) shutdown_mode = APP_SHUTDOWN_STAGED;
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);

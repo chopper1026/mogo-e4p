@@ -26,9 +26,14 @@ void app_settings_init(void);
 app_sleep_mode_t app_settings_sleep_mode(void);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
-/// 电源菜单"关机"的方式。默认仅浅睡；彻底关机：立即断电，长按开机；先浅后深：锁屏浅睡十分钟后断电，短按开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
-/// Power-menu shutdown style, light-only by default. Full: immediate power-off, long-press boots; staged: lock, light-sleep ten minutes, then power off, short-press boots; light-only: lock sleeps forever without powering off, key/pickup returns.
+/// 锁屏睡眠方式，默认仅浅睡。先浅后深：锁屏浅睡十分钟后断电，短按冷开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
+/// 电源菜单「关机」固定立即断电，与本设置无关。
+/// APP_SHUTDOWN_FULL 是旧档位：仅为 NVS/备份兼容保留编号，读取时并入先浅后深，界面不再提供。
+/// Lock sleep style, light-only by default. Staged: lock, light-sleep ten minutes, then power off (a short press cold-boots); light-only: lock sleeps forever without powering off, key/pickup returns.
+/// The power menu's 关机 always powers off immediately and ignores this setting.
+/// APP_SHUTDOWN_FULL is a legacy value kept for NVS/backup compatibility; loads merge into staged and the UI no longer offers it.
 typedef enum {
+    /// 旧档位保留编号，读取时并入先浅后深。/ Legacy ID; loads merge into staged.
     APP_SHUTDOWN_FULL = 0,
     APP_SHUTDOWN_STAGED = 1,
     APP_SHUTDOWN_LIGHT = 2,

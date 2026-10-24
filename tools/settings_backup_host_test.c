@@ -737,7 +737,8 @@ int main(void) {
     assert(fwrite(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fwrite(v3_extension, 1, sizeof(v3_extension), file) == sizeof(v3_extension));
     assert(fclose(file) == 0);
-    assert(app_settings_backup_restore() == ESP_OK && s_shutdown_style == APP_SHUTDOWN_FULL);
+    /* 彻底断电档已移除：旧备份里的 FULL 一律迁移为先浅后深。/ Full-off is retired: legacy FULL in backups migrates to staged. */
+    assert(app_settings_backup_restore() == ESP_OK && s_shutdown_style == APP_SHUTDOWN_STAGED);
     assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
     app_settings_init();
     assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
@@ -923,7 +924,7 @@ int main(void) {
     assert(app_settings_backup_save() == ESP_OK);
     app_settings_set_book_fonts(true);
     app_settings_set_book_vertical(false);
-    app_settings_set_shutdown_style(APP_SHUTDOWN_FULL);
+    app_settings_set_shutdown_style(APP_SHUTDOWN_STAGED);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(!app_settings_book_fonts() && app_settings_book_vertical() &&
            app_settings_shutdown_style() == APP_SHUTDOWN_LIGHT);
@@ -962,7 +963,7 @@ int main(void) {
     assert(fflush(saved) == 0 && ftruncate(fileno(saved), v26_tail_at + (long)v26_tail) == 0 && fclose(saved) == 0);
     app_settings_set_book_fonts(true);
     app_settings_set_book_vertical(false);
-    app_settings_set_shutdown_style(APP_SHUTDOWN_FULL);
+    app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_fonts() && !app_settings_book_vertical() &&
            app_settings_shutdown_style() == APP_SHUTDOWN_STAGED);
