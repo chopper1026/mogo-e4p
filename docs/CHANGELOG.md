@@ -25,8 +25,8 @@ Official release consolidating the rc98 local builds; per-item details remain un
 
 ## 0.3.3-rc99 本地 / 2026-10-23
 
-- 设置：「关机睡眠」更名「待机方式」，电源菜单「关机」固定立即断电、不再跟随该设置；页内移除「彻底关机」，只留「先浅后深」与「仅浅睡」，已存档和备份里的彻底关机自动并入先浅后深。
-  Settings: the shutdown-sleep setting is renamed 待机方式 (standby style) and the power menu's 关机 always powers off immediately instead of following it; the page drops full-off, leaving staged and light-only, and stored full-off values (NVS or backups) migrate to staged.
+- 设置：「关机睡眠」更名「待机方式」，电源菜单「关机」固定立即断电、不再跟随该设置；页内移除「彻底关机」，只留「先浅后深」与「仅浅睡」，已存档和备份里的彻底关机自动并入先浅后深，页底说明文字一并删除。
+  Settings: the shutdown-sleep setting is renamed 待机方式 (standby style) and the power menu's 关机 always powers off immediately instead of following it; the page drops full-off, leaving staged and light-only, stored full-off values (NVS or backups) migrate to staged, and the bottom hint line is removed.
 
 - 关机睡眠「先浅后深」：本机没有 PMU EN，锁屏满 10 分钟后不再永远停在浅睡，而是按原厂方式打电源键脉冲彻底断电，之后短按电源键冷开机并恢复锁屏与阅读位置；电源菜单「关机」的脉冲也改为反复重试直到断电，不再一轮失败就进深睡兜底。
   Shutdown style "staged": this board has no PMU EN, so after ten locked minutes the device no longer stays in light sleep forever—it pulses the power key factory-style and powers off completely; a short key press then cold-boots back to the lock face and reading position. The power menu's shutdown pulses also retry train after train until the rails drop instead of falling into deep sleep after one round.
@@ -35,6 +35,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
   SD card: removal is detected about 1.5 s after the card leaves the slot, the reader falls back to the built-in face and listings report a read failure; a reinserted card remounts within about 2 s and the face and listings recover without leaving the page or rebooting. This board has no slot CD pin, so previously the device kept assuming the card was present and only produced read timeouts.
 - 阅读页脚：章节名和页码固定使用同一种字体，带《》【】等标点的章节不再让整行页脚变小。
   Reader footer: the chapter name and page counter always share one face, so titles with 《》【】 no longer shrink the whole footer.
+
+- 前光：亮度输出上限从原厂满输出的 30% 降到 20%，滑杆仍为 1–100%，已保存的亮度值不变。
+  Frontlight: the brightness output ceiling drops from 30% to 20% of factory full output; the slider still spans 1–100% and saved values are unchanged.
 
 ## 0.3.3-rc98 本地 / 2026-10-23
 

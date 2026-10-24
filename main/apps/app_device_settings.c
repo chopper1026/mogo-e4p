@@ -1232,7 +1232,6 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 54, 784, 21, "电源菜单「关机」总是立即断电；浅睡时按键直接返回。", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
