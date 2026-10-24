@@ -31,7 +31,7 @@ typedef enum {
 /// 登记常开供电的触摸与加速度计，并准备 CPU 浅睡保持区。/ Bind always-on touch/accelerometer and prepare CPU light-sleep retention.
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc);
 
-/// light_only 为真（关机睡眠"仅浅睡"）时锁屏浅睡无期限、永不掉电；为假走浅睡十分钟转断电交接的阶梯（无 PMU EN 的板为脉冲断电）。
+/// light_only 为真（待机方式"仅浅睡"）时锁屏浅睡无期限、永不掉电；为假走浅睡十分钟转断电交接的阶梯（无 PMU EN 的板为脉冲断电）。
 /// With light_only (shutdown style "light-only") the lock sleeps without a deadline and never powers off; otherwise the ten-minute ladder hands off to power-down (pulse power-off on boards without PMU EN).
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,

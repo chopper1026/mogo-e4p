@@ -16,7 +16,7 @@
  * User revision: manual collage locks promptly present white and a round lock, then present the complete collage once with original GC16; remove placeholders and four-pass reveal.
  * 用户修订：合入官方 a2a63a6 的外设停用、IOE 收口与 CPU 浅睡保持；保留十分钟浅睡、密码和阅读检查点。
  * User revision: port official a2a63a6 peripheral/IOE parking and CPU light-sleep retention while preserving ten-minute light sleep, PIN and reader checkpoints.
- * 用户修订：锁屏入口带仅浅睡开关——关机睡眠选"仅浅睡"时锁屏无期限浅睡、永不断电；其余入口维持十分钟深睡阶梯。
+ * 用户修订：锁屏入口带仅浅睡开关——待机方式选"仅浅睡"时锁屏无期限浅睡、永不断电；其余入口维持十分钟深睡阶梯。
  * User revision: the lock entry takes a light-only switch--shutdown style "light-only" sleeps without deadline and never powers off; other entries keep the ten-minute deep ladder.
  * 用户修订：无 PMU EN 的板（Metalio）深睡交接不存在，十分钟到点自动升级为原厂式电源键脉冲断电；脉冲彻底失败才回退无期限锁屏浅睡。
  * User revision: on boards without PMU EN (Metalio) no deep handoff exists, so the ten-minute mark escalates to the factory-style power-key pulse power-off; only exhausted pulses fall back to a deadline-free locked light sleep.

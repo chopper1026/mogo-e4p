@@ -792,7 +792,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_CLOCK,             // 6 日期与时间
         UI_ICON_CONTRAST,          // 7 系统对比度
         UI_ICON_COPY,              // 8 保存与恢复
-        UI_ICON_POWER,             // 9 关机睡眠
+        UI_ICON_POWER,             // 9 待机方式
         UI_ICON_TEXT_ALIGN_START,  // 10 状态栏签名
         UI_ICON_REFRESH_CW,        // 11 首页强刷
         UI_ICON_DOWNLOAD,          // 12 系统升级
@@ -1219,8 +1219,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     if (s_page == SETTINGS_POWER_SLEEP) {
-        back_header(fb, "关机睡眠");
-        section(fb, 248, "选择锁屏后的睡眠方式");
+        back_header(fb, "待机方式");
+        section(fb, 248, "选择锁屏后的待机方式");
         const char *labels[] = {"先浅睡，10 分钟后断电", "仅浅睡"};
         const char *details[] = {"锁屏画面保留；断电后短按电源键开机",
                                  "锁屏画面保留；不断电，按键返回关机前页面"};
@@ -1233,7 +1233,6 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
         }
         ui_text(fb, 54, 784, 21, "电源菜单「关机」总是立即断电；浅睡时按键直接返回。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 828, 21, "锁屏样式同时适用于壁纸与阅读票根。", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1447,7 +1446,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
     unsigned minutes=app_settings_auto_lock_minutes();
     if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else strcpy(idle,"关闭");
-    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","关机睡眠"};
+    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","待机方式"};
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
