@@ -10,6 +10,8 @@
  * Authorized keyboard revision: rename uses shared T9/QWERTY and a steady caret; exit frees candidates.
  * 用户修订：输入只刷新变化区域，布局切换局部灰阶，避免打字累计整屏清残影。
  * User revision: input refreshes changed regions; layout switches use local grayscale, without accumulating whole-page cleanup.
+ * 用户修订：存储卡未挂载时点卡片手动重挂；深睡唤醒后的挂载失败不再无路可走。
+ * User revision: tapping the storage card remounts it while unmounted; a mount failure after deep-sleep wake is no longer a dead end.
  */
 #include "ui_avatar.h"
 #include "book_cover_jobs.h"
@@ -646,7 +648,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                      : (s_sd_format_confirm ? "将清空卡内全部数据，再点确认" : "格式化可能可以解决此问题"));
         } else {
             snprintf(total, sizeof(total), "未挂载");
-            snprintf(usage, sizeof(usage), "请检查 TF 卡");
+            // 探测失败不会自动重试，卡片本身就是重挂入口：提示语直接写出来。
+            // A failed probe never retries on its own and the card is the remount entry: say so in the hint.
+            snprintf(usage, sizeof(usage),
+                     s_scan_pending ? "正在尝试挂载…" : "请检查 TF 卡，点击卡片重新挂载");
         }
         ui_text(fb, 624, 191, 21, total, EPD_DRAW_ALIGN_RIGHT, false);
         ui_text(fb, 58, 231, 19, usage, EPD_DRAW_ALIGN_LEFT, false);
@@ -1013,6 +1018,19 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 snprintf(s_sd_notice, sizeof(s_sd_notice), "格式化失败：%s", esp_err_to_name(err));
             }
         }
+        return APP_REDRAW_PAGE;
+    }
+    // 未挂载时点存储卡手动重挂：探测失败的锁存没有任何自动重试，这里是用户侧出路。
+    // Tap the storage card to remount while unmounted: a latched probe failure has no automatic
+    // retry anywhere, so this tap is the user-side way out.
+    if (!long_press && !s_sd.mounted && !sd_needs_format() && !s_scan_pending &&
+        ui_rect_hit(storage_card_rect(), ev->x0, ev->y0)) {
+        // 后台封面/头像任务可能占着卡，静默成功才动手；忙时保留原提示，用户可再点。
+        // Cover/avatar jobs may hold the card; remount only after a clean quiesce and let the
+        // user tap again when busy.
+        if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_REDRAW_NONE;
+        (void)read_pico_sd_remount();
+        s_scan_pending = true;
         return APP_REDRAW_PAGE;
     }
     // 点别处就撤销确认，免得提示一直停在"再点一次"。
