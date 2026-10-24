@@ -4,9 +4,12 @@
  *
  * Metalio E-INK4 Plus 的 read_pico_pmu 兼容层：
  * BQ27220 电量、CX25601N 充电状态、PCF8563 RTC、TCA9555 P17 电源键。
+ * 电量在电压/电流之上滤波：负载补偿、EMA、分段曲线、单向限速，并持久化到 NVS。
  *
  * read_pico_pmu compatibility layer for Metalio E-INK4 Plus:
  * BQ27220 gauge, CX25601N charger status, PCF8563 RTC and TCA9555 P17 key.
+ * The percent is filtered on top of voltage/current: load compensation, EMA, a piecewise
+ * curve and one-direction rate limiting, persisted to NVS.
  * 没有 CW32 PMU，因此软睡/关机按新板电源路径实现或降级。
  * There is no CW32 PMU; soft sleep / power-off follow the new board's rails.
  */
@@ -35,7 +38,11 @@
 
 #define BQ_REG_VOLTAGE 0x08
 #define BQ_REG_CURRENT 0x0C
+// StateOfCharge() 寄存器，地址按 TRM 复核。 / StateOfCharge() register; re-check the address against the TRM.
+#define BQ_REG_SOC 0x2C
 #define CX_REG_STATUS1 0x1E
+// STATUS1 判满编码，位义待手册核对。 / STATUS1 done code; verify the bits against the datasheet.
+#define CX_CHG_STAT_DONE 3
 
 #define PCF_REG_SECONDS 0x02
 #define PCF_BIT_VL 0x80
@@ -118,13 +125,148 @@ static esp_err_t bq_read_current(int16_t* ma) {
     return ESP_OK;
 }
 
-static int voltage_to_soc(uint16_t mv) {
-    const int empty = 3300;
-    const int full = 4330;
-    if (mv <= empty) return 0;
-    if (mv >= full) return 1000;
-    return (int)((int64_t)(mv - empty) * 1000 / (full - empty));
+/* ---- 电池滤波状态机 / Battery filter ---- */
+
+// 滤波参数：真机日志（batt: ...）校准后可调。 / Filter tunables; calibrate from the "batt:" logs.
+#define BATT_R_MOHM 100                  // 电池内阻估计。 / Estimated pack resistance.
+#define BATT_COMP_CAP_MV 150             // 负载补偿上限。 / Load compensation cap.
+#define BATT_EMA_TAU_MS 25000            // 电压 EMA 时间常数。 / Voltage EMA time constant.
+#define BATT_DEADBAND_PERMILLE 10        // 差距小于 1% 不动显示。 / Ignore sub-1% movement.
+#define BATT_MAX_STEP_PERMILLE 10        // 单次可见变化最多 1%。 / At most 1% per visible step.
+#define BATT_MIN_STEP_INTERVAL_MS 10000  // 两次可见变化至少隔 10 s。 / Steps sit at least 10 s apart.
+#define BATT_RESTORE_TOL_PERMILLE 150    // 开机恢复容差。 / Boot-restore tolerance.
+#define BATT_DONE_MIN_MV 4300            // 判满电压门槛，防状态位误判。 / Voltage gate for the done snap.
+#define BATT_SAVE_INTERVAL_MS 300000     // NVS 周期保存间隔。 / Periodic NVS save cadence.
+#define BATT_LOG_INTERVAL_MS 60000       // 校准日志间隔。 / Calibration log cadence.
+
+// 4.4 V 高压电池初始 OCV-SOC 锚点（mV → ‰），mV 降序；满充静置锚点待真机日志校准。
+// Initial OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV;
+// the full-rest anchor awaits calibration from on-device logs.
+static const int32_t s_soc_curve[][2] = {
+    {4400, 1000}, {4300, 900}, {4200, 800}, {4100, 680}, {4000, 560},
+    {3900, 450},  {3800, 340}, {3700, 230}, {3600, 140}, {3500, 80},
+    {3400, 40},   {3300, 0},
+};
+
+// 滤波状态：跨 poll 保持，首采时初始化。 / Filter state held across polls, seeded by the first sample.
+typedef struct {
+    bool inited;
+    int32_t ema_q8;        // 补偿后电压 EMA，×256 定点。 / EMA of compensated OCV, fixed-point ×256.
+    int32_t disp_permille; // 对外显示值。 / The value consumers see.
+    int64_t last_poll_us;
+    int64_t last_move_us;
+} batt_filter_t;
+
+// 查表线性插值。 / Linear interpolation over the anchor table.
+static int32_t batt_curve_soc(int32_t mv) {
+    const size_t n = sizeof(s_soc_curve) / sizeof(s_soc_curve[0]);
+    if (mv >= s_soc_curve[0][0]) return s_soc_curve[0][1];
+    for (size_t i = 1; i < n; i++) {
+        if (mv >= s_soc_curve[i][0]) {
+            const int32_t span = s_soc_curve[i - 1][0] - s_soc_curve[i][0];
+            const int32_t rise = s_soc_curve[i - 1][1] - s_soc_curve[i][1];
+            return s_soc_curve[i][1] + (mv - s_soc_curve[i][0]) * rise / span;
+        }
+    }
+    return s_soc_curve[n - 1][1];
 }
+
+// 一步滤波：负载补偿 → EMA → 查表 → 死区/单向/限速；纯函数，便于主机对拍。
+// One filter step: load compensation -> EMA -> table -> deadband/one-direction/rate limit;
+// pure so host tests can replay it.
+static void batt_filter_step(batt_filter_t* f, int64_t now_us, uint16_t raw_mv, bool have_i,
+                             int16_t raw_ma, bool charging, bool charge_done, int32_t saved_permille,
+                             int32_t* out_mv, int32_t* out_permille) {
+    // 负载补偿方向按充电标志，不依赖电流符号约定；封顶防电流尖峰。
+    // Compensation direction follows the charging flag, not the current sign; capped against spikes.
+    int32_t comp = 0;
+    if (have_i) {
+        comp = ((int32_t)(raw_ma < 0 ? -raw_ma : raw_ma) * BATT_R_MOHM) / 1000;
+        if (comp > BATT_COMP_CAP_MV) comp = BATT_COMP_CAP_MV;
+    }
+    const int32_t ocv = charging ? (int32_t)raw_mv - comp : (int32_t)raw_mv + comp;
+
+    // poll 间隔不固定（200/40/20/500/1500 ms 都有），按实际 dt 算系数。
+    // Poll intervals vary (200/40/20/500/1500 ms); derive the factor from the real dt.
+    int64_t dt_us = f->inited ? now_us - f->last_poll_us : 0;
+    if (dt_us < 0) dt_us = 0;
+    f->last_poll_us = now_us;
+
+    if (!f->inited) {
+        f->inited = true;
+        f->ema_q8 = ocv * 256;
+        const int32_t table = batt_curve_soc(ocv);
+        // 首采恢复：保存值在表值容差内则沿用，深睡唤醒显示连续。
+        // First-sample restore: keep the saved value inside tolerance, so deep-standby
+        // wake keeps the display continuous.
+        f->disp_permille = table;
+        if (saved_permille >= 0 && saved_permille <= 1000 &&
+            saved_permille - table <= BATT_RESTORE_TOL_PERMILLE &&
+            table - saved_permille <= BATT_RESTORE_TOL_PERMILLE) {
+            f->disp_permille = saved_permille;
+        }
+        f->last_move_us = now_us;
+    } else {
+        const int64_t tau_us = (int64_t)BATT_EMA_TAU_MS * 1000;
+        f->ema_q8 += (int32_t)(((int64_t)ocv * 256 - f->ema_q8) * dt_us / (tau_us + dt_us));
+    }
+
+    // 充电完成即认为满电，直接对齐 100%；电压门槛挡住状态位误判。
+    // Charge done means full: align to 100% directly; the voltage gate guards a misread status.
+    if (charge_done && raw_mv >= BATT_DONE_MIN_MV) {
+        f->disp_permille = 1000;
+        f->last_move_us = now_us;
+    } else {
+        // 单向步进：放电只降不升，充电只升不降。
+        // One-direction stepping: discharge only falls, charge only rises.
+        int32_t target = batt_curve_soc(f->ema_q8 / 256);
+        if (charging) {
+            if (target < f->disp_permille) target = f->disp_permille;
+        } else if (target > f->disp_permille) {
+            target = f->disp_permille;
+        }
+        const int32_t delta = target - f->disp_permille;
+        // 死区 + 限速：小于 1% 不动；动时单步最多 1%，两次至少隔 10 s。
+        // Deadband + rate limit: sub-1% is ignored; steps cap at 1% and sit 10 s apart.
+        if (delta != 0) {
+            const int32_t abs_delta = delta < 0 ? -delta : delta;
+            if (abs_delta >= BATT_DEADBAND_PERMILLE &&
+                now_us - f->last_move_us >= (int64_t)BATT_MIN_STEP_INTERVAL_MS * 1000) {
+                const int32_t step =
+                    abs_delta > BATT_MAX_STEP_PERMILLE ? BATT_MAX_STEP_PERMILLE : abs_delta;
+                f->disp_permille += delta < 0 ? -step : step;
+                f->last_move_us = now_us;
+            }
+        }
+    }
+
+    *out_mv = f->ema_q8 / 256;
+    *out_permille = f->disp_permille;
+}
+
+// BQ27220 内部库仑计 SOC，只读对比用。 / BQ27220 internal coulomb-counted SOC, read-only comparison.
+static int bq_read_soc(void) {
+    uint8_t pct = 0;
+    if (dev_read(s_bq, BQ_REG_SOC, &pct, sizeof(pct)) != ESP_OK) return -1;
+    return pct <= 100 ? pct : -1;
+}
+
+// 电量持久化到 NVS，供深睡唤醒后恢复显示。 / Persist the percent to NVS for deep-standby wake restore.
+static void batt_save(int32_t permille) {
+    nvs_handle_t nvs;
+    if (nvs_open("pmu", NVS_READWRITE, &nvs) != ESP_OK) return;
+    if (nvs_set_i32(nvs, "soc", permille) == ESP_OK) {
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+static batt_filter_t s_batt_filter;
+// NVS 恢复值，只在首采时被消费一次。 / NVS restore value, consumed once by the first sample.
+static int32_t s_batt_saved_permille = -1;
+static bool s_batt_charging_last;
+static int64_t s_batt_last_save_us;
+static int64_t s_batt_last_log_us;
 
 static esp_err_t rtc_read(struct tm* out, bool* valid) {
     uint8_t r[7] = {0};
@@ -191,21 +333,15 @@ static void poll_key(void) {
 }
 
 static void poll_battery(void) {
+    const int64_t now = esp_timer_get_time();
+
     uint16_t mv = 0;
     int16_t ma = 0;
     const bool have_v = s_bq != NULL && bq_read_voltage(&mv) == ESP_OK && mv >= 2500 && mv <= 5000;
     const bool have_i = s_bq != NULL && bq_read_current(&ma) == ESP_OK;
 
-    if (have_v) {
-        s_snap.battery_mv = mv;
-        s_snap.battery_raw = mv;
-        s_snap.soc_permille = (uint16_t)voltage_to_soc(mv);
-        s_snap.flags |= PMU_STATUS_BATTERY_VALID;
-        s_snap.status_ok = true;
-    } else {
-        s_snap.flags &= ~PMU_STATUS_BATTERY_VALID;
-    }
-
+    // 充电检测照旧：CX STATUS1 优先，电流作兜底。
+    // Charger detection unchanged: CX STATUS1 first, current as the fallback.
     uint8_t chg_stat = 0;
     bool have_chg = false;
     if (s_cx != NULL) {
@@ -215,7 +351,6 @@ static void poll_battery(void) {
             have_chg = true;
         }
     }
-
     bool charging;
     if (have_chg) {
         charging = chg_stat != 0;
@@ -224,11 +359,45 @@ static void poll_battery(void) {
     } else {
         charging = false;
     }
+    const bool charge_done = have_chg && chg_stat == CX_CHG_STAT_DONE;
     s_snap.charge_state = charging ? PMU_CHARGE_CHARGING : PMU_CHARGE_NOT_CHARGING;
     if (charging) {
         s_snap.flags |= PMU_STATUS_CHARGING_ACTIVE;
     } else {
         s_snap.flags &= ~PMU_STATUS_CHARGING_ACTIVE;
+    }
+
+    if (have_v) {
+        int32_t ocv_mv = (int32_t)mv;
+        int32_t disp = 0;
+        batt_filter_step(&s_batt_filter, now, mv, have_i, ma, charging, charge_done,
+                         s_batt_saved_permille, &ocv_mv, &disp);
+        s_batt_saved_permille = -1;  // 恢复值只喂首采。 / The restore value feeds the first sample only.
+        s_snap.battery_mv = (uint16_t)ocv_mv;
+        s_snap.battery_raw = mv;
+        s_snap.soc_permille = (uint16_t)disp;
+        s_snap.flags |= PMU_STATUS_BATTERY_VALID;
+        s_snap.status_ok = true;
+
+        // 保存：周期 + 充电状态切换。/ Periodic saves plus charge-state transitions.
+        const bool charging_changed = charging != s_batt_charging_last;
+        s_batt_charging_last = charging;
+        if (charging_changed ||
+            now - s_batt_last_save_us >= (int64_t)BATT_SAVE_INTERVAL_MS * 1000) {
+            s_batt_last_save_us = now;
+            batt_save(disp);
+        }
+
+        // 校准日志：真机曲线与内部电量计对比数据的来源。
+        // Calibration log: the source of on-device curve data and internal-gauge comparison.
+        if (now - s_batt_last_log_us >= (int64_t)BATT_LOG_INTERVAL_MS * 1000) {
+            s_batt_last_log_us = now;
+            ESP_LOGI(TAG, "batt: raw=%umV ma=%d chg=%d done=%d ocv=%ldmV disp=%ld ic_soc=%d", mv,
+                     have_i ? (int)ma : 0, charging ? 1 : 0, charge_done ? 1 : 0, (long)ocv_mv,
+                     (long)disp, bq_read_soc());
+        }
+    } else {
+        s_snap.flags &= ~PMU_STATUS_BATTERY_VALID;
     }
 }
 
@@ -257,6 +426,15 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle,
         int32_t v = 0;
         if (nvs_get_i32(nvs, "vcom", &v) == ESP_OK && v >= 500 && v <= 2500) {
             s_vcom_mv = v;
+        }
+        nvs_close(nvs);
+    }
+    // 上次电量恢复值：深睡唤醒（复位重启）后显示连续。
+    // Last-percent restore: keeps the display continuous after a deep-standby wake (reset boot).
+    if (nvs_open("pmu", NVS_READONLY, &nvs) == ESP_OK) {
+        int32_t v = 0;
+        if (nvs_get_i32(nvs, "soc", &v) == ESP_OK && v >= 0 && v <= 1000) {
+            s_batt_saved_permille = v;
         }
         nvs_close(nvs);
     }

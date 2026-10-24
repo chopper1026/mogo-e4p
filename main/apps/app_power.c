@@ -195,7 +195,7 @@ static void draw_page(uint8_t* framebuffer, const read_pico_status_t* status) {
             line, sizeof(line), "%u.%03u V",
             pmu->battery_mv / 1000, pmu->battery_mv % 1000
         );
-        snprintf(aux, sizeof(aux), "%u%%", pmu->soc_permille / 10);
+        snprintf(aux, sizeof(aux), "%d%%", pmu_battery_percent(pmu));
         volt = line;
         soc = aux;
         chg = charge_text(pmu);

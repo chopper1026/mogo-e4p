@@ -71,8 +71,8 @@ static void fmt_battery(char* buf, size_t n, const pmu_snapshot_t* s) {
         snprintf(buf, n, "未读到 No data");
         return;
     }
-    snprintf(buf, n, "%u.%03u V　%u%%",
-             s->battery_mv / 1000, s->battery_mv % 1000, s->soc_permille / 10);
+    snprintf(buf, n, "%u.%03u V　%d%%",
+             s->battery_mv / 1000, s->battery_mv % 1000, pmu_battery_percent(s));
 }
 
 static void fmt_mac_code(char* code, size_t n) {
