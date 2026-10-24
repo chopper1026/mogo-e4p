@@ -35,12 +35,43 @@ EXPECTED = {
     "ota_data_initial.bin": (0xD000, 0xF000),
 }
 
+# 分区布局只有两个已登记时代：OTA 槽位与 otadata 永不移动（升级契约）；nvs/storage 于 2026-10
+# 从头部搬到 flash 末尾，完整刷机不再覆盖用户数据。新构建必须逐项等于当前时代。
+# Partition layouts have exactly two registered eras: OTA slots and otadata never move (upgrade
+# contract); nvs/storage moved from the head to end of flash in 2026-10 so full-image flashes stop
+# wiping user data. New builds must match the current era entry by entry.
+LAYOUT_2026_10_TAIL_NVS = {
+    "otadata": (1, 0, 0xD000, 0x2000),
+    "phy_init": (1, 1, 0xF000, 0x1000),
+    "ota_0": (0, 16, 0x10000, 0x500000),
+    "ota_1": (0, 17, 0x510000, 0x500000),
+    "storage": (1, 129, 0xA10000, 0x5E8000),
+    "nvs": (1, 2, 0xFF8000, 0x8000),
+}
+LAYOUT_LEGACY_HEAD_NVS = {
+    "otadata": (1, 0, 0xD000, 0x2000),
+    "phy_init": (1, 1, 0xF000, 0x1000),
+    "ota_0": (0, 16, 0x10000, 0x500000),
+    "ota_1": (0, 17, 0x510000, 0x500000),
+    "storage": (1, 129, 0xA10000, 0x5F0000),
+    "nvs": (1, 2, 0x9000, 0x4000),
+}
+
+
+def parse_partition_table(data: bytes) -> dict[str, tuple[int, int, int, int]]:
+    entries: dict[str, tuple[int, int, int, int]] = {}
+    for offset in range(0, len(data) - 31, 32):
+        magic, kind, subtype, address, size, label, _ = struct.unpack_from("<HBBII16sI", data, offset)
+        if magic != 0x50aa: break
+        entries[label.split(b"\0")[0].decode()] = (kind, subtype, address, size)
+    return entries
+
 # 发布仓库的 Pages 站点；打包写清单与校验清单共用这一份，避免两处漂移。
 # Pages origin of the release repository, shared by the feed writer and the validator so they cannot drift.
 PAGES_ORIGIN = "https://chopper1026.github.io/mogo-e4p/"
 
 
-def check_archived_releases(folder: Path, current_partitions: Path | None = None) -> list[dict]:
+def check_archived_releases(folder: Path) -> list[dict]:
     # 历史版本只引用原正式固件，并核对每个完整刷机部件的大小、地址与校验值。
     # Historical choices use original releases; verify every base part's size, address and hash.
     catalog_path = folder / "releases.json"
@@ -89,7 +120,10 @@ def check_archived_releases(folder: Path, current_partitions: Path | None = None
                 assert data[80:112].split(b"\0")[0].decode() == LAYOUT["project"]
                 assert b"PICO_HTTPS_OTA_V1" in data
             elif name == "partitions.bin":
-                assert data == (current_partitions or folder / "partitions.bin").read_bytes(), "historical layout incompatible"
+                # 历史版本整表必须等于某个已登记时代，禁止任何未登记的布局漂移。
+                # Historical tables must equal a registered era exactly; no unregistered layout drift.
+                assert parse_partition_table(data) in (LAYOUT_LEGACY_HEAD_NVS, LAYOUT_2026_10_TAIL_NVS), (
+                    f"historical layout incompatible: {version}")
         print(f"Historical USB bundle verified: {version} (original bytes, preserve-data default)")
     assert (folder / "versions.js").is_file(), "missing version selector"
     return catalog["releases"]
@@ -116,17 +150,12 @@ def check(folder: Path) -> None:
     assert seen == set(EXPECTED)
     # 升级兼容性门禁：实际双槽分区、应用描述、基础包能力及升级 SHA 必须一致。
     # Upgrade gate: real slots, app description, base capability and upgrade SHA must agree.
-    entries = {}
-    table = (folder / "partitions.bin").read_bytes()
-    for offset in range(0, len(table) - 31, 32):
-        magic, kind, subtype, address, size, label, _ = struct.unpack_from("<HBBII16sI", table, offset)
-        if magic != 0x50aa: break
-        entries[label.split(b"\0")[0].decode()] = (kind, subtype, address, size)
-    assert entries.get("ota_0") == (0, 16, 0x10000, 0x500000), "base OTA slot changed"
-    assert entries.get("ota_1") == (0, 17, 0x510000, 0x500000), "inactive OTA slot changed"
-    assert entries.get("otadata") == (1, 0, 0xd000, 0x2000), "OTA selection metadata changed"
-    assert entries.get("nvs") == (1, 2, 0x9000, 0x4000), "user settings partition changed"
-    assert entries.get("storage") == (1, 129, 0xa10000, 0x5f0000), "user storage partition changed"
+    entries = parse_partition_table((folder / "partitions.bin").read_bytes())
+    assert entries.get("ota_0") == LAYOUT_2026_10_TAIL_NVS["ota_0"], "base OTA slot changed"
+    assert entries.get("ota_1") == LAYOUT_2026_10_TAIL_NVS["ota_1"], "inactive OTA slot changed"
+    assert entries.get("otadata") == LAYOUT_2026_10_TAIL_NVS["otadata"], "OTA selection metadata changed"
+    assert entries.get("nvs") == LAYOUT_2026_10_TAIL_NVS["nvs"], "user settings partition changed"
+    assert entries.get("storage") == LAYOUT_2026_10_TAIL_NVS["storage"], "user storage partition changed"
     image = (folder / "firmware.bin").read_bytes()
     assert image[0] == 0xe9 and struct.unpack_from("<H", image, 12)[0] == LAYOUT["chip_id"], "wrong target chip"
     assert struct.unpack_from("<I", image, 32)[0] == 0xabcd5432, "missing app description"

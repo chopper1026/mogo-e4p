@@ -130,7 +130,7 @@ python -m serial.tools.miniterm COMx 115200     # Ctrl+] 退出，看开机日�
 0x10000 Read_Pico.bin
 ```
 
-`Read_Pico.bin` 只是 app，**必须落在 0x10000**。把它写到 `0x0` 会覆盖 bootloader、分区表、NVS、phy_init，设备不再启动——而墨水屏会保留上一帧画面，看起来"没坏"。这个错误已经在实测中发生过一次，用上面的命令全量重写后恢复（§13.2）。想要单文件烧写，先 `idf.py merge-bin` 生成合并镜像再写 0x0。
+`Read_Pico.bin` 只是 app，**必须落在 0x10000**。把它写到 `0x0` 会覆盖 bootloader、分区表、NVS、phy_init，设备不再启动——而墨水屏会保留上一帧画面，看起来"没坏"。这个错误已经在实测中发生过一次，用上面的命令全量重写后恢复（§13.2）。想要单文件烧写，先 `idf.py merge-bin` 生成合并镜像再写 0x0。合并镜像连续覆盖 0x0 到 app 末尾，空洞一律填 0xFF：2026-10 起 nvs 已挪到 flash 末尾（0xFF8000），整刷不再抹掉用户数据；但设备若还在旧分区表上（从未刷过新表的完整包），这次刷机仍会把旧头部 nvs 与内置 /flash 卷重置一次。
 
 实测踩坑：
 - 端口写 `COMx`，**不要写 `\\.\COMx`**。后者在 esptool 5.x 下报 `Failed to get VID/PID` + `Write timeout`，很容易被误判成"没进下载模式"。
@@ -177,7 +177,7 @@ idf.py size                       # CI 也跑这一步
 
 `idf.py flash` 内部就是 `esptool write_flash @flash_args`，三段镜像各归其位。没有 idf.py 的宿主走 §3.4。
 
-烧写会**覆盖**设备出厂应用固件，但按当前 `flash_args` 不会写入 NVS；睡眠模式 / 字体选择 / 自检结果会保留。VCOM 在 PMU 里，不受影响。分区表 [partitions_16M.csv](../partitions_16M.csv)：nvs 0x9000/0x5000、phy_init 0xE000/0x1000、factory app 0x10000/2 MB、spiffs 0x500000/5 MB（当前代码未挂载 spiffs，仅预留）。
+烧写会**覆盖**设备出厂应用固件，但按当前 `flash_args` 不会写入 NVS；睡眠模式 / 字体选择 / 自检结果会保留。VCOM 在 PMU 里，不受影响。分区表 [partitions_16M.csv](../partitions_16M.csv)：otadata 0xD000/8 KB、phy_init 0xF000/4 KB、ota_0 0x10000 与 ota_1 0x510000 各 5 MB、storage 0xA10000/6.04 MB（/flash 书库）、nvs 0xFF8000/32 KB。nvs 刻意放在 app 覆盖范围之外的 flash 末尾：单文件整机镜像会连续覆盖 0x0 到 app 末尾并把头部空洞全部填 0xFF，nvs 在头部就会被每次整刷抹掉——这正是 2026-10 之前整刷重置用户数据的原因。storage 为此让出 32 KB（wear leveling 状态区在分区末尾，收缩量必须越过旧状态区，旧卷才会干净重格式化而不是带旧几何损坏）；采用新表的第一次挂载会把内置 /flash 卷格式化为空，存在里面的书要重新传输，TF 卡不受影响。
 
 ### 4.2 CI 等价编译（只验证能不能编过）
 

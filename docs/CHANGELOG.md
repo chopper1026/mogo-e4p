@@ -31,6 +31,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 电源菜单滑动关机修复：回放积压的触摸帧不再每帧各推一次扫描，而是合并滑块轨迹后统一推一次；此前一次扫描 55–90 ms 而触摸帧 5 ms 一帧，拖动时积压越滚越大，滑块越拖越落后。触摸笔迹用的 8 帧跟随 DU 面积差分同时固定走 FAST 扫描档，滑块跟手速度约为原来的两倍。
   Slide-to-off fix: replayed touch frames no longer push one scan each—the slider trajectory is merged and pushed once. Previously a scan cost 55–90 ms while touch frames arrived every 5 ms, so the backlog grew during a drag and the thumb fell further behind. The 8-frame FOLLOW DU used for touch ink also now always runs the FAST scan profile, roughly doubling slider tracking speed.
 
+- 分区：nvs 移到 flash 末尾（0xFF8000，32 KB），内置书库分区缩 32 KB 让位。此后单文件整机镜像与网页完整刷机不再覆盖用户数据——设置、锁屏密码、阅读进度与阅读历史整刷后保留。采用新分区表的那次完整刷机仍会重置一次设置与进度，并把内置 /flash 书库格式化为空（存在里面的书要重新传输，TF 卡书籍不受影响）；OTA 与 TF 应用包升级不受影响。
+  Partitioning: nvs moves to the end of flash (0xFF8000, 32 KB) and the internal library partition shrinks 32 KB to make room. Full single-image and web flashes no longer wipe user data—settings, lock PIN, reading progress and history survive a reflash. The one full flash that adopts the new layout still resets settings and progress once and formats the internal /flash library empty (books stored there must be re-transferred; TF-card books are untouched); OTA and TF app updates are unaffected.
+
 ## 0.3.3-rc99 本地 / 2026-10-23
 
 - 设置：「关机睡眠」更名「待机方式」，电源菜单「关机」固定立即断电、不再跟随该设置；页内移除「彻底关机」，只留「先浅后深」与「仅浅睡」，已存档和备份里的彻底关机自动并入先浅后深，页底说明文字一并删除。
