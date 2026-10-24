@@ -25,6 +25,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 
 ## 0.3.3-rc99 本地 / 2026-10-23
 
+- 关机睡眠「先浅后深」：本机没有 PMU EN，锁屏满 10 分钟后不再永远停在浅睡，而是按原厂方式打电源键脉冲彻底断电，之后短按电源键冷开机并恢复锁屏与阅读位置；电源菜单「关机」的脉冲也改为反复重试直到断电，不再一轮失败就进深睡兜底。
+  Shutdown style "staged": this board has no PMU EN, so after ten locked minutes the device no longer stays in light sleep forever—it pulses the power key factory-style and powers off completely; a short key press then cold-boots back to the lock face and reading position. The power menu's shutdown pulses also retry train after train until the rails drop instead of falling into deep sleep after one round.
+
 - TF 卡：拔卡约 1.5 秒后判为掉卡，阅读页回退内建字体、目录提示读取失败；卡插回后 2 秒内自动重挂，字体和目录自行恢复，不用退出页面或重启。此前本机没有卡座 CD 脚，拔卡后设备一直以为卡还在，只能反复读超时。
   SD card: removal is detected about 1.5 s after the card leaves the slot, the reader falls back to the built-in face and listings report a read failure; a reinserted card remounts within about 2 s and the face and listings recover without leaving the page or rebooting. This board has no slot CD pin, so previously the device kept assuming the card was present and only produced read timeouts.
 - 阅读页脚：章节名和页码固定使用同一种字体，带《》【】等标点的章节不再让整行页脚变小。

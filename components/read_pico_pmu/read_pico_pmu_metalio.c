@@ -47,6 +47,9 @@
 #define KEY_POWER_MASK 0x80
 #define PWR_PULSE_COUNT 15
 #define PWR_PULSE_INTERVAL_MS 100
+// 单轮 train 不掉电就按原厂再打；打满仍活着才进 ESP 深睡兜底。
+// If one train does not cut power, repeat like the factory firmware; ESP deep sleep is the last resort.
+#define PWR_OFF_TRAIN_LIMIT 10
 
 // read_pico 组件在 final link 提供；不反向依赖，避免组件环。
 // Provided by the read_pico component at final link; declared here to avoid a component cycle.
@@ -414,16 +417,21 @@ esp_err_t read_pico_pmu_report_ready(void) {
 }
 
 esp_err_t read_pico_pmu_power_off(void) {
-    // P13 脉冲 15 次；成功后仍活着则进深睡。 / Pulse P13 15 times; deep-sleep if still alive.
-    for (int i = 0; i < PWR_PULSE_COUNT; i++) {
-        esp_err_t err = read_pico_pwr_pulse(true);
-        if (err != ESP_OK) return err;
-        vTaskDelay(pdMS_TO_TICKS(PWR_PULSE_INTERVAL_MS));
-        err = read_pico_pwr_pulse(false);
-        if (err != ESP_OK) return err;
-        vTaskDelay(pdMS_TO_TICKS(PWR_PULSE_INTERVAL_MS));
+    // 每轮 train 打 PWR_PULSE_COUNT 次；PMU 不掉电就按原厂反复打，打满才进深睡兜底。
+    // Each train fires PWR_PULSE_COUNT pulses; repeat factory-style while the host lives on
+    // and fall back to ESP deep sleep only after the trains are exhausted.
+    for (unsigned train = 0; train < PWR_OFF_TRAIN_LIMIT; ++train) {
+        for (int i = 0; i < PWR_PULSE_COUNT; i++) {
+            esp_err_t err = read_pico_pwr_pulse(true);
+            if (err != ESP_OK) return err;
+            vTaskDelay(pdMS_TO_TICKS(PWR_PULSE_INTERVAL_MS));
+            err = read_pico_pwr_pulse(false);
+            if (err != ESP_OK) return err;
+            vTaskDelay(pdMS_TO_TICKS(PWR_PULSE_INTERVAL_MS));
+        }
+        ESP_LOGW(TAG, "power-off train %u done, host still alive", train + 1);
     }
-    ESP_LOGW(TAG, "power-off pulse sent; entering deep sleep");
+    ESP_LOGW(TAG, "power-off pulses exhausted; entering deep sleep");
     esp_deep_sleep_start();
     return ESP_OK;
 }

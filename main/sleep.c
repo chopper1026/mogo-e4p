@@ -18,6 +18,8 @@
  * User revision: port official a2a63a6 peripheral/IOE parking and CPU light-sleep retention while preserving ten-minute light sleep, PIN and reader checkpoints.
  * 用户修订：锁屏入口带仅浅睡开关——关机睡眠选"仅浅睡"时锁屏无期限浅睡、永不断电；其余入口维持十分钟深睡阶梯。
  * User revision: the lock entry takes a light-only switch--shutdown style "light-only" sleeps without deadline and never powers off; other entries keep the ten-minute deep ladder.
+ * 用户修订：无 PMU EN 的板（Metalio）深睡交接不存在，十分钟到点自动升级为原厂式电源键脉冲断电；脉冲彻底失败才回退无期限锁屏浅睡。
+ * User revision: on boards without PMU EN (Metalio) no deep handoff exists, so the ten-minute mark escalates to the factory-style power-key pulse power-off; only exhausted pulses fall back to a deadline-free locked light sleep.
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
@@ -423,10 +425,11 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     pmu_selftest_prepare_powerdown();
     periph_suspend(true);
     esp_err_t err = ESP_FAIL;
-    const unsigned attempts = mode == APP_SLEEP_OFF ? 1 : 3;
+    const bool soft = mode != APP_SLEEP_OFF;
+    const unsigned attempts = soft ? 3 : 1;
     for (unsigned attempt = 0; attempt < attempts; ++attempt) {
-        err = mode == APP_SLEEP_OFF ? read_pico_pmu_power_off() : read_pico_pmu_report_sleep();
-        ESP_LOGI(TAG, "%s attempt %u: %s", mode == APP_SLEEP_OFF ? "power off" : "SOFT_SLEEP",
+        err = soft ? read_pico_pmu_report_sleep() : read_pico_pmu_power_off();
+        ESP_LOGI(TAG, "%s attempt %u: %s", soft ? "SOFT_SLEEP" : "power off",
                  attempt + 1, esp_err_to_name(err));
         if (err == ESP_OK) {
             vTaskDelay(pdMS_TO_TICKS(HOST_EN_DROP_WAIT_MS));
@@ -434,7 +437,23 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
             ESP_LOGE(TAG, "EN still high after PMU ack");
             break;
         }
+        // 明确不支持软睡的板不再空转重试，循环外直接升级断电。/ A board that declares no soft
+        // sleep must not spin through retries; escalate to power-off below.
+        if (err == ESP_ERR_NOT_SUPPORTED) break;
         if (attempt + 1 < attempts) vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    if (soft && err == ESP_ERR_NOT_SUPPORTED) {
+        // 本板没有 PMU EN，软睡交接不存在：按原厂方向升级为电源键脉冲断电，断电成功不返回。
+        // No PMU EN on this board, so no soft-sleep handoff exists: escalate to the
+        // factory-style power-key pulse train; a successful power-off does not return.
+        ESP_LOGW(TAG, "soft sleep unsupported; escalate to power-off pulses");
+        err = read_pico_pmu_power_off();
+        ESP_LOGI(TAG, "power off attempt 1: %s", esp_err_to_name(err));
+        if (err == ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(HOST_EN_DROP_WAIT_MS));
+            err = ESP_ERR_TIMEOUT;
+            ESP_LOGE(TAG, "EN still high after PMU ack");
+        }
     }
     // 失败不复位重试；恢复外设，交还锁屏/密码层，阅读恢复检查点仍由原入口处理。
     // Do not reset/retry on failure; restore peripherals to the lock/PIN caller, which retains checkpoint ownership.
@@ -550,8 +569,10 @@ void enter_lock_and_sleep(
         (long long)((lock_t_art - lock_t_font) / 1000), (long long)((lock_t_clear - lock_t_art) / 1000),
         (long long)((lock_t_panel - lock_t_clear) / 1000), (long long)((lock_t_panel - lock_t_art) / 1000),
         (long long)((lock_t_key - lock_t_panel) / 1000), (long long)((lock_t_key - lock_t_start) / 1000));
-    // 锁屏先浅睡，十分钟后进入深睡；关机睡眠"仅浅睡"无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
-    // Locks light-sleep first and deep-sleeps after ten minutes; shutdown style "light-only" sleeps without a deadline and never powers off. Key wake uses the saved page checkpoint.
+    // 锁屏先浅睡，十分钟后交接断电——有 PMU EN 的板走软睡，没有的板自动升级为脉冲断电；仅浅睡无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
+    // Locks light-sleep first and hands off to power-down after ten minutes--soft sleep with PMU
+    // EN, an automatic pulse power-off escalation without it; "light-only" sleeps without a
+    // deadline and never powers off. Key wake uses the saved page checkpoint.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
     app_wake_source_t wake = APP_WAKE_KEY;
@@ -559,13 +580,17 @@ void enter_lock_and_sleep(
     else {
         wake = app_light_sleep_wait_timed(acc, light_only ? 0 : APP_LOCK_LIGHT_SLEEP_MS);
         if (wake == APP_WAKE_TIMEOUT) {
-            // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
-            // power-key press boots the host; the e-paper keeps this lock image.
+            // PMU 软睡拉掉 ESP 轨而 RTC 继续走时；无 PMU EN 的板升级为脉冲断电。两种落点主机都已断电，
+            // 短按电源键冷开机，墨水屏保留这张锁屏图，检查点恢复原页面。
+            // PMU soft sleep drops the ESP rail while its RTC keeps time; boards without PMU EN
+            // escalate to pulse power-off. Either way the host ends up powered down: a short
+            // power-key press cold-boots, the e-paper keeps this lock image and the checkpoint
+            // restores the page.
             if(lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
             esp_err_t handoff = app_enter_host_sleep(APP_SLEEP_DEEP);
             if (handoff != ESP_OK) {
-                // 本板没有可用的深睡交接（S31 无 PMU EN）：保持锁屏继续无期限浅睡，绝不自行解锁。
-                // No deep-sleep handoff on this board (S31 has no PMU EN): stay locked in a deadline-free light sleep; never self-unlock.
+                // 断电彻底失败（脉冲打满/EN 未掉）：保持锁屏继续无期限浅睡，绝不自行解锁。
+                // Power-down exhausted (pulses spent / EN never dropped): stay locked in a deadline-free light sleep; never self-unlock.
                 ESP_LOGW(TAG, "deep sleep unavailable (%s); stay locked", esp_err_to_name(handoff));
                 wake = app_light_sleep_wait_timed(acc, 0);
             }
