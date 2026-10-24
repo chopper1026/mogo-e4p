@@ -23,6 +23,14 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 设置页不提供「升级和恢复 → 系统升级」入口：OTA 尚未就绪，联网与 TF 卡升级页面代码保留但不可达。
   The settings page offers no System Upgrade row until OTA is ready; the online and TF-card update pages keep their code but stay unreachable.
 
+## 0.3.3-rc99 本地 / 2026-10-24
+
+- 待机「先浅后深」唤醒修复：脉冲断电后硬件只能长按开机，锁屏满 10 分钟不再断电，改为进入主机深睡——面板画面保留，短按电源键即重启回到锁屏与阅读位置（有密码时先验证）。菜单「关机」仍为彻底断电，长按约 1 秒开机，行为不变。
+  Staged standby wake fix: after pulse power-off the hardware only boots on a long hold, so after ten locked minutes the device no longer powers down—it enters a host deep sleep with the lock image retained, and a short power-key press reboots back to the lock face and reading position (PIN verification first when enabled). The power menu's 关机 still cuts power completely and needs a ~1 s hold, unchanged.
+
+- 电源菜单滑动关机修复：回放积压的触摸帧不再每帧各推一次扫描，而是合并滑块轨迹后统一推一次；此前一次扫描 55–90 ms 而触摸帧 5 ms 一帧，拖动时积压越滚越大，滑块越拖越落后。触摸笔迹用的 8 帧跟随 DU 面积差分同时固定走 FAST 扫描档，滑块跟手速度约为原来的两倍。
+  Slide-to-off fix: replayed touch frames no longer push one scan each—the slider trajectory is merged and pushed once. Previously a scan cost 55–90 ms while touch frames arrived every 5 ms, so the backlog grew during a drag and the thumb fell further behind. The 8-frame FOLLOW DU used for touch ink also now always runs the FAST scan profile, roughly doubling slider tracking speed.
+
 ## 0.3.3-rc99 本地 / 2026-10-23
 
 - 设置：「关机睡眠」更名「待机方式」，电源菜单「关机」固定立即断电、不再跟随该设置；页内移除「彻底关机」，只留「先浅后深」与「仅浅睡」，已存档和备份里的彻底关机自动并入先浅后深，页底说明文字一并删除。

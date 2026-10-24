@@ -1221,8 +1221,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "待机方式");
         section(fb, 248, "选择锁屏后的待机方式");
-        const char *labels[] = {"先浅睡，10 分钟后断电", "仅浅睡"};
-        const char *details[] = {"锁屏画面保留；断电后短按电源键开机",
+        const char *labels[] = {"先浅睡，10 分钟后深睡", "仅浅睡"};
+        const char *details[] = {"锁屏画面保留；深睡后短按电源键开机",
                                  "锁屏画面保留；不断电，按键返回关机前页面"};
         for (int i = 0; i < 2; ++i) {
             EpdRect box = {36, 300 + i * 154, 612, 132};

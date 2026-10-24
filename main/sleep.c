@@ -20,6 +20,8 @@
  * User revision: the lock entry takes a light-only switch--shutdown style "light-only" sleeps without deadline and never powers off; other entries keep the ten-minute deep ladder.
  * 用户修订：无 PMU EN 的板（Metalio）深睡交接不存在，十分钟到点自动升级为原厂式电源键脉冲断电；脉冲彻底失败才回退无期限锁屏浅睡。
  * User revision: on boards without PMU EN (Metalio) no deep handoff exists, so the ten-minute mark escalates to the factory-style power-key pulse power-off; only exhausted pulses fall back to a deadline-free locked light sleep.
+ * 用户修订：脉冲断电后硬件只能长按开机，锁屏 10 分钟深睡改为主机真深睡——EXT1 盯 IOE 扩展器中断，短按电源键即重启回检查点；脉冲断电只保留给主动关机（APP_SLEEP_OFF）。
+ * User revision: after pulse power-off the hardware only boots on a long hold, so the ten-minute lock deep stage is now a true host deep sleep--EXT1 watches the expander interrupt and a short power-key press reboots back to the checkpoint; pulse power-off remains for explicit shutdown (APP_SLEEP_OFF).
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
@@ -52,6 +54,7 @@
 #include "ota_online.h"
 #include "time_service.h"
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #if defined(CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU)
@@ -84,6 +87,9 @@ static bool s_lock_feedback_visible;
 #define APP_LOCK_SLEEP_ERROR_LIMIT 5
 // PMU 确认后仍未掉 EN 时恢复调用方，禁止无限等待。/ Restore the caller if EN stays high after acknowledgement instead of waiting forever.
 #define HOST_EN_DROP_WAIT_MS 5000
+// 深睡待机前等高压轨彻底掉落、PWR_GOOD 输入稳定，再做最后一次清中断。
+// Let the HV rails fall and PWR_GOOD settle before the final interrupt clear ahead of deep standby.
+#define HOST_DEEP_QUIET_MS 100
 
 extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 
@@ -443,17 +449,40 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if (attempt + 1 < attempts) vTaskDelay(pdMS_TO_TICKS(200));
     }
     if (soft && err == ESP_ERR_NOT_SUPPORTED) {
-        // 本板没有 PMU EN，软睡交接不存在：按原厂方向升级为电源键脉冲断电，断电成功不返回。
-        // No PMU EN on this board, so no soft-sleep handoff exists: escalate to the
-        // factory-style power-key pulse train; a successful power-off does not return.
-        ESP_LOGW(TAG, "soft sleep unsupported; escalate to power-off pulses");
-        err = read_pico_pmu_power_off();
-        ESP_LOGI(TAG, "power off attempt 1: %s", esp_err_to_name(err));
+        // 本板没有 PMU EN，软睡交接不存在：进入主机深睡待机。电源键接在 IO 扩展器 P17 上，
+        // 按下经输入变化拉低 IOE_INT，EXT1 低电平唤醒即整机重启，短按电源键就能回到检查点；
+        // 轨道不断比脉冲断电费一点电，但保住"短按解锁"。脉冲断电只属于 APP_SLEEP_OFF。
+        // No PMU EN on this board, so no soft-sleep handoff exists: enter host deep standby. The
+        // power key sits on expander P17; a press pulls IOE_INT low via the input change, and the
+        // EXT1 low-level wake reboots the whole chip, so a short press returns to the checkpoint.
+        // Keeping the rails costs a little more than pulse power-off but preserves short-press
+        // wake; pulse power-off is reserved for APP_SLEEP_OFF.
+        vTaskDelay(pdMS_TO_TICKS(HOST_DEEP_QUIET_MS));
+        // 最后一次清中断必须落在 PWR_GOOD 掉落之后，否则残留低电平会立刻唤醒。
+        // The final interrupt clear must follow the PWR_GOOD fall or a stale low wakes us at once.
+        read_pico_clear_ioe_int();
+        // 单脚掩码下 ALL_LOW 与 ANY_LOW 等价：仅该脚低电平触发。/ With a one-pin mask ALL_LOW
+        // equals ANY_LOW: only that pin's low level triggers.
+#if SOC_PM_SUPPORT_EXT1_WAKEUP_MODE_PER_PIN
+        err = esp_sleep_enable_ext1_wakeup_io(
+            UINT64_C(1) << READ_PICO_IOE_INT_GPIO, ESP_EXT1_WAKEUP_ALL_LOW);
+#else
+        err = esp_sleep_enable_ext1_wakeup_io(
+            UINT64_C(1) << READ_PICO_IOE_INT_GPIO, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
         if (err == ESP_OK) {
-            vTaskDelay(pdMS_TO_TICKS(HOST_EN_DROP_WAIT_MS));
-            err = ESP_ERR_TIMEOUT;
-            ESP_LOGE(TAG, "EN still high after PMU ack");
+            // 深睡里数字 IO MUX 掉电，上拉必须走 RTC IOMUX；EXT1 使能后 sleep 层自动保持
+            // RTC_PERIPH 供电，内部上拉整夜有效。
+            // The digital IO MUX loses power in deep sleep, so the pull-up must go through the
+            // RTC IOMUX; sleep keeps RTC_PERIPH powered while EXT1 is armed, so the internal
+            // pull-up stays valid overnight.
+            rtc_gpio_init((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+            rtc_gpio_pulldown_dis((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+            rtc_gpio_pullup_en((gpio_num_t)READ_PICO_IOE_INT_GPIO);
+            ESP_LOGI(TAG, "deep standby, wake on IOE_INT GPIO%d", READ_PICO_IOE_INT_GPIO);
+            esp_deep_sleep_start();
         }
+        ESP_LOGW(TAG, "deep standby unavailable: %s", esp_err_to_name(err));
     }
     // 失败不复位重试；恢复外设，交还锁屏/密码层，阅读恢复检查点仍由原入口处理。
     // Do not reset/retry on failure; restore peripherals to the lock/PIN caller, which retains checkpoint ownership.
@@ -569,10 +598,11 @@ void enter_lock_and_sleep(
         (long long)((lock_t_art - lock_t_font) / 1000), (long long)((lock_t_clear - lock_t_art) / 1000),
         (long long)((lock_t_panel - lock_t_clear) / 1000), (long long)((lock_t_panel - lock_t_art) / 1000),
         (long long)((lock_t_key - lock_t_panel) / 1000), (long long)((lock_t_key - lock_t_start) / 1000));
-    // 锁屏先浅睡，十分钟后交接断电——有 PMU EN 的板走软睡，没有的板自动升级为脉冲断电；仅浅睡无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
-    // Locks light-sleep first and hands off to power-down after ten minutes--soft sleep with PMU
-    // EN, an automatic pulse power-off escalation without it; "light-only" sleeps without a
-    // deadline and never powers off. Key wake uses the saved page checkpoint.
+    // 锁屏先浅睡，十分钟后交接深睡——有 PMU EN 的板走软睡，没有的板进主机深睡待机（短按电源键唤醒）；
+    // 仅浅睡无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
+    // Locks light-sleep first and hands off to deep sleep after ten minutes--soft sleep with PMU
+    // EN, a host deep standby without it (a short power-key press wakes); "light-only" sleeps
+    // without a deadline and never powers off. Key wake uses the saved page checkpoint.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
     app_wake_source_t wake = APP_WAKE_KEY;
@@ -580,12 +610,12 @@ void enter_lock_and_sleep(
     else {
         wake = app_light_sleep_wait_timed(acc, light_only ? 0 : APP_LOCK_LIGHT_SLEEP_MS);
         if (wake == APP_WAKE_TIMEOUT) {
-            // PMU 软睡拉掉 ESP 轨而 RTC 继续走时；无 PMU EN 的板升级为脉冲断电。两种落点主机都已断电，
-            // 短按电源键冷开机，墨水屏保留这张锁屏图，检查点恢复原页面。
+            // PMU 软睡拉掉 ESP 轨而 RTC 继续走时；无 PMU EN 的板进入主机深睡，EXT1 盯 IOE 中断。
+            // 两种落点短按电源键都会重启回检查点，墨水屏保留这张锁屏图，页面由检查点恢复。
             // PMU soft sleep drops the ESP rail while its RTC keeps time; boards without PMU EN
-            // escalate to pulse power-off. Either way the host ends up powered down: a short
-            // power-key press cold-boots, the e-paper keeps this lock image and the checkpoint
-            // restores the page.
+            // enter host deep standby with EXT1 on the expander interrupt. Either way a short
+            // power-key press reboots back to the checkpoint; the e-paper keeps this lock image
+            // and the checkpoint restores the page.
             if(lock_screen_save(framebuffer)) (void)pico_boot_mark_frame_cached();
             esp_err_t handoff = app_enter_host_sleep(APP_SLEEP_DEEP);
             if (handoff != ESP_OK) {
