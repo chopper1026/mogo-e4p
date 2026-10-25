@@ -229,7 +229,16 @@ int ui_pager_hit(int x,int y);
 int ui_pager_target(int action,int page,int pages);
 void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed);
 
+/// 圆角矩形描边；颜色经系统对比度重映射。/ Rounded-rect outline; the color passes the system-contrast remap.
 void ui_draw_round_rect(
+    uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
+);
+/// 同上但灰阶直写，不过对比度重映射；波形锚点灰阶（前光胶囊的 0x30/0x38/白）
+/// 必须用它，否则档位随对比度漂出拖动表的 (3↔15) 格子，差分刷新静默跳过。
+/// Same outline painting the gray verbatim without the remap; waveform-anchored
+/// grays (the capsule 0x30/0x38/white) must use it, or contrast drifts the level
+/// out of the drag table's (3↔15) cells and differential pushes skip silently.
+void ui_draw_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );
 /// 控件外框用深色双像素线，黑白快刷后不消失；封面及图标仍用原绘图接口。/ Use a dark two-pixel control frame that survives BW refresh; covers and icons retain the original primitives.
@@ -245,9 +254,14 @@ void ui_draw_pressed_round_rect(uint8_t* framebuffer, EpdRect rect, int radius);
 void ui_draw_choice_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, bool on
 );
-/// 圆角矩形填充：中间矩形 + 左右两侧半圆帽（epdiy 无原生圆角接口）。
-/// Filled rounded rect: center rectangle plus left/right caps (epdiy has no native rounded fill).
+/// 圆角矩形填充：中间矩形 + 左右两侧半圆帽（epdiy 无原生圆角接口）；颜色经系统对比度重映射。
+/// Filled rounded rect: center rectangle plus left/right caps (epdiy has no native rounded fill); the color passes the contrast remap.
 void ui_fill_round_rect(
+    uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
+);
+/// 同上但灰阶直写，不过对比度重映射；用途见 ui_draw_round_rect_raw。
+/// Same fill painting the gray verbatim without the remap; see ui_draw_round_rect_raw.
+void ui_fill_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );
 EpdRect ui_inset_rect(EpdRect r, int d);

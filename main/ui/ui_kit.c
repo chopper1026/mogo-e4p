@@ -625,10 +625,9 @@ static void draw_arc(
     }
 }
 
-void ui_draw_round_rect(
+void ui_draw_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 ) {
-    color = ui_contrast_gray(color);
     if (rect.width <= 0 || rect.height <= 0) return;
     const int r = clamp_radius(rect, radius);
     const int x1 = rect.x + rect.width - 1;
@@ -662,6 +661,14 @@ void ui_draw_round_rect(
         draw_arc(framebuffer, x1 - r, y1 - r, r, 4, color);
         draw_arc(framebuffer, rect.x + r, y1 - r, r, 8, color);
     }
+}
+
+// 对比度重映射包装：普通 UI 灰阶跟系统对比度走；波形锚点灰阶必须用 _raw 直写。
+// Contrast-remap wrapper: ordinary UI grays follow system contrast; waveform-anchored grays must use the _raw variant.
+void ui_draw_round_rect(
+    uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
+) {
+    ui_draw_round_rect_raw(framebuffer, rect, radius, ui_contrast_gray(color));
 }
 
 EpdRect ui_inset_rect(EpdRect r, int d) {
@@ -711,11 +718,10 @@ void ui_draw_choice_round_rect(
     }
 }
 
-void ui_fill_round_rect(
+void ui_fill_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 ) {
     if (rect.width <= 0 || rect.height <= 0) return;
-    color = ui_contrast_gray(color);
     radius = clamp_radius(rect, radius);
 
     ui_fill_rect_fast(
@@ -736,6 +742,15 @@ void ui_fill_round_rect(
     epd_fill_circle_helper(
         rect.x + radius, rect.y + radius, radius, 2, delta, color, framebuffer
     );
+}
+
+// 对比度重映射包装，理由同 ui_draw_round_rect_raw。
+// Contrast-remap wrapper; see ui_draw_round_rect_raw for why _raw exists.
+void ui_fill_round_rect(
+    uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
+) {
+    if (rect.width <= 0 || rect.height <= 0) return;
+    ui_fill_round_rect_raw(framebuffer, rect, radius, ui_contrast_gray(color));
 }
 
 bool ui_rect_hit(EpdRect rect, uint16_t x, uint16_t y) {

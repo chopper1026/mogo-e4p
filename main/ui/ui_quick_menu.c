@@ -135,20 +135,25 @@ static int cap_inset(int offset) {
 
 // 控制中心式胶囊滑杆：活动灰胶囊为空档，白色填充从左缘生长，图标常驻左端，
 // 无旋钮无文字无档位线。整片自绘，局部行刷不需要还原遮罩底色。
+// 胶囊灰阶全部直写不过对比度重映射：拖动表只有 (3↔15) 两格，重映射会把
+// 0x30/0x38 挪到 level 1–2，拖动差分就静默跳过整条填充边界。
 // Control-centre style capsule slider: the active-gray capsule is the empty
 // track, a white fill grows from the left edge, and the icon stays at the left
 // end with no knob, text or level line. The whole body repaints, so a local row
-// refresh never needs the shade restored underneath.
+// refresh never needs the shade restored underneath. Every capsule gray paints
+// verbatim, bypassing the contrast remap: the drag table holds only the (3↔15)
+// cells, and the remap moved 0x30/0x38 to levels 1-2, so drag differentials
+// silently skipped the whole fill edge.
 static void draw_capsule(uint8_t *fb, int cy, ui_icon_t icon, uint8_t value) {
     const int r = UI_QUICK_FL_TRACK_H / 2;
     const EpdRect track = {UI_QUICK_FL_TRACK_X, cy - r, UI_QUICK_FL_TRACK_W, UI_QUICK_FL_TRACK_H};
     // 底灰与首页最近阅读进度条已读段同用 0x30：拖动表的近似落点就在这附近，残影随底色隐没。
     // The track gray matches the dashboard reading-progress read fill (0x30):
     // the drag table's approximate landing sits nearby, so residue blends in.
-    ui_fill_round_rect(fb, track, r, 0x30);
+    ui_fill_round_rect_raw(fb, track, r, 0x30);
     const int width = fl_thumb_x(value) - track.x;
     if (width >= UI_QUICK_FL_TRACK_H) {
-        ui_fill_round_rect(fb, (EpdRect){track.x, cy - r, width, UI_QUICK_FL_TRACK_H}, r, UI_GRAY_WHITE);
+        ui_fill_round_rect_raw(fb, (EpdRect){track.x, cy - r, width, UI_QUICK_FL_TRACK_H}, r, UI_GRAY_WHITE);
     } else if (width > 0) {
         // 不足一个帽宽的填充按行收进左端半圆，与轨道的圆端保持同形。
         // A fill narrower than one cap tucks into the left cap row by row, matching the track's rounded end.
@@ -165,8 +170,8 @@ static void draw_capsule(uint8_t *fb, int cy, ui_icon_t icon, uint8_t value) {
     // the drag table, and real driving needs the 18-push ladder plus a table
     // over twice as long; the low-level contrast loss is an accepted trade-off.
     ui_draw_icon(fb, UI_QUICK_FL_ICON_CX, cy, UI_QUICK_FL_ICON_SIZE, icon, UI_GRAY_BLACK);
-    ui_draw_round_rect(fb, track, r, 0x38);
-    ui_draw_round_rect(fb, ui_inset_rect(track, 1), r - 1, 0x38);
+    ui_draw_round_rect_raw(fb, track, r, 0x38);
+    ui_draw_round_rect_raw(fb, ui_inset_rect(track, 1), r - 1, 0x38);
 }
 
 static void draw_fl_row_at(uint8_t *fb, ui_quick_control_t control, uint8_t value) {
