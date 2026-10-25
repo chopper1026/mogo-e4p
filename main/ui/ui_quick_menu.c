@@ -1,13 +1,16 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
  * 开关。灯灭时层高只有圆钮区；开灯后圆钮下方展开两条横向胶囊滑杆，直接浮在遮
- * 罩上：无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长。
+ * 罩上：无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长。灯灭时
+ * 开层后停顿再继续下拉可临时展开胶囊，只属本次开层；一次连续快滑只开层。
  * English: A shallow full-width top layer with rounded bottom corners and four
  * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
  * circle. While the light is off the layer keeps only the circle band; switching
  * it on expands two horizontal capsule sliders below the circles, floating on
  * the shade: no card, text or knob, the icon inside the left end and a white
- * fill growing from the left edge.
+ * fill growing from the left edge. With the light off, pausing after the open
+ * and then pulling further down expands the capsules for that opening only;
+ * one continuous fast swipe only opens, never expands.
  * 用户修订：常驻大滑杆先改为随开关展开的卡片行，再按用户参考图去掉卡片容器，
  * 改成控制中心式横向胶囊；亮度用半填充圆图标，色温用温度计图标；填充不足一个
  * 帽宽时按行收进左端半圆。
@@ -99,10 +102,11 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
 
 /* ---- 前光胶囊 / Frontlight capsules ---- */
 
-// 胶囊只在开灯时存在：层高随之伸缩，熄灯即收起。
-// The capsules exist only while the light is on: the layer height follows and collapses when off.
-static bool fl_expanded(const ui_quick_menu_t *menu) {
-    return menu != NULL && menu->frontlight && menu->fl_on;
+// 胶囊在开灯或本次开层下拉临时展开时存在：层高随之伸缩，熄灯点按即收起。
+// The capsules exist while the light is on or the layer was pulled open this
+// session: the layer height follows, and the light-off tap collapses them.
+static bool fl_rows_visible(const ui_quick_menu_t *menu) {
+    return menu != NULL && menu->frontlight && (menu->fl_on || menu->fl_expanded);
 }
 static EpdRect fl_row_rect(ui_quick_control_t control) {
     // 行矩形只作为局刷范围：胶囊整片自绘，行内胶囊以外的像素保持遮罩不动。
@@ -192,7 +196,7 @@ bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int butto
 
 bool ui_quick_menu_draw_control(uint8_t *fb, const ui_quick_menu_t *menu,
                                 ui_quick_control_t control, EpdRect *dirty) {
-    if (!fb || !fl_expanded(menu) || !dirty) return false;
+    if (!fb || !fl_rows_visible(menu) || !dirty) return false;
     const EpdRect row = fl_row_rect(control);
     if (row.width <= 0) return false;
     draw_fl_row(fb, menu, control);
@@ -202,7 +206,7 @@ bool ui_quick_menu_draw_control(uint8_t *fb, const ui_quick_menu_t *menu,
 
 bool ui_quick_menu_draw_control_white(uint8_t *fb, const ui_quick_menu_t *menu,
                                       ui_quick_control_t control, EpdRect *dirty) {
-    if (!fb || !fl_expanded(menu) || !dirty) return false;
+    if (!fb || !fl_rows_visible(menu) || !dirty) return false;
     const EpdRect row = fl_row_rect(control);
     if (row.width <= 0 || control < UI_QUICK_CTL_BRIGHTNESS) return false;
     // 定稿第一段：白填充长到本次弄脏的上沿，底色区域先归一到已知白。
@@ -221,14 +225,14 @@ void ui_quick_menu_draw_status(uint8_t *fb) {
 
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
     return (EpdRect){0, 0, UI_LOCK_WIDTH,
-                     fl_expanded(menu) ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT};
+                     fl_rows_visible(menu) ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT};
 }
 
 void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool bluetooth) {
     if(!fb)return;
     const int width = epd_rotated_display_width();
     const int height = epd_rotated_display_height();
-    const int layer_height = fl_expanded(menu)
+    const int layer_height = fl_rows_visible(menu)
         ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
     // 每个像素只采一次原图，直接合成灰阶，不让主页快刷模式把菜单变成点阵。
     // Sample each underlay pixel once and compose grays directly, independently of fast main-page rendering.
@@ -256,9 +260,12 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
         draw_key(fb, i, menu, active, false);
         draw_badge(fb, i, active);
     }
-    // 胶囊滑杆只在开灯时展开，直接浮在遮罩上；熄灯或没有前光的板保持原来的 264 高度。
-    // The capsule sliders expand only while the light is on, floating on the shade; off or no-frontlight boards keep the original 264 height.
-    if (fl_expanded(menu)) {
+    // 胶囊滑杆只在开灯或本次开层下拉展开时出现，直接浮在遮罩上；熄灯点按或
+    // 没有前光的板保持原来的 264 高度。
+    // The capsule sliders appear while the light is on or the layer was pulled
+    // open this session, floating on the shade; the light-off tap and boards
+    // without a frontlight keep the original 264 height.
+    if (fl_rows_visible(menu)) {
         draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
         draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
     }

@@ -415,6 +415,13 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
         }
         quick_present(ctx, current, false);
     }
+    // 灯灭时继续下拉临时展开胶囊：不碰设置与前光硬件，只按新层高整层重排；
+    // 重排出口已按新旧高度并集推 GL16，展开 264→480 由同一机制覆盖。
+    // Pulling the open layer further down with the light off expands the
+    // capsules for this opening: no settings or frontlight hardware change, just
+    // a whole-layer re-composite; its push already covers the new/old height
+    // union with GL16, which carries the 264→480 growth.
+    else if (event.action == UI_QUICK_EXPAND) quick_present(ctx, current, false);
     else if (event.action == UI_QUICK_WIFI) quick_toggle_wifi();
     else if (event.action == UI_QUICK_BLUETOOTH) {
         bool enable = !app_settings_ble_turner();

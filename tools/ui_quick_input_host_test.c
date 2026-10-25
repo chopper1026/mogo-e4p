@@ -92,10 +92,122 @@ int main(void){
  assert(e.action==UI_QUICK_CLOSE&&!menu.open);
  puts("PASS: fourth circle toggles the frontlight, capsule rows expand only while on, full-row hit areas, 1%-step commit and drag protection");
 
- // 没有前光的板：第四枚仍是锁屏，卡片区域不命中，层高仍是 264。
- // Boards without a frontlight keep the lock on the fourth circle, ignore the card area and stay 264px tall.
+ // 灯灭时继续下拉临时展开胶囊：同一次下拉要「停顿后再拉」才算继续，开层后的
+ // 再次下拉也展开；只属本次开层，重开或熄灯点按即收起，滑杆在灯灭时只排队档位
+ // 不开灯。
+ // With the light off, the capsules expand for this opening only when the same
+ // pull pauses and then resumes, or via a fresh drag on the open layer: reopening
+ // or the light-off tap collapses them, and rows dragged while off only queue
+ // levels without lighting.
+ ui_quick_menu_set_frontlight(&menu,true,false,40,50);
+ // 一次连续快滑只开层不展开：总行程再大也不算「继续下拉」。
+ // One continuous fast swipe only opens: any total travel stays short of a "continuation".
+ ui_quick_menu_reset(&menu);time_ms=0;
+ feed(300,32,1,true,false,true,true);
+ assert(feed(300,104,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open&&menu.fl_pull);
+ assert(feed(300,200,1,false,false,true,true).action==UI_QUICK_NONE);
+ assert(feed(300,260,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded&&!menu.fl_pull_settled);
+ assert(feed(300,260,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open&&!menu.fl_expanded);
+ // 停在圆钮区外（滑过头）解除继续下拉，之后怎么拉都不展开。
+ // Resting below the circle band (overshoot) disarms the continuation for good.
+ ui_quick_menu_reset(&menu);time_ms=0;
+ feed(300,32,1,true,false,true,true);
+ assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open);
+ time_ms=300;
+ assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_pull);
+ time_ms=350;
+ assert(feed(300,400,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ feed(300,400,0,false,true,true,true);
+ // 停顿不足再拉过一程、或再拉行程不足，都不展开。
+ // An insufficient pause, or a resumed pull shorter than the opening travel, never expands.
+ ui_quick_menu_reset(&menu);time_ms=0;
+ feed(300,32,1,true,false,true,true);
+ assert(feed(300,150,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open);
+ time_ms=299;
+ assert(feed(300,170,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_pull_settled);
+ time_ms=300;
+ assert(feed(300,170,1,false,false,true,true).action==UI_QUICK_NONE&&menu.fl_pull_settled);
+ time_ms=350;
+ assert(feed(300,200,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ feed(300,200,0,false,true,true,true);
+ // 停顿后继续下拉过开层行程：同一次手势完成「开层—停顿—展开」。
+ // Pause, then pull the opening travel again: one contact completes open-pause-expand.
+ ui_quick_menu_reset(&menu);time_ms=0;
+ feed(300,32,1,true,false,true,true);
+ assert(feed(300,150,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open);
+ time_ms=300;
+ assert(feed(300,150,1,false,false,true,true).action==UI_QUICK_NONE&&menu.fl_pull_settled);
+ time_ms=350;
+ assert(feed(300,250,1,false,false,true,true).action==UI_QUICK_EXPAND&&menu.fl_expanded&&!menu.fl_on);
+ assert(feed(300,250,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open);
+ // 展开后灯仍灭：整行可命中，拖动提交档位但不开灯。
+ // Still off after expansion: full rows hit and drags commit levels without lighting.
+ e=feed(399,300,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==59&&!e.commit&&!menu.fl_on);
+ e=feed(399,300,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.commit&&e.value==59&&!menu.fl_on&&menu.fl_bri==59);
+ // 熄灯点按收起临时展开：开灯再熄灯后卡片区域不再命中。
+ // The light-off tap collapses the session expansion: after on then off the card area stops matching.
+ e=feed(598,156,1,true,false,true,true);
+ e=feed(598,156,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&e.commit&&menu.fl_on&&!menu.fl_expanded);
+ e=feed(598,156,1,true,false,true,true);
+ e=feed(598,156,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&!menu.fl_on&&!menu.fl_expanded);
+ e=feed(399,300,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_NONE);
+ e=feed(399,300,0,false,true,true,true);
+ assert(e.action==UI_QUICK_CLOSE&&!menu.open&&!menu.fl_expanded);
+ // 重开不记忆：开层后的再次下拉也能展开；收层再开只剩圆钮区。
+ // Reopening forgets: a fresh drag on the open layer also expands; after closing
+ // and reopening only the circle band remains.
+ open();
+ assert(feed(300,200,1,true,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_EXPAND&&menu.fl_expanded);
+ assert(feed(300,300,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open);
+ feed(300,100,1,true,false,true,true);
+ assert(feed(300,20,1,false,false,true,true).action==UI_QUICK_CLOSE);
+ feed(300,20,0,false,true,true,true);
+ open();
+ assert(!menu.fl_expanded);
+ e=feed(399,300,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_NONE&&!menu.fl_expanded);
+ e=feed(399,300,0,false,true,true,true);
+ assert(e.action==UI_QUICK_CLOSE&&!menu.open);
+ // 层下缘起手的再次下拉不展开（起手必须抓在遮罩上）。
+ // A fresh drag started below the band never expands (the grip must be on the shade).
+ ui_quick_menu_set_frontlight(&menu,true,false,40,50);
+ open();
+ assert(feed(300,500,1,true,false,true,true).action==UI_QUICK_NONE);
+ assert(feed(300,600,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ assert(feed(300,600,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open);
+ feed(300,500,1,true,false,true,true);
+ assert(feed(300,500,0,false,true,true,true).action==UI_QUICK_CLOSE&&!menu.open);
+ // 灯亮开的层不受下拉影响：滑杆本就展开，无 EXPAND 事件。
+ // A layer opened with the light on ignores further pulls: the rows are already
+ // visible and no EXPAND event fires.
+ ui_quick_menu_set_frontlight(&menu,true,true,40,50);
+ open();
+ assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_NONE&&menu.fl_on&&!menu.fl_expanded);
+ feed(300,300,0,false,true,true,true);
+ e=feed(300,200,1,true,false,true,true);
+ assert(e.action==UI_QUICK_NONE&&menu.fl_on&&!menu.fl_expanded);
+ e=feed(300,300,1,false,false,true,true);
+ assert(e.action==UI_QUICK_NONE&&menu.fl_on);
+ feed(300,300,0,false,true,true,true);
+ puts("PASS: light-off expansion needs a paused continuation or a fresh drag, never chains inside one fast swipe, forgets on reopen and never lights up");
+
+ // 没有前光的板：第四枚仍是锁屏，卡片区域不命中，层高仍是 264，下拉延续与
+ // 再次下拉都不会产生 EXPAND。
+ // Boards without a frontlight keep the lock on the fourth circle, ignore the
+ // card area and stay 264px tall; neither continued nor fresh pulls expand.
  ui_quick_menu_set_frontlight(&menu,false,true,40,50);
  open();
+ assert(feed(300,200,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ feed(300,200,0,false,true,true,true);
+ feed(300,200,1,true,false,true,true);
+ assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ feed(300,300,0,false,true,true,true);
  assert(feed(598,156,1,true,false,true,true).action==UI_QUICK_NONE);
  assert(feed(598,156,0,false,true,true,true).action==UI_QUICK_LOCK);
  assert(feed(300,300,1,true,false,true,true).control==UI_QUICK_CTL_NONE);

@@ -15,11 +15,13 @@ enum { HIT_BRIGHTNESS = 4, HIT_CCT = 5 };
 
 static int center_x(int button) { return (button * 2 + 1) * UI_LOCK_WIDTH / 8; }
 
-// 层高随开灯伸缩：熄灯时胶囊卡片收起，只剩圆钮区，与绘图侧 ui_quick_menu_rect 一致。
-// The layer height follows the light: with it off the capsule card collapses to the
-// circle band, matching ui_quick_menu_rect on the drawing side.
+// 层高随开灯或临时展开伸缩：熄灯且未下拉展开时胶囊收起，只剩圆钮区，与绘图侧
+// ui_quick_menu_rect 一致。
+// The layer height follows the light or the session expansion: without either the
+// capsule collapses to the circle band, matching ui_quick_menu_rect on the drawing side.
 static int layer_height(const ui_quick_menu_t *menu) {
-    return menu->frontlight && menu->fl_on ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
+    return menu->frontlight && (menu->fl_on || menu->fl_expanded)
+        ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
 }
 
 static int circle_hit(int x, int y) {
@@ -33,9 +35,11 @@ static int circle_hit(int x, int y) {
 static int hit_test(const ui_quick_menu_t *menu, int x, int y) {
     int key = circle_hit(x, y);
     if (key >= 0) return key;
-    // 胶囊行只在开灯时存在；熄灯时卡片区域不是命中目标，也不命中第四枚以外的键。
-    // Capsule rows exist only while the light is on; with it off the card area matches nothing.
-    if (!menu->frontlight || !menu->fl_on) return -1;
+    // 胶囊行只在开灯或本次开层下拉展开时存在；否则卡片区域不是命中目标，也不
+    // 命中第四枚以外的键。
+    // Capsule rows exist while the light is on or the layer was pulled open this
+    // session; otherwise the card area matches nothing.
+    if (!menu->frontlight || (!menu->fl_on && !menu->fl_expanded)) return -1;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
         y >= UI_QUICK_FL_BRI_HIT_Y0 && y <= UI_QUICK_FL_BRI_HIT_Y1) return HIT_BRIGHTNESS;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
@@ -76,6 +80,10 @@ void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on
     menu->fl_on = on;
     menu->fl_bri = brightness < 1 ? 1 : brightness > 100 ? 100 : brightness;
     menu->fl_cct = cct > 100 ? 100 : cct;
+    // 每次开层都回到设置里的开灯状态：上次开层的下拉临时展开不跨层记忆。
+    // Every opening returns to the persisted on state: a previous session's
+    // pull-down expansion is never remembered.
+    menu->fl_expanded = false;
     // 展开层时屏上状态视为已定稿：脏范围从当前档位起算。
     // The on-screen state counts as settled when the layer opens: dirty extents start at the current levels.
     menu->fl_bri_dirty = menu->fl_bri;
@@ -85,6 +93,7 @@ void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu) {
     menu->tracking = false;
     menu->swallow = true;
+    menu->fl_pull = false;
     menu->drag = UI_QUICK_CTL_NONE;
 }
 
@@ -96,6 +105,8 @@ int ui_quick_menu_pressed(const ui_quick_menu_t *menu) {
 static void dismiss(ui_quick_menu_t *menu, ui_quick_event_t *event) {
     menu->open = menu->tracking = false;
     menu->swallow = true;
+    menu->fl_expanded = false;
+    menu->fl_pull = false;
     menu->drag = UI_QUICK_CTL_NONE;
     event->action = UI_QUICK_CLOSE;
 }
@@ -115,7 +126,41 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         return owned;
     }
     if (menu->swallow) {
-        if (!ctx->touch->touched) menu->swallow = false;
+        // 开层的同一次下拉还在继续：停顿一小会儿、再往下拉过一程才临时展开胶
+        // 囊；一次连续快滑的总行程不算「继续下拉」，开层与展开不会连触发。
+        // The pull that opened the layer is still going: a pause and then a
+        // further pull expands the capsules; one continuous fast swipe's total
+        // travel never counts, so opening and expanding cannot chain in one flick.
+        if (menu->fl_pull && ctx->touch->touched) {
+            const int pull_y = ctx->touch->y;
+            if (!menu->fl_pull_settled) {
+                if (abs(pull_y - (int)menu->fl_pull_y) > UI_TOUCH_SLOP_PX) {
+                    menu->fl_pull_y = ctx->touch->y;
+                    menu->fl_pull_ms = ctx->now_ms;
+                } else if (ctx->now_ms - menu->fl_pull_ms >= UI_QUICK_PULL_SETTLE_MS) {
+                    // 停在圆钮区内才算还抓着遮罩；停在层外是滑过头，不armed。
+                    // Resting inside the circle band still holds the shade;
+                    // resting below it overshot and disarms the continuation.
+                    if (pull_y < layer_height(menu)) {
+                        menu->fl_pull_settled = true;
+                        menu->fl_pull_x = ctx->touch->x;
+                        menu->fl_pull_y = ctx->touch->y;
+                    } else {
+                        menu->fl_pull = false;
+                    }
+                }
+            } else {
+                const int more_dy = pull_y - (int)menu->fl_pull_y;
+                const int more_dx = ctx->touch->x - (int)menu->fl_pull_x;
+                if (more_dy >= UI_QUICK_SWIPE_PX && more_dy >= abs(more_dx) * 2) {
+                    menu->fl_expanded = true;
+                    menu->fl_pull = false;
+                    event->action = UI_QUICK_EXPAND;
+                    return true;
+                }
+            }
+        }
+        if (!ctx->touch->touched) menu->swallow = menu->fl_pull = false;
         return true;
     }
     int x = ctx->touch->x, y = ctx->touch->y;
@@ -164,7 +209,27 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         menu->open = true;
         menu->tracking = false;
         menu->swallow = true;
+        // 灯灭时记下「这次下拉刚开层」：手指停顿后再继续下拉还能临时展开胶囊；
+        // 停顿判定的锚点从开层瞬间的手指位置起算。
+        // With the light off, remember this pull just opened the layer: a pause
+        // and further pull can still expand the capsules; the stillness anchor
+        // starts at the finger position when the layer opened.
+        menu->fl_pull = menu->frontlight && !menu->fl_on;
+        menu->fl_pull_settled = false;
+        menu->fl_pull_y = y;
+        menu->fl_pull_ms = ctx->now_ms;
         event->action = UI_QUICK_OPEN;
+    } else if (menu->open && menu->frontlight && !menu->fl_on && !menu->fl_expanded &&
+               menu->drag == UI_QUICK_CTL_NONE && (int)menu->y0 < layer_height(menu) &&
+               dy >= UI_QUICK_SWIPE_PX && dy >= abs(dx) * 2 &&
+               ctx->now_ms - menu->started_ms <= 1500) {
+        // 灯灭时在已开的层上再次下拉：同样临时展开胶囊，只属本次开层。
+        // Pulling down again on the open layer with the light off: expand the
+        // capsules for this opening only.
+        menu->fl_expanded = true;
+        menu->tracking = false;
+        menu->swallow = true;
+        event->action = UI_QUICK_EXPAND;
     } else if (menu->open && menu->drag == UI_QUICK_CTL_NONE &&
                dy <= -UI_QUICK_SWIPE_PX && -dy >= abs(dx) * 2) {
         dismiss(menu, event);
@@ -172,9 +237,13 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         menu->tracking = false;
         if (menu->open && !menu->moved) {
             if (menu->hit == 3 && menu->frontlight) {
-                // 第四枚圆钮就是前光开关：点按翻转，并作为一次立即提交。
-                // The fourth circle is the frontlight switch: a tap flips it and commits immediately.
+                // 第四枚圆钮就是前光开关：点按翻转，并作为一次立即提交；翻转也
+                // 清掉下拉临时展开，熄灯即收起滑杆。
+                // The fourth circle is the frontlight switch: a tap flips it and
+                // commits immediately; the flip also clears the pull-down
+                // expansion, so switching off collapses the sliders.
                 menu->fl_on = !menu->fl_on;
+                menu->fl_expanded = false;
                 event->control = UI_QUICK_CTL_ON;
                 event->value = menu->fl_on ? 1 : 0;
                 event->commit = true;

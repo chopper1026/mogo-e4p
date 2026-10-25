@@ -2,14 +2,19 @@
  * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
  * 开关。灯灭时层高只有圆钮区；点按开灯后圆钮下方才展开两条横向胶囊滑杆：直接
  * 浮在遮罩上，无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长，
- * 无极滑动；再次熄灯即收起。
+ * 无极滑动；再次熄灯即收起。灯灭时开层后停顿再继续下拉也可临时展开胶囊滑杆，
+ * 只属本次开层：收层或再开层即回到只有圆钮区，熄灯点按同样收起；一次连续快滑
+ * 只开层不展开。
  * English: A shallow full-width top layer with rounded bottom corners and four
  * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
  * circle. While the light is off the layer keeps only the circle band; switching
  * it on expands two horizontal capsule sliders below the circles: they float on
  * the shade with no card, text or knob, the icon sits inside the left end, a
  * white fill grows from the left edge, and dragging is continuous; switching off
- * collapses them again.
+ * collapses them again. With the light off, pausing after the open and then
+ * pulling further down expands the capsules for that opening only: closing or
+ * reopening returns to the circle band alone, and the light-off tap still
+ * collapses them; one continuous fast swipe only opens, never expands.
  * 用户修订：锁屏图标移出快捷栏；常驻大滑杆先改为随开关展开的卡片行，再按用户
  * 参考图去掉卡片容器，改成控制中心式横向胶囊；亮度用半填充圆图标，色温用温度
  * 计图标，滑杆只在开灯时可触。
@@ -26,6 +31,14 @@
 
 #define UI_QUICK_EDGE_PX 32
 #define UI_QUICK_SWIPE_PX 72
+// 同一次下拉的「继续」判定：开层后停顿至少这么久，再往下拉过开层行程才算继续
+// 下拉；用户实测单次自然下滑总行程常超 150px，按总行程判定会让开层与展开在一
+// 次滑动里连触发（2026-10-25 用户反馈）。
+// The "continue" test for the same pull: after opening, the finger must pause at
+// least this long and then pull the opening distance again; a user's single
+// natural swipe routinely spans 150px+, so a total-travel test chains opening and
+// expanding inside one flick (user report 2026-10-25).
+#define UI_QUICK_PULL_SETTLE_MS 300
 #define UI_QUICK_HEIGHT 264
 #define UI_QUICK_FRONTLIGHT_HEIGHT 480
 #define UI_QUICK_CIRCLE_Y 156
@@ -59,7 +72,7 @@
 #define UI_QUICK_FL_CCT_HIT_Y1 440
 
 typedef enum {
-    UI_QUICK_NONE, UI_QUICK_OPEN, UI_QUICK_CLOSE,
+    UI_QUICK_NONE, UI_QUICK_OPEN, UI_QUICK_CLOSE, UI_QUICK_EXPAND,
     UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
 } ui_quick_action_t;
 
@@ -81,6 +94,24 @@ typedef struct {
     /// Whether this board has a frontlight; without one the fourth circle keeps the lock, the card is omitted and the layer stays UI_QUICK_HEIGHT.
     bool frontlight;
     bool fl_on;
+    /// 灯灭时继续下拉产生的本次开层临时展开；开层、收层与熄灯点按都会清零，
+    /// 不跨层记忆，也不落盘。
+    /// Session-only expansion from pulling the open layer further down while the
+    /// light is off; opening, closing and the light-off tap all clear it. It is
+    /// never remembered across openings or persisted.
+    bool fl_expanded;
+    /// 接触态：本次下拉刚把层拉开且灯灭，手指未抬；停顿一小会儿后再继续往下拉
+    /// 过一程才临时展开——一次连续快滑的总行程不算「继续下拉」，开层与展开不会
+    /// 在一次滑动里连触发。
+    /// Contact state: this very pull just opened the layer with the light off;
+    /// only a pause and then a further pull expands the capsules. A continuous
+    /// fast swipe's total travel never counts, so opening and expanding cannot
+    /// chain inside one flick.
+    bool fl_pull;
+    uint16_t fl_pull_x;    ///< 停顿锚点 x。/ x of the pause anchor.
+    uint16_t fl_pull_y;    ///< 停顿判定的移动锚点 y。/ y anchor for the stillness test.
+    int64_t fl_pull_ms;    ///< 最近一次明显移动的时间。/ time of the last material movement.
+    bool fl_pull_settled;  ///< 已停顿，继续下拉可展开。/ paused; a further pull may expand.
     uint8_t fl_bri;
     uint8_t fl_cct;
     /// 每条滑杆自上次定稿以来达到的最大档位：定稿第一段据此把弄脏范围洗白。

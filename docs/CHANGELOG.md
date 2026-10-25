@@ -31,6 +31,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 按键：「上键单击」绑定「开关前光」后，退出阅读回到主页/书架也能正常开关前光；其余上键动作仍只在阅读正文生效，阅读内行为不变。
   Keys: with the top key bound to the frontlight toggle, leaving the reader for the home/shelf pages no longer kills the binding; other top-key actions stay reader-body-only and in-reader behavior is unchanged.
 
+- 快捷栏：前光关闭时打开的快捷栏，继续下拉也会展开亮度、色温胶囊滑杆——同一次下拉需先停顿约 0.3 秒再往下拉过一段，或在已开的层上再往下拉一次；一次连续快滑只开层、不会连带展开。展开只属本次开层，收起再打开仍只有四个圆钮，灯灭时拖动滑杆只记住档位不点亮，点太阳开灯或熄灯同样收起。
+  Quick layer: with the frontlight off, continuing the pull also expands the brightness and colour-temperature capsules—either the same pull paused for ~0.3 s and then pulled further down, or a fresh downward drag on the open layer; one continuous fast swipe only opens the bar without chaining the expansion. The expansion lives only for that opening: closing and reopening returns to the four circles, dragging while the light is off only queues the levels without lighting, and the sun tap still expands or collapses.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。
