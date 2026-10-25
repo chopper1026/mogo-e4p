@@ -3923,12 +3923,18 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);
     // 工具栏开关只改底部一条带：GL16 差分只驱动带内变化像素，脏区膨胀补推进度条边缘的
-    // 白色邻行/邻列，实心进度条擦除后不再留轮廓。
+    // 白色邻行/邻列，实心进度条擦除后不再留轮廓。收起帧例外：被工具栏盖过的字多走了
+    // 一轮擦白推黑，带内差分追不平驱动历史，纯文字页放行到下方的整屏归一分支。
     // A tools toggle changes only the bottom band: a GL16 differential drives the changed
     // pixels inside it, and dirty-mask dilation re-drives the white neighbours around the
-    // solid progress bar so erasing it leaves no outline.
+    // solid progress bar so erasing it leaves no outline. The closing frame is the
+    // exception: the covered glyphs ran one extra erase-then-black cycle that a band
+    // differential cannot match, so pure-text pages fall through to the whole-screen
+    // normalize branch below.
     else if (tools_toggle && redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
-             s_presented_view == (int)READING) {
+             s_presented_view == (int)READING &&
+             !(s_presented_panel == READER_PANEL_TOOLS && s_reader_panel == READER_PANEL_NONE &&
+               reader_text_body())) {
         tools_band = true;
         err = update_display_area_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16,
                                             reader_tools_area());
