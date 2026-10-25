@@ -26,14 +26,14 @@ void app_settings_init(void);
 app_sleep_mode_t app_settings_sleep_mode(void);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
-/// 锁屏睡眠方式，默认仅浅睡。先浅后深：锁屏浅睡十分钟后断电，短按冷开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
+/// 锁屏睡眠方式，默认仅浅睡。彻底关机：锁屏出图后立即按原厂脉冲彻底断电，长按电源键约 1 秒冷开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
 /// 电源菜单「关机」固定立即断电，与本设置无关。
-/// APP_SHUTDOWN_FULL 是旧档位：仅为 NVS/备份兼容保留编号，读取时并入先浅后深，界面不再提供。
-/// Lock sleep style, light-only by default. Staged: lock, light-sleep ten minutes, then power off (a short press cold-boots); light-only: lock sleeps forever without powering off, key/pickup returns.
+/// APP_SHUTDOWN_FULL 是旧档位：仅为 NVS/备份兼容保留编号，读取时并入彻底关机，界面不再提供。
+/// Lock sleep style, light-only by default. Full off: the lock pulses off factory-style right after the lock art (a one-second power-key hold cold-boots); light-only: lock sleeps forever without powering off, key/pickup returns.
 /// The power menu's 关机 always powers off immediately and ignores this setting.
-/// APP_SHUTDOWN_FULL is a legacy value kept for NVS/backup compatibility; loads merge into staged and the UI no longer offers it.
+/// APP_SHUTDOWN_FULL is a legacy value kept for NVS/backup compatibility; loads merge into full off and the UI no longer offers it.
 typedef enum {
-    /// 旧档位保留编号，读取时并入先浅后深。/ Legacy ID; loads merge into staged.
+    /// 旧档位保留编号，读取时并入彻底关机。/ Legacy ID; loads merge into full off.
     APP_SHUTDOWN_FULL = 0,
     APP_SHUTDOWN_STAGED = 1,
     APP_SHUTDOWN_LIGHT = 2,

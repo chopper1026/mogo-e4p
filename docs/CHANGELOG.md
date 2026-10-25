@@ -25,6 +25,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 
 ## 0.3.3-rc100 本地 / 2026-10-24
 
+- 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。
+  Standby style renamed and back to full power-off: "先浅后深" (staged) becomes "彻底关机" (full off); locking no longer stages ten minutes of light sleep—the device pulses off factory-style right after the lock art (f326902's repeating pulse trains), cutting host and panel. Booting afterwards requires holding the power key for about one second. The lock image is retained and a boot returns to the lock face and reading position (PIN verification first when enabled). Light-only and the power menu's 关机 are unchanged.
+
 - 电量显示稳定化：修复翻页/刷屏时状态栏电量 ±1% 乱跳（此前是瞬时电压线性换算直出显示）。Metalio 电量现改为在 BQ27220 电压/电流之上滤波：负载补偿、EMA 平滑、4.4 V 分段 OCV 曲线、放电只降/充电只升的单向步进、1% 死区与 10 s 限速；充电完成对齐 100%，电量每 5 分钟和充电状态切换时持久化到 NVS，深睡唤醒显示连续。主页/电源页取整与状态栏统一为四舍五入。每 60 s 输出一条 `batt:` 校准日志（含 BQ27220 内部库仑计 SOC 对比读数），后续据此校准曲线锚点。
   Battery display stabilization: the status bar no longer jumps ±1% across page turns and refreshes (the percent used to come straight from an instantaneous linear voltage mapping). On Metalio the percent is now filtered on top of the BQ27220 voltage/current: load compensation, EMA smoothing, a 4.4 V piecewise OCV curve, one-direction stepping (falls only on discharge, rises only on charge), a 1% deadband and a 10 s rate limit; charge-done aligns to 100%, and the percent persists to NVS every 5 minutes and on charge transitions so deep-standby wake stays continuous. The home and power pages round like the status bar. A `batt:` calibration log line every 60 s (including the BQ27220 internal coulomb-counted SOC for comparison) feeds later curve-anchor calibration.
 

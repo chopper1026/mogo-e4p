@@ -31,8 +31,8 @@ typedef enum {
 /// 登记常开供电的触摸与加速度计，并准备 CPU 浅睡保持区。/ Bind always-on touch/accelerometer and prepare CPU light-sleep retention.
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc);
 
-/// light_only 为真（待机方式"仅浅睡"）时锁屏浅睡无期限、永不掉电；为假走浅睡十分钟转深睡交接的阶梯（无 PMU EN 的板为主机深睡待机，短按电源键唤醒）。
-/// With light_only (shutdown style "light-only") the lock sleeps without a deadline and never powers off; otherwise the ten-minute ladder hands off to deep sleep (host deep standby with short-press wake on boards without PMU EN).
+/// light_only 为假（待机方式"彻底关机"）时锁屏出图后立即断电交接（无 PMU EN 的板为原厂脉冲断电，长按电源键约 1 秒开机）；为真（"仅浅睡"）锁屏浅睡无期限、永不掉电。
+/// With light_only false (standby style "full off") the lock hands off to power-down right after the lock art (factory pulse power-off with a one-second power-key hold to boot on boards without PMU EN); true ("light-only") sleeps without a deadline and never powers off.
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background, bool light_only
@@ -51,13 +51,10 @@ void app_lock_wait_key_idle(int timeout_ms);
 /// ESP 浅睡，按键或拿起唤醒。acc 为空则只等按键。
 /// ESP light sleep; wake on key or pickup. Key only when acc is NULL.
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc);
-/// ESP 浅睡至按键、拿起或超时；超时以毫秒计，0 表示不设期限。
-/// ESP light sleep until key, pickup, or timeout; 0 means no deadline.
-app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms);
 app_wake_source_t app_last_wake_source(void);
 /// 软睡/关机前停用外设并落盘；成功不返回，交接失败恢复外设并返回错误。保留调用方的阅读/密码上下文。
-/// 深睡在无 PMU EN 的板上为主机深睡待机，短按电源键唤醒重启；脉冲断电只用于主动关机。
-/// Park peripherals and sync before host sleep/off; success does not return, failure restores peripherals and returns an error with reader/PIN context intact. On boards without PMU EN deep sleep is a host deep standby woken by a short power-key press; pulse power-off serves explicit shutdown only.
+/// 深睡在无 PMU EN 的板上自动升级为原厂式电源键脉冲断电，此后长按电源键约 1 秒开机。
+/// Park peripherals and sync before host sleep/off; success does not return, failure restores peripherals and returns an error with reader/PIN context intact. Deep sleep escalates to the factory-style power-key pulse power-off on boards without PMU EN; booting afterwards takes a one-second power-key hold.
 esp_err_t app_enter_host_sleep(app_sleep_mode_t mode);
 /// 将当前系统时间写入常供电 PMU RTC；主控断电后由 PMU 继续走时。
 /// Sync system time to the always-on PMU RTC so it keeps ticking while the host is off.

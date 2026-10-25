@@ -1214,15 +1214,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
         }
         ui_text(fb, 48, 760, 23, "操作后重新计时，传输和升级期间暂停", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 810, 23, "锁屏浅睡；“仅浅睡”时永不断电", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 810, 23, "「彻底关机」锁屏即断电；「仅浅睡」永不断电", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "待机方式");
         section(fb, 248, "选择锁屏后的待机方式");
-        const char *labels[] = {"先浅睡，10 分钟后深睡", "仅浅睡"};
-        const char *details[] = {"锁屏画面保留；深睡后短按电源键开机",
+        const char *labels[] = {"彻底关机", "仅浅睡"};
+        const char *details[] = {"锁屏即彻底断电；画面保留，长按电源键约 1 秒开机",
                                  "锁屏画面保留；不断电，按键返回关机前页面"};
         for (int i = 0; i < 2; ++i) {
             EpdRect box = {36, 300 + i * 154, 612, 132};
@@ -1449,7 +1449,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
-        app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"先浅后深"};
+        app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底关机"};
     const int display_icons[]={2,7,15,11,14,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);

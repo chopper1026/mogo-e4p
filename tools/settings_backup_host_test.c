@@ -737,7 +737,7 @@ int main(void) {
     assert(fwrite(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fwrite(v3_extension, 1, sizeof(v3_extension), file) == sizeof(v3_extension));
     assert(fclose(file) == 0);
-    /* 彻底断电档已移除：旧备份里的 FULL 一律迁移为先浅后深。/ Full-off is retired: legacy FULL in backups migrates to staged. */
+    /* 彻底断电档已移除：旧备份里的 FULL 一律迁移为彻底关机。/ Full-off is retired: legacy FULL in backups migrates to full off. */
     assert(app_settings_backup_restore() == ESP_OK && s_shutdown_style == APP_SHUTDOWN_STAGED);
     assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
     app_settings_init();

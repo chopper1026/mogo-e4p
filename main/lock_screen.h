@@ -9,5 +9,6 @@
 bool lock_screen_restore(uint8_t *frame);
 /// 无密码深睡前保存实际锁屏参考，不改变屏幕。/ Persist the actual no-PIN lock reference before deep sleep without driving the panel.
 bool lock_screen_save(const uint8_t *frame);
-/// 普通锁屏先等待唤醒，开机直接验证；错误/取消不能返回主循环。light_only 时等待浅睡无期限、不断电。/ Normal locks wait for wake; boot verifies immediately; errors/cancel cannot return to the app loop. With light_only the wait sleeps without a deadline and never powers off.
-void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot,bool light_only);
+/// 仅浅睡档的密码锁屏先等待唤醒，开机直接验证；错误/取消不能返回主循环，等待浅睡无期限、不断电。
+/// Light-only PIN locks wait for wake and boots verify immediately; errors/cancel cannot return to the app loop, and the wait sleeps without a deadline and never powers off.
+void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot);
