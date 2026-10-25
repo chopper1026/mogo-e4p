@@ -33,6 +33,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "haptics.h"
+#include "read_pico_pmu.h"
 #include "read_pico_sd.h"
 #include "read_pico_transfer.h"
 #include "book/book_history_backup.h"
@@ -53,6 +54,7 @@
 #define NVS_KEY_AVATAR "dev_avatar"
 #define NVS_KEY_STATUS_SIGNATURE "status_sig"
 #define NVS_KEY_TOUCH_HAPTIC "touch_haptic"
+#define NVS_KEY_BATT_LOG "batt_log"
 #define NVS_KEY_HAPTIC_LEVEL "haptic_lvl"
 #define NVS_KEY_FONT "font"
 #define NVS_KEY_SYS_FONT "sys_font"
@@ -131,6 +133,9 @@ static char s_status_signature[96];
 // 触摸震动默认开启、弱档；与原厂默认一致。/ Touch vibration defaults to on and weak, matching the vendor.
 static bool s_touch_haptics = true;
 static uint8_t s_haptic_intensity = APP_HAPTIC_WEAK;
+// 电量校准日志是调试开关，默认关闭：不建 batt.log、不写卡。
+// The battery calibration log is a debug switch, off by default: no batt.log and no card writes.
+static bool s_batt_log;
 static char s_font[FONT_PATH_MAX];
 static char s_system_font[FONT_PATH_MAX];
 static uint8_t s_system_size = 120;
@@ -306,6 +311,11 @@ void app_settings_init(void) {
         s_haptic_intensity = raw;
     haptics_set_enabled(s_touch_haptics);
     haptics_set_intensity(s_haptic_intensity);
+    // 日志开关只在这里读入；PMU 随后初始化，由 app_main 统一下发，避免早于总线就绪。
+    // The log switch is only read here; the PMU initialises later and app_main applies it once,
+    // so no call runs before the bus is ready.
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_BATT_LOG, &raw) == ESP_OK) s_batt_log = raw != 0;
     size_t font_len = sizeof(s_font);
     if (nvs_get_str(h, NVS_KEY_FONT, s_font, &font_len) != ESP_OK) {
         s_font[0] = '\0';
@@ -608,6 +618,16 @@ void app_settings_set_touch_haptics(bool on) {
     s_touch_haptics = on;
     nvs_put_u8(NVS_KEY_TOUCH_HAPTIC, on ? 1 : 0);
     haptics_set_enabled(on);
+}
+
+bool app_settings_batt_log(void) { return s_batt_log; }
+void app_settings_set_batt_log(bool on) {
+    if (on == s_batt_log) return;
+    s_batt_log = on;
+    nvs_put_u8(NVS_KEY_BATT_LOG, on ? 1 : 0);
+    // 立即生效：关闭后下一次唤醒不再建文件；打开后最多一分钟写入第一行。
+    // Take effect at once: off stops any further file creation, on writes the first line within a minute.
+    read_pico_pmu_set_batt_log(on);
 }
 
 uint8_t app_settings_haptic_intensity(void) { return s_haptic_intensity; }

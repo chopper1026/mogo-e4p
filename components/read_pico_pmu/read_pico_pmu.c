@@ -849,3 +849,7 @@ const char* pmu_action_name(uint8_t action) {
         default: return "ACT";
     }
 }
+
+// CW32 板级链路没有电池校准日志；保留空实现，让上层不必区分目标。
+// The CW32 board link has no battery calibration log; the no-op keeps callers target-agnostic.
+void read_pico_pmu_set_batt_log(bool enabled) { (void)enabled; }

@@ -101,6 +101,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_READING_BG, SETTINGS_READING_BG_PREVIEW,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_HAPTIC,
+               SETTINGS_POWER_LOG,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
@@ -339,6 +340,10 @@ static int settings_main_row_height(void) {
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_MAINTENANCE_Y (SETTINGS_PERSONAL_Y + SETTINGS_PERSONAL_ROWS * SETTINGS_ROW_H + 78)
+// 电源管理排在最后，放调试类开关，不挤占常规设置。
+// Power management sits last for debug switches without crowding ordinary settings.
+#define SETTINGS_POWER_ROWS 1
+#define SETTINGS_POWER_Y (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H + 78)
 // 设置行图标：32 像素盒，在行高 68 里垂直居中；墨色统一，避免一行一个灰度。
 // Setting row icons: a 32 px box centred in the 68 px row with one shared ink level.
 #define SETTINGS_ICON_PX 32
@@ -347,7 +352,7 @@ static int settings_main_row_height(void) {
 // Main-page scroll limit: just enough to bring the last row of the last group above the nav bar,
 // with 8 px to spare.
 #define SETTINGS_SCROLL_MAX \
-    (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
+    (SETTINGS_POWER_Y + SETTINGS_POWER_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -833,6 +838,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_VIBRATE,           // 18 触摸震动 / touch vibration
         UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
+        UI_ICON_ZAP,               // 20 电源管理 / power management
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1333,6 +1339,18 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_POWER_LOG) {
+        back_header(fb, "日志调试");
+        section(fb, 228, "电量校准日志");
+        setting_toggle(fb, 272, "写入 batt.log", "每分钟记录电压、电流与充电状态",
+                       app_settings_batt_log());
+        ui_text(fb, 48, 440, 23, "写入 TF 卡根目录 batt.log，同时输出到串口", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 485, 23, "卡不在或正在 USB 读卡时自动跳过", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 530, 23, "关闭后不再创建文件，也不写日志", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 575, 23, "默认关闭；开关立即生效", EPD_DRAW_ALIGN_LEFT, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "待机方式");
         section(fb, 248, "选择锁屏后的待机方式");
@@ -1592,6 +1610,13 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int maintenance_icons[]={8,17};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
+    char batt_log_value[16];
+    snprintf(batt_log_value,sizeof(batt_log_value),"%s",app_settings_batt_log()?"开启":"关闭");
+    const char *power_labels[]={"日志调试"};
+    const char *power_values[]={batt_log_value};
+    const int power_icons[]={20};
+    setting_group(fb,SETTINGS_POWER_Y-49,"电源管理",SETTINGS_POWER_Y,
+                  power_icons,power_labels,power_values,SETTINGS_POWER_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
@@ -2209,6 +2234,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_POWER_LOG) {
+        if (ui_rect_hit((EpdRect){36, 272, 612, 126}, ev->x0, y)) {
+            app_settings_set_batt_log(!app_settings_batt_log());
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
 
     if (s_page == SETTINGS_WIFI) {
         if (y >= 408 && y < 478) {
@@ -2536,6 +2568,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
             return APP_REDRAW_PAGE;
         }
+        return APP_REDRAW_PAGE;
+    }
+    if(y>=SETTINGS_POWER_Y && y<SETTINGS_POWER_Y+SETTINGS_POWER_ROWS*SETTINGS_ROW_H) {
+        row=(y-SETTINGS_POWER_Y)/SETTINGS_ROW_H;
+        if(row==0) s_page=SETTINGS_POWER_LOG;
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;

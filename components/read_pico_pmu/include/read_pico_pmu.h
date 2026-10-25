@@ -172,6 +172,11 @@ esp_err_t read_pico_pmu_refresh(void);
 /// / Refresh STATUS / QUICK / event count only, for page polls.
 esp_err_t read_pico_pmu_poll(void);
 
+/// 电池校准日志开关：打开后每分钟把 batt 行写串口与 TF 卡 `/sdcard/batt.log`，默认关闭。
+/// Battery calibration log switch: when on, one batt line per minute goes to serial and
+/// `/sdcard/batt.log`; off by default, so no file is created and nothing is written.
+void read_pico_pmu_set_batt_log(bool enabled);
+
 esp_err_t read_pico_pmu_cmd(uint16_t code, const uint8_t* payload, uint8_t plen);
 /// 读出厂绑定的面板 VCOM。valid 则 *out_mv 为 500..2500，
 /// 未标定 / 旧固件 / 读失败一律 ESP_ERR_NOT_FOUND。

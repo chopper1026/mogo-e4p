@@ -49,6 +49,11 @@ bool app_settings_touch_haptics(void);
 void app_settings_set_touch_haptics(bool on);
 uint8_t app_settings_haptic_intensity(void);
 void app_settings_set_haptic_intensity(uint8_t intensity);
+/// 电量校准日志（串口 + TF 卡 batt.log），调试开关，默认关闭；设备本地设置，不进配置备份。
+/// Battery calibration log (serial + TF batt.log), a debug switch that defaults off; it stays
+/// device-local and is not part of config backups.
+bool app_settings_batt_log(void);
+void app_settings_set_batt_log(bool on);
 /// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
 typedef enum {
     APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,

@@ -476,6 +476,12 @@ static portMUX_TYPE s_batt_log_mux = portMUX_INITIALIZER_UNLOCKED;
 // 日志任务句柄，deinit 时停止，避免反初始化后继续写旧采样。
 // Logger task handle, stopped on deinit so a torn-down shim cannot keep logging stale samples.
 static TaskHandle_t s_batt_log_task;
+// 设置页的日志开关；默认关，关时任务照常休眠但不碰卡也不打印。
+// Settings-page log switch; off by default, and while off the task keeps sleeping but touches
+// neither the card nor the console.
+static bool s_batt_log_enabled;
+
+void read_pico_pmu_set_batt_log(bool enabled) { s_batt_log_enabled = enabled; }
 
 // 校准日志任务：串口与 TF 卡写同一行，写卡只在本任务做，不卡主循环跟手；卡不在
 // 或未挂载（含 USB 读卡让出）时静默跳过，逐行开关文件，拔卡/断电最多丢最后一行。
@@ -487,6 +493,7 @@ static void batt_log_task(void *arg) {
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(BATT_LOG_INTERVAL_MS));
+        if (!s_batt_log_enabled) continue;
         batt_log_sample_t s;
         portENTER_CRITICAL(&s_batt_log_mux);
         s = s_batt_log_sample;
@@ -654,9 +661,11 @@ static void poll_battery(void) {
         }
 
         // 采样快照喂给日志任务；ic_soc 仍按 60 s 在轮询侧读，I2C 不离开主循环任务。
-        // Feed the snapshot to the logger task; ic_soc still reads at a 60 s cadence
-        // on the poll side so I2C never leaves the loop task.
-        if (now - s_batt_last_log_us >= (int64_t)BATT_LOG_INTERVAL_MS * 1000) {
+        // 日志关闭时连这次库仑计读也省掉，不产生无人消费的 I2C 流量。
+        // Feed the snapshot to the logger task; ic_soc still reads at a 60 s cadence on the poll
+        // side so I2C never leaves the loop task. With logging off even that coulomb read is
+        // skipped, so no I2C traffic goes to a consumer that will not look at it.
+        if (s_batt_log_enabled && now - s_batt_last_log_us >= (int64_t)BATT_LOG_INTERVAL_MS * 1000) {
             s_batt_last_log_us = now;
             s_batt_ic_soc = (int8_t)bq_read_soc();
         }

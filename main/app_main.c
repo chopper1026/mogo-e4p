@@ -177,6 +177,10 @@ void app_main(void) {
     // 马达能力与定时器在板级就绪后建立；开关/强度已由设置初始化写入。
     // / Set up the motor timer once the board is ready; settings init already applied switch and intensity.
     haptics_init();
+    // 电量校准日志按设置启动；默认关闭时不创建 batt.log，也不打印 batt 行。
+    // Start the battery calibration log per the setting; the off default creates no batt.log
+    // and prints no batt line.
+    read_pico_pmu_set_batt_log(app_settings_batt_log());
     // 前光在板级初始化里已挂好 LEDC；这里按 NVS 恢复用户状态，早于首帧。
     // The board step already wired LEDC; restore the user state before the first frame.
     const bool fl_on = app_settings_frontlight_on();
