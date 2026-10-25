@@ -275,6 +275,11 @@ void app_restart_host(void) {++restarts;longjmp(done,1);}
 void epd_poweroff(void) {}
 const char* app_settings_font_path(void) {return "builtin";}
 bool app_settings_reader_power_turn(void) {return false;}
+// 上键全局兜底在宿主测试里保持不绑定：GPIO 不被轮询，既有场景行为零变化。
+// / The global up-key fallback stays unbound in host tests: the GPIO is never
+// polled and existing scenarios keep their exact behavior.
+app_reader_key_action_t app_settings_reader_up_action(void) {return APP_READER_KEY_NONE;}
+esp_err_t read_pico_read_up_key(bool* pressed) {*pressed=false;return ESP_OK;}
 app_shutdown_style_t app_settings_shutdown_style(void) {return staged_shutdown ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL;}
 bool ttf_font_path_is_builtin(const char*p) {(void)p;return !font_due&&!saved_sd_font;}
 bool ttf_font_ready(void) {return true;}

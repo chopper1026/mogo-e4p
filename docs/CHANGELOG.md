@@ -23,6 +23,14 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 设置页不提供「升级和恢复 → 系统升级」入口：OTA 尚未就绪，联网与 TF 卡升级页面代码保留但不可达。
   The settings page offers no System Upgrade row until OTA is ready; the online and TF-card update pages keep their code but stay unreachable.
 
+## 0.3.3-rc101 本地 / 2026-10-25
+
+- 锁屏密码：修复设密码后输完解锁、页面乱跳的问题——输密码的四次点击此前会留在触摸采样回放队列里（主循环阻塞在密码层，队列无人消费），解锁后被当作新手势整批回放到已解锁页面；现在每次锁屏返回主循环即作废全部积压触摸帧并复位边沿状态，普通浅睡唤醒路径同样受益。
+  Lock PIN: fixed the unlocked page jumping around after typing the password—the four PIN taps used to survive in the touch sampler replay queue (the main loop stays blocked in the PIN layer, so nobody drains it) and were replayed onto the unlocked page as fresh gestures. Every lock return now discards the whole backlog and resets edge state; ordinary light-sleep wakes benefit the same way.
+
+- 按键：「上键单击」绑定「开关前光」后，退出阅读回到主页/书架也能正常开关前光；其余上键动作仍只在阅读正文生效，阅读内行为不变。
+  Keys: with the top key bound to the frontlight toggle, leaving the reader for the home/shelf pages no longer kills the binding; other top-key actions stay reader-body-only and in-reader behavior is unchanged.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。

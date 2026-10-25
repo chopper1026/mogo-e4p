@@ -906,6 +906,58 @@ bool app_poll_main_navigation(app_ctx_t *ctx) {
     return ctx->request_app!=NULL;
 }
 
+// 上键单击的全局兜底。阅读正文内由 app_book 的 tick 按阅读映射处理（含翻页等动作），
+// 这里不重复轮询；其余页面（主页、书架、子页）只兑现「前光开关」绑定，翻页等阅读
+// 动作不上身。边沿规则与阅读侧对齐（app_book.c 的 READER_UP_KEY_*）：按下沿去抖，
+// 松开时仍在短按窗口内才执行，按住不重复；绑定不是前光开关或板上无前光时不轮询
+// GPIO，本机读取失败按抬起处理保持静默。退出阅读留在书架时正文已不可见，同样走这里。
+// / Global up-key fallback. The reader body dispatches through app_book's tick
+// (page turns etc.), so no double polling here; every other page (home, shelf,
+// subpages) honours only the frontlight binding and never reader actions. Edge
+// rules mirror the reader side (app_book.c READER_UP_KEY_*): debounced press,
+// fire on release inside the short window, holds never repeat; the GPIO is only
+// polled when the binding is the frontlight toggle and the board has one, and a
+// failed read is treated as release. Leaving the reader for the shelf also lands
+// here because the body is no longer visible.
+#define UP_KEY_POLL_MS 30
+#define UP_KEY_DEBOUNCE_MS 30
+#define UP_KEY_LONG_MS 1000
+static void up_key_global_tick(app_ctx_t* ctx, const app_desc_t* current) {
+    static int64_t s_poll_ms;
+    static bool s_down;
+    static int64_t s_down_ms;
+    if (current == &app_book && app_book_reader_body_visible()) {
+        s_down = false;
+        return;
+    }
+    if (app_settings_reader_up_action() != APP_READER_KEY_FRONTLIGHT || !frontlight_ready()) {
+        s_down = false;
+        return;
+    }
+    if (ctx->now_ms - s_poll_ms < UP_KEY_POLL_MS) return;
+    s_poll_ms = ctx->now_ms;
+    bool pressed = false;
+    if (read_pico_read_up_key(&pressed) != ESP_OK) {
+        s_down = false;
+        return;
+    }
+    if (pressed) {
+        if (!s_down) { s_down = true; s_down_ms = ctx->now_ms; }
+        return;
+    }
+    if (!s_down) return;
+    s_down = false;
+    int64_t held = ctx->now_ms - s_down_ms;
+    if (held < UP_KEY_DEBOUNCE_MS || held >= UP_KEY_LONG_MS) return;
+    // 与阅读侧同款：只驱动灯不重画；快捷层开层前会重读设置，预览不会复活旧状态。
+    // / Same as the reader side: drive the light only, no repaint; the quick
+    // layer reloads settings on open, so its preview never resurrects a stale state.
+    const bool on = !app_settings_frontlight_on();
+    app_settings_set_frontlight_on(on);
+    (void)frontlight_apply(on, app_settings_frontlight_brightness(), app_settings_frontlight_cct());
+    ctx->user_activity = true;
+}
+
 void app_loop_run(const app_loop_config_t* config) {
     s_presented_main = NULL;
     s_nav_contact_down=s_nav_polled=false;
@@ -1567,6 +1619,12 @@ void app_loop_run(const app_loop_config_t* config) {
             while (ble_pt_pop_raw(&raw_event)) {}
         }
         if (s_quick.open && quick_status() != s_quick_status) quick_buttons_present(&ctx,current);
+        // 上键全局兜底与 on_tick 同门控：弹窗、快捷层、菜单持有输入时不响应。
+        // / Global up-key fallback gated like on_tick: silent while the dialog,
+        // quick layer or menu owns input.
+        if (!power_dialog_open && !s_quick.open && !quick_input_owned && !menu_open &&
+            !ctx.request_app && !ctx.request_menu && !ctx.request_return)
+            up_key_global_tick(&ctx, current);
         if (!power_dialog_open && !s_quick.open && !quick_input_owned && !ui_click_feedback_active() && !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return && current->on_tick != NULL) {
             app_redraw_t redraw = current->on_tick(&ctx);
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) held_key = -1;
