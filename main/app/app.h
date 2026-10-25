@@ -109,6 +109,12 @@ struct app_desc_s {
     /// 可选：当前确实显示主页面，允许本地测试优化底栏切页；阅读/子页面返回 false。
     /// Optional: true only for a main-tab view eligible for local transition testing; reader/subviews return false.
     bool (*main_page_visible)(app_ctx_t* ctx);
+    /// 可选：快捷栏收起做整屏归一时是否保护图片灰阶。只有画面带阅读背景正文的页面返回 true；
+    /// 返回 false 或缺省时完整归一所有灰阶。全局背景设置不能代替本回调的判断。
+    /// Optional: whether the quick-layer close normalization must protect picture grays.
+    /// Only a page showing a background reading body returns true; false or absent runs the
+    /// full pass over every gray. The global background setting is not a substitute for this.
+    bool (*normalize_hold_gray)(app_ctx_t* ctx);
     /// 进页/离页。on_enter 里做上电、唤醒传感器、拉一次数据这类副作用。
     /// / Enter/exit. on_enter powers up, wakes sensors, takes a first sample.
     void (*on_enter)(app_ctx_t* ctx);

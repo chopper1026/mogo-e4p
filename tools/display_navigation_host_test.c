@@ -16,7 +16,9 @@
 #define H 684
 #define BYTES (W * H / 2)
 const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1},
-    E0470_FULL_WAVEFORM = {2}, E0470_GRAY8_WAVEFORM = {3};
+    E0470_FULL_WAVEFORM = {2}, E0470_GRAY8_WAVEFORM = {3},
+    E0470_CAPSULE_DRAG_WAVEFORM = {4}, E0470_CAPSULE_WHITE_WAVEFORM = {5},
+    E0470_CAPSULE_GRAY_WAVEFORM = {6}, E0470_APPLY_WAVEFORM = {7};
 static const EpdWaveform main_gray = {4}, main_exit = {5}, main_water = {6}, main_bw = {7}, main_acrylic = {8}, main_acrylic_clean = {9};
 static const EpdWaveform reader_soft = {10}, reader_water = {11};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}

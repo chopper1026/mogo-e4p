@@ -392,6 +392,7 @@ static unsigned s_chapter_lead_width;
 static char s_font_path[192];
 static char* s_text;
 static bool reader_text_body(void);
+static bool normalize_hold_gray(app_ctx_t* ctx);
 bool app_book_reader_body_visible(void) {
     return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
 }
@@ -3807,11 +3808,14 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
     s_reader_clock_pending=true;
     return APP_REDRAW_AREA;
 }
-// 正文是否是纯文字画面：插图页与阅读背景保留原来的整页差分，不让归一表的字芯推黑改动图片灰阶。
-// Whether the body is a plain text frame: image pages and reading backgrounds keep the ordinary
-// page differential so the normalize pass's black pushes cannot shift their picture grays.
+// 正文是否是纯文字画面：插图页保留原来的整页差分，不让归一表的字芯推黑改动图片灰阶。
+// 阅读背景不再排除：归一表把非黑相等对清成保持，整屏 pass 只重驱字芯，背景灰阶不动。
+// Whether the body is a plain text frame: image pages keep the ordinary page differential
+// so the normalize pass's black pushes cannot shift their picture grays. A reading
+// background is no longer excluded: the normalize table holds every non-black equal pair,
+// so the whole-screen pass re-drives only glyph cores and leaves background grays alone.
 static bool reader_text_body(void) {
-    return book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
+    return book_layout_page_image_count(s_page) == 0;
 }
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // 开关标记只对本次推屏有效：提前返回也不留给下一帧。
@@ -3973,7 +3977,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     else if (redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
              s_presented_panel != READER_PANEL_NONE && s_reader_panel == READER_PANEL_NONE &&
              reader_text_body()) {
-        err = update_display_area_full_with(ctx->hl, display_normalize_waveform(),
+        err = update_display_area_full_with(ctx->hl, display_normalize_waveform(normalize_hold_gray(ctx)),
                                             MODE_GL16,
                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     }
@@ -7129,6 +7133,13 @@ static bool menu_handle_enabled(app_ctx_t* ctx) {
     // All book views use product navigation; the legacy menu must never steal the right pager.
     return false;
 }
+// 只有阅读背景正文需要保护图片灰阶；书架、搜索、输入等视图让快捷栏收起走完整归一。
+// Only a background reading body needs picture grays protected; the shelf, search and input
+// views let the quick-layer close run the full normalization pass.
+static bool normalize_hold_gray(app_ctx_t* ctx) {
+    (void)ctx;
+    return s_view == READING && s_text && app_settings_book_background_path()[0] != '\0';
+}
 static app_redraw_t shelf_turn_page(app_ctx_t *ctx, int direction) {
     int next = ctx->leaf + direction;
     if (s_view != SHELF || s_scan_pending || s_clear_confirm || next == ctx->leaf || next < 0 || next >= leaves())
@@ -7382,6 +7393,7 @@ const app_desc_t app_book = {
     .defer_middle_short = true,
     .menu_handle_enabled = menu_handle_enabled,
     .main_page_visible = main_page_visible,
+    .normalize_hold_gray = normalize_hold_gray,
     .render = render, .present = present, .on_enter = on_enter, .on_exit = book_on_exit,
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,

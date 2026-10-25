@@ -233,14 +233,17 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     const int area_height = quick_height > s_quick_height ? quick_height : s_quick_height;
     s_quick_height = quick_height;
     // 收起快捷层时，被半透明遮罩盖过的字多走了一轮推黑，比没被盖过的字更黑；单次还原
-    // 追不平。任何页面都用归一表整屏再走一遍，全页字芯落在同一墨度。展开仍只画遮罩与圆键。
+    // 追不平。整屏用归一表再走一遍，全页字芯落在同一墨度。展开仍只画遮罩与圆键。
+    // 是否保护图片灰阶由当前页面决定：只有阅读背景正文需要，其他页面完整归一。
     // Closing leaves the text under the translucent shade one black cycle ahead of the rest,
-    // which a single restore cannot match. Every page runs one whole-screen normalize pass so
-    // each glyph core lands on the same ink. Opening still paints only the shade and keys.
+    // which a single restore cannot match. One whole-screen normalize pass puts every glyph
+    // core on the same ink. Whether picture grays need protecting is the current page's call:
+    // only a background reading body does, and every other page takes the full pass.
     const void *wave = &E0470_WAVEFORM;
     EpdRect area = {0, 0, UI_LOCK_WIDTH, area_height};
     if (!s_quick.open) {
-        wave = display_normalize_waveform();
+        wave = display_normalize_waveform(current->normalize_hold_gray &&
+                                          current->normalize_hold_gray(ctx));
         area.height = UI_LOCK_HEIGHT;
     }
     enum EpdDrawError error = full ? update_display_full(ctx->hl)

@@ -5,8 +5,15 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include "display_normalize.h"
 #include "display_reader_waveform.h"
 #include "e0470_epaper_waveform.h"
+
+// 主机替身：表构建会读背景路径设置；用例先跑无背景分支，再临时打开背景验证归一表。
+// Host stand-in: table builds read the background-path setting; cases run the
+// no-background branch first, then switch the background on to check the normalize table.
+static const char *s_bg_path = "";
+const char *app_settings_book_background_path(void) { return s_bg_path; }
 
 int main(void) {
     e0470_waveform_init();
@@ -159,6 +166,85 @@ int main(void) {
             black += e0470_phase_action(full_page, f, 0, from) == 1;
         assert(black == 18);
     }
+    // 背景派生表：二次裁剪会把白列削到 15 拍，旧字转白擦不净。这里必须补回主页水波纹
+    // 已验证的 24 拍，且不增加帧数——白列的形状能落进现有的尾部保持空间。
+    // Background derivative: the second trim would leave 15 white pushes and erased text
+    // would stay pale. It must carry the main water table's verified 24 pushes without
+    // adding frames—the column shape fits inside the existing trailing holds.
+    s_bg_path = "card:/backgrounds/paper.bmp";
+    const EpdWaveform* bg = display_reader_bg_waveform();
+    const EpdWaveformPhases* bgp = e0470_waveform_phases(bg, MODE_GL16);
+    assert(bgp && bgp->luts && !bgp->phase_times);
+    assert(bgp->phases <= E0470_GL16_FRAMES);
+    int bg_white = 0;
+    for (int f = 0; f < bgp->phases; ++f) bg_white += e0470_phase_action(bgp, f, 15, 0) == 2;
+    assert(bg_white == 24);
+    // 白列必须给尾部保持让位，不能把最后一相也拿去推白。
+    // The white column must leave the trailing hold alone instead of pushing on the last phase.
+    assert(e0470_phase_action(bgp, bgp->phases - 1, 15, 0) == 0);
+    // 归一表：基底不随阅读背景切换。背景派生表相数更少，旧实现会原样返回它，归一化
+    // 在开了阅读背景时静默失效。两张变体：纯文字页保留原厂非黑相等对，背景页清成保持。
+    // Normalize table: the base never follows the reading-background switch. The background
+    // derivative carries fewer phases, and the old build returned it unchanged, so
+    // normalization silently stopped working while a background was set. Two variants: a
+    // plain-text table that keeps the vendor non-black equal pairs and a background table
+    // that holds them.
+    assert(display_reader_page_waveform() != display_reader_ink_waveform());
+    const EpdWaveform* norm_bg = display_normalize_waveform(true);
+    const EpdWaveformPhases* np_bg = e0470_waveform_phases(norm_bg, MODE_GL16);
+    assert(np_bg && np_bg->luts && np_bg->phases == E0470_GL16_FRAMES && !np_bg->phase_times);
+    s_bg_path = "";
+    assert(display_reader_page_waveform() == display_reader_ink_waveform());
+    // 变体只由参数决定：背景开关不影响哪张表被选中。
+    // The variant comes from the argument alone; the background switch never picks the table.
+    assert(display_normalize_waveform(true) == norm_bg);
+    const EpdWaveform* norm = display_normalize_waveform(false);
+    const EpdWaveformPhases* np = e0470_waveform_phases(norm, MODE_GL16);
+    assert(np && np->luts && np->phases == E0470_GL16_FRAMES && !np->phase_times);
+    assert(norm != norm_bg && display_normalize_waveform(false) == norm);
+    s_bg_path = "card:/backgrounds/paper.bmp";
+    assert(display_normalize_waveform(false) == norm);
+    const EpdWaveformPhases* ink = e0470_waveform_phases(display_reader_ink_waveform(), MODE_GL16);
+    assert(ink && ink->phases == np->phases);
+    const EpdWaveformPhases* variants[2] = {np, np_bg};
+    for (int v = 0; v < 2; ++v) {
+        // 字芯：每个起点都是 18 擦白后接 18 推黑，中途不再擦白。
+        // Glyph core: every start runs 18 erases then 18 pushes, with no erase in between.
+        for (int from = 0; from < 16; ++from) {
+            int erase = 0, black = 0, first_black = -1, erase_after_black = 0;
+            for (int f = 0; f < variants[v]->phases; ++f) {
+                const int action = e0470_phase_action(variants[v], f, 0, from);
+                erase += action == 2;
+                black += action == 1;
+                if (action == 1 && first_black < 0) first_black = f;
+                if (action == 2 && first_black >= 0) ++erase_after_black;
+            }
+            assert(erase == 18 && black == 18 && erase_after_black == 0);
+        }
+        // 非字芯迁移逐相沿用基底整页表；对角线由各自的相等对检查覆盖。
+        // Every non-core transition follows the base page table; the diagonal is covered by
+        // the equal-pair check below.
+        for (int to = 1; to < 16; ++to)
+            for (int from = 0; from < 16; ++from) {
+                if (from == to) continue;
+                for (int f = 0; f < variants[v]->phases; ++f)
+                    assert(e0470_phase_action(variants[v], f, to, from) ==
+                           e0470_phase_action(ink, f, to, from));
+            }
+    }
+    // 纯文字表保留原厂相等对：抗锯齿边缘也跟着走一轮，墨度与字芯一起归一。
+    // The plain-text table keeps the vendor equal pairs so antialiased edges normalize with
+    // the glyph core instead of keeping their covered/uncovered history.
+    for (int g = 1; g < 16; ++g)
+        for (int f = 0; f < np->phases; ++f)
+            assert(e0470_phase_action(np, f, g, g) == e0470_phase_action(ink, f, g, g));
+    // 背景表清成保持：整屏 pass 标脏整页，未变化的背景与图片灰阶不被重驱。
+    // The background table holds them: the pass dirties every pixel, and unchanged
+    // background and picture grays must not be re-driven.
+    for (int g = 1; g < 16; ++g)
+        for (int f = 0; f < np_bg->phases; ++f)
+            assert(e0470_phase_action(np_bg, f, g, g) == 0);
+    puts("PASS: the normalize table keeps 37 phases with a reading background on; its plain-text variant keeps the vendor equal pairs and the background variant holds them so picture grays survive the whole-screen pass");
     puts("PASS: water turns restore 18 black pushes for to=0 while keeping the vendor white column, 37 phases and the eight-band tick count");
     puts("PASS: ordinary text turns hold all 16 unchanged grays, reduce at least ten gray-edge dark runs and keep the 37 phases");
     puts("PASS: all 256 pairs, holds, first/final actions, phase count and original LUT retained except the to=0 black column; optical validation pending");

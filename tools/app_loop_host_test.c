@@ -128,11 +128,17 @@ int E0470_FOLLOW_WAVEFORM;
 int E0470_CAPSULE_DRAG_WAVEFORM;
 int E0470_CAPSULE_WHITE_WAVEFORM;
 int E0470_CAPSULE_GRAY_WAVEFORM;
-// 收起快捷层改用整屏归一表；调度测试只关心换表不影响推屏次数。
+// 收起快捷层改用整屏归一表；调度测试只关心换表不影响推屏次数，同时记录页面是否要求
+// 保护图片灰阶——主机假页面没有阅读背景，必须走完整归一。
 // A closing quick layer swaps in the whole-screen normalize table; the scheduling test only
-// checks that the swap changes nothing else.
+// checks that the swap changes nothing else, and records whether the page asked to protect
+// picture grays—the host stand-in has no reading background, so it must take the full pass.
 static int s_normalize_waveform;
-const EpdWaveform *display_normalize_waveform(void) { return (const EpdWaveform*)&s_normalize_waveform; }
+static bool quick_norm_hold;
+const EpdWaveform *display_normalize_waveform(bool hold_gray) {
+    quick_norm_hold = hold_gray;
+    return (const EpdWaveform*)&s_normalize_waveform;
+}
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
         assert(a.width==108&&a.y==102);
@@ -680,6 +686,10 @@ int main(void) {
     add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==78&&fl_cct==59);
     assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&quick_norm==1);
+    // 主机假页面没有阅读背景：收起快捷栏必须走完整归一，不能沿用背景变体。
+    // The host stand-in has no reading background: closing must take the full pass, never
+    // the background variant.
+    assert(!quick_norm_hold);
     assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
     // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
     // Opening and the switch tap each re-composite and redraw the layer; on close the

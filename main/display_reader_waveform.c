@@ -31,6 +31,11 @@
  * both saturation runs trimmed again, to=0 boost kept); the two accessors switch to it
  * automatically while a reading background is set; tune the numbers on hardware against
  * ghosting and text blackness.
+ * 用户 2026-10-26：背景页翻页旧字转白擦不净（二次裁剪只剩 15 拍白推），白列改回主页
+ * 水波纹已验证的 24 拍，其余迁移与相数不变，翻页时长不变。
+ * User report 2026-10-26: erased text stayed pale on background pages because the second trim
+ * left only 15 white pushes. The to=15 row now carries the main water table's verified 24
+ * pushes; every other transition and the phase count stay put, so turns keep their timing.
  */
 #include "display_reader_waveform.h"
 #include "display_main_waveform.h"
@@ -141,11 +146,10 @@ const EpdWaveform* display_reader_text_waveform(void) {
     return &s_waveform;
 }
 
-const EpdWaveform* display_reader_page_waveform(void) {
-    // 背景页统一走派生表：深色图形上的饱和往返更短，黑闪与扫描时长一起下降。
-    // Background pages always take the derivative: shorter saturation runs over dark
-    // graphics cut both the black flashing and the scan time.
-    if (app_settings_book_background_path()[0]) return display_reader_bg_waveform();
+const EpdWaveform* display_reader_ink_waveform(void) {
+    // 与背景设置无关的全页表：归一表拿它做基底，整屏 pass 的字芯墨度不能随背景开关漂移。
+    // Background-independent page table: the normalize table builds on it so the whole-screen
+    // pass lands on the same glyph ink whether or not a reading background is set.
     if (s_page_ready) return &s_page_waveform;
     const EpdWaveformPhases* base = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
     if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
@@ -156,6 +160,14 @@ const EpdWaveform* display_reader_page_waveform(void) {
     s_page_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_page_ready = true;
     return &s_page_waveform;
+}
+
+const EpdWaveform* display_reader_page_waveform(void) {
+    // 背景页统一走派生表：深色图形上的饱和往返更短，黑闪与扫描时长一起下降。
+    // Background pages always take the derivative: shorter saturation runs over dark
+    // graphics cut both the black flashing and the scan time.
+    if (app_settings_book_background_path()[0]) return display_reader_bg_waveform();
+    return display_reader_ink_waveform();
 }
 
 // 无背景的水波纹原表：构建逻辑保持不变，供 accessor 与背景派生表作基底。
@@ -228,6 +240,49 @@ static void bg_strip_dark_erase(int frames) {
     }
 }
 
+// 白列补强：基座拿的是原厂 18 拍白列，二次裁剪又削掉 3 拍，旧字转白只剩 15 拍，擦不净
+// 就留下淡灰字形。主页水波纹的 to=15 行是实屏验证过的 24 拍；按原形状（含中间保持）
+// 右对齐搬进来，只有短表放不下时才压掉中间保持相。
+// White-column boost: the base carries the vendor's 18 pushes and the second trim shaves
+// three more, leaving 15 to erase text to white -- too few, so glyphs stay pale gray. The
+// main water table's to=15 row is the panel-verified 24 pushes; move it in right-aligned
+// with its interior holds, compressing them only when the shorter table cannot take it.
+static void bg_boost_white_column(int frames) {
+    const EpdWaveformPhases* water = e0470_waveform_phases(display_main_water_waveform(), MODE_GL16);
+    if (!water || !water->luts || water->phases != E0470_GL16_FRAMES || water->phase_times) return;
+    const int limit = frames - BG_TRIM_HOLD;
+    if (limit <= 0) return;
+    for (int from = 0; from < 15; ++from) {
+        int first = -1, last = -1;
+        for (int f = 0; f < water->phases; ++f) {
+            if (!e0470_phase_action(water, f, 15, from)) continue;
+            if (first < 0) first = f;
+            last = f;
+        }
+        if (first < 0) continue;
+        for (int f = 0; f < frames; ++f) bg_set(f, 15, from, 0);
+        const int span = last - first + 1;
+        if (span <= limit) {
+            const int start = limit - span;
+            for (int i = 0; i < span; ++i)
+                bg_set(start + i, 15, from, e0470_phase_action(water, first + i, 15, from));
+            continue;
+        }
+        // 只留非零动作并右对齐；仍放不下就丢掉最早的白推，保留最靠近落位的部分。
+        // Keep only the non-zero actions, right-aligned; if still too long, drop the earliest
+        // pushes and keep the ones closest to the settle.
+        uint8_t seq[E0470_GL16_FRAMES];
+        int n = 0;
+        for (int f = first; f <= last; ++f) {
+            const int action = e0470_phase_action(water, f, 15, from);
+            if (action) seq[n++] = (uint8_t)action;
+        }
+        const int skip = n > limit ? n - limit : 0;
+        const int start = limit - (n - skip);
+        for (int i = skip; i < n; ++i) bg_set(start + i - skip, 15, from, seq[i]);
+    }
+}
+
 const EpdWaveform* display_reader_bg_waveform(void) {
     if (s_bg_ready) return &s_bg_waveform;
     const EpdWaveformPhases* base = e0470_waveform_phases(water_table(), MODE_GL16);
@@ -249,6 +304,7 @@ const EpdWaveform* display_reader_bg_waveform(void) {
     // differential never drives equal pairs; hold here the same way.
     for (int g = 0; g < 15; ++g)
         for (int f = 0; f < frames; ++f) bg_set(f, g, g, 0);
+    bg_boost_white_column(frames);
     s_bg_phases = (EpdWaveformPhases){.phases = frames, .luts = (const uint8_t*)s_bg_data, .phase_times = NULL};
     s_bg_ranges[0] = &s_bg_phases;
     s_bg_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;

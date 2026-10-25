@@ -10,16 +10,21 @@
  * saturated than the rest; a single restore cannot match it, so every glyph core on the page
  * runs the same cycle once more.
  *
- * 冻结：只改写 to=0 列；白列、灰阶行、相数与帧时序沿用阅读整页表（其灰阶行与原厂表
- * 逐相相同，所以首页、书架等页面的灰卡不受影响）。
- * Frozen: rewrite only the to=0 column; keep the reader page table's white column, gray
- * rows, phase count and frame timing (its gray rows match the vendor table phase for phase,
- * so gray cards on the home, shelf and settings pages are unaffected).
+ * 冻结：只改写 to=0 列与非黑相等对；白列与相数沿用那张与背景设置无关的阅读整页表，
+ * 基底不随阅读背景切换。哪个页面用哪张由调用方决定，本模块不读全局设置。
+ * Frozen: rewrite only the to=0 column and, for hold_gray, the non-black equal pairs; keep
+ * the background-independent reader page table's white column and phase count. The caller
+ * picks the variant; this module never reads the global setting.
  */
 #pragma once
 #include "epdiy.h"
+#include <stdbool.h>
 
-/// 归一表：任意起点的字芯都是「擦白 18 相 + 推黑 18 相」，其余目标同阅读整页表。
+/// 归一表：任意起点的字芯都是「擦白 18 相 + 推黑 18 相」，其余目标同基底整页表。
+/// hold_gray 为真时返回把非黑相等对清成保持的变体，整屏 pass 只重驱字芯——只有画面上
+/// 有阅读背景等图片灰阶时才该这样做；其余页面必须走完整归一。
 /// / Normalize table: every glyph core runs 18 erase phases then 18 black phases from any
-/// start; all other targets match the reader page table.
-const EpdWaveform* display_normalize_waveform(void);
+/// start; all other targets match the base page table. With hold_gray the variant holds
+/// non-black equal pairs so the pass re-drives only glyph cores; use it only when the frame
+/// carries picture grays such as a reading background. Every other page needs the full pass.
+const EpdWaveform* display_normalize_waveform(bool hold_gray);
