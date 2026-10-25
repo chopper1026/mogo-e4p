@@ -41,9 +41,37 @@
 #define BQ_REG_CURRENT 0x0C
 // StateOfCharge() 寄存器，地址按 TRM 复核。 / StateOfCharge() register; re-check the address against the TRM.
 #define BQ_REG_SOC 0x2C
+#define CX_REG_ICHG_LO 0x02
+#define CX_REG_ICHG_HI 0x03
+#define CX_REG_VREG_LO 0x04
+#define CX_REG_VREG_HI 0x05
+#define CX_REG_IINDPM_LO 0x06
+#define CX_REG_IINDPM_HI 0x07
+#define CX_REG_IPRECHG_LO 0x10
+#define CX_REG_IPRECHG_HI 0x11
+#define CX_REG_ITERM_LO 0x12
+#define CX_REG_ITERM_HI 0x13
+#define CX_REG_CHG_CTRL0 0x14
+#define CX_REG_CHG_TMR 0x15
+#define CX_REG_CHG_CTRL1 0x16
+#define CX_REG_CHG_CTRL3 0x18
 #define CX_REG_STATUS1 0x1E
-// STATUS1 判满编码，位义待手册核对。 / STATUS1 done code; verify the bits against the datasheet.
-#define CX_CHG_STAT_DONE 3
+#define CX_REG_PART_INFO 0x38
+#define CX_REG_UNLOCK 0x70
+// STATUS1 bits[4:3]：0 未充电/已满、1 涓流/预充/CC、2 恒压降流、3 top-off。
+// 编码取自原厂驱动 cx25601n.h（CX25601N_CHG_STAT_*）。
+// STATUS1 bits[4:3]: 0 not charging/full, 1 trickle/precharge/CC, 2 CV taper, 3 top-off.
+// The encoding comes from the vendor driver's cx25601n.h (CX25601N_CHG_STAT_*).
+#define CX_CHG_STAT_CC 1
+#define CX_CHG_STAT_CV 2
+#define CX_CHG_STAT_TOPOFF 3
+// 原厂板级默认快速充电 1000 mA（MetalioPower_Init 的 kDefaultIchgMa），输入限流同值，
+// 充电截止 4.4 V。不写这些寄存器时芯片停在上次遗留值，换电池/掉电后可能回落到默认档。
+// Vendor board default fast charge is 1000 mA (MetalioPower_Init's kDefaultIchgMa), the
+// input limit follows it and VREG is 4.4 V. Without these writes the chip keeps whatever
+// an earlier firmware left behind and can fall back to its power-on defaults.
+#define CX_CHG_ICHG_MA 1000
+#define CX_CHG_VREG_MV 4400
 
 #define PCF_REG_SECONDS 0x02
 #define PCF_BIT_VL 0x80
@@ -110,6 +138,123 @@ static esp_err_t add_dev(uint8_t addr, i2c_master_dev_handle_t* out) {
     return i2c_master_bus_add_device(s_bus, &cfg, out);
 }
 
+/* ---- CX25601N 充电配置 / CX25601N charger setup ---- */
+
+// 位域更新沿用原厂驱动的语义：mask 是字段宽度，shift 是字段起始位。
+// Field update with the vendor driver's semantics: mask is the field width, shift its start bit.
+static esp_err_t cx_update_bits(uint8_t reg, uint8_t mask, uint8_t shift, uint8_t field) {
+    if (s_cx == NULL) return ESP_ERR_INVALID_STATE;
+    uint8_t cur = 0;
+    esp_err_t err = dev_read(s_cx, reg, &cur, 1);
+    if (err != ESP_OK) return err;
+    const uint8_t m = (uint8_t)(mask << shift);
+    cur = (uint8_t)((cur & (uint8_t)~m) | ((field << shift) & m));
+    return dev_write(s_cx, reg, &cur, 1);
+}
+
+// 充电截止电压，10 mV 一档：低 5 位在 0x04[7:3]，高 4 位在 0x05[3:0]。
+// Charge regulation in 10 mV steps: low 5 bits in 0x04[7:3], high 4 in 0x05[3:0].
+static esp_err_t cx_set_vreg_mv(uint32_t mv) {
+    if (mv < 3840) mv = 3840;
+    if (mv > 4800) mv = 4800;
+    const uint32_t code = mv / 10;
+    esp_err_t err = cx_update_bits(CX_REG_VREG_LO, 0x1F, 3, (uint8_t)(code & 0x1F));
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_VREG_HI, 0x0F, 0, (uint8_t)((code >> 5) & 0x0F));
+    return err;
+}
+
+// 充电电流 80 mA 一档，并像原厂一样把输入限流（20 mA 一档）设成同一个值。
+// Charge current in 80 mA steps; the input limit (20 mA steps) follows it as the vendor does.
+static esp_err_t cx_set_ichg_ma(uint32_t ma) {
+    if (ma < 80) ma = 80;
+    if (ma > 3040) ma = 3040;
+    const uint32_t in_ma = ma < 100 ? 100 : (ma > 3000 ? 3000 : ma);
+    const uint32_t icode = ma / 80;
+    const uint32_t pcode = in_ma / 20;
+    esp_err_t err = cx_update_bits(CX_REG_ICHG_LO, 0x03, 6, (uint8_t)(icode & 0x03));
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_ICHG_HI, 0x0F, 0, (uint8_t)((icode >> 2) & 0x0F));
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_IINDPM_LO, 0x0F, 4, (uint8_t)(pcode & 0x0F));
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_IINDPM_HI, 0x0F, 0, (uint8_t)((pcode >> 4) & 0x0F));
+    return err;
+}
+
+// 私有寄存器区：按原厂顺序解锁（0x70 写 00/50/57/44，直到读回 0x03）。
+// Private block: unlock in the vendor's order (0x70 = 00/50/57/44 until it reads back 0x03).
+static void cx_unlock_private(void) {
+    for (int i = 0; i < 10; i++) {
+        static const uint8_t seq[] = {0x00, 0x50, 0x57, 0x44};
+        for (size_t k = 0; k < sizeof(seq); k++) {
+            dev_write(s_cx, CX_REG_UNLOCK, &seq[k], 1);
+        }
+        uint8_t v = 0;
+        if (dev_read(s_cx, CX_REG_UNLOCK, &v, 1) == ESP_OK && v == 0x03) return;
+    }
+    ESP_LOGW(TAG, "CX25601N private unlock failed");
+}
+
+// 照搬原厂 hw_init_defaults()：关 DPDM 探测和看门狗，预充/终止用原厂码值，VREG 4.4 V，
+// 充电与输入限流 1 A，充电期间不自动终止（原厂监控任务在 VBAT<VREG 时的稳态），最后开 EN_CHG。
+// Mirrors the vendor hw_init_defaults(): DPDM probing and the watchdog stay off, precharge and
+// termination keep the vendor codes, VREG is 4.4 V, charge and input limit are 1 A, termination
+// stays disabled (the vendor monitor's steady state while VBAT < VREG), then EN_CHG is set.
+static esp_err_t cx_charger_setup(void) {
+    if (s_cx == NULL) return ESP_ERR_INVALID_STATE;
+    uint8_t part = 0;
+    esp_err_t err = dev_read(s_cx, CX_REG_PART_INFO, &part, 1);
+    if (err != ESP_OK) return err;
+
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_TMR, 0x01, 6, 0);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 4, 0);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x03, 0, 0);
+    // 预充与终止电流沿用原厂码值，单位未公开。
+    // Precharge and termination keep the vendor codes; their units are not public.
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_IPRECHG_LO, 0x0F, 4, 0x0C);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_IPRECHG_HI, 0x01, 0, 0x00);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_ITERM_LO, 0x1F, 3, 0x06);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_ITERM_HI, 0x01, 0, 0x00);
+    if (err == ESP_OK) err = cx_set_vreg_mv(CX_CHG_VREG_MV);
+    if (err == ESP_OK) err = cx_set_ichg_ma(CX_CHG_ICHG_MA);
+    if (err != ESP_OK) return err;
+
+    // 私有区三个值只由原厂驱动写入，含义未公开，照抄。
+    // The three private values are written only by the vendor driver; their meaning is undocumented.
+    cx_unlock_private();
+    const uint8_t v86 = 0x06, v3a = 0x10, v46 = 0x20, zero = 0x00;
+    dev_write(s_cx, 0x86, &v86, 1);
+    dev_write(s_cx, 0x3A, &v3a, 1);
+    dev_write(s_cx, 0x46, &v46, 1);
+    dev_write(s_cx, CX_REG_UNLOCK, &zero, 1);
+
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 0, 1);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 2, 0);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL3, 0x01, 2, 0);
+    if (err == ESP_OK) err = cx_update_bits(0x1A, 0x01, 7, 1);
+    if (err == ESP_OK) err = cx_update_bits(0x23, 0x07, 2, 0x07);
+    if (err == ESP_OK) err = cx_update_bits(0x24, 0x01, 3, 1);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 1);
+
+    // 回读配置：串口一眼能看出快充有没有写进去。
+    // Read the configuration back so the serial log shows whether fast charge took effect.
+    uint8_t lo = 0, hi = 0;
+    long ichg_ma = -1, iindpm_ma = -1, vreg_mv = -1;
+    if (dev_read(s_cx, CX_REG_ICHG_LO, &lo, 1) == ESP_OK &&
+        dev_read(s_cx, CX_REG_ICHG_HI, &hi, 1) == ESP_OK) {
+        ichg_ma = (long)((((lo >> 6) & 0x03) | ((hi & 0x0F) << 2)) * 80);
+    }
+    if (dev_read(s_cx, CX_REG_IINDPM_LO, &lo, 1) == ESP_OK &&
+        dev_read(s_cx, CX_REG_IINDPM_HI, &hi, 1) == ESP_OK) {
+        iindpm_ma = (long)((((lo >> 4) & 0x0F) | ((hi & 0x0F) << 4)) * 20);
+    }
+    if (dev_read(s_cx, CX_REG_VREG_LO, &lo, 1) == ESP_OK &&
+        dev_read(s_cx, CX_REG_VREG_HI, &hi, 1) == ESP_OK) {
+        vreg_mv = (long)((((lo >> 3) & 0x1F) | ((hi & 0x0F) << 5)) * 10);
+    }
+    ESP_LOGI(TAG, "CX25601N part=0x%02X ichg=%ldmA iindpm=%ldmA vreg=%ldmV (%s)", part,
+             ichg_ma, iindpm_ma, vreg_mv, err == ESP_OK ? "ok" : esp_err_to_name(err));
+    return err;
+}
+
+
 static esp_err_t bq_read_voltage(uint16_t* mv) {
     uint8_t b[2] = {0};
     esp_err_t err = dev_read(s_bq, BQ_REG_VOLTAGE, b, sizeof(b));
@@ -129,7 +274,14 @@ static esp_err_t bq_read_current(int16_t* ma) {
 /* ---- 电池滤波状态机 / Battery filter ---- */
 
 // 滤波参数：真机日志（batt: ...）校准后可调。 / Filter tunables; calibrate from the "batt:" logs.
-#define BATT_R_MOHM 100                  // 电池内阻估计。 / Estimated pack resistance.
+// 电池内阻：2026-10-25 卡上日志 13 次充放电切换（60 s 采样、ΔI≥80 mA）中位 180 mΩ。
+// 原 100 mΩ 补偿不足，拔掉充电器那一分钟负载压降只补了一半，满电显示瞬间掉 3%。
+// 取该组中位；实测区间 160–216 mΩ，等更长放电日志再复核。
+// Pack resistance: the 2026-10-25 card log's 13 charge/discharge switches (60 s samples,
+// ΔI ≥ 80 mA) median 180 mΩ. The old 100 mΩ under-compensated the load step, so the full
+// display fell 3% in the first minute off the charger. This takes that median; the measured
+// range was 160–216 mΩ, to be re-checked against a longer discharge log.
+#define BATT_R_MOHM 180
 #define BATT_COMP_CAP_MV 150             // 负载补偿上限。 / Load compensation cap.
 #define BATT_EMA_TAU_MS 25000            // 电压 EMA 时间常数。 / Voltage EMA time constant.
 #define BATT_DEADBAND_PERMILLE 10        // 差距小于 1% 不动显示。 / Ignore sub-1% movement.
@@ -137,10 +289,10 @@ static esp_err_t bq_read_current(int16_t* ma) {
 #define BATT_MIN_STEP_INTERVAL_MS 10000  // 两次可见变化至少隔 10 s。 / Steps sit at least 10 s apart.
 #define BATT_RESTORE_TOL_PERMILLE 150    // 开机恢复容差。 / Boot-restore tolerance.
 #define BATT_DONE_MIN_MV 4300            // 判满电压门槛，防状态位误判。 / Voltage gate for the done snap.
-// 涓流判满：2026-10-25 真机在 0 mA 电流下 CX 仍报快充码 2、done 位不置位，done
-// 路径可能永不触发；高电压下持续近零电流即视为充满。
-// Taper-full: on-device 2026-10-25 the CX kept reporting the fast-charge code at
-// 0 mA with the done bit clear, so the done path may never fire; sustained
+// 涓流判满：原厂在充电期间关掉终止，STATUS1 停在恒压码 2，top-off 码 3 不会出现，
+// done 路径可能永不触发；高电压下持续近零电流即视为充满。
+// Taper-full: the vendor keeps termination off while charging, so STATUS1 stays on the CV
+// code 2 and the top-off code 3 never appears; the done path may never fire, so sustained
 // near-zero current at a high voltage counts as full.
 #define BATT_FULL_MV 4360                // 涓流判满的电压门槛。 / Voltage gate for the taper-full call.
 #define BATT_FULL_MA 25                  // 高于该正向电流视为还在真充电。 / Above this positive current the pack is still really charging.
@@ -152,11 +304,18 @@ static esp_err_t bq_read_current(int16_t* ma) {
 // serial and card carry the same line.
 #define BATT_LOG_PATH "/sdcard/batt.log"
 
-// 4.4 V 高压电池初始 OCV-SOC 锚点（mV → ‰），mV 降序；满充静置锚点待真机日志校准。
-// Initial OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV;
-// the full-rest anchor awaits calibration from on-device logs.
+// 4.4 V 高压电池 OCV-SOC 锚点（mV → ‰），mV 降序。2026-10-25 卡上日志实测充满平台
+// 4374–4385 mV（289 点、|I|≤15 mA，中位 4379、免载最高 4385）：原 4400 mV 锚点不可达，
+// 曲线满电只算到 98%，再被涓流判满硬拉到 100%，形成 2% 跳变。顶锚点改为 4380 mV。
+// 4.30 V 以下日志没有放电数据，低段锚点保持原值，等一次完整放电再校准。
+// OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV. The
+// 2026-10-25 card log measured a full-charge plateau of 4374–4385 mV (289 samples,
+// |I| ≤ 15 mA, median 4379, 4385 unloaded max): the old 4400 mV anchor was unreachable, so
+// the curve topped out near 98% and the taper-full snap pulled it to 100% as a 2% jump.
+// The top anchor is now 4380 mV. The log has no discharge below 4.30 V, so the low anchors
+// stay as-is until a full discharge is captured.
 static const int32_t s_soc_curve[][2] = {
-    {4400, 1000}, {4300, 900}, {4200, 800}, {4100, 680}, {4000, 560},
+    {4380, 1000}, {4300, 900}, {4200, 800}, {4100, 680}, {4000, 560},
     {3900, 450},  {3800, 340}, {3700, 230}, {3600, 140}, {3500, 80},
     {3400, 40},   {3300, 0},
 };
@@ -458,7 +617,7 @@ static void poll_battery(void) {
     } else {
         charging = false;
     }
-    const bool charge_done_cx = have_chg && chg_stat == CX_CHG_STAT_DONE;
+    const bool charge_done_cx = have_chg && chg_stat == CX_CHG_STAT_TOPOFF;
     // 涓流判满兜底：CX 在零电流下也不报 done（见 BATT_FULL_* 注释），高电压持续
     // 近零电流同样进入滤波的判满对齐。
     // Taper-full fallback: the CX never reports done even at zero current (see
@@ -531,6 +690,13 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle,
     (void)add_dev(BQ27220_ADDR, &s_bq);
     (void)add_dev(CX25601N_ADDR, &s_cx);
     (void)add_dev(PCF8563_ADDR, &s_rtc);
+
+    // 充电芯片按原厂配置写一次（1 A 快充、4.4 V 截止）；失败不阻塞 PMU，充电按遗留值继续。
+    // Configure the charger once with the vendor defaults (1 A fast charge, 4.4 V regulation);
+    // a failure never blocks the PMU and charging continues on whatever the chip holds.
+    if (s_cx != NULL && cx_charger_setup() != ESP_OK) {
+        ESP_LOGW(TAG, "CX25601N setup incomplete; charge registers keep previous values");
+    }
 
     s_snap.present = s_bq != NULL || s_cx != NULL || s_rtc != NULL;
     s_snap.identity_ok = s_snap.present;

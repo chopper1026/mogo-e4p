@@ -96,8 +96,8 @@ int main(void) {
  assert(s_mv>=3899 && s_mv<=3901);
  // 8) 负载补偿方向与封顶 / load compensation direction and cap
  reset(); step(0, 3800, 3000, true, false, false, -1); assert(s_mv==3950);
- reset(); step(0, 3800, 800, true, false, false, -1);  assert(s_mv==3880);
- reset(); step(0, 3800, 800, true, true, false, -1);   assert(s_mv==3720);
+ reset(); step(0, 3800, 800, true, false, false, -1);  assert(s_mv==3944);
+ reset(); step(0, 3800, 800, true, true, false, -1);   assert(s_mv==3656);
  // 9) 涓流判满 / taper-full
  s_since=-1;
  assert(full(0,4380,0,true,false)==false);              // 立即不算满 / not full instantly
@@ -122,12 +122,20 @@ int main(void) {
  // 显示对齐 100% / taper-full through the whole filter: done stays false inside the
  // window, the poll side feeds done=true once it completes, and the display snaps
  reset();
- step(0, 4380, 10, true, true, false, -1);
- step(299999999, 4380, 10, true, true, false, -1);
+ step(0, 4370, 10, true, true, false, -1);
+ step(299999999, 4370, 10, true, true, false, -1);
  assert(s_pm<1000);
- step(300000000, 4380, 10, true, true, true, -1);
+ step(300000000, 4370, 10, true, true, true, -1);
  assert(s_pm==1000);
- puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence, load compensation and taper-full");
+ // 10) 满电平台与拔线瞬间（2026-10-25 卡上日志）
+ // Full plateau and the unplug instant (2026-10-25 card log)
+ reset(); step(0, 4374, 0, false, false, false, -1); assert(s_pm>=990);   // 平台下沿 / plateau low edge
+ reset(); step(0, 4380, 5, true, false, false, -1);  assert(s_pm>=990);   // 平台中位 / plateau median
+ reset(); step(0, 4380, 10, true, true, false, -1);  assert(s_pm>=990);   // 涓流窗口内 / inside the taper window
+ reset(); step(0, 4382, 8, true, true, true, -1);    assert(s_pm==1000);  // 判满 / full
+ step(60000000, 4351, -186, true, false, false, -1); assert(s_pm==1000); // 拔线第一分钟不掉 / stays full off the charger
+ step(120000000, 4345, -96, true, false, false, -1); assert(s_pm>=970);  // 之后随负载电压缓降 / then eases down under load
+ puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence, load compensation, taper-full and the full-charge plateau");
 }
 '''
     (p/'test.c').write_text(code)
