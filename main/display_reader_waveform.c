@@ -25,12 +25,29 @@
  * black saturation run. All three reader tables now restore the vendor's 18 consecutive
  * black pushes for to=0 by reusing that row's leading holds, leaving table length and turn
  * time unchanged; water keeps its own table with the vendor leading erase and white column.
+ * 用户 2026-10-25 续定：背景页用一张更深裁的派生表（擦除/白黑饱和再收，to=0 增黑保留），
+ * 两个 accessor 在设置了阅读背景时自动切换；参数按残影与文字黑度上机回调。
+ * User follow-up of 2026-10-25: background pages use a deeper-trimmed derivative (erase and
+ * both saturation runs trimmed again, to=0 boost kept); the two accessors switch to it
+ * automatically while a reading background is set; tune the numbers on hardware against
+ * ghosting and text blackness.
  */
 #include "display_reader_waveform.h"
 #include "display_main_waveform.h"
 #include "e0470_epaper_waveform.h"
+#include "e0470_waveform_trim.h"
+#include "settings.h"
+#include "esp_log.h"
 #include <stdbool.h>
 #include <string.h>
+
+// 背景页二次裁剪参数：在 37 相水波纹表上再收余量，目标 28 相上下。
+// Second-pass trim for background pages: shave more slack off the 37-phase water table,
+// aiming for roughly 28 phases.
+#define BG_TRIM_ERASE_MAX 7
+#define BG_TRIM_SAT_CUT 4
+#define BG_TRIM_WHITE_SAT_CUT 3
+#define BG_TRIM_HOLD 3
 
 static uint8_t s_data[E0470_GL16_FRAMES][16][4];
 static const EpdWaveformPhases s_phases = {E0470_GL16_FRAMES, (const uint8_t*)s_data, NULL};
@@ -55,6 +72,16 @@ static const EpdWaveformMode s_water_mode = {5, 1, s_water_ranges};
 static const EpdWaveformMode* s_water_modes[] = {&s_water_mode};
 static EpdWaveform s_water_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_water_modes};
 static bool s_water_ready;
+
+// 背景页派生表：相数运行时定，结构与上面三张同构。
+// Background derivative: the phase count lands at runtime; the structure mirrors the three above.
+static uint8_t s_bg_data[E0470_GL16_FRAMES][16][4];
+static EpdWaveformPhases s_bg_phases;
+static const EpdWaveformPhases* s_bg_ranges[1];
+static const EpdWaveformMode s_bg_mode = {5, 1, s_bg_ranges};
+static const EpdWaveformMode* s_bg_modes[] = {&s_bg_mode};
+static EpdWaveform s_bg_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_bg_modes};
+static bool s_bg_ready;
 
 // E4P 原厂 GL16 的白饱和不足：大片旧文字转白后会在数秒内回灰。主页水波纹已验证
 // 把全部剩余相用作同向擦白可以消除；这里只替换 to=15 一列，其余迁移和帧时序不动。
@@ -115,6 +142,10 @@ const EpdWaveform* display_reader_text_waveform(void) {
 }
 
 const EpdWaveform* display_reader_page_waveform(void) {
+    // 背景页统一走派生表：深色图形上的饱和往返更短，黑闪与扫描时长一起下降。
+    // Background pages always take the derivative: shorter saturation runs over dark
+    // graphics cut both the black flashing and the scan time.
+    if (app_settings_book_background_path()[0]) return display_reader_bg_waveform();
     if (s_page_ready) return &s_page_waveform;
     const EpdWaveformPhases* base = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
     if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
@@ -127,7 +158,10 @@ const EpdWaveform* display_reader_page_waveform(void) {
     return &s_page_waveform;
 }
 
-const EpdWaveform* display_reader_water_waveform(void) {
+// 无背景的水波纹原表：构建逻辑保持不变，供 accessor 与背景派生表作基底。
+// The no-background water table: the build stays as-is, serving the accessor and as the
+// base of the background derivative.
+static const EpdWaveform* water_table(void) {
     if (s_water_ready) return &s_water_waveform;
     const EpdWaveformPhases* base = e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16);
     if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
@@ -139,4 +173,90 @@ const EpdWaveform* display_reader_water_waveform(void) {
     s_water_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_water_ready = true;
     return &s_water_waveform;
+}
+
+// 深色对上限：from 与 to 都不超过该值视为「深底上的文字迁移」，剥离前导擦白。
+// Dark-pair ceiling: a pair with both from and to at or below it counts as text moving
+// over dark art and gets its leading white erase stripped.
+#define BG_DARK_MAX 7
+
+// 表字节布局与裁表工具一致：data[frame][to][from/4]，每字节高位起 4 个 2bit 动作。
+// Same byte layout as the trim tool: data[frame][to][from/4], four 2-bit actions MSB-first.
+static int bg_get(int f, int to, int from) {
+    return (s_bg_data[f][to][from / 4] >> (6 - 2 * (from % 4))) & 3;
+}
+static void bg_set(int f, int to, int from, int v) {
+    const int shift = 6 - 2 * (from % 4);
+    s_bg_data[f][to][from / 4] =
+        (uint8_t)((s_bg_data[f][to][from / 4] & ~(3u << shift)) | ((unsigned)v << shift));
+}
+
+// 原厂对深色对的骨架是「先冲白轨擦除、再压黑轨饱和、灰尾落位」——深底图片上的
+// 文字足迹每次翻页都整段白→黑往返，这就是黑闪。对角迁移（白→黑）没有擦除、直接
+// 单调推：把深色对的前导擦白整段剥掉，只留「黑饱和 + 灰尾」右对齐，迁移变成与
+// 文字落黑同向的变暗脉冲，不再有对比频闪；灰阶终点仍由原厂灰尾保证。
+// The vendor skeleton for dark pairs is "erase to the white rail, saturate to the black
+// rail, settle on the gray tail" -- every text footprint over dark art makes that full
+// white-to-black round trip each turn, which is the black flashing. Diagonal moves
+// (white-to-black) carry no erase and push monotonically: strip the leading white erase
+// from dark pairs and keep only [black saturation + gray tail] right-aligned, turning the
+// move into a darkening pulse in the same direction the text lands, with no contrast
+// strobe; the vendor gray tail still ends on the exact target.
+static void bg_strip_dark_erase(int frames) {
+    uint8_t kept[E0470_GL16_FRAMES];
+    for (int to = 0; to <= BG_DARK_MAX; ++to) {
+        for (int from = 0; from <= BG_DARK_MAX; ++from) {
+            if (from == to) continue;
+            int a = 0;
+            while (a < frames && !bg_get(a, to, from)) ++a;
+            if (a >= frames || bg_get(a, to, from) != 2) continue;  // 无前导擦白则不动。/ Skip without a leading white run.
+            int z = frames;
+            while (z > a && !bg_get(z - 1, to, from)) --z;
+            int e = a;
+            while (e < z && bg_get(e, to, from) == 2) ++e;
+            int len = z - e, start = frames - BG_TRIM_HOLD - len;
+            if (start < a) {  // 剥离后仍超窗则再截头，保住结尾保持相。/ Still too long: cut more head, keep the trailing holds.
+                start = a;
+                len = frames - BG_TRIM_HOLD - start;
+                e = z - len;
+                if (len <= 0) continue;
+            }
+            for (int i = 0; i < len; ++i) kept[i] = (uint8_t)bg_get(e + i, to, from);
+            for (int f = 0; f < frames; ++f) bg_set(f, to, from, 0);
+            for (int i = 0; i < len; ++i) bg_set(start + i, to, from, kept[i]);
+        }
+    }
+}
+
+const EpdWaveform* display_reader_bg_waveform(void) {
+    if (s_bg_ready) return &s_bg_waveform;
+    const EpdWaveformPhases* base = e0470_waveform_phases(water_table(), MODE_GL16);
+    if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
+        return water_table();
+    // 再裁一轮擦除与白/黑饱和；to=0 仍补 18 连推，文字黑度不减。
+    // A second trim of erase and both saturation runs; to=0 keeps the 18-push boost so
+    // text blackness does not regress.
+    const e0470_trim_t trim = {BG_TRIM_ERASE_MAX, BG_TRIM_SAT_CUT, BG_TRIM_WHITE_SAT_CUT, BG_TRIM_HOLD};
+    const int frames = e0470_waveform_trim(base, &trim, s_bg_data);
+    if (!frames) return water_table();
+    e0470_boost_black_column(s_bg_data, frames);
+    bg_strip_dark_erase(frames);
+    // 黑闪主体在相等对：原厂表里除纯白外的 (g,g) 都带完整擦白+推黑，而条带整带标脏，
+    // 深色图形的每个未变化像素都被推一遍白黑往返。差分路径从不驱动相等对，这里同样置保持。
+    // The bulk of the flashing lives on equal pairs: every vendor (g,g) except pure white
+    // carries a full white-then-black run, and the ripple dirties whole bands, so every
+    // unchanged pixel of a dark graphic is driven through that excursion. The ordinary
+    // differential never drives equal pairs; hold here the same way.
+    for (int g = 0; g < 15; ++g)
+        for (int f = 0; f < frames; ++f) bg_set(f, g, g, 0);
+    s_bg_phases = (EpdWaveformPhases){.phases = frames, .luts = (const uint8_t*)s_bg_data, .phase_times = NULL};
+    s_bg_ranges[0] = &s_bg_phases;
+    s_bg_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_bg_ready = true;
+    ESP_LOGI("reader_wf", "background table frames=%d", frames);
+    return &s_bg_waveform;
+}
+
+const EpdWaveform* display_reader_water_waveform(void) {
+    return app_settings_book_background_path()[0] ? display_reader_bg_waveform() : water_table();
 }

@@ -94,7 +94,7 @@ One file, one `app_desc_t`. Order matches `app_registry.c`.
 | `app_font_pick.c` | 卡上 TTF 列表与字重。/ Font picker. | `ttf_font` |
 | `app_ioe.c` | FCA9555 Port-0。/ Expander pins. | `fca9555` |
 | `app_selftest.c` | 设备功能自检入口。/ Device self-test UI. | `pmu_selftest` |
-| `app_book.c` | TXT / EPUB 书架、目录、字号与逐书进度与 TF 阅读背景。/ TXT / EPUB shelf, TOC, size, progress and SD reading backgrounds. | `book_*`, `ttf_font` |
+| `app_book.c` | TXT / EPUB 书架、目录、字号与逐书进度；阅读背景只绘制，选择入口在设置页。/ TXT / EPUB shelf, TOC, size and progress; backgrounds are painted here but picked in Settings. | `book_*`, `ttf_font` |
 | `app_image.c` | 内置灰阶图与 TF 卡 JPG/PNG 图片对比。/ Built-in gray chart and SD JPG/PNG image comparison. | `book_cover`, `read_pico_sd` |
 | `app_transfer.c` | 设备热点/已有 WiFi 传 TXT/EPUB，触屏/网页配网与热点二维码，离页停止；停止按钮返回进入前的位置。/ AP/STA upload with touchscreen/web provisioning and hotspot QR; stops and returns to the entry origin. | `read_pico_transfer`, `book_store` |
 

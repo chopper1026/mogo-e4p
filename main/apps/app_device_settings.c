@@ -25,6 +25,11 @@
  * User revision: maintenance keeps only backup/restore and panel repair; the BOOT flashing entry is withdrawn.
  * 用户新增：个性化功能新增「触摸震动」入口，页内包含开关与强度档位，打开或改档即时震一记作预览。
  * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
+ * 用户 2026-10-25 新增：个性化功能在触摸震动下方新增「阅读背景」入口；列表加预览对齐壁纸选择，
+ * 解码延迟到 tick，入口自阅读器迁出后旧面板删除。
+ * User addition of 2026-10-25: personalization gains a Reading background entry under Touch
+ * vibration; list-plus-preview mirrors the wallpaper picker, decoding defers to the tick, and the
+ * reader's retired panel is deleted now that the entry lives here.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +65,7 @@
 #include "ui_keyboard.h"
 #include "ui_nav.h"
 #include "ui_wallpaper.h"
+#include "ui_reader_background.h"
 #include "ui_avatar.h"
 #include "read_pico_search.h"
 #include "book_store.h"
@@ -92,6 +98,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_TIME_EDIT, SETTINGS_SHELF_STYLE, SETTINGS_SYSTEM_FONT,
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
                SETTINGS_WALLPAPER, SETTINGS_WALLPAPER_PREVIEW,
+               SETTINGS_READING_BG, SETTINGS_READING_BG_PREVIEW,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_HAPTIC,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
@@ -324,7 +331,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
-#define SETTINGS_PERSONAL_ROWS 5
+#define SETTINGS_PERSONAL_ROWS 6
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
 #define SETTINGS_MAINTENANCE_ROWS 2
@@ -405,6 +412,11 @@ static bool wallpapers_alloc(void) {
 static int s_wallpaper_count;
 static int s_wallpaper_selected;
 static bool s_wallpaper_confirm, s_wallpaper_preview_ok;
+// 阅读背景选择：预览解码延迟到 tick，ready 只在解码成功后置位，notice 兼作列表页反馈行。
+// Reading-background picker: preview decoding defers to the tick, ready is set only after a
+// successful decode, and notice doubles as the list page's feedback line.
+static bool s_reading_bg_confirm, s_reading_bg_ready, s_reading_bg_pending;
+static char s_reading_bg_notice[96];
 static bool s_bookmark_picker;
 static uint8_t *s_bookmark_preview;
 static uint8_t *s_bookmark_preview_base;
@@ -456,6 +468,16 @@ static void wallpaper_scan(void) {
     wallpaper_scan_dir("/sdcard/pictures");
     wallpaper_scan_dir("/sdcard/images");
     wallpaper_scan_dir("/sdcard");
+}
+// 阅读背景的保存只接受 /sdcard/pictures 前缀，列表就不得显示其它目录，否则点了也存不上。
+// The reading-background setter accepts only the /sdcard/pictures prefix, so the list must not
+// offer other folders; picking one would fail to persist.
+static void reading_bg_scan(void) {
+    s_wallpaper_count = s_wallpaper_page = 0;
+    wallpaper_scan_dir("/sdcard/pictures");
+    s_wallpaper_selected = 0;
+    for (int i = 0; i < s_wallpaper_count; ++i)
+        if (!strcmp(s_wallpapers[i].path, app_settings_book_background_path())) s_wallpaper_selected = i;
 }
 
 
@@ -810,6 +832,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
         UI_ICON_VIBRATE,           // 18 触摸震动 / touch vibration
+        UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1186,6 +1209,69 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_READING_BG) {
+        back_header(fb, "阅读背景");
+        section(fb, 244, "TF 卡 pictures · JPG / PNG · 不超过 50 MB");
+        if (!s_wallpaper_count)
+            ui_text(fb, 54, 325, 25, "未找到图片，请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
+        // 7 行/页给底部的关闭按钮留位；壁纸列表的 8 行版式不放按钮。
+        // Seven rows per page leave room for the bottom close button; the wallpaper list has
+        // no button and keeps eight.
+        for (int i = 0; i < 7; ++i) {
+            int index = s_wallpaper_page * 7 + i;
+            if (index >= s_wallpaper_count) break;
+            EpdRect box = {36, 292 + i * 92, 612, 78};
+            bool active = !strcmp(s_wallpapers[index].path, app_settings_book_background_path());
+            settings_card(fb, box, 18, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[index].name);
+            fit_value(name, 490);
+            ui_text_vc(fb, 60, box.y + 39, 24, name, EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 39, 6, UI_GRAY_BLACK, fb);
+        }
+        ui_draw_button(fb, (EpdRect){36, 956, 612, 76}, "关闭阅读背景 · 恢复白底", false);
+        if (s_reading_bg_notice[0])
+            ui_text_vc(fb, 342, 1062, 21, s_reading_bg_notice, EPD_DRAW_ALIGN_CENTER, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
+    if (s_page == SETTINGS_READING_BG_PREVIEW) {
+        back_header(fb, "预览阅读背景");
+        EpdRect image = {166, 194, 352, 626};
+        ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
+        if (s_reading_bg_ready) ui_reader_background_paint(fb, image, false);
+        ui_draw_round_rect(fb, image, 8, 0x70);
+        if (!s_reading_bg_ready)
+            ui_text_vc(fb, 342, 507, 23, s_reading_bg_pending ? "正在加载预览…" :
+                (s_reading_bg_notice[0] ? s_reading_bg_notice : "正在加载预览…"),
+                EPD_DRAW_ALIGN_CENTER, false);
+        if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
+            char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[s_wallpaper_selected].name);
+            fit_value(name, 570);
+            ui_text_vc(fb, 342, 859, 24, name, EPD_DRAW_ALIGN_CENTER, false);
+            char position[40];
+            snprintf(position, sizeof(position), "%d / %d · 上下滑动切换", s_wallpaper_selected + 1, s_wallpaper_count);
+            ui_text_vc(fb, 342, 908, 20, position, EPD_DRAW_ALIGN_CENTER, false);
+        }
+        if (s_reading_bg_ready) {
+            EpdRect button = {94, 962, 496, 70};
+            ui_fill_round_rect(fb, button, 22, 0x30);
+            ui_text_vc(fb, 342, 997, 25, "使用阅读背景", EPD_DRAW_ALIGN_CENTER, true);
+        }
+        if (s_reading_bg_confirm) {
+            EpdRect dialog = {68, 435, 548, 306};
+            ui_fill_round_rect(fb, dialog, 26, UI_GRAY_WHITE);
+            ui_draw_control_frame(fb, dialog, 26, 0x50);
+            ui_text_vc(fb, 342, 503, 31, "使用阅读背景？", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_vc(fb, 342, 565, 20, "确认后，阅读正文以它为底，文字自动加深", EPD_DRAW_ALIGN_CENTER, false);
+            EpdRect cancel = {94, 643, 232, 68}, confirm = {358, 643, 232, 68};
+            ui_fill_round_rect(fb, cancel, 18, 0xe0);
+            ui_fill_round_rect(fb, confirm, 18, 0x30);
+            ui_text_vc(fb, 210, 677, 24, "取消", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_vc(fb, 474, 677, 24, "确认", EPD_DRAW_ALIGN_CENTER, true);
+        }
+        ui_nav_draw(fb, 3);
+        return;
+    }
     if (s_page == SETTINGS_TIME) {
         back_header(fb, "日期与时间");
         time_t now = time(NULL);
@@ -1483,17 +1569,22 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","触摸震动"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","触摸震动","阅读背景"};
     char haptic_value[24];
     if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),"不支持");
     else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),"关闭");
     else snprintf(haptic_value,sizeof(haptic_value),"开启 · %s",
         app_settings_haptic_intensity()==APP_HAPTIC_STRONG?"强":
         app_settings_haptic_intensity()==APP_HAPTIC_MEDIUM?"中":"弱");
+    char background_value[96];
+    const char *background_path=app_settings_book_background_path();
+    const char *background_base=background_path[0]?strrchr(background_path,'/'):NULL;
+    snprintf(background_value,sizeof(background_value),"%s",
+        background_path[0]?(background_base?background_base+1:background_path):"无");
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value};
-    const int personal_icons[]={4,5,16,10,18};
+        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value};
+    const int personal_icons[]={4,5,16,10,18,19};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"保存与恢复","屏幕修复"};
@@ -1625,6 +1716,18 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             free(preview);
         }
         return APP_REDRAW_NONE;
+    }
+
+    // 阅读背景预览：解码上限 50 MB，只能放 tick 里做，render 只画缓存。
+    // Reading-background preview: decoding reads up to 50 MB, so it runs here; render paints
+    // the cache only.
+    if (s_reading_bg_pending && s_page == SETTINGS_READING_BG_PREVIEW) {
+        s_reading_bg_pending = false;
+        s_reading_bg_ready = s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count &&
+            ui_reader_background_prepare(s_wallpapers[s_wallpaper_selected].path);
+        if (!s_reading_bg_ready)
+            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "图片无法解码或内存不足，请换一张");
+        return APP_REDRAW_PAGE;
     }
 
     if (s_page == SETTINGS_TEXT_EDIT) {
@@ -1934,11 +2037,24 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_wallpaper_page = next / 8;
         return APP_REDRAW_PAGE;
     }
-    if ((s_page == SETTINGS_SYSTEM_FONT || s_page == SETTINGS_WALLPAPER) &&
+    if (s_page == SETTINGS_READING_BG_PREVIEW && !s_reading_bg_confirm &&
+        (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
+        int next = s_wallpaper_selected + (ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
+        if (next < 0 || next >= s_wallpaper_count) return APP_REDRAW_NONE;
+        s_wallpaper_selected = next;
+        s_wallpaper_page = next / 7;
+        // 换图要重新解码：ready 只对上一张有效。
+        // A different image needs a fresh decode; ready was only valid for the previous one.
+        s_reading_bg_ready = false;
+        s_reading_bg_pending = true;
+        s_reading_bg_notice[0] = 0;
+        return APP_REDRAW_PAGE;
+    }
+    if ((s_page == SETTINGS_SYSTEM_FONT || s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_READING_BG) &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int *page = s_page == SETTINGS_SYSTEM_FONT ? &s_font_page : &s_wallpaper_page;
         int count = s_page == SETTINGS_SYSTEM_FONT ? ttf_font_count() + 1 : s_wallpaper_count;
-        int slots=s_page==SETTINGS_SYSTEM_FONT?system_font_layout().slots:8;
+        int slots = s_page == SETTINGS_SYSTEM_FONT ? system_font_layout().slots : (s_page == SETTINGS_READING_BG ? 7 : 8);
         int pages = count > 0 ? (count + slots - 1) / slots : 1;
         int old = *page;
         if (ev->type == UI_GESTURE_SWIPE_U && *page + 1 < pages) ++*page;
@@ -2013,6 +2129,44 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_WALLPAPER && y < 190) {
         s_page = SETTINGS_LOCK_STYLE;
         return APP_REDRAW_PAGE;
+    }
+    if (s_page == SETTINGS_READING_BG_PREVIEW) {
+        if (y < 190) { s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
+        if (s_reading_bg_confirm) {
+            if (y >= 643 && y < 711 && ev->x0 >= 358 && ev->x0 < 590) {
+                if (app_settings_set_book_background_path(s_wallpapers[s_wallpaper_selected].path))
+                    snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已设为阅读背景，下次打开书籍生效");
+            }
+            // 与壁纸弹窗一致：其余点按一律视为取消。
+            // Same as the wallpaper dialog: any other tap just cancels.
+            s_reading_bg_confirm = false;
+            return APP_REDRAW_PAGE;
+        }
+        if (s_reading_bg_ready && y >= 194 && y < 1032) {
+            s_reading_bg_confirm = true;
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
+    if (s_page == SETTINGS_READING_BG) {
+        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if (y >= 956 && y < 1032) {
+            if (!app_settings_set_book_background_path("")) return APP_REDRAW_NONE;
+            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已恢复白底");
+            return APP_REDRAW_PAGE;
+        }
+        if (y >= 292 && y < 936) {
+            int index = s_wallpaper_page * 7 + (y - 292) / 92;
+            if (index >= s_wallpaper_count) return APP_REDRAW_NONE;
+            s_wallpaper_selected = index;
+            s_reading_bg_confirm = false;
+            s_reading_bg_ready = false;
+            s_reading_bg_pending = true;
+            s_reading_bg_notice[0] = 0;
+            s_page = SETTINGS_READING_BG_PREVIEW;
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
         if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
@@ -2361,6 +2515,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if(!haptics_available())return APP_REDRAW_NONE;
             s_page=SETTINGS_HAPTIC;
         }
+        else if(row==5){
+            reading_bg_scan();
+            s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;
+            s_reading_bg_notice[0]=0;
+            s_page=SETTINGS_READING_BG;
+        }
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
@@ -2403,6 +2563,8 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_WALLPAPER) { s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_READING_BG_PREVIEW) { s_reading_bg_confirm = false; s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_READING_BG) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_AVATAR) { s_page = SETTINGS_PROFILE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_TEXT_EDIT) { ui_keyboard_end(); s_page = s_editor_signature ? SETTINGS_MAIN : SETTINGS_PROFILE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_PROFILE) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
@@ -2413,6 +2575,11 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
 }
 static void settings_exit(app_ctx_t *ctx) {
     bookmark_preview_release();s_bookmark_picker=false;
+    // 阅读背景预览缓存只在设置页存活；阅读器打开时会按当前路径重新解码。
+    // The reading-background preview cache lives only while settings is open; the reader
+    // re-decodes from the stored path when it opens.
+    ui_reader_background_release();
+    s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
     s_collage_prepare_pending = false;
@@ -2421,6 +2588,14 @@ static void settings_exit(app_ctx_t *ctx) {
 }
 static void on_before_lock(app_ctx_t *ctx) {
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
+    // 锁屏唤醒后 tick 不会再补解码，预览页会停在白框：锁屏前退回主列表并释放缓存。
+    // After waking from lock no tick re-runs the decode, so the preview page would sit on a
+    // white frame: drop back to the main list and release the cache before locking.
+    if (s_page == SETTINGS_READING_BG || s_page == SETTINGS_READING_BG_PREVIEW) {
+        s_page = SETTINGS_MAIN;
+        s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
+        ui_reader_background_release();
+    }
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
     s_upgrade_job = UPGRADE_JOB_NONE;
     (void)ctx; pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
@@ -2429,6 +2604,14 @@ static void on_before_lock(app_ctx_t *ctx) {
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
     bookmark_preview_release();
+    // 拔卡后背景图片和列表都失效；退回主列表，避免停留在一个空预览。
+    // Losing the card invalidates the image and the list; fall back to the main list instead
+    // of staying on an empty preview.
+    if (s_page == SETTINGS_READING_BG || s_page == SETTINGS_READING_BG_PREVIEW) {
+        s_page = SETTINGS_MAIN;
+        s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
+        ui_reader_background_release();
+    }
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
 static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_prepare_profile(); }
@@ -2453,7 +2636,8 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_AREA && s_scroll_present_pending &&
         (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN ||
          s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
-         s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_AVATAR)) {
+         s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_AVATAR ||
+         s_page == SETTINGS_READING_BG)) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
