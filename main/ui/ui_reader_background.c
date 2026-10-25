@@ -1,12 +1,12 @@
 /* SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 中文：阅读背景的唯一缓存与绘制。缓存按面板扫描序存放，混合用 256 项半字节查表，
- * 翻页热路径里不再有逐像素函数调用；输出与旧的逐像素路径逐位一致。
+ * 中文：阅读背景的唯一缓存与绘制。解码后先做白点归一（≥240 归纯白），缓存按面板
+ * 扫描序存放，混合用 256 项半字节查表，翻页热路径里不再有逐像素函数调用。
  *
- * English: The sole reading-background cache and painter. The cache is stored in panel
- * scan order and blending uses a 256-entry nibble LUT, so the turn hot path makes no
- * per-pixel calls; the output stays bit-identical to the old per-pixel path.
+ * English: The sole reading-background cache and painter. Decoded paper is white-point
+ * clamped (>=240 becomes pure white) before the cache is packed in panel scan order;
+ * blending uses a 256-entry nibble LUT, so the turn hot path makes no per-pixel calls.
  *
  * 冻结：仅一个选中背景，不保留两份图片；混合公式 (bg*ink+7)/15 不变。
  * Frozen: one selected wallpaper, never two image caches; the blend formula
@@ -27,6 +27,18 @@ static int s_rotation = -1;
 static char s_path[288];
 static off_t s_size;
 static time_t s_mtime;
+// 白点归一：纸面统一成纯白，近白 JPEG 噪声不再被抖动成 14/15 灰点。
+// White-point clamp: paper snaps to pure white so near-white JPEG noise cannot dither
+// into a 14/15 speckle. 240 only touches the top 6% of the input range.
+#define READER_BG_WHITE_CLAMP 240
+static uint8_t s_white_lut[256];
+static bool s_white_lut_ready;
+
+static void white_lut_init(void) {
+    for (unsigned g = 0; g < 256; ++g)
+        s_white_lut[g] = (uint8_t)(g >= READER_BG_WHITE_CLAMP ? 255 : g);
+    s_white_lut_ready = true;
+}
 // 查表混合：索引 (bg<<4)|ink，值 (bg*ink+7)/15；ink=0 得 0，与旧的「纯黑跳过」逐位一致。
 // LUT blend: index (bg<<4)|ink, value (bg*ink+7)/15; ink=0 yields 0, bit-identical to the
 // old skip-and-keep-black path.
@@ -87,12 +99,13 @@ bool ui_reader_background_prepare(const char *path) {
     if (!plane || !out || !book_image_file_grayscale(path, png, w, h, plane)) {
         free(plane); free(out); ui_reader_background_release(); return false;
     }
-    // 抖动仍在逻辑坐标定形，半字节按面板序落位；plane 只读、out 只写，互不越界。
-    // Dithering keeps logical coordinates while nibbles land in panel order; plane is
-    // read-only and out write-only, so the two buffers never alias.
+    // 白点归一后再抖动：纸面落在纯白，装饰灰阶原样通过；抖动仍在逻辑坐标定形，半字节按面板序落位。
+    // White-point clamp feeds the dither: paper lands on pure white while decorative grays
+    // pass through; dithering keeps logical coordinates and nibbles land in panel order.
+    if (!s_white_lut_ready) white_lut_init();
     for (size_t i = 0; i < pixels; ++i) {
         const int x = (int)(i % w), y = (int)(i / w);
-        const unsigned nib = ui_image_dither_gray(plane[i], x, y) >> 4;
+        const unsigned nib = ui_image_dither_gray(s_white_lut[plane[i]], x, y) >> 4;
         const size_t at = panel_nibble(x, y);
         out[at >> 1] |= at & 1 ? (uint8_t)(nib << 4) : (uint8_t)nib;
     }

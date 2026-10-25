@@ -58,6 +58,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 排版设置：边距拆成上/下/左/右四项独立留白，排版面板内按 2×2 排列，各自 0～96 像素、6 像素一档（默认左右 24、上下 0），旋钮直接显示方向与像素，端点仍可逐档微调。旧单一边距升级为左右同值、上下 0，横排观感不变；竖排也改为四向统一留白，原来作用于上下的边距需要重新设置。正文矩形、页首插图、通栏插图和悬挂标点都按真实右边距计算，非对称边距不再让标点冲出屏幕或让整屏插图偏移。配置备份升到 v29。
   Layout: the margin becomes four independent top/bottom/left/right insets in a 2x2 block, each 0–96 px in 6 px steps (left/right default 24, top/bottom 0), with the direction and pixel value on the knob and endpoint stepping retained. An older single margin migrates to equal left/right with zero top/bottom, leaving horizontal text unchanged; vertical text now uses the same four screen-side insets, so its previous top/bottom spacing must be set again. Body geometry, page-start and full-bleed illustrations and hanging punctuation all use the real right inset, so asymmetric margins no longer push punctuation off-screen or shift full-bleed art. Backups move to v29.
 
+- 阅读背景：修复近白纸面的背景图（例如纸色约 250 的 JPEG）翻页后正文发虚——4-bit 量化把这类纸色抖动成 14/15 灰点，翻页时这些灰点走的是重裁剪的灰阶行，字形边缘墨度不匀。现在解码后先做白点归一：≥240 的像素归纯白，纸面落在面板白（15），装饰灰阶原样保留；背景预览与正文共用同一结果。
+  Reading background: fixed soft text after turns on near-white artwork (for example a JPEG with a paper tone around 250)—4-bit quantization dithered that paper into 14/15 specks, and turns drove those specks through the deeply trimmed gray rows, leaving uneven glyph edges. Decoded pixels at or above 240 now snap to pure white, so paper lands on the panel white (15) while decorative grays pass through; the preview shares the same result.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。
