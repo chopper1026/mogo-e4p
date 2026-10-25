@@ -21,6 +21,8 @@
  * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh, discrete gestures and ripple pacing.
  * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
+ * 用户修订：设置「升级和恢复」只保留保存与恢复、屏幕修复，BOOT 刷机入口撤下。
+ * User revision: maintenance keeps only backup/restore and panel repair; the BOOT flashing entry is withdrawn.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -319,7 +321,9 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
 #define SETTINGS_PERSONAL_ROWS 4
-#define SETTINGS_MAINTENANCE_ROWS 3
+// BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
+// The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
+#define SETTINGS_MAINTENANCE_ROWS 2
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -1461,9 +1465,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"保存与恢复","屏幕修复","BOOT 刷机"};
-    const char *maintenance_values[]={"配置","清除条纹","电脑刷机"};
-    const int maintenance_icons[]={8,17,13};
+    const char *maintenance_labels[]={"保存与恢复","屏幕修复"};
+    const char *maintenance_values[]={"配置","清除条纹"};
+    const int maintenance_icons[]={8,17};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
@@ -2320,7 +2324,6 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
             return APP_REDRAW_PAGE;
         }
-        else {s_boot_pending=false;s_page=SETTINGS_BOOT;}
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;
