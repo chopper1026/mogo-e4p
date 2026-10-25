@@ -107,6 +107,8 @@ typedef struct {
     uint32_t generation, image_at;
     size_t page, offset;
     int64_t used;
+    /// 上一段留下的段距，跨行预绘时恢复；落在页底可被压缩。/ Gap from the previous paragraph, restored across slices; squeezable at the page bottom.
+    int64_t gap;
     bool started, complete, failed;
 } book_layout_draw_cursor_t;
 /// 每次只画一行或一列，不推屏；返回-1失败、0待续、1完成。只在UI空闲线程调用。

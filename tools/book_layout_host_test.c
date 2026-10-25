@@ -235,12 +235,30 @@ int main(void) {
                       {.offset = 6, .len = 4, .heading = false, .image = -1}};
     r = (EpdRect){0, 0, 100, 45};
     assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));
+    // 题头下 9px 段距落在页底时压缩到 8px，正文首行不再被推到下一页。
+    // The 9 px gap under the heading squeezes to 8 px at the page bottom, so the body line
+    // shares the page instead of starting a new one.
+    assert(book_layout_page_count() == 1);
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, r, 10);
+    assert(!strcmp(drawn, "Titlebody") && first_draw_px == 18 && last_draw_px == 10);
+    r = (EpdRect){0, 0, 100, 30};
+    assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));
     assert(book_layout_page_count() == 2);
     assert(book_layout_page_start_offset(1) == 6);
     drawn[0] = 0;
     book_layout_draw_page(&fb, 0, r, 10);
     book_layout_draw_page(&fb, 1, r, 10);
     assert(!strcmp(drawn, "Titlebody") && first_draw_px == 18 && last_draw_px == 10);
+    // 页底只要求字形放得下：行盒尾随行距悬出正文底，基线仍落在版心内。
+    // At the page bottom only the glyph has to fit: the box's trailing leading hangs below the
+    // body while the baseline stays inside it.
+    r = (EpdRect){0, 0, 20, 25};
+    assert(book_layout_build("abcdef", 6, r, 10));
+    assert(book_layout_page_count() == 2 && book_layout_page_start_offset(1) == 4);
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, r, 10);
+    assert(!strcmp(drawn, "abcd") && first_draw_y == 10 && last_draw_y == 25);
     const char chapters[] = "One\nalpha\nTwo\nbeta";
     blk_t chapter_blocks[] = {
         {.offset = 0, .len = 3, .heading = true, .chapter_start = true, .image = -1},
@@ -493,8 +511,12 @@ int main(void) {
     book_layout_set_chapter_lead(0, 0);
     r.width = 20;
     assert(book_layout_build_blocks(styled, strlen(styled), blocks, 2, r, 10));
-    assert(book_layout_page_count() == 6);
-    assert(book_layout_page_start_offset(5) == 6);
+    // 页底按字形高度装箱：18px 题头行在 45px 高的栏里也能两行一页，正文从题头末页接上。
+    // The page bottom packs by glyph height: two 18 px heading lines fit a 45 px column, and the
+    // body starts on the page where the heading ends.
+    assert(book_layout_page_count() == 4);
+    assert(book_layout_page_start_offset(3) == 8);
+    assert(book_layout_page_for_offset(6) == 2);
     drawn[0] = 0;
     for (size_t i = 0; i < book_layout_page_count(); ++i) book_layout_draw_page(&fb, i, r, 10);
     assert(!strcmp(drawn, "Titlebody"));

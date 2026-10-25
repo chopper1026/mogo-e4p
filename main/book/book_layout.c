@@ -759,11 +759,17 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     }
     if (!append_page(off)) goto fail;
     int64_t used = s_lead_height;
+    // 上一段留下的段距，还没决定是否落在本页：页底放不下时压缩到剩余空间。
+    // Gap from the previous paragraph, not yet committed: at the page bottom it shrinks to the
+    // space that is left instead of pushing the next line over.
+    int64_t pending_gap = 0;
     while (off < len) {
         size_t visible = skip_image_spacing(off);
         if (visible != off) { off = visible; continue; }
         const blk_t* block = block_at(off);
         if (block && block->image >= 0 && off == block->offset) {
+            used += pending_gap;
+            pending_gap = 0;
             int img_w = 0, img_h = 0;
             if (image_display_size(block->image, &img_w, &img_h)) {
                 // 图是页面流里的一个块：放得下就留在本页，文字接着图下面排；放不下才翻页。
@@ -795,14 +801,28 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         (void)line_width; (void)indent; (void)align;
         line_height = line_height_for(line_px);
         if (line_height > rect.height) goto fail;
+        // 页底按字形高度判定，不按整行盒：行盒尾部那段行距是不可见留白，属于页脚侧边距，
+        // 不该把这一行挤到下一页。行盒底允许悬出正文底，墨迹仍在版心内。
+        // Page-bottom fit uses the glyph height, not the whole line box: the box's trailing
+        // leading is invisible margin on the footer side and must not push this line over. The
+        // box bottom may hang below the body while the ink stays inside.
         int leading = used ? margin_before : 0;
-        if (used + leading + line_height > rect.height) {
+        if (used + leading + line_px > rect.height) {
             if (!append_page(off)) goto fail;
             used = 0;
             leading = 0;
+            pending_gap = 0;
         }
-        used += leading + line_height;
-        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        int64_t gap = pending_gap;
+        int64_t room = (int64_t)rect.height - used - leading - line_px;
+        // 段距落在页底时压缩到剩余空间，不把下一段首行推到下一页。
+        // A paragraph gap that lands at the page bottom shrinks to the space left instead of
+        // pushing the next paragraph's first line over.
+        if (gap > room) gap = room;
+        used += gap + leading;
+        pending_gap = 0;
+        used += line_height;
+        if (paragraph_end) pending_gap = gap_for(line_height, heading) + margin_after;
         off = next;
     }
     // 测量会按 run 移动游标；还回去，后面的界面与状态栏仍从系统字体起。
@@ -968,6 +988,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     size_t off = s_pages[page];
     size_t end = page + 1 < s_count ? s_pages[page + 1] : s_len;
     int64_t used = page == 0 ? s_lead_height : 0;
+    int64_t pending_gap = 0;
     // 本页插图按出现顺序排在池里，游标走到哪个块就用哪条记录，不必再查表。
     // This page's images sit in the pool in encounter order, so the walk just consumes them in
     // turn instead of looking each one up.
@@ -975,6 +996,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     const uint32_t img_end = s_page_img_start ? s_page_img_start[page + 1] : 0;
     if (s_idle_draw && s_idle_draw->started) {
         off=s_idle_draw->offset;used=s_idle_draw->used;img_at=s_idle_draw->image_at;
+        pending_gap=s_idle_draw->gap;
     }
     while (off < end) {
         size_t visible = skip_image_spacing(off);
@@ -986,6 +1008,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 const layout_image_t* rec = &s_images[img_at++];
                 used = (int64_t)rec->y + rec->height + s_px / 2;
             }
+            pending_gap = 0;
             off = image_block->offset + image_block->len;
             if (off < end && s_text[off] == '\n') ++off;
             continue;
@@ -997,13 +1020,26 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
                        &line_width, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int line_height = line_height_for(line_px);
+        // 与分页同一判定：页底只要求字形高度放得下，行盒尾随行距可以悬出正文底。
+        // Same test as pagination: only the glyph height must fit at the page bottom; the line
+        // box's trailing leading may hang below the body.
         int leading = used ? margin_before : 0;
-        if (used + leading + line_height > rect.height) return;
-        used += leading;
+        if (used + leading + line_px > rect.height) return;
+        int64_t gap = pending_gap;
+        int64_t room = (int64_t)rect.height - used - leading - line_px;
+        // 段距落在页底时压缩到剩余空间，不把下一段首行推到下一页。
+        // A paragraph gap that lands at the page bottom shrinks to the space left instead of
+        // pushing the next paragraph's first line over.
+        if (gap > room) gap = room;
+        used += gap + leading;
+        pending_gap = 0;
         if (s_line[0]) {
             if (s_reading_line) {
                 int guide_y = rect.y + (int)used + line_px + (line_height - line_px) / 2 +
                               s_reading_line_offset;
+                // 页底允许行盒悬出正文，阅读线不能跟着画进页脚带。
+                // The page-bottom line may hang its box; the guide must stay off the footer band.
+                if (guide_y > rect.y + rect.height - 2) guide_y = rect.y + rect.height - 2;
                 int dash = s_reading_line == 1 ? 19 : 2;
                 int period = s_reading_line == 1 ? 31 : 13;
                 for (int dx = 0; dx < rect.width; dx += period) {
@@ -1047,10 +1083,11 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             ttf_font_select(TTF_FONT_SLOT_SYSTEM);
         }
         used += line_height;
-        if (paragraph_end) used += gap_for(line_height, heading) + margin_after;
+        if (paragraph_end) pending_gap = gap_for(line_height, heading) + margin_after;
         off = next;
         if (s_idle_draw && off < end) {
             s_idle_draw->offset=off;s_idle_draw->used=used;s_idle_draw->image_at=img_at;
+            s_idle_draw->gap=pending_gap;
             s_idle_draw->started=true;s_idle_draw->complete=false;
             return;
         }
