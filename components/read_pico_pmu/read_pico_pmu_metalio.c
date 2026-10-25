@@ -17,6 +17,7 @@
 #include "read_pico_pmu.h"
 
 #include <string.h>
+#include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -136,8 +137,20 @@ static esp_err_t bq_read_current(int16_t* ma) {
 #define BATT_MIN_STEP_INTERVAL_MS 10000  // 两次可见变化至少隔 10 s。 / Steps sit at least 10 s apart.
 #define BATT_RESTORE_TOL_PERMILLE 150    // 开机恢复容差。 / Boot-restore tolerance.
 #define BATT_DONE_MIN_MV 4300            // 判满电压门槛，防状态位误判。 / Voltage gate for the done snap.
+// 涓流判满：2026-10-25 真机在 0 mA 电流下 CX 仍报快充码 2、done 位不置位，done
+// 路径可能永不触发；高电压下持续近零电流即视为充满。
+// Taper-full: on-device 2026-10-25 the CX kept reporting the fast-charge code at
+// 0 mA with the done bit clear, so the done path may never fire; sustained
+// near-zero current at a high voltage counts as full.
+#define BATT_FULL_MV 4360                // 涓流判满的电压门槛。 / Voltage gate for the taper-full call.
+#define BATT_FULL_MA 25                  // 高于该正向电流视为还在真充电。 / Above this positive current the pack is still really charging.
+#define BATT_FULL_CONFIRM_MS 300000      // 持续近零电流多久判满。 / How long near-zero current must hold.
 #define BATT_SAVE_INTERVAL_MS 300000     // NVS 周期保存间隔。 / Periodic NVS save cadence.
 #define BATT_LOG_INTERVAL_MS 60000       // 校准日志间隔。 / Calibration log cadence.
+// 卡上校准日志：不连电脑也能积累日常放电曲线；串口与卡写同一行。
+// Calibration log on the card: daily discharge curves accumulate without a host;
+// serial and card carry the same line.
+#define BATT_LOG_PATH "/sdcard/batt.log"
 
 // 4.4 V 高压电池初始 OCV-SOC 锚点（mV → ‰），mV 降序；满充静置锚点待真机日志校准。
 // Initial OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV;
@@ -244,6 +257,27 @@ static void batt_filter_step(batt_filter_t* f, int64_t now_us, uint16_t raw_mv, 
     *out_permille = f->disp_permille;
 }
 
+// 涓流判满的纯判定，便于主机对拍：CX done 位优先；否则充电中、高电压且正向电流
+// 低于门槛持续满 BATT_FULL_CONFIRM_MS 才算满。负向电流（负载浪涌）不清窗口，
+// 电压门槛兜底持续放电；状态经 *since_us 传入传出。
+// Pure taper-full decision for host replay: a real CX done bit wins; otherwise
+// charging at a high voltage with positive current under the gate must hold for
+// BATT_FULL_CONFIRM_MS. Negative current (load surges) never clears the window —
+// the voltage gate covers sustained drain — and the state travels via *since_us.
+static bool batt_full_now(bool charge_done, bool charging, bool have_v, int32_t raw_mv,
+                          bool have_i, int16_t raw_ma, int64_t now_us, int64_t *since_us) {
+    if (charge_done) {
+        *since_us = -1;
+        return true;
+    }
+    if (!charging || !have_v || !have_i || raw_mv < BATT_FULL_MV || raw_ma >= BATT_FULL_MA) {
+        *since_us = -1;
+        return false;
+    }
+    if (*since_us < 0) *since_us = now_us;
+    return now_us - *since_us >= (int64_t)BATT_FULL_CONFIRM_MS * 1000;
+}
+
 // BQ27220 内部库仑计 SOC，只读对比用。 / BQ27220 internal coulomb-counted SOC, read-only comparison.
 static int bq_read_soc(void) {
     uint8_t pct = 0;
@@ -261,12 +295,77 @@ static void batt_save(int32_t permille) {
     nvs_close(nvs);
 }
 
+/* ---- 校准日志 / Calibration log ---- */
+
+// 最新采样快照：轮询侧在主循环任务里填，日志任务只读副本；I2C 全部留在轮询侧。
+// Latest sample snapshot: the poll side fills it on the loop task and the logger
+// task only copies it out; every I2C access stays on the poll side.
+typedef struct {
+    bool valid;
+    uint16_t raw_mv;
+    int16_t ma;
+    bool have_i;
+    bool charging;
+    bool charge_done;
+    int8_t chg_stat;
+    int32_t ocv_mv;
+    int32_t disp_permille;
+    int8_t ic_soc;
+} batt_log_sample_t;
+static batt_log_sample_t s_batt_log_sample;
+static portMUX_TYPE s_batt_log_mux = portMUX_INITIALIZER_UNLOCKED;
+// 日志任务句柄，deinit 时停止，避免反初始化后继续写旧采样。
+// Logger task handle, stopped on deinit so a torn-down shim cannot keep logging stale samples.
+static TaskHandle_t s_batt_log_task;
+
+// 校准日志任务：串口与 TF 卡写同一行，写卡只在本任务做，不卡主循环跟手；卡不在
+// 或未挂载（含 USB 读卡让出）时静默跳过，逐行开关文件，拔卡/断电最多丢最后一行。
+// Calibration logger task: serial and the TF card carry the same line, and only
+// this task touches the card so the loop never stalls mid-drag; a missing or
+// unmounted card (including USB export) skips silently, and the per-line
+// open/close loses at most the last line on removal or power loss.
+static void batt_log_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(BATT_LOG_INTERVAL_MS));
+        batt_log_sample_t s;
+        portENTER_CRITICAL(&s_batt_log_mux);
+        s = s_batt_log_sample;
+        portEXIT_CRITICAL(&s_batt_log_mux);
+        if (!s.valid) continue;
+        const time_t wall = time(NULL);
+        char line[160];
+        const int n = snprintf(line, sizeof(line),
+            "t=%lld up=%lld raw=%u ma=%d chg=%d done=%d cs=%d ocv=%ld disp=%ld ic_soc=%d\n",
+            wall >= 1704067200 ? (long long)wall : -1LL,
+            (long long)(esp_timer_get_time() / 1000000),
+            (unsigned)s.raw_mv, s.have_i ? (int)s.ma : 0, s.charging ? 1 : 0,
+            s.charge_done ? 1 : 0, (int)s.chg_stat, (long)s.ocv_mv,
+            (long)s.disp_permille, (int)s.ic_soc);
+        if (n <= 1 || (size_t)n >= sizeof(line)) continue;
+        ESP_LOGI(TAG, "batt: %.*s", n - 1, line);
+        FILE *f = fopen(BATT_LOG_PATH, "a");
+        if (f == NULL) continue;
+        if (ftell(f) == 0) {
+            fputs("# t up raw ma chg done cs ocv disp ic_soc\n", f);
+        }
+        fputs(line, f);
+        fclose(f);
+    }
+}
+
 static batt_filter_t s_batt_filter;
 // NVS 恢复值，只在首采时被消费一次。 / NVS restore value, consumed once by the first sample.
 static int32_t s_batt_saved_permille = -1;
 static bool s_batt_charging_last;
 static int64_t s_batt_last_save_us;
 static int64_t s_batt_last_log_us;
+// 最近一次 BQ27220 库仑计读数（60 s 一次，轮询侧更新）。 / Latest BQ27220 coulomb
+// reading (60 s cadence, refreshed on the poll side).
+static int8_t s_batt_ic_soc = -1;
+// 涓流判满的确认窗口起点（µs，-1 表示未在窗口内）。 / Start of the taper-full
+// confirmation window (µs; -1 when outside the window).
+static int64_t s_batt_full_since_us = -1;
 
 static esp_err_t rtc_read(struct tm* out, bool* valid) {
     uint8_t r[7] = {0};
@@ -359,7 +458,14 @@ static void poll_battery(void) {
     } else {
         charging = false;
     }
-    const bool charge_done = have_chg && chg_stat == CX_CHG_STAT_DONE;
+    const bool charge_done_cx = have_chg && chg_stat == CX_CHG_STAT_DONE;
+    // 涓流判满兜底：CX 在零电流下也不报 done（见 BATT_FULL_* 注释），高电压持续
+    // 近零电流同样进入滤波的判满对齐。
+    // Taper-full fallback: the CX never reports done even at zero current (see
+    // the BATT_FULL_* notes); sustained near-zero current at a high voltage also
+    // enters the filter's charge-done alignment.
+    const bool charge_done = batt_full_now(charge_done_cx, charging, have_v, (int32_t)mv,
+                                           have_i, ma, now, &s_batt_full_since_us);
     s_snap.charge_state = charging ? PMU_CHARGE_CHARGING : PMU_CHARGE_NOT_CHARGING;
     if (charging) {
         s_snap.flags |= PMU_STATUS_CHARGING_ACTIVE;
@@ -388,14 +494,28 @@ static void poll_battery(void) {
             batt_save(disp);
         }
 
-        // 校准日志：真机曲线与内部电量计对比数据的来源。
-        // Calibration log: the source of on-device curve data and internal-gauge comparison.
+        // 采样快照喂给日志任务；ic_soc 仍按 60 s 在轮询侧读，I2C 不离开主循环任务。
+        // Feed the snapshot to the logger task; ic_soc still reads at a 60 s cadence
+        // on the poll side so I2C never leaves the loop task.
         if (now - s_batt_last_log_us >= (int64_t)BATT_LOG_INTERVAL_MS * 1000) {
             s_batt_last_log_us = now;
-            ESP_LOGI(TAG, "batt: raw=%umV ma=%d chg=%d done=%d ocv=%ldmV disp=%ld ic_soc=%d", mv,
-                     have_i ? (int)ma : 0, charging ? 1 : 0, charge_done ? 1 : 0, (long)ocv_mv,
-                     (long)disp, bq_read_soc());
+            s_batt_ic_soc = (int8_t)bq_read_soc();
         }
+        const batt_log_sample_t sample = {
+            .valid = true,
+            .raw_mv = mv,
+            .ma = ma,
+            .have_i = have_i,
+            .charging = charging,
+            .charge_done = charge_done,
+            .chg_stat = have_chg ? (int8_t)chg_stat : (int8_t)-1,
+            .ocv_mv = ocv_mv,
+            .disp_permille = disp,
+            .ic_soc = s_batt_ic_soc,
+        };
+        portENTER_CRITICAL(&s_batt_log_mux);
+        s_batt_log_sample = sample;
+        portEXIT_CRITICAL(&s_batt_log_mux);
     } else {
         s_snap.flags &= ~PMU_STATUS_BATTERY_VALID;
     }
@@ -440,12 +560,24 @@ esp_err_t read_pico_pmu_init(i2c_master_bus_handle_t bus_handle,
     }
 
     s_ready = true;
+    // 校准日志任务：起不来只影响串口/卡日志，不影响电量功能。
+    // Calibration logger task: failing to start only costs the serial/card log.
+    if (xTaskCreate(batt_log_task, "battlog", 4096, NULL, 1, &s_batt_log_task) != pdPASS) {
+        ESP_LOGW(TAG, "battery log task not started");
+    }
     ESP_LOGI(TAG, "Metalio PMU shim ready (BQ=%d CX=%d RTC=%d VCOM=%dmV)", s_bq != NULL,
              s_cx != NULL, s_rtc != NULL, s_vcom_mv);
     return ESP_OK;
 }
 
 esp_err_t read_pico_pmu_deinit(void) {
+    if (s_batt_log_task != NULL) {
+        vTaskDelete(s_batt_log_task);
+        s_batt_log_task = NULL;
+    }
+    portENTER_CRITICAL(&s_batt_log_mux);
+    s_batt_log_sample.valid = false;
+    portEXIT_CRITICAL(&s_batt_log_mux);
     if (s_bq) i2c_master_bus_rm_device(s_bq);
     if (s_cx) i2c_master_bus_rm_device(s_cx);
     if (s_rtc) i2c_master_bus_rm_device(s_rtc);

@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory() as tmp:
     p=Path(tmp)
     code='#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n'
     code+=defines+'\n'+curve+'\n'+typedef+'\n'
-    code+='\n'.join(extract(f) for f in ['batt_curve_soc','batt_filter_step'])
+    code+='\n'.join(extract(f) for f in ['batt_curve_soc','batt_filter_step','batt_full_now'])
     code+='''
 static batt_filter_t f;
 static int32_t s_mv;
@@ -30,6 +30,10 @@ static int32_t s_pm;
 static void reset(void) { memset(&f, 0, sizeof(f)); }
 static void step(int64_t t, int mv, int ma, bool have_i, bool chg, bool done, int saved) {
  batt_filter_step(&f, t, (uint16_t)mv, have_i, (int16_t)ma, chg, done, saved, &s_mv, &s_pm);
+}
+static int64_t s_since;
+static bool full(int64_t t, int mv, int ma, bool chg, bool done) {
+ return batt_full_now(done, chg, true, mv, true, (int16_t)ma, t, &s_since);
 }
 int main(void) {
  // 1) 瞬时 ±8mV 抖动整段不动显示 / instantaneous +-8mV noise never moves the display
@@ -94,7 +98,36 @@ int main(void) {
  reset(); step(0, 3800, 3000, true, false, false, -1); assert(s_mv==3950);
  reset(); step(0, 3800, 800, true, false, false, -1);  assert(s_mv==3880);
  reset(); step(0, 3800, 800, true, true, false, -1);   assert(s_mv==3720);
- puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence and load compensation");
+ // 9) 涓流判满 / taper-full
+ s_since=-1;
+ assert(full(0,4380,0,true,false)==false);              // 立即不算满 / not full instantly
+ assert(full(299999999,4380,10,true,false)==false);    // 差 1µs 不算 / 1µs short stays unfilled
+ assert(full(300000000,4380,10,true,false)==true);     // 满 5 分钟判满 / held 5 min: full
+ assert(full(300000001,4380,-80,true,false)==true);    // 负向浪涌不清已满 / negative surges keep full
+ s_since=-1;
+ assert(full(100000000,4380,-80,true,false)==false);   // 负向浪涌不清确认窗口 / surges keep the window
+ assert(full(400000000,4380,5,true,false)==true);      // 窗口跨浪涌累计到 5 分钟 / the window still accrues to 5 min
+ s_since=-1;
+ assert(full(0,4380,117,true,false)==false&&s_since==-1);  // 大电流重置 / real charge current resets
+ assert(full(0,4340,0,true,false)==false&&s_since==-1);    // 电压不够重置 / low voltage resets
+ assert(full(0,4380,0,false,false)==false&&s_since==-1);   // 未充电重置 / not charging resets
+ assert(full(0,4380,0,true,true)==true);                   // CX done 位优先 / a real done bit wins
+ // 中途真充电清窗后重新累计 / a mid-window real charge restarts the accrual
+ s_since=-1;
+ assert(full(0,4380,5,true,false)==false);
+ assert(full(60000000,4380,80,true,false)==false&&s_since==-1);
+ assert(full(60000001,4380,5,true,false)==false);
+ assert(full(360000001,4380,5,true,false)==true);
+ // 判满对齐穿过整只滤波器：涓流窗口内 done 仍为假，窗口满后轮询侧喂 done=true，
+ // 显示对齐 100% / taper-full through the whole filter: done stays false inside the
+ // window, the poll side feeds done=true once it completes, and the display snaps
+ reset();
+ step(0, 4380, 10, true, true, false, -1);
+ step(299999999, 4380, 10, true, true, false, -1);
+ assert(s_pm<1000);
+ step(300000000, 4380, 10, true, true, true, -1);
+ assert(s_pm==1000);
+ puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence, load compensation and taper-full");
 }
 '''
     (p/'test.c').write_text(code)
