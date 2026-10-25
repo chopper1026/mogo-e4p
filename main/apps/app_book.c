@@ -154,6 +154,7 @@
 #include "book_shelf_categories.h"
 #include "display.h"
 #include "display_reader_waveform.h"
+#include "display_normalize.h"
 #include "e0470_epaper_waveform.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -264,6 +265,10 @@ static bool s_reader_text_frame;
 // A tools toggle changes only the bottom band; that frame runs a GL16 differential inside
 // the band, with dirty-mask dilation erasing the progress bar edges.
 static bool s_reader_tools_toggle;
+// 上一次推上屏的面板状态；从有面板变回无面板就是一次收起，要走整屏归一。
+// Panel state of the last presented frame; going from a panel back to none is a close and
+// takes the whole-screen normalize pass.
+static int s_presented_panel;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
 static bool s_requested_fullscreen = true;
@@ -373,6 +378,7 @@ static unsigned s_chapter_lead_row_height;
 static unsigned s_chapter_lead_width;
 static char s_font_path[192];
 static char* s_text;
+static bool reader_text_body(void);
 bool app_book_reader_body_visible(void) {
     return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
 }
@@ -3972,6 +3978,12 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
     s_reader_clock_pending=true;
     return APP_REDRAW_AREA;
 }
+// 正文是否是纯文字画面：插图页与阅读背景保留原来的整页差分，不让归一表的字芯推黑改动图片灰阶。
+// Whether the body is a plain text frame: image pages and reading backgrounds keep the ordinary
+// page differential so the normalize pass's black pushes cannot shift their picture grays.
+static bool reader_text_body(void) {
+    return book_layout_page_image_count(s_page) == 0 && !app_settings_book_background_path()[0];
+}
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // 开关标记只对本次推屏有效：提前返回也不留给下一帧。
     // The toggle flag applies to this present only; consume it even on an early return.
@@ -4119,6 +4131,18 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                 ESP_LOGI(TAG, "reader regions body_h=%d footer=diff pct=%u", s_area.height, percent(s_page));
         }
     }
+    // 关闭阅读设置等面板时，被白底盖过的字已经多走了一轮「擦白 → 推黑」，比没被盖过的
+    // 字更黑；单次还原追不平。这里整屏再走一遍归一表，全页字芯落在同一墨度。
+    // Closing a sheet leaves the text it covered one erase-then-black cycle ahead of the rest,
+    // which no single restore can match. One whole-screen normalize pass puts every glyph core
+    // on the same ink.
+    else if (redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
+             s_presented_panel != READER_PANEL_NONE && s_reader_panel == READER_PANEL_NONE &&
+             reader_text_body()) {
+        err = update_display_area_full_with(ctx->hl, display_normalize_waveform(),
+                                            MODE_GL16,
+                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
+    }
     else err = s_view == READING
         ? update_display_mode_diff_with(ctx->hl, display_reader_page_waveform(), APP_PAGE_REFRESH_MODE)
         : update_display_fast_page(ctx->hl);
@@ -4147,6 +4171,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_reader_cleanup = false;
     s_reader_image_refresh_pending = false;
     s_presented_view = (int)s_view;
+    s_presented_panel = (int)s_reader_panel;
     s_reader_footer_pending = false;
     s_reader_footer_strong = false;
     s_water_turn_pending = false;

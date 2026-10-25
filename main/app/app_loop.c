@@ -49,6 +49,7 @@
 #include "ota_online.h"
 #include "continuous_du.h"
 #include "display.h"
+#include "display_normalize.h"
 #include "e0470_epaper_waveform.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -232,9 +233,19 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     const int quick_height = ui_quick_menu_rect(&s_quick).height;
     const int area_height = quick_height > s_quick_height ? quick_height : s_quick_height;
     s_quick_height = quick_height;
+    // 收起快捷层时，被半透明遮罩盖过的字多走了一轮推黑，比没被盖过的字更黑；单次还原
+    // 追不平。任何页面都用归一表整屏再走一遍，全页字芯落在同一墨度。展开仍只画遮罩与圆键。
+    // Closing leaves the text under the translucent shade one black cycle ahead of the rest,
+    // which a single restore cannot match. Every page runs one whole-screen normalize pass so
+    // each glyph core lands on the same ink. Opening still paints only the shade and keys.
+    const void *wave = &E0470_WAVEFORM;
+    EpdRect area = {0, 0, UI_LOCK_WIDTH, area_height};
+    if (!s_quick.open) {
+        wave = display_normalize_waveform();
+        area.height = UI_LOCK_HEIGHT;
+    }
     enum EpdDrawError error = full ? update_display_full(ctx->hl)
-        : update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
-                                       (EpdRect){0, 0, UI_LOCK_WIDTH, area_height});
+        : update_display_area_full_with(ctx->hl, wave, MODE_GL16, area);
     guard_draw_result(ctx->hl, error);
     if(motion&&!full&&error==EPD_DRAW_SUCCESS) {
         error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,motion_area);

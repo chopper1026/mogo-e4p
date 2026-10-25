@@ -122,12 +122,17 @@ static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, remounts, loss_step;
 static bool fl_ready, fl_on;
 static uint8_t fl_bri=40, fl_cct=50;
-static int fl_applies, fl_control_draws, fl_sweep_draws, fl_drag_pushes, fl_white_pushes, fl_gray_pushes, fl_key_gl, quick_gl_height;
+static int fl_applies, fl_control_draws, fl_sweep_draws, fl_drag_pushes, fl_white_pushes, fl_gray_pushes, fl_key_gl, quick_gl_height, quick_norm;
 int E0470_WAVEFORM;
 int E0470_FOLLOW_WAVEFORM;
 int E0470_CAPSULE_DRAG_WAVEFORM;
 int E0470_CAPSULE_WHITE_WAVEFORM;
 int E0470_CAPSULE_GRAY_WAVEFORM;
+// 收起快捷层改用整屏归一表；调度测试只关心换表不影响推屏次数。
+// A closing quick layer swaps in the whole-screen normalize table; the scheduling test only
+// checks that the swap changes nothing else.
+static int s_normalize_waveform;
+const EpdWaveform *display_normalize_waveform(void) { return (const EpdWaveform*)&s_normalize_waveform; }
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
         assert(a.width==108&&a.y==102);
@@ -162,8 +167,10 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     assert(a.x==0&&a.y==0&&a.width==684&&
-           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT));++quick_gl;
-    quick_gl_height=a.height;
+           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT||a.height==1216));++quick_gl;
+    // 展开只推快捷层；收起改走整屏归一，单记一次。
+    // Opening pushes the layer only; closing normalizes the whole screen and is counted apart.
+    if(a.height==1216)++quick_norm; else quick_gl_height=a.height;
     // 快捷层展开刷新阻塞期间，用户抬手并快速点按 Wi-Fi 圆键；三帧都在队列里。
     // While the quick layer's opening refresh blocks, the user lifts and taps Wi-Fi fast.
     if (tap_during_present) {
@@ -343,7 +350,7 @@ static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
-    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=0;
+    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=quick_norm=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
@@ -681,13 +688,13 @@ int main(void) {
     add(399,398,1,0);add(0,0,0,0);
     add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==78&&fl_cct==59);
-    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT);
+    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&quick_norm==1);
     assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
     // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
     // Opening and the switch tap each re-composite and redraw the layer; on close the
     // layer is already gone, so only the underlay page is re-rendered.
     assert(quick_draws==2&&quick_gl==3&&base_renders==4);
-    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag, drag-table commit on release and 480px close passed");
+    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag, drag-table commit on release and a whole-screen close normalize passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.
