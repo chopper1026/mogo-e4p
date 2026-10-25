@@ -78,6 +78,13 @@ static EpdRect s_image_rect;
 // 通栏宽度（整屏像素）。面板常量，重排不必跟着改；0 关闭。
 // Full-bleed width in panel pixels. A panel constant, so re-layouts need not update it; 0 disables.
 static int s_image_bleed_width;
+// 正文右缘之外的实际留白：悬挂标点只能越出这么多，不能拿左边距代替。
+// -1 表示调用方尚未发布右留白，沿用旧行为（以正文左边距为准），仅供未设置该值的宿主测试。
+// Actual slack beyond the body's right edge: hanging marks may cross only this far, never the
+// left inset standing in for it. -1 means the caller has not published it yet; the legacy
+// left-inset behavior applies, which only host tests that never set it still rely on.
+static int s_right_slack = -1;
+static int right_slack(void) { return s_right_slack >= 0 ? s_right_slack : s_rect.x; }
 
 // 块表是有序字节区间，二分查找当前行样式。/ Blocks are ordered byte ranges; binary-search the line style.
 static const blk_t* block_at(size_t off) {
@@ -323,17 +330,23 @@ void book_layout_set_image_bleed_width(int screen_width) {
     s_image_bleed_width = screen_width > 0 ? screen_width : 0;
 }
 
+void book_layout_set_right_slack(int px) {
+    s_right_slack = px >= 0 ? px : 0;
+}
+
 EpdRect book_layout_image_rect(void) {
     return s_image_rect.width > 0 ? s_image_rect : s_rect;
 }
 
-// 每次重排由正文栏推出插图区域：宽度换成整屏并与正文栏同心，其余保持原样。
-// Derive the illustration region from the body column on every re-layout: the width becomes the
-// panel's, concentric with the column, and everything else stays put.
+// 每次重排由正文栏推出插图区域：通栏时宽度换成整屏并贴住面板原点，其余保持原样。
+// 非对称边距下不能按正文栏居中，否则整屏插图会整体偏移出界。
+// Derive the illustration region from the body column on every re-layout: full bleed takes the
+// panel width anchored at the panel origin, everything else stays put. Centering on the body
+// column would shift a full-bleed illustration off-panel once the margins differ.
 static void resolve_image_rect(void) {
     s_image_rect = s_rect;
     if (s_image_bleed_width > s_rect.width) {
-        s_image_rect.x = s_rect.x + (s_rect.width - s_image_bleed_width) / 2;
+        s_image_rect.x = 0;
         s_image_rect.width = s_image_bleed_width;
     }
 }
@@ -453,10 +466,10 @@ static size_t visible_start(size_t off, size_t limit) {
 }
 
 // 折行时保留原文字节位置；CRLF 算一个段落边界。advance_limit 是行宽（竖排是列高），
-// hang_margin 是允许标点悬挂的外侧留白（竖排为 0，列底没有可悬挂的空白）。
+// hang_margin 是正文右缘之外允许标点悬挂的宽度（竖排为 0，列底没有可悬挂的空白）。
 // Preserve source offsets while wrapping; CRLF is one paragraph boundary. advance_limit is the
-// line width (the column height vertically) and hang_margin is the outer slack a hanging mark may
-// use (0 vertically: a column has no bottom margin to hang into).
+// line width (the column height vertically) and hang_margin is the slack beyond the body's right
+// edge that a hanging mark may use (0 vertically: a column has no bottom margin to hang into).
 // 行缓冲按实际UTF-8长度增长，包含零宽字符的长行仍可安全扩容；失败保留原指针。
 // Grow by actual UTF-8 line bytes, including long zero-width runs; failed growth keeps the old allocation.
 static bool line_append(size_t at, const char *text, size_t bytes) {
@@ -777,7 +790,7 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         bool paragraph_end, heading;
         int line_px, line_width, indent, margin_before, margin_after;
         uint8_t align;
-        if (!take_line(off, s_rect.width, s_rect.x, &next, &paragraph_end, &line_px, &heading,
+        if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
                        &line_width, &indent, &align, &margin_before, &margin_after)) goto fail;
         (void)line_width; (void)indent; (void)align;
         line_height = line_height_for(line_px);
@@ -981,7 +994,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         bool paragraph_end, heading;
         int line_px, line_width, indent, margin_before, margin_after;
         uint8_t align;
-        if (!take_line(off, s_rect.width, s_rect.x, &next, &paragraph_end, &line_px, &heading,
+        if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
                        &line_width, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int line_height = line_height_for(line_px);
         int leading = used ? margin_before : 0;
@@ -1017,8 +1030,9 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             if (!heading && !align && (!final_line || line_width > available)) {
                 // 完整正文行对齐到统一右边界；悬挂标点最多使用少量右侧留白。
                 // Justify complete body lines; a hanging closer may use a small part of the right margin.
-                int hang = s_rect.x > 4 ? line_px / 3 : 0;
-                if (hang > s_rect.x - 4) hang = s_rect.x - 4;
+                int slack = right_slack();
+                int hang = slack > 4 ? line_px / 3 : 0;
+                if (hang > slack - 4) hang = slack - 4;
                 int target = line_width > available ? available + hang : available;
                 ttf_draw_text_px_fitted(fb, x, baseline, line_px, s_line, s_tracking_px,
                                         target, 0, 15);

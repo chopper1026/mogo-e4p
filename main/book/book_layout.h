@@ -71,6 +71,10 @@ void book_layout_set_image_dims(book_layout_image_dims_fn fn, void* ctx);
 /// the body column. It is a panel constant, so re-layouts after margin or size changes need no
 /// update.
 void book_layout_set_image_bleed_width(int screen_width);
+/// 正文右缘之外可悬挂的宽度（像素）：两端对齐时标点最多越出正文右缘这么多。
+/// Right-side hanging allowance in pixels: how far justified punctuation may cross the body's
+/// right edge. Publish the actual right margin before every build.
+void book_layout_set_right_slack(int px);
 /// 插图可用区域：通栏开启时整屏宽、与正文同带；未开启或未排版时等于正文栏。
 /// Region illustrations may occupy: panel-wide and as tall as the body when full bleed is on;
 /// the body column itself when it is off or before the first layout.

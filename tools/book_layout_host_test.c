@@ -332,6 +332,13 @@ int main(void) {
     assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, column, 10));
     assert(book_layout_page_count() == 1);
     assert(book_layout_image_rect().x == 0 && book_layout_image_rect().width == 200);
+    // 非对称边距：通栏图仍贴面板原点，不能按正文栏居中而整体偏移。
+    // Asymmetric margins: a full-bleed image still anchors at the panel origin instead of
+    // centering on the body column and shifting off-panel.
+    EpdRect asymmetric = {48, 0, 120, 200};
+    assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, asymmetric, 10));
+    assert(book_layout_image_rect().x == 0 && book_layout_image_rect().width == 200);
+    assert(book_layout_build_blocks("IMG", 3, &wide_block, 1, column, 10));
     assert(book_layout_page_image_at(0, 0, &wide_image, &wide_y, &wide_w, &wide_h));
     assert(wide_w == 200 && wide_h == 83);
     book_layout_set_image_dims(probe_image, &image_probe_count);
@@ -607,6 +614,20 @@ int main(void) {
     drawn[0] = 0; fitted_target = 0;
     book_layout_draw_page(&fb, 0, r, 10);
     assert(!strcmp(drawn, "甲乙丙丁，") && fitted_target == 43);
+    // 右留白为 0 时标点不得越出正文右缘；发布真实右边距后才允许悬挂。
+    // With zero right slack a closer may not cross the body edge; the published right margin
+    // allows it. Asymmetric margins no longer borrow the left inset for this.
+    book_layout_set_right_slack(0);
+    assert(book_layout_build(hanging, strlen(hanging), r, 10));
+    drawn[0] = 0; fitted_target = 0;
+    book_layout_draw_page(&fb, 0, r, 10);
+    assert(fitted_target == 40);
+    book_layout_set_right_slack(40);
+    assert(book_layout_build(hanging, strlen(hanging), r, 10));
+    drawn[0] = 0; fitted_target = 0;
+    book_layout_draw_page(&fb, 0, r, 10);
+    assert(fitted_target == 43);
+    book_layout_set_right_slack(-1);
     // 居中块的首行不应带入普通段落缩进。/ A centered block must not inherit first-line body indent.
     blk_t centered = {.offset = 0, .len = strlen("甲乙丙丁戊己"), .align = 1, .indent_percent = 200, .image = -1};
     r = (EpdRect){40, 0, 30, 15};

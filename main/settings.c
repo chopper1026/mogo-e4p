@@ -89,7 +89,14 @@
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
 #define NVS_KEY_BOOK_PARA "bk_para"
+// 旧单一边距键只作左右边距的升级回退与降级回写；新配置按四向各存一键。
+// The old single-margin key only backs the left/right upgrade fallback and downgrade writes;
+// the new configuration stores one key per side.
 #define NVS_KEY_BOOK_MARGIN "bk_margin"
+#define NVS_KEY_BOOK_MARGIN_L "bk_marg_l"
+#define NVS_KEY_BOOK_MARGIN_R "bk_marg_r"
+#define NVS_KEY_BOOK_MARGIN_T "bk_marg_t"
+#define NVS_KEY_BOOK_MARGIN_B "bk_marg_b"
 #define NVS_KEY_BOOK_TRACK "bk_track"
 #define NVS_KEY_BOOK_INDENT "bk_indent"
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"
@@ -141,7 +148,11 @@ static bool s_book_antialias = true;
 static char s_book_background[288];
 static uint8_t s_reader_full_pages = 15;
 static uint8_t s_reader_turn_effect;
-static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
+static uint8_t s_book_line = 130, s_book_para = 50;
+// 四向边距默认左右 24、上下 0，与旧单一边距的横排观感一致。
+// Four margins default to 24 px left/right and 0 top/bottom, matching the old horizontal look.
+static uint8_t s_book_margin_l = 24, s_book_margin_r = 24;
+static uint8_t s_book_margin_t, s_book_margin_b;
 static bool s_reader_power_turn;
 static bool s_reader_volume_turn;
 static bool s_reader_statusbar = true;
@@ -430,16 +441,33 @@ void app_settings_init(void) {
         s_book_indent = indent;
     s_book_indent_adjust = nvs_get_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, &indent_adjust) == ESP_OK && indent_adjust <= 200
         ? indent_adjust : 20;
-    uint8_t line = 130, para = 50, margin = 24;
+    uint8_t line = 130, para = 50;
     if (nvs_get_u8(h, NVS_KEY_BOOK_LINE, &line) == ESP_OK) {
         if (line >= 110 && line <= 150) s_book_line = line;
         else if (line == 180) s_book_line = 150;
     }
     if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && app_settings_book_paragraph_value(app_settings_book_paragraph_level(para)) == para) s_book_para = para;
+    // 旧单一边距只在左右两个新键都缺失时整体接管；只写过一边时，另一边回到默认值，
+    // 不能被左边距同步写回的旧键带跑。上下缺省为 0。
     // 旧本地 49..60 px 的边距直接收敛到 48，不回到默认 24。
-    // Old local 49..60 px margins converge to 48 instead of jumping back to the 24 px default.
-    if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK)
-        s_book_margin = margin > 48 ? 48 : margin;
+    // The legacy single margin takes over both sides only when neither new key exists; once one
+    // side has been written, the other falls back to its default instead of following the legacy
+    // mirror. Top/bottom default to zero. Old local 49..60 px margins converge to 48.
+    uint8_t legacy_margin = 24, margin_l = 0, margin_r = 0, margin_t = 0, margin_b = 0;
+    const bool has_legacy = nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &legacy_margin) == ESP_OK;
+    if (has_legacy && legacy_margin > 48) legacy_margin = 48;
+    const bool has_margin_l = nvs_get_u8(h, NVS_KEY_BOOK_MARGIN_L, &margin_l) == ESP_OK && margin_l <= 96;
+    const bool has_margin_r = nvs_get_u8(h, NVS_KEY_BOOK_MARGIN_R, &margin_r) == ESP_OK && margin_r <= 96;
+    s_book_margin_l = s_book_margin_r = 24;
+    s_book_margin_t = s_book_margin_b = 0;
+    if (has_margin_l) s_book_margin_l = margin_l;
+    else if (!has_margin_r && has_legacy) s_book_margin_l = legacy_margin;
+    if (has_margin_r) s_book_margin_r = margin_r;
+    else if (!has_margin_l && has_legacy) s_book_margin_r = legacy_margin;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN_T, &margin_t) == ESP_OK && margin_t <= 96)
+        s_book_margin_t = margin_t;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN_B, &margin_b) == ESP_OK && margin_b <= 96)
+        s_book_margin_b = margin_b;
     uint8_t shelf_style = 2;
     if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 5)
         s_shelf_style = shelf_style == 3 || shelf_style == 4 ? 2 : shelf_style;
@@ -1013,11 +1041,32 @@ void app_settings_set_book_line_spacing(uint8_t percent) {
     s_book_line = percent;
     nvs_put_u8(NVS_KEY_BOOK_LINE, percent);
 }
-uint8_t app_settings_book_margin(void) { return s_book_margin; }
-void app_settings_set_book_margin(uint8_t px) {
-    if (px > 48 || s_book_margin == px) return;
-    s_book_margin = px;
-    nvs_put_u8(NVS_KEY_BOOK_MARGIN, px);
+uint8_t app_settings_book_margin_left(void) { return s_book_margin_l; }
+void app_settings_set_book_margin_left(uint8_t px) {
+    if (px > 96 || s_book_margin_l == px) return;
+    s_book_margin_l = px;
+    nvs_put_u8(NVS_KEY_BOOK_MARGIN_L, px);
+    // 降级回写：旧固件只认单一 bk_margin 且上限 48，按旧上限夹取。
+    // Downgrade write: older firmware reads only the single bk_margin, whose ceiling is 48.
+    nvs_put_u8(NVS_KEY_BOOK_MARGIN, px > 48 ? 48 : px);
+}
+uint8_t app_settings_book_margin_right(void) { return s_book_margin_r; }
+void app_settings_set_book_margin_right(uint8_t px) {
+    if (px > 96 || s_book_margin_r == px) return;
+    s_book_margin_r = px;
+    nvs_put_u8(NVS_KEY_BOOK_MARGIN_R, px);
+}
+uint8_t app_settings_book_margin_top(void) { return s_book_margin_t; }
+void app_settings_set_book_margin_top(uint8_t px) {
+    if (px > 96 || s_book_margin_t == px) return;
+    s_book_margin_t = px;
+    nvs_put_u8(NVS_KEY_BOOK_MARGIN_T, px);
+}
+uint8_t app_settings_book_margin_bottom(void) { return s_book_margin_b; }
+void app_settings_set_book_margin_bottom(uint8_t px) {
+    if (px > 96 || s_book_margin_b == px) return;
+    s_book_margin_b = px;
+    nvs_put_u8(NVS_KEY_BOOK_MARGIN_B, px);
 }
 // 非线性段距保留旧档位，并将25%置于几何中点。/ Nonlinear gaps retain legacy stops with 25% at the geometric midpoint.
 uint8_t app_settings_book_paragraph_value(uint8_t level) {
@@ -1238,6 +1287,22 @@ static bool backup_haptic_valid(const settings_backup_haptic_t *haptic) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)haptic->checksum[i] << (8 * i);
     return haptic->on <= 1 && haptic->level <= APP_HAPTIC_STRONG && stored == backup_haptic_checksum(haptic);
 }
+// v29 追加四向边距；旧备份把单一 bk_margin 恢复成左右同值、上下 0。
+// V29 appends the four per-side margins; older backups restore the single bk_margin as equal
+// left/right insets with zero top/bottom.
+typedef struct { uint8_t left, right, top, bottom, checksum[4]; } settings_backup_margins_t;
+static uint32_t backup_margins_checksum(const settings_backup_margins_t *margins) {
+    const uint8_t values[4] = {margins->left, margins->right, margins->top, margins->bottom};
+    uint32_t hash = 2166136261u;
+    for (unsigned i = 0; i < 4; ++i) hash = (hash ^ values[i]) * 16777619u;
+    return hash;
+}
+static bool backup_margins_valid(const settings_backup_margins_t *margins) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)margins->checksum[i] << (8 * i);
+    return margins->left <= 96 && margins->right <= 96 && margins->top <= 96 &&
+           margins->bottom <= 96 && stored == backup_margins_checksum(margins);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1263,9 +1328,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1349,7 +1414,9 @@ esp_err_t app_settings_backup_save(void) {
     // v27: appends embedded book fonts, vertical body text and the full shutdown style to v26.
     // v28：在 v27 尾部再追加触摸震动开关与强度。
     // v28: appends the touch-vibration switch and intensity after the v27 tail.
-    memcpy(backup.magic, "PICOSETS", sizeof(backup.magic));
+    // v29：在 v28 尾部再追加四向边距；旧槽位继续写左边距。
+    // v29: appends the four per-side margins after the v28 tail; the legacy slot keeps the left inset.
+    memcpy(backup.magic, "PICOSETT", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1369,7 +1436,10 @@ esp_err_t app_settings_backup_save(void) {
     f[BK_TRACKING] = s_book_tracking;
     f[BK_READING_LINE] = s_book_reading_line;
     f[BK_LINE_SPACING] = s_book_line;
-    f[BK_MARGIN] = s_book_margin;
+    // 旧槽位只供旧固件读取，上限仍是 48；四向真值在 v29 尾块里。
+    // The legacy slot only serves older firmware and keeps its 48 px ceiling; the real four
+    // values live in the v29 tail block.
+    f[BK_MARGIN] = s_book_margin_l > 48 ? 48 : s_book_margin_l;
     f[BK_PARAGRAPH] = s_book_para;
     f[BK_SHELF] = s_shelf_style;
     strlcpy(backup.font, !strcmp(s_font, "builtin") ? "" : s_font, sizeof(backup.font));
@@ -1444,6 +1514,10 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_haptic_t haptic = {.on = s_touch_haptics ? 1 : 0, .level = s_haptic_intensity};
     uint32_t haptic_hash = backup_haptic_checksum(&haptic);
     for (unsigned i = 0; i < 4; ++i) haptic.checksum[i] = (uint8_t)(haptic_hash >> (8 * i));
+    settings_backup_margins_t margins = {.left = s_book_margin_l, .right = s_book_margin_r,
+                                         .top = s_book_margin_t, .bottom = s_book_margin_b};
+    uint32_t margins_hash = backup_margins_checksum(&margins);
+    for (unsigned i = 0; i < 4; ++i) margins.checksum[i] = (uint8_t)(margins_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1485,6 +1559,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical);
     if (ok) ok = fwrite(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style);
     if (ok) ok = fwrite(&haptic, 1, sizeof(haptic), file) == sizeof(haptic);
+    if (ok) ok = fwrite(&margins, 1, sizeof(margins), file) == sizeof(margins);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1581,6 +1656,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_book_vertical_t book_vertical = {.on = 0};
     settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_STAGED};
     settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
+    settings_backup_margins_t margins = {0};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1674,6 +1750,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 27) ok = fread(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical) && backup_book_vertical_valid(&book_vertical);
     if (ok && version >= 27) ok = fread(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style) && backup_shutdown_style_valid(&shutdown_style);
     if (ok && version >= 28) ok = fread(&haptic, 1, sizeof(haptic), file) == sizeof(haptic) && backup_haptic_valid(&haptic);
+    if (ok && version >= 29) ok = fread(&margins, 1, sizeof(margins), file) == sizeof(margins) && backup_margins_valid(&margins);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1699,6 +1776,12 @@ esp_err_t app_settings_backup_restore(void) {
         backup.flags[BK_TRACKING]=(uint8_t)(px-APP_BOOK_TRACK_MIN);
     }
     backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
+    // v29 之前只有单一边距：按旧横排语义恢复成左右同值、上下 0。
+    // Before v29 there was one margin: restore it as equal left/right insets with zero top/bottom.
+    if (version < 29) {
+        margins.left = margins.right = backup.flags[BK_MARGIN];
+        margins.top = margins.bottom = 0;
+    }
     if (version < 15) backup.flags[BK_SHAKE] = 0; // 旧晃动标志不改变AA。/ Old shake flags never affect AA.
     // 已删除组件的备份仍可恢复，其余字段不受影响。/ Restore retired widget backups without rejecting other preferences.
     if (home.component == 3) home.component = APP_HOME_CLOCK;
@@ -1789,6 +1872,10 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
     BACKUP_SET_U8(NVS_KEY_BOOK_LINE, BK_LINE_SPACING);
     BACKUP_SET_U8(NVS_KEY_BOOK_MARGIN, BK_MARGIN);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_L, margins.left);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_R, margins.right);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_T, margins.top);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_B, margins.bottom);
     BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
@@ -1856,7 +1943,10 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_reading_line = f[BK_READING_LINE];
     s_book_rule_offset = rule_offset;
     s_book_line = f[BK_LINE_SPACING];
-    s_book_margin = f[BK_MARGIN];
+    s_book_margin_l = margins.left;
+    s_book_margin_r = margins.right;
+    s_book_margin_t = margins.top;
+    s_book_margin_b = margins.bottom;
     s_book_para = f[BK_PARAGRAPH];
     s_shelf_style = f[BK_SHELF];
     strlcpy(s_book_background, background.path, sizeof(s_book_background));

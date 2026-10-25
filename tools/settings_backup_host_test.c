@@ -21,15 +21,15 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v26 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v26; legacy fixtures drop them all. */
+/* v15..v29 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v29; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
                             sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + \
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
-                            sizeof(settings_backup_haptic_t))
+                            sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -99,13 +99,14 @@ static bool has_keys[3];
 static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
 static uint8_t loaded_idle;static bool has_idle;
+static int loaded_margin=-1,loaded_margin_l=-1,loaded_margin_r=-1,loaded_margin_t=-1,loaded_margin_b=-1;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
 static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=(uint8_t)loaded_margin;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_L)&&loaded_margin_l>=0){*value=(uint8_t)loaded_margin_l;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_R)&&loaded_margin_r>=0){*value=(uint8_t)loaded_margin_r;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_T)&&loaded_margin_t>=0){*value=(uint8_t)loaded_margin_t;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_B)&&loaded_margin_b>=0){*value=(uint8_t)loaded_margin_b;return ESP_OK;} return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
@@ -134,7 +135,8 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t));
+                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
+                                   sizeof(settings_backup_margins_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -153,10 +155,39 @@ int main(void) {
     loaded_home=-1;keys_v2=false;
 
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
-    app_settings_set_book_margin(0);assert(app_settings_book_margin()==0);
-    app_settings_set_book_margin(24);assert(app_settings_book_margin()==24);
-    app_settings_set_book_margin(48);assert(app_settings_book_margin()==48);
-    app_settings_set_book_margin(49);assert(app_settings_book_margin()==48);
+    app_settings_set_book_margin_left(0);assert(app_settings_book_margin_left()==0);
+    app_settings_set_book_margin_left(24);assert(app_settings_book_margin_left()==24);
+    app_settings_set_book_margin_left(96);assert(app_settings_book_margin_left()==96);
+    app_settings_set_book_margin_left(97);assert(app_settings_book_margin_left()==96);
+    app_settings_set_book_margin_right(12);assert(app_settings_book_margin_right()==12);
+    app_settings_set_book_margin_top(18);assert(app_settings_book_margin_top()==18);
+    app_settings_set_book_margin_bottom(30);assert(app_settings_book_margin_bottom()==30);
+    app_settings_set_book_margin_top(97);assert(app_settings_book_margin_top()==18);
+    app_settings_set_book_margin_bottom(0);assert(app_settings_book_margin_bottom()==0);
+    // 旧单一边距只在左右新键都缺失时接管；只写过一边时另一边回到默认，不被旧键带跑。
+    // The legacy single margin takes over both sides only when neither new key exists; after one
+    // side has been written the other returns to its default instead of following the legacy key.
+    loaded_margin=36;
+    app_settings_init();
+    assert(app_settings_book_margin_left()==36&&app_settings_book_margin_right()==36&&
+           app_settings_book_margin_top()==0&&app_settings_book_margin_bottom()==0);
+    loaded_margin=48;loaded_margin_l=96;
+    app_settings_init();
+    assert(app_settings_book_margin_left()==96&&app_settings_book_margin_right()==24);
+    loaded_margin_l=-1;loaded_margin_r=12;
+    app_settings_init();
+    assert(app_settings_book_margin_left()==24&&app_settings_book_margin_right()==12);
+    loaded_margin_l=6;loaded_margin_r=12;loaded_margin_t=96;loaded_margin_b=30;
+    app_settings_init();
+    assert(app_settings_book_margin_left()==6&&app_settings_book_margin_right()==12&&
+           app_settings_book_margin_top()==96&&app_settings_book_margin_bottom()==30);
+    loaded_margin=loaded_margin_l=loaded_margin_r=loaded_margin_t=loaded_margin_b=-1;
+    app_settings_init();
+    assert(app_settings_book_margin_left()==24&&app_settings_book_margin_right()==24&&
+           app_settings_book_margin_top()==0&&app_settings_book_margin_bottom()==0);
+    // 上面的初始化会提交按键迁移标记；恢复测试夹具的初始状态。
+    // The initializations above commit the key-migration marker; restore the fixture state.
+    keys_v2=false;
     assert(app_settings_set_book_background_path("/sdcard/pictures/bg.png"));
     assert(!app_settings_set_book_background_path("/sdcard/pictures/../bad.png"));
     has_hold=true;loaded_hold=APP_READER_KEY_REFRESH;
@@ -298,6 +329,12 @@ int main(void) {
     strlcpy(s_wallpaper, "/sdcard/pictures/missing.jpg", sizeof(s_wallpaper));
     s_touch_haptics = false;
     s_haptic_intensity = APP_HAPTIC_STRONG;
+    // v29 尾部保存四向边距；恢复前先改成别的值，确认四项都回来。
+    // The v29 tail carries all four margins; change them before restoring so each one must return.
+    app_settings_set_book_margin_left(96);
+    app_settings_set_book_margin_right(12);
+    app_settings_set_book_margin_top(18);
+    app_settings_set_book_margin_bottom(30);
     assert(app_settings_backup_save() == ESP_OK);
     assert(history_saves == 1);
     FILE *saved = fopen(BACKUP_FILE, "rb");
@@ -409,6 +446,10 @@ int main(void) {
     s_wallpaper[0] = 0;
     s_touch_haptics = true;
     s_haptic_intensity = APP_HAPTIC_WEAK;
+    app_settings_set_book_margin_left(0);
+    app_settings_set_book_margin_right(0);
+    app_settings_set_book_margin_top(0);
+    app_settings_set_book_margin_bottom(0);
     app_settings_set_reader_key_preset(1);
     const int prior_restore_commits = commit_count;
     assert(app_settings_backup_restore() == ESP_OK);
@@ -423,6 +464,8 @@ int main(void) {
            !strcmp(saved_wifi.password, "password123"));
     assert(app_settings_book_indent_adjust()==-7&&loaded_adjust==13);
     assert(!app_settings_touch_haptics() && app_settings_haptic_intensity()==APP_HAPTIC_STRONG);
+    assert(app_settings_book_margin_left()==96 && app_settings_book_margin_right()==12 &&
+           app_settings_book_margin_top()==18 && app_settings_book_margin_bottom()==30);
     assert(s_book_px == 62 && s_book_tracking == 8 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
@@ -480,7 +523,8 @@ int main(void) {
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t));
+                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
+                                   sizeof(settings_backup_margins_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -522,7 +566,10 @@ int main(void) {
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX);
     app_settings_set_reader_open_fullscreen(false);
     app_settings_set_reader_double_action(APP_READER_KEY_FULLSCREEN);
-    app_settings_set_book_margin(48);
+    app_settings_set_book_margin_left(48);
+    app_settings_set_book_margin_right(48);
+    app_settings_set_book_margin_top(48);
+    app_settings_set_book_margin_bottom(48);
     app_settings_set_book_tracking(15);
     assert(app_settings_backup_save() == ESP_OK);
     saved = fopen(BACKUP_FILE, "r+b");
@@ -547,7 +594,8 @@ int main(void) {
     // them so history follows directly.
     const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                  sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t);
+                                  sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
+                                  sizeof(settings_backup_margins_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -574,14 +622,18 @@ int main(void) {
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
     app_settings_set_reader_open_fullscreen(true);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
-    app_settings_set_book_margin(0);
+    app_settings_set_book_margin_left(0);
+    app_settings_set_book_margin_right(0);
+    app_settings_set_book_margin_top(0);
+    app_settings_set_book_margin_bottom(0);
     app_settings_set_book_tracking(0);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_FRAME);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
     assert(!app_settings_reader_open_fullscreen());
     assert(app_settings_reader_double_action() == APP_READER_KEY_FULLSCREEN);
-    assert(app_settings_book_margin() == 48);
+    assert(app_settings_book_margin_left() == 48 && app_settings_book_margin_right() == 48 &&
+           app_settings_book_margin_top() == 0 && app_settings_book_margin_bottom() == 0);
     assert(app_settings_book_tracking() == 15);
     assert(app_settings_backup_save() == ESP_OK);
     // v11 没有微调块；保留映射、网络及阅读记录，微调安全回到0。
@@ -956,7 +1008,8 @@ int main(void) {
         sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) +
         sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                              sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t);
+                              sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
+                              sizeof(settings_backup_margins_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;

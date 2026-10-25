@@ -70,6 +70,8 @@ static EpdRect body={40,20,100,200};
 // Illustration region: the body column by default; the full-bleed case widens the band.
 static EpdRect image_band={40,20,100,200};
 static EpdRect reader_area_rect={40,20,100,200};
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
+static int s_margin[MARGIN_COUNT];
 static int pixel_min_x=1<<30,pixel_max_x=-1,pixel_min_y=1<<30,pixel_max_y=-1;
 static struct {int image,y,width,height;} slots[40];
 static int slot_count;
@@ -268,6 +270,12 @@ int main(void){
  prepare_inline_image();assert(s_page_images[0].width==60&&s_page_images[0].height==20);
  pixel_min_y=1<<30;pixel_max_y=-1;
  draw_reader_images(&fb,s_page,body);assert(pixel_min_y==0&&pixel_max_y==19);
+ // 用户设置的上边距要作用到页首插图，固定呼吸空间仍留给正文。
+ // A user-set top margin applies to a page-start illustration; the fixed inset stays with text.
+ s_margin[MARGIN_TOP]=24;
+ pixel_min_y=1<<30;pixel_max_y=-1;
+ draw_reader_images(&fb,s_page,body);assert(pixel_min_y==24&&pixel_max_y==43);
+ s_margin[MARGIN_TOP]=0;
  reader_area_rect=body;release_page_images();
  // 通栏：插图在整屏宽的一条带里居中，正文栏的左右边距不再限制它。
  // Full bleed: the illustration centers in the panel-wide band and the body margins no longer

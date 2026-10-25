@@ -22,6 +22,7 @@ static const char *s_text="IMG\ntail";
 static size_t s_count=1,s_len=8,s_pages[]={0};
 static int s_px=10,s_lead_height,s_reading_line,s_reading_line_offset,s_tracking_px;
 static EpdRect s_rect={0,0,100,100};
+static int right_slack(void){return s_rect.x;}
 static char s_line[16];
 static uint32_t image_starts[]={0,1};
 static uint32_t *s_page_img_start=image_starts;

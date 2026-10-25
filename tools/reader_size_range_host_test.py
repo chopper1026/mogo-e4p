@@ -16,16 +16,17 @@ unit=r'''
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "book_font_size.h"
 #define BOOK_PX_MIN BOOK_READER_PX_MIN
 #define BOOK_PX_MAX BOOK_READER_PX_MAX
-#define BOOK_MARGIN_CHOICES 9
+#define BOOK_MARGIN_CHOICES 17
 #define APP_BOOK_TRACK_MIN -15
 #define APP_BOOK_TRACK_COUNT 31
 #define APP_BOOK_PARAGRAPH_COUNT 11
 typedef struct {int x,y,width,height;}EpdRect;
-static int s_px=48,s_margin=24,s_line_spacing=130;
-static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
+static int s_px=48,s_margin[4]={24,24,0,0},s_line_spacing=130;
+static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin[4],s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
 static bool s_reader_slider_endpoint;
 static EpdRect reader_slider_rect(int slider){(void)slider;return (EpdRect){36,700,612,76};}
 static int app_settings_book_tracking(void){return 15;}
@@ -33,9 +34,8 @@ static int app_settings_book_line_spacing(void){return s_line_spacing;}
 static int app_settings_book_paragraph_spacing(void){return 25;}
 static int app_settings_book_paragraph_value(uint8_t value){return value;}
 static int app_settings_book_paragraph_level(uint8_t value){return value;}
-static int reader_margin_levels(int a,int b,int *c,int *d){(void)a;(void)b;(void)c;(void)d;return 9;}
-static int reader_margin_for_level(int a,int b,int c,int d){(void)a;(void)c;(void)d;return b;}
-static int reader_margin_input(EpdRect r,int a,int b,int c,int d){(void)r;(void)a;(void)c;(void)d;return b;}
+static int reader_margin_value(int level){return level*6;}
+static int reader_margin_input(EpdRect r,int x,int current){(void)r;(void)x;return current;}
 '''
 for name in ['slider_index','reader_slider_map','reader_slider_begin']:unit+=function(name)
 unit+=r'''

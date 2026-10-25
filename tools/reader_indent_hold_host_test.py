@@ -25,7 +25,8 @@ enum {EPD_DRAW_ALIGN_CENTER,MODE_DU};
 #define UI_TOUCH_SLOP_PX 24
 #define UI_SWIPE_MIN_PX 120
 #define UI_GRAY_BLACK 0
-static int s_view=READING,s_reader_panel=READER_PANEL_LAYOUT_SETTINGS,s_pressed_control=-1,s_reader_slider=-1,s_margin,s_px=48;
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
+static int s_view=READING,s_reader_panel=READER_PANEL_LAYOUT_SETTINGS,s_pressed_control=-1,s_reader_slider=-1,s_margin[MARGIN_COUNT],s_px=48;
 static bool s_clear_confirm,s_indent_feedback_pending;
 static EpdRect s_area;
 static int s_mode;
@@ -50,7 +51,7 @@ static int update_display_area_diff_with(void *hl,const int *wave,int mode,EpdRe
 static void guard_draw_result(void *hl,int result){(void)hl;assert(result==0);}
 static app_redraw_t apply_reader_indent(app_ctx_t *ctx,int em,int value){(void)ctx;assert(em>=0&&em<=3&&value>=-100&&value<=100);if(value==saved)return APP_REDRAW_NONE;saved=value;++reflows;return APP_REDRAW_PAGE;}
 static EpdRect reader_slider_rect(int n){(void)n;return(EpdRect){0};}
-static int reader_margin_input(EpdRect r,int x,int margin,int px,int tracking){(void)r;(void)x;(void)px;(void)tracking;return margin;}
+static int reader_margin_input(EpdRect r,int x,int margin){(void)r;(void)x;return margin;}
 static int app_settings_book_tracking(void){return 4;}
 static int app_settings_book_line_spacing(void){return 120;}
 static int app_settings_book_paragraph_spacing(void){return 0;}
@@ -72,7 +73,7 @@ static void app_settings_set_book_title_style(uint8_t v){title_style_value=v;}
 static uint8_t app_settings_book_title_size(void){return (uint8_t)title_size_value;}
 static void app_settings_set_book_title_size(uint8_t v){title_size_value=v;}
 static app_redraw_t apply_heading_size(int control){(void)control;return APP_REDRAW_PAGE;}
-static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,int margin,int line,int para){(void)ctx;(void)px;(void)margin;(void)line;(void)para;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,const int margin[MARGIN_COUNT],int line,int para){(void)ctx;(void)px;(void)margin;(void)line;(void)para;assert(false);return APP_REDRAW_NONE;}
 static app_redraw_t apply_reader_typography(app_ctx_t *ctx,int value){(void)ctx;(void)value;assert(false);return APP_REDRAW_NONE;}
 static void invalidate_prep(void){++invalidated;}
 '''

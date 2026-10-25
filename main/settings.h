@@ -279,9 +279,16 @@ void app_settings_set_book_reading_line_offset(int8_t offset_px);
 /// 阅读行高百分比，110..150。/ Reader line-height percentage: 110..150.
 uint8_t app_settings_book_line_spacing(void);
 void app_settings_set_book_line_spacing(uint8_t percent);
-/// 阅读页左右边距，0..48 像素；界面按 6 像素一档。/ Reader horizontal margin: 0..48 pixels, 6 px per UI step.
-uint8_t app_settings_book_margin(void);
-void app_settings_set_book_margin(uint8_t px);
+/// 阅读页四向边距，0..96 像素；界面按 6 像素一档。默认左/右 24、上/下 0。
+/// Reader margins per side: 0..96 px, 6 px per UI step; left/right default 24, top/bottom 0.
+uint8_t app_settings_book_margin_left(void);
+void app_settings_set_book_margin_left(uint8_t px);
+uint8_t app_settings_book_margin_right(void);
+void app_settings_set_book_margin_right(uint8_t px);
+uint8_t app_settings_book_margin_top(void);
+void app_settings_set_book_margin_top(uint8_t px);
+uint8_t app_settings_book_margin_bottom(void);
+void app_settings_set_book_margin_bottom(uint8_t px);
 /// 段距11档，25%居中，0..100%。/ Eleven paragraph-gap stops centered on 25%, spanning 0..100%.
 #define APP_BOOK_PARAGRAPH_COUNT 11
 uint8_t app_settings_book_paragraph_value(uint8_t level);

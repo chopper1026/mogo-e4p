@@ -205,7 +205,8 @@ static char s_path[288],s_requested_open[288];
 static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen;
 static int test_open_calls;
 static char* s_text;
-static int s_unsaved,s_px=48,s_margin=36,s_line_spacing=130;
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
+static int s_unsaved,s_px=48,s_margin[MARGIN_COUNT]={36,36,0,0},s_line_spacing=130;
 static uint32_t s_file_size=1000;
 static size_t s_chapter,s_page;
 static bool s_book_fonts_applied;
@@ -248,7 +249,7 @@ static void middle_pending_clear(void) { s_middle_pending = false; }
 static int s_reader_slider=-1;
 static bool s_reader_slider_endpoint;
 static bool s_reader_tools_toggle;
-static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
+static int s_reader_preview_px,s_reader_preview_margin[MARGIN_COUNT],s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
 static bool s_requested_manage;
 static int s_presented_view;
 static uint8_t* s_editor_cover;
@@ -316,10 +317,16 @@ static int64_t s_size_settle_ms,s_poll_ms;
 static void* s_prep_task,*s_prep_done,*s_draw_lock,*s_next_fb;
 static void ensure_prep(void){}
 static int app_settings_book_px(void){return 48;}
-static int test_saved_margin=36;
-static int app_settings_book_margin(void){return test_saved_margin;}
+static int test_saved_margin[MARGIN_COUNT]={36,36,0,0};
+static int app_settings_book_margin_left(void){return test_saved_margin[MARGIN_LEFT];}
+static int app_settings_book_margin_right(void){return test_saved_margin[MARGIN_RIGHT];}
+static int app_settings_book_margin_top(void){return test_saved_margin[MARGIN_TOP];}
+static int app_settings_book_margin_bottom(void){return test_saved_margin[MARGIN_BOTTOM];}
 static void app_settings_set_book_px(uint8_t px){assert(px==48);}
-static void app_settings_set_book_margin(uint8_t margin){test_saved_margin=margin;}
+static void app_settings_set_book_margin_left(uint8_t margin){test_saved_margin[MARGIN_LEFT]=margin;}
+static void app_settings_set_book_margin_right(uint8_t margin){test_saved_margin[MARGIN_RIGHT]=margin;}
+static void app_settings_set_book_margin_top(uint8_t margin){test_saved_margin[MARGIN_TOP]=margin;}
+static void app_settings_set_book_margin_bottom(uint8_t margin){test_saved_margin[MARGIN_BOTTOM]=margin;}
 static void app_settings_set_book_line_spacing(uint8_t line){assert(line==130);}
 static void app_settings_set_book_paragraph_spacing(uint8_t para){assert(para==50);}
 static app_redraw_t apply_reader_typography(app_ctx_t* ctx,int tracking){(void)ctx;(void)tracking;return APP_REDRAW_NONE;}
@@ -351,6 +358,7 @@ static bool test_book_vertical;
 static bool app_settings_book_vertical(void){return test_book_vertical;}
 static void app_settings_set_book_vertical(bool on){test_book_vertical=on;}
 static void book_layout_set_image_bleed_width(int screen_width){(void)screen_width;}
+static void book_layout_set_right_slack(int px){(void)px;}
 static void book_layout_set_vertical(bool vertical){test_book_vertical=vertical;}
 static bool app_settings_book_shake(void){return false;}
 static void read_pico_sd_start_probe(void){}
@@ -400,8 +408,9 @@ static char test_wrapped[512];
 #define UI_BAR_TOP 1096
 #define UI_BAR_H 96
 #define BOOK_MARGIN_MIN 0
-#define BOOK_MARGIN_MAX 48
-#define BOOK_MARGIN_CHOICES 9
+#define BOOK_MARGIN_MAX 96
+#define BOOK_MARGIN_STEP 6
+#define BOOK_MARGIN_CHOICES 17
 #define BOOK_PX_MIN 18
 #define BOOK_PX_MAX 90
 #define EPD_DRAW_ALIGN_LEFT 0
@@ -449,7 +458,7 @@ static char s_category_root[288];
 """
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -513,55 +522,58 @@ int main(void) {
     s_visible_count=0;s_view=SHELF;test_shelf_style=0;
     for (int gray=0; gray<=255; ++gray)
         assert(inline_ink_gray((uint8_t)gray)==gray);
-    EpdRect margin_slider={36,700,294,66};
-    int narrow=reader_margin_input(margin_slider,40,36,48,0);
-    int wide=reader_margin_input(margin_slider,325,36,48,0);
-    assert(reader_margin_width(0,48,0)>reader_margin_width(24,48,0));
-    assert(reader_margin_width(narrow,48,0)>reader_margin_width(36,48,0));
+    EpdRect margin_slider={36,540,294,66};
+    int narrow=reader_margin_input(margin_slider,40,36);
+    int wide=reader_margin_input(margin_slider,325,36);
     // 端点点按按一档推进：36 的下一档是 42，而不是直接跳到 48。
     // An endpoint tap advances one stop: 36 goes to 42, not straight to 48.
-    assert(wide==42&&reader_margin_width(wide,48,0)<reader_margin_width(36,48,0));
-    assert(reader_margin_level_for(24,72,0)==4&&reader_margin_for_level(4,24,72,0)==24);
-    // 每个字体/字间距下，只展示实际宽度不同的档位，任意旧边距只读保留。
-    // All fonts/tracking values expose distinct visible widths and retain existing margins on a read.
-    for(int px=18;px<=90;++px)for(int tracking=-4;tracking<=4;tracking+=2){
-        int widths[BOOK_MARGIN_CHOICES],values[BOOK_MARGIN_CHOICES];
-        int count=reader_margin_levels(px,tracking,widths,values);
-        assert(count==BOOK_MARGIN_CHOICES&&values[0]==0&&values[count-1]==48);
-        for(int i=0;i<count;++i){
-            assert(widths[i]==reader_margin_width(values[i],px,tracking));
-            if(i)assert(widths[i-1]>widths[i]&&values[i-1]<values[i]);
-        }
-        for(int margin=0;margin<=48;++margin)
-            assert(reader_margin_for_level(reader_margin_level_for(margin,px,tracking),margin,px,tracking)==margin);
-        for(int i=1;i<count;++i){
-            int smaller=reader_margin_input(margin_slider,40,values[i],px,tracking);
-            assert(reader_margin_width(smaller,px,tracking)>widths[i]);
-        }    }
-    // 每次提交都要真正重排并保存，而不是只挪滑块。
-    // Actual slider commit must reflow and persist every margin value, not just move the thumb.
+    assert(narrow==30&&wide==42);
+    for(int margin=0;margin<=96;margin+=6)
+        assert(reader_margin_value(reader_margin_level(margin))==margin);
+    assert(reader_margin_level(22)==4&&reader_margin_value(4)==24);
+    // 每次提交都要真正重排并保存四向边距，而不是只挪滑块。
+    // Actual slider commit must reflow and persist all four insets, not just move the thumb.
     app_ctx_t margin_ctx={0};
-    for(int margin=0;margin<=48;margin+=6){
-        s_margin=margin==0?48:0;test_saved_margin=s_margin;s_px=48;s_page=2;
+    for(int margin=0;margin<=96;margin+=6){
+        s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=margin==0?48:0;
+        s_margin[MARGIN_TOP]=s_margin[MARGIN_BOTTOM]=0;
+        memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
+        s_px=48;s_page=2;
         int before=test_reflows;
-        assert(apply_reader_layout(&margin_ctx,48,margin,130,50)==APP_REDRAW_PAGE);
-        assert(s_margin==margin&&test_saved_margin==margin&&test_reflows==before+1&&s_page==2);
+        int next[MARGIN_COUNT]={margin,margin,0,0};
+        assert(apply_reader_layout(&margin_ctx,48,next,130,50)==APP_REDRAW_PAGE);
+        assert(s_margin[MARGIN_LEFT]==margin&&s_margin[MARGIN_RIGHT]==margin&&
+               test_saved_margin[MARGIN_LEFT]==margin&&test_saved_margin[MARGIN_RIGHT]==margin&&
+               test_reflows==before+1&&s_page==2);
         assert(test_reflow_rect.width==UI_LOCK_WIDTH-2*margin);
     }
-    assert(apply_reader_layout(&margin_ctx,48,-1,130,50)==APP_REDRAW_NONE);
-    assert(apply_reader_layout(&margin_ctx,48,49,130,50)==APP_REDRAW_NONE);
-    s_margin=test_saved_margin=24;s_reader_slider_endpoint=false;
-    reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin==18);
-    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==18&&test_saved_margin==18);
-    s_margin=test_saved_margin=24;s_reader_slider_endpoint=true;
+    int bad_margin[MARGIN_COUNT]={-1,0,0,0};
+    assert(apply_reader_layout(&margin_ctx,48,bad_margin,130,50)==APP_REDRAW_NONE);
+    int wide_margin[MARGIN_COUNT]={97,0,0,0};
+    assert(apply_reader_layout(&margin_ctx,48,wide_margin,130,50)==APP_REDRAW_NONE);
+    s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=24;
+    memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
+    s_reader_slider_endpoint=false;
+    reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin[MARGIN_LEFT]==18);
+    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin[MARGIN_LEFT]==18&&test_saved_margin[MARGIN_LEFT]==18);
+    s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=24;
+    memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
+    s_reader_slider_endpoint=true;
     reader_slider_begin(1,183);assert(!s_reader_slider_endpoint);
     reader_slider_move(100);
-    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==0&&test_saved_margin==0);
-    assert(body_rect().width==UI_LOCK_WIDTH);
-    s_margin=test_saved_margin=24;test_reflow_failures=1;
-    assert(apply_reader_layout(&margin_ctx,48,0,130,50)==APP_REDRAW_NONE);
-    assert(s_margin==24&&test_saved_margin==24&&!test_draw_locked);
-    s_margin=test_saved_margin=36;s_page=0;test_reflows=0;
+    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin[MARGIN_LEFT]==0&&test_saved_margin[MARGIN_LEFT]==0);
+    // 左边距归零时右边距仍保留，正文栏不再对称收窄。
+    // The right inset survives the left one reaching zero, so the column is no longer symmetric.
+    assert(body_rect().width==UI_LOCK_WIDTH-24);
+    s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=24;
+    memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
+    test_reflow_failures=1;
+    int zero_margin[MARGIN_COUNT]={0,0,0,0};
+    assert(apply_reader_layout(&margin_ctx,48,zero_margin,130,50)==APP_REDRAW_NONE);
+    assert(s_margin[MARGIN_LEFT]==24&&s_margin[MARGIN_RIGHT]==24&&test_saved_margin[MARGIN_LEFT]==24&&!test_draw_locked);
+    s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=36;
+    memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
+    s_page=0;test_reflows=0;
     reader_bookmarks_t marks={.count=6};
     for(unsigned i=0;i<marks.count;++i)marks.entries[i].byte_off=(i+1)*100;
     bookmark_compact(&marks,(1u<<0)|(1u<<2)|(1u<<5));

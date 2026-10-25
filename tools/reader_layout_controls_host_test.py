@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-# 中文：真实边距输入/几何与扩展缩进编码，覆盖不同字体和旧配置。
-# English: Actual margin input/geometry and extended indent encoding, across font sizes and legacy configurations.
+# 中文：四向边距输入/几何与扩展缩进编码，覆盖非对称组合和旧配置。
+# English: Four-side margin input/geometry and extended indent encoding, across asymmetric combinations and legacy configurations.
 from pathlib import Path
 import subprocess,tempfile,re
 from home_cover_cache_host_test import function
@@ -17,13 +17,14 @@ u=r'''
 #define UI_BAR_TOP 1120
 #define READER_FULLSCREEN_PROGRESS_TOP 1198
 #define BOOK_MARGIN_MIN 0
-#define BOOK_MARGIN_MAX 48
-#define BOOK_MARGIN_CHOICES 9
+#define BOOK_MARGIN_MAX 96
+#define BOOK_MARGIN_STEP 6
+#define BOOK_MARGIN_CHOICES 17
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
 typedef struct {int x,y,width,height;} EpdRect;
-static bool s_reader_fullscreen,vertical;
-static int s_margin;
+static bool s_reader_fullscreen;
+static int s_margin[MARGIN_COUNT];
 static bool app_settings_reader_statusbar(void){return true;}
-static bool app_settings_book_vertical(void){return vertical;}
 static unsigned s_book_indent_adjust=20;
 static void nvs_put_u8(const char *key,uint8_t v){(void)key;assert(v==s_book_indent_adjust);}
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"
@@ -34,7 +35,7 @@ for name in ('APP_BOOK_TRACK_MIN','APP_BOOK_TRACK_MAX','APP_BOOK_TRACK_COUNT','A
 for name in ('app_settings_book_paragraph_value','app_settings_book_paragraph_level'):
     u+=function(name,r/'main/settings.c')+'\n'
 u+=function('slider_index',f)+'\n'
-for n in ('body_rect_for_tracking','reader_margin_width','reader_margin_levels','reader_margin_level_for','reader_margin_for_level','reader_margin_input'):
+for n in ('body_rect_for_tracking','reader_margin_level','reader_margin_value','reader_margin_input'):
     u+=function(n,f)+'\n'
 for n in ('app_settings_book_indent_adjust','app_settings_set_book_indent_adjust'):
     u+=function(n,r/'main/settings.c')+'\n'
@@ -56,21 +57,47 @@ int main(void){
   assert(slider_index(slider,x,31)+APP_BOOK_TRACK_MIN==px);
  }
 
- for(int px=36;px<=72;++px)for(int tr=-15;tr<=15;++tr){
-  int widths[9],values[9];assert(reader_margin_levels(px,tr,widths,values)==9);
-  for(int i=0;i<9;++i){assert(values[i]==i*6&&widths[i]==684-i*12);assert(reader_margin_level_for(i*6,px,tr)==i);}
-  for(int i=0;i<=48;++i)assert(reader_margin_for_level(reader_margin_level_for(i,px,tr),i,px,tr)==i);
+ // 四向边距共用固定十七档，就近吸附到 6 px 台阶。
+ // All four sides share the fixed 17-step ladder and snap to the nearest 6 px stop.
+ assert(BOOK_MARGIN_CHOICES==17);
+ for(int i=0;i<17;++i){
+  assert(reader_margin_value(i)==i*6&&reader_margin_level(i*6)==i);
+  if(i>0)assert(reader_margin_level(i*6+2)==i);
+  if(i<16)assert(reader_margin_level(i*6+4)==i+1);
  }
- for(int full=0;full<2;++full)for(int v=0;v<2;++v){
-  s_reader_fullscreen=full;vertical=v;
-  for(int i=0;i<9;++i){s_margin=i*6;EpdRect a=body_rect_for_tracking(2);
-   if(v){const int top=full?96:176,bottom=full?1196:1159;assert(a.y==top+s_margin);assert(a.height==bottom-top-2*s_margin);}
-   else assert(a.x==s_margin&&a.width==684-2*s_margin);
-  }
+ assert(reader_margin_level(-7)==0&&reader_margin_level(100)==16);
+ assert(reader_margin_value(-3)==0&&reader_margin_value(99)==96);
+ EpdRect rail={36,540,294,66};
+ assert(reader_margin_input(rail,rail.x+10,24)==18);
+ assert(reader_margin_input(rail,rail.x+rail.width-1,24)==30);
+ assert(reader_margin_input(rail,rail.x+64,24)==0);
+ assert(reader_margin_input(rail,rail.x+rail.width-64,24)==30);
+ assert(reader_margin_input(rail,rail.x+10,0)==0);
+ assert(reader_margin_input(rail,rail.x+rail.width-1,96)==96);
+ assert(reader_margin_input(rail,rail.x+10,96)==90);
+
+ // 四向内缩互不牵连：横排竖排同一公式，左大右小也不会互相顶替。
+ // The four insets stay independent: both writing modes share one formula, and a large left
+ // margin never stands in for a small right one.
+ for(int full=0;full<2;++full){
+  s_reader_fullscreen=full;
+  const int top=full?96:176,bottom=full?1196:1159;
+  const int lefts[]={0,12,24,48,96},rights[]={0,24,48,96};
+  const int tops[]={0,18,48,96},bottoms[]={0,30,48,96};
+  for(unsigned li=0;li<5;++li)for(unsigned ri=0;ri<4;++ri)
+   for(unsigned ti=0;ti<4;++ti)for(unsigned bi=0;bi<4;++bi){
+    s_margin[MARGIN_LEFT]=lefts[li];s_margin[MARGIN_RIGHT]=rights[ri];
+    s_margin[MARGIN_TOP]=tops[ti];s_margin[MARGIN_BOTTOM]=bottoms[bi];
+    EpdRect a=body_rect_for_tracking(2);
+    assert(a.x==s_margin[MARGIN_LEFT]);
+    assert(a.y==top+s_margin[MARGIN_TOP]);
+    assert(a.width==684-s_margin[MARGIN_LEFT]-s_margin[MARGIN_RIGHT]);
+    assert(a.height==bottom-top-s_margin[MARGIN_TOP]-s_margin[MARGIN_BOTTOM]);
+   }
  }
  for(int i=-100;i<=100;++i){app_settings_set_book_indent_adjust(i);assert(app_settings_book_indent_adjust()==i&&s_book_indent_adjust<=200);}
  for(int old=0;old<=40;++old){s_book_indent_adjust=old;assert(app_settings_book_indent_adjust()==old-20);}
- puts("PASS: centered paragraph/tracking ladders and nine distinct physical margins in both orientations, preserved legacy margin values, all 201 indent adjustments and legacy encoding");
+ puts("PASS: centered paragraph/tracking ladders, four independent margin insets in both orientations, 6 px snapping to 96, endpoint stepping, all 201 indent adjustments and legacy encoding");
 }
 '''
 with tempfile.TemporaryDirectory() as d:
