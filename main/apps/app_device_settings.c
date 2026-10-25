@@ -23,6 +23,8 @@
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  * 用户修订：设置「升级和恢复」只保留保存与恢复、屏幕修复，BOOT 刷机入口撤下。
  * User revision: maintenance keeps only backup/restore and panel repair; the BOOT flashing entry is withdrawn.
+ * 用户新增：个性化功能新增「触摸震动」入口，页内包含开关与强度档位，打开或改档即时震一记作预览。
+ * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +41,7 @@
 #include "app_registry.h"
 #include "app_transfer_mode.h"
 #include "settings.h"
+#include "haptics.h"
 #include "lock_pin_flow.h"
 #include "ui_pinpad.h"
 #include "book_lock_collage.h"
@@ -90,7 +93,8 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
                SETTINGS_WALLPAPER, SETTINGS_WALLPAPER_PREVIEW,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT,
-               SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_PROFILE, SETTINGS_AVATAR,
+               SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_HAPTIC,
+               SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
 static settings_page_t s_page;
@@ -320,7 +324,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
-#define SETTINGS_PERSONAL_ROWS 4
+#define SETTINGS_PERSONAL_ROWS 5
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
 #define SETTINGS_MAINTENANCE_ROWS 2
@@ -805,6 +809,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
         UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
+        UI_ICON_VIBRATE,           // 18 触摸震动 / touch vibration
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1222,6 +1227,26 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_HAPTIC) {
+        back_header(fb, "触摸震动");
+        section(fb, 228, "单指按下时短震一次");
+        setting_toggle(fb, 272, "触摸震动", "点击屏幕时震一下", app_settings_touch_haptics());
+        section(fb, 438, "震动强度");
+        const char *labels[] = {"弱", "中", "强"};
+        const char *details[] = {"最轻，默认", "适中", "最明显"};
+        for (int i = 0; i < 3; ++i) {
+            EpdRect box = {36, 482 + i * 112, 612, 92};
+            bool active = app_settings_haptic_intensity() == (uint8_t)i;
+            settings_card(fb, box, 20, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            ui_text_vc(fb, 64, box.y + box.height / 2, 30, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_vc(fb, 132, box.y + box.height / 2, 21, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
+        }
+        ui_text(fb, 48, 830, 23, "选中后立即震一下，可反复比较", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 880, 23, "关闭后不再震，档位仍保留", EPD_DRAW_ALIGN_LEFT, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "待机方式");
         section(fb, 248, "选择锁屏后的待机方式");
@@ -1458,11 +1483,17 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","触摸震动"};
+    char haptic_value[24];
+    if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),"不支持");
+    else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),"关闭");
+    else snprintf(haptic_value,sizeof(haptic_value),"开启 · %s",
+        app_settings_haptic_intensity()==APP_HAPTIC_STRONG?"强":
+        app_settings_haptic_intensity()==APP_HAPTIC_MEDIUM?"中":"弱");
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,5,16,10};
+        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value};
+    const int personal_icons[]={4,5,16,10,18};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"保存与恢复","屏幕修复"};
@@ -2007,6 +2038,23 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_HAPTIC) {
+        if (!haptics_available()) return APP_REDRAW_NONE;
+        if (ui_rect_hit((EpdRect){36, 272, 612, 126}, ev->x0, y)) {
+            // 打开时震一下作预览；关闭不再震。
+            // / Enabling previews one pulse; disabling stays silent.
+            bool on = !app_settings_touch_haptics();
+            app_settings_set_touch_haptics(on);
+            if (on) haptics_pulse();
+            return APP_REDRAW_PAGE;
+        }
+        for (int i = 0; i < 3; ++i) if (ui_rect_hit((EpdRect){36, 482 + i * 112, 612, 92}, ev->x0, y)) {
+            app_settings_set_haptic_intensity((uint8_t)i);
+            haptics_pulse();
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
 
     if (s_page == SETTINGS_WIFI) {
         if (y >= 408 && y < 478) {
@@ -2308,7 +2356,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
         else if(row==1)s_page=SETTINGS_LOCK_STYLE;
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
-        else profile_editor_open(true);
+        else if(row==3)profile_editor_open(true);
+        else if(row==4){
+            if(!haptics_available())return APP_REDRAW_NONE;
+            s_page=SETTINGS_HAPTIC;
+        }
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {

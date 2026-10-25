@@ -48,6 +48,7 @@
 #include "read_pico_init.h"
 #include "read_pico_pmu.h"
 #include "read_pico_pmu_protocol.h"
+#include "haptics.h"
 #include "settings.h"
 #include "sleep.h"
 #include "ttf_font.h"
@@ -173,6 +174,9 @@ void app_main(void) {
 
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;
+    // 马达能力与定时器在板级就绪后建立；开关/强度已由设置初始化写入。
+    // / Set up the motor timer once the board is ready; settings init already applied switch and intensity.
+    haptics_init();
     // 前光在板级初始化里已挂好 LEDC；这里按 NVS 恢复用户状态，早于首帧。
     // The board step already wired LEDC; restore the user state before the first frame.
     const bool fl_on = app_settings_frontlight_on();

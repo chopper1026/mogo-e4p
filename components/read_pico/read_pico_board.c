@@ -592,6 +592,13 @@ esp_err_t read_pico_read_up_key(bool* pressed) {
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+bool read_pico_has_motor(void) { return false; }
+
+esp_err_t read_pico_motor(bool on) {
+    (void)on;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 static read_pico_i2c_census_t s_census;
 
 static const struct {

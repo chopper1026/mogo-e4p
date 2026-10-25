@@ -168,9 +168,10 @@ static uint8_t p0_value(void) {
     return v;
 }
 
-static void p0_write(void) {
+static esp_err_t p0_write(void) {
     esp_err_t err = ioe_write(2, p0_value()); // OUT0
     if (err != ESP_OK) ESP_LOGW(TAG, "TCA OUT0 write: %s", esp_err_to_name(err));
+    return err;
 }
 
 static void p1_write(void) {
@@ -628,6 +629,9 @@ void read_pico_clear_ioe_int(void) {
 esp_err_t read_pico_ioe_sleep(bool host_off) {
     (void)host_off;
     if (!s_ioe_ok) return ESP_ERR_INVALID_STATE;
+    // 浅睡期间 TCA 锁存保持：马达必须在睡前关断，否则会一直通电。
+    // / The TCA latch holds through light sleep; the motor must be off before sleeping or it stays powered.
+    s_p0_extra &= (uint8_t)~IOE_BIT(IO_MOTOR);
     s_pwrup = false;
     s_vcom_ctrl = false;
     s_wakeup = false;
@@ -684,4 +688,18 @@ esp_err_t read_pico_pwr_pulse(bool high) {
     }
     p1_write();
     return ESP_OK;
+}
+
+bool read_pico_has_motor(void) { return true; }
+
+esp_err_t read_pico_motor(bool on) {
+    if (!s_ioe_ok) return ESP_ERR_INVALID_STATE;
+    // P03 高有效；只改这一个锁存位，TPS/PA/CAM 的状态保持不动。
+    // / P03 is active high; touch only this latch bit and leave TPS/PA/CAM alone.
+    if (on) {
+        s_p0_extra |= IOE_BIT(IO_MOTOR);
+    } else {
+        s_p0_extra &= (uint8_t)~IOE_BIT(IO_MOTOR);
+    }
+    return p0_write();
 }

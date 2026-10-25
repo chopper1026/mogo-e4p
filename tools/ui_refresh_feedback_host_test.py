@@ -467,8 +467,6 @@ typedef struct {int x,y,width,height;} EpdRect;
 #define UI_GRAY_LIGHT 224
 #define EPD_DRAW_ALIGN_CENTER 1
 #define UI_NAV_TAB_ICON_PX 44
-enum {UI_CLICK_NAV};
-static void ui_click_feedback_register(uint8_t *fb,EpdRect r,int kind,ui_icon_t icon){(void)fb;(void)icon;assert(kind==UI_CLICK_NAV&&r.width==60&&r.height==60);}
 static const char *const labels[]={"首页","书架","文件管理","设置"};
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static int main_choice;

@@ -28,7 +28,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
                             sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + \
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
-                            sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t))
+                            sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
+                            sizeof(settings_backup_haptic_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -52,6 +53,11 @@ esp_err_t read_pico_transfer_import_wifi_backup(const read_pico_transfer_wifi_ba
     ++wifi_imports;
     return ESP_OK;
 }
+
+// 设置层只把开关/强度同步给驱动；宿主不链接马达实现。
+// / The settings layer only syncs switch/intensity to the driver; the host does not link the motor.
+void haptics_set_enabled(bool on) { (void)on; }
+void haptics_set_intensity(uint8_t intensity) { (void)intensity; }
 
 static unsigned history_saves, history_restores;
 esp_err_t book_history_backup_write(FILE *file) {
@@ -128,7 +134,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                   sizeof(settings_backup_shutdown_style_t));
+                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -198,6 +204,7 @@ int main(void) {
     has_idle=false;
     // 关机样式默认仅浅睡。/ Shutdown style defaults to light-only.
     assert(app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT);
+    assert(app_settings_touch_haptics() && app_settings_haptic_intensity()==APP_HAPTIC_WEAK);
 
     assert(app_settings_book_indent_adjust()==0);
     app_settings_set_book_indent_adjust(-20);assert(loaded_adjust==0);
@@ -289,6 +296,8 @@ int main(void) {
     strlcpy(s_font, "/sdcard/fonts/missing.ttf", sizeof(s_font));
     s_lock_style = 1;
     strlcpy(s_wallpaper, "/sdcard/pictures/missing.jpg", sizeof(s_wallpaper));
+    s_touch_haptics = false;
+    s_haptic_intensity = APP_HAPTIC_STRONG;
     assert(app_settings_backup_save() == ESP_OK);
     assert(history_saves == 1);
     FILE *saved = fopen(BACKUP_FILE, "rb");
@@ -398,6 +407,8 @@ int main(void) {
     s_avatar[0] = 0;
     s_lock_style = 0;
     s_wallpaper[0] = 0;
+    s_touch_haptics = true;
+    s_haptic_intensity = APP_HAPTIC_WEAK;
     app_settings_set_reader_key_preset(1);
     const int prior_restore_commits = commit_count;
     assert(app_settings_backup_restore() == ESP_OK);
@@ -411,6 +422,7 @@ int main(void) {
            !strcmp(saved_wifi.ssid, "Home_2.4G") &&
            !strcmp(saved_wifi.password, "password123"));
     assert(app_settings_book_indent_adjust()==-7&&loaded_adjust==13);
+    assert(!app_settings_touch_haptics() && app_settings_haptic_intensity()==APP_HAPTIC_STRONG);
     assert(s_book_px == 62 && s_book_tracking == 8 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
@@ -468,7 +480,7 @@ int main(void) {
                                    sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t) +
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                   sizeof(settings_backup_shutdown_style_t));
+                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -535,7 +547,7 @@ int main(void) {
     // them so history follows directly.
     const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                                  sizeof(settings_backup_shutdown_style_t);
+                                  sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -944,7 +956,7 @@ int main(void) {
         sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) +
         sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
-                              sizeof(settings_backup_shutdown_style_t);
+                              sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;

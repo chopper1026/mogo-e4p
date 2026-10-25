@@ -230,23 +230,15 @@ void read_pico_transfer_get_status(read_pico_transfer_status_t *s) {*s=transfer_
 int read_pico_transfer_get_saved_wifi(char *ssid,bool *configured) {strcpy(ssid,"saved");*configured=saved_wifi;return ESP_OK;}
 int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {assert(cfg->mode==READ_PICO_TRANSFER_MODE_STA&&cfg->network_only);++wifi_starts;transfer_status.mode=cfg->mode;transfer_status.state=1;return ESP_OK;}
 bool read_pico_transfer_try_stop_if_idle(void) {if(upload_busy)return false;++wifi_stops;transfer_status.state=0;return true;}
-static int pulse_tab=-1,pulse_requests,pulse_draws;
-void ui_click_feedback_reset(void) {click_active=false;pulse_tab=-1;}
+void ui_click_feedback_reset(void) {click_active=false;}
 void ui_click_feedback_begin(uint8_t *fb) {(void)fb;click_active=false;}
-void ui_click_feedback_nav_request(int tab) {pulse_tab=tab;++pulse_requests;}
-bool ui_click_feedback_nav_finish(uint8_t *fb,EpdRect *r) {(void)fb;(void)r;pulse_tab=-1;return false;}
-bool ui_click_feedback_nav_pending(void) {return pulse_tab>=0;}
-bool ui_click_feedback_nav_tick(uint8_t *fb,int64_t now_ms,EpdRect *r) {
- (void)fb;(void)now_ms;
- if(pulse_tab<0)return false;
- // 首姿态只要求当前画面存在，不依赖目标页面进入。/ A first pose requires the current frame, never destination entry.
- ++pulse_draws;pulse_tab=-1;
- *r=(EpdRect){60,1120,50,48};return true;
-}
 bool ui_click_feedback_active(void) {return click_active;}
 bool ui_click_feedback_press(uint8_t *fb,int x,int y,EpdRect *r) {(void)fb;if(!click_enabled||y!=1141)return false;(void)x;*r=(EpdRect){60,1120,50,48};click_active=true;++click_presses;return true;}
 bool ui_click_feedback_release(uint8_t *fb,EpdRect *r) {(void)fb;if(!click_active)return false;click_active=false;++click_restores;*r=(EpdRect){60,1120,50,48};return true;}
 bool ui_click_feedback_cancel_at(int x,int y) {return x>120||y!=1141;}
+static int haptic_pulses, haptic_stops;
+void haptics_pulse(void) {++haptic_pulses;}
+void haptics_stop(void) {++haptic_stops;}
 int cst836u_read(void* h, cst836u_touch_t* t) {
     (void)h;
     sample_t s = samples[step];
@@ -343,13 +335,13 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
-    pulse_tab=-1;pulse_requests=pulse_draws=0;
     quick_button_draws=quick_status_draws=quick_press_draws=quick_recent_requests=base_renders=0;
     power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=false;
     last_du_area=(EpdRect){0};
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
+    haptic_pulses=haptic_stops=0;
     fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=quick_norm=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
@@ -397,29 +389,29 @@ int main(void) {
     // The first contact switches before lift; its subsequent hold and release never repeat navigation.
     for(int policy=0;policy<3;++policy) {
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
-        add(200,UI_NAV_TOUCH_TOP,1,0);run();assert(nav_draws==1&&enters==2&&!touch_calls&&pulse_requests==1&&pulse_draws==1);
+        add(200,UI_NAV_TOUCH_TOP,1,0);run();assert(nav_draws==1&&enters==2&&!touch_calls&&haptic_pulses==1);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
         add(200,1080,1,0);add(232,1092,1,0);add(232,1092,1,0);add(0,0,0,0);run();
-        assert(nav_draws==1&&enters==2&&!touch_calls&&pulse_requests==1&&pulse_draws==1);
+        assert(nav_draws==1&&enters==2&&!touch_calls);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
         add(200,1080,1,0);add(0,0,0,0);add(85,1080,1,0);add(0,0,0,0);run();
-        assert(nav_draws==2&&enters==3&&!touch_calls&&pulse_requests==2&&pulse_draws==2);
+        assert(nav_draws==2&&enters==3&&!touch_calls);
     }
-    reset();enable_main_tabs();add(85,1080,1,0);add(0,0,0,0);run();assert(!nav_draws&&enters==1&&pulse_requests==1&&pulse_draws==1);
-    reset();enable_main_tabs();first.on_gesture=gesture;add(200,1080,2,0);add(0,0,0,0);run();assert(!nav_draws);
-    reset();enable_main_tabs();add(200,1080,1,-1);add(0,0,0,0);run();assert(!nav_draws);
+    reset();enable_main_tabs();add(85,1080,1,0);add(0,0,0,0);run();assert(!nav_draws&&enters==1);
+    reset();enable_main_tabs();first.on_gesture=gesture;add(200,1080,2,0);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
+    reset();enable_main_tabs();add(200,1080,1,-1);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
     reset();enable_main_tabs();main_source_visible=false;first.on_gesture=gesture;
     add(200,1080,1,0);run();assert(!nav_draws&&enters==1);
     for(int policy=0;policy<3;++policy){
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
         add(85,1080,1,0);add(0,0,0,0);add(85,1080,1,0);add(0,0,0,0);run();
-        assert(!nav_draws&&enters==1&&pulse_requests==2&&pulse_draws==2);
+        assert(!nav_draws&&enters==1);
     }
-    // 待切另一页时点击当前页也必须反馈，并取消旧待切请求。
-    // Tapping the active page while another tab is pending must give feedback and replace that pending request.
+    // 待切另一页时点击当前页必须取消旧待切请求，底栏图标保持静止。
+    // Tapping the active page while another tab is pending must drop that pending request, leaving the footer still.
     for(int policy=0;policy<3;++policy){
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;first.on_enter=enter_with_pending_tab;
-        add(85,1080,1,0);run();assert(enters==1&&!nav_draws&&pulse_requests==1&&pulse_draws==1);
+        add(85,1080,1,0);run();assert(enters==1&&!nav_draws);
     }
     puts("PASS: root tabs act on first contact in all modes, enlarged top edge, one-shot holds, rapid taps, active-tab no-op, subview/multitouch/read-error guards");
     reset();add(10,1141,1,0);
@@ -433,18 +425,17 @@ int main(void) {
     samples[0]=(sample_t){.x=10,.y=1141,.count=2};assert(!app_poll_main_navigation(&loading));
     samples[0]=(sample_t){.x=10,.y=1141,.count=1,.error=-1};assert(!app_poll_main_navigation(&loading));
 
-    // 冷封面加载的轮询中，点当前书架也能反馈，保持不取消；同一接触不重复。
-    // During cold-cover polling even the current shelf responds without cancelling; one contact never repeats.
+    // 冷封面加载的轮询中，点当前书架不取消；同一接触不重复。
+    // During cold-cover polling the current shelf is not cancelled and one contact never repeats.
     uint8_t loading_fb=0;EpdiyHighlevelState loading_hl={0};
     loading.fb=&loading_fb;loading.hl=&loading_hl;loading.request_app=NULL;
     samples[0]=(sample_t){0};assert(!app_poll_main_navigation(&loading));
-    int loading_pulses=pulse_draws;
     samples[0]=(sample_t){.x=200,.y=1141,.count=1};
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+1);
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+1);
+    assert(!app_poll_main_navigation(&loading));
+    assert(!app_poll_main_navigation(&loading));
     samples[0]=(sample_t){0};assert(!app_poll_main_navigation(&loading));
     samples[0]=(sample_t){.x=200,.y=1141,.count=1};
-    assert(!app_poll_main_navigation(&loading)&&pulse_draws==loading_pulses+2);
+    assert(!app_poll_main_navigation(&loading));
 
     reset();add(100,400,1,0);add(110,400,1,0);add(0,0,0,0);run();
     assert(touch_calls==1&&ticks==3&&!tick_consumed[0]);
@@ -653,7 +644,7 @@ int main(void) {
         assert(click_presses==1&&click_restores==1&&!click_active&&ticks==1&&du_areas==2&&!gl_areas);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;click_enabled=true;request_on_touch=true;
         add(200,1141,1,0);add(0,0,0,0);run();
-        assert(!click_presses&&!click_restores&&!click_active&&du_areas==1&&!gl_areas&&nav_draws==1&&pulse_requests==1&&pulse_draws==1);
+        assert(!click_presses&&!click_restores&&!click_active&&!du_areas&&!gl_areas&&nav_draws==1);
     }
     reset();click_enabled=true;add(85,1141,1,0);add(85,1141,2,0);add(0,0,0,0);run();
     assert(click_presses==1&&click_restores==1&&!click_active);

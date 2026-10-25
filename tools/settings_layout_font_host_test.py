@@ -79,6 +79,7 @@ static bool ble_pt_pop_raw(ble_pt_raw_t*p){(void)p;return false;}
 static bool app_settings_home_full_refresh(void){return home_full;}
 static void app_settings_set_home_full_refresh(bool v){home_full=v;}
 static void profile_editor_open(bool signature){assert(signature);++profile_edits;}
+static bool haptics_available(void){return true;}
 #define UI_NAV_TOP 1096
 '''+enum+'\nstatic settings_page_t s_page;\n'+macros+'''
 #define SETTINGS_SCROLL_MAX (SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H-UI_NAV_TOP+12)

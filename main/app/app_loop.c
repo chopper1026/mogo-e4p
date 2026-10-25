@@ -61,6 +61,7 @@
 #include "read_pico_transfer.h"
 #include "read_pico_sd.h"
 #include "settings.h"
+#include "haptics.h"
 #include "sleep.h"
 #include "frontlight.h"
 #include "time_service.h"
@@ -199,8 +200,6 @@ static unsigned quick_status(void) {
 // 同步输出完再接收下一条触摸，不安排旧层回放；错误时关闭层并可靠全刷当前页。
 // Complete presentation before accepting another contact, with no stale replay; close and full-refresh the current page on error.
 static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) {
-    EpdRect motion_area={0};
-    bool motion=ui_click_feedback_nav_finish(ctx->fb,&motion_area);
     ui_click_feedback_begin(ctx->fb);
     display_main_transition_cancel();
     // 整层重绘会带上最新前光状态，积压的局部行刷新作废。
@@ -247,10 +246,6 @@ static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) 
     enum EpdDrawError error = full ? update_display_full(ctx->hl)
         : update_display_area_full_with(ctx->hl, wave, MODE_GL16, area);
     guard_draw_result(ctx->hl, error);
-    if(motion&&!full&&error==EPD_DRAW_SUCCESS) {
-        error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,motion_area);
-        guard_draw_result(ctx->hl,error);
-    }
     if (error != EPD_DRAW_SUCCESS) {
         quick_reset();
         app_present(ctx, current, APP_REDRAW_FULL);
@@ -473,9 +468,9 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
 #endif
 #endif
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
-    if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active() && !ui_click_feedback_nav_pending()) {
-        // 切页固定底栏之前先复位真实按压像素，避免把放大的图标当作长期基准。
-        // Restore physical pressed pixels before freezing navigation, so an enlarged icon never becomes its baseline.
+    if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active()) {
+        // 切页固定底栏之前先复位真实按压像素，避免按下底色留在新页。
+        // Restore physical pressed pixels before freezing navigation, so a pressed tint never carries into the new page.
         EpdRect area;
         if (ui_click_feedback_release(ctx->fb, &area)) {
             display_main_transition_cancel();
@@ -852,6 +847,9 @@ static bool lock_light_only(void) {
 
 static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
     const int64_t lock_prepare_start = esp_timer_get_time();
+    // 浅睡期间定时器不再走完，锁屏前必须同步关断马达。
+    // / Timers do not finish in light sleep, so cut the motor before the lock face.
+    haptics_stop();
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
@@ -915,11 +913,6 @@ bool app_poll_main_navigation(app_ctx_t *ctx) {
         s_nav_contact_down=s_nav_polled=true;
         if(index!=1)ui_nav_request(ctx,index);
         ctx->user_activity=true;
-        if(ctx->fb&&ctx->hl) {
-            EpdRect area;ui_click_feedback_nav_request(index);
-            if(ui_click_feedback_nav_tick(ctx->fb,esp_timer_get_time()/1000,&area))
-                click_present(ctx,&app_book,area);
-        }
     }
     return ctx->request_app!=NULL;
 }
@@ -1215,6 +1208,9 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!replayed) {
             ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
                                frame_ms, &last_input_ms, &pressed, &released);
+            // 单指按下沿给一记短震；回放帧不重复，多点、读错与读卡模式不震。
+            // / One short pulse per single-finger press edge; replayed frames never repeat and multitouch, read errors and USB storage stay silent.
+            if (err == ESP_OK && pressed && touch.count == 1 && !usb_storage_active()) haptics_pulse();
         }
         // 触摸已由 ingest_touch_frame 去抖并更新 ctx；这里只复位上游新增的导航按压状态。
         // Touch is debounced in ingest_touch_frame; only the upstream nav-press state resets here.
@@ -1327,8 +1323,6 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
         if (err != ESP_OK) {
-            EpdRect motion_area;
-            if(ui_click_feedback_nav_finish(ctx.fb,&motion_area))click_present(&ctx,current,motion_area);
             held_key = -1;
 #if CONFIG_TOUCH_DIAG
             // I2C 出错强杀手势跟踪：单指场景下等价于这次点击报废。
@@ -1353,8 +1347,8 @@ void app_loop_run(const app_loop_config_t* config) {
         EpdRect click_area;
         if (ui_click_feedback_active() && (err != ESP_OK || touch.count > 1 ||
             quick_input_owned || power_input_owned || menu_open ||
-            (!ui_click_feedback_nav_pending() && (released || touch.count != 1 ||
-            ui_click_feedback_cancel_at(touch.x, touch.y))))) {
+            released || touch.count != 1 ||
+            ui_click_feedback_cancel_at(touch.x, touch.y))) {
             if (ui_click_feedback_release(ctx.fb, &click_area)) click_present(&ctx, current, click_area);
         }
         // 主页面底栏在首次单指报点就确认；抬手、轻滑和停留不再重复切页。
@@ -1373,9 +1367,6 @@ void app_loop_run(const app_loop_config_t* config) {
                 nav_press_owned = true;
                 s_nav_contact_down=true;
                 if(tab!=app_index_of(current)||ctx.request_app)ui_nav_request(&ctx,tab);
-                ui_click_feedback_nav_request(tab);
-                if(ui_click_feedback_nav_tick(ctx.fb,esp_timer_get_time()/1000,&click_area))
-                    click_present(&ctx,current,click_area);
             }
         }
         if (err == ESP_OK && pressed && touch.count == 1 && !nav_press_owned && !power_input_owned &&
@@ -1704,7 +1695,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_menu = false;
         }
         if (!power_dialog_open && (ctx.request_return || ctx.request_app || ctx.request_menu)) {
-            if (!ui_click_feedback_nav_pending() && ui_click_feedback_release(ctx.fb, &click_area))
+            if (ui_click_feedback_release(ctx.fb, &click_area))
                 click_present(&ctx, current, click_area);
             quick_reset();
             held_key = -1;
@@ -1764,14 +1755,6 @@ void app_loop_run(const app_loop_config_t* config) {
                     td_replays, td_replay_frames);
         }
 #endif
-        // 按下效果已经显示，只定时复位；不把是否切页当作反馈触发条件。
-        // The pressed pose is already visible; settle by timer independently of navigation.
-        if(ui_click_feedback_nav_pending()) {
-            if(err!=ESP_OK || touch.count>1 || menu_open || power_dialog_open || s_quick.open ||
-                usb_storage_active() || !main_page_ready(&ctx,current))ui_click_feedback_reset();
-            else if(ui_click_feedback_nav_tick(ctx.fb,esp_timer_get_time()/1000,&click_area))
-                click_present(&ctx,current,click_area);
-        }
         // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
         // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
         vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));

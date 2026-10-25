@@ -12,6 +12,8 @@
  * User revision: persist a -20..20px indent adjustment; v12 adds a checked block, legacy backups default to zero and leave PIN credentials intact.
  * 用户修订：备份v27追加书内字体、竖排正文与完整关机三态；旧备份回落开启/横排/扩展位。
  * User revision: backup v27 appends book fonts, vertical text and the full shutdown states; older backups fall back to on/horizontal/the extension bit.
+ * 用户修订：备份v28追加触摸震动开关与强度；旧备份回落开启、弱档。
+ * User revision: backup v28 appends the touch-vibration switch and intensity; older backups fall back to on and weak.
  * NVS load/store. A failed open keeps the deep-sleep default; the
  * partition is not erased.
  */
@@ -30,6 +32,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "haptics.h"
 #include "read_pico_sd.h"
 #include "read_pico_transfer.h"
 #include "book/book_history_backup.h"
@@ -49,6 +52,8 @@
 #define NVS_KEY_DEVICE_NAME "dev_name"
 #define NVS_KEY_AVATAR "dev_avatar"
 #define NVS_KEY_STATUS_SIGNATURE "status_sig"
+#define NVS_KEY_TOUCH_HAPTIC "touch_haptic"
+#define NVS_KEY_HAPTIC_LEVEL "haptic_lvl"
 #define NVS_KEY_FONT "font"
 #define NVS_KEY_SYS_FONT "sys_font"
 #define NVS_KEY_SYS_SIZE "sys_size"
@@ -116,6 +121,9 @@ static app_main_refresh_mode_t s_main_refresh = APP_MAIN_REFRESH_WATER;
 static char s_device_name[64] = "kiikoread";
 static char s_avatar[288];
 static char s_status_signature[96];
+// 触摸震动默认开启、弱档；与原厂默认一致。/ Touch vibration defaults to on and weak, matching the vendor.
+static bool s_touch_haptics = true;
+static uint8_t s_haptic_intensity = APP_HAPTIC_WEAK;
 static char s_font[FONT_PATH_MAX];
 static char s_system_font[FONT_PATH_MAX];
 static uint8_t s_system_size = 120;
@@ -280,6 +288,13 @@ void app_settings_init(void) {
     value_len = sizeof(s_status_signature);
     if (nvs_get_str(h, NVS_KEY_STATUS_SIGNATURE, s_status_signature, &value_len) != ESP_OK)
         s_status_signature[0] = 0;
+    raw = 1;
+    if (nvs_get_u8(h, NVS_KEY_TOUCH_HAPTIC, &raw) == ESP_OK) s_touch_haptics = raw != 0;
+    raw = APP_HAPTIC_WEAK;
+    if (nvs_get_u8(h, NVS_KEY_HAPTIC_LEVEL, &raw) == ESP_OK && raw <= APP_HAPTIC_STRONG)
+        s_haptic_intensity = raw;
+    haptics_set_enabled(s_touch_haptics);
+    haptics_set_intensity(s_haptic_intensity);
     size_t font_len = sizeof(s_font);
     if (nvs_get_str(h, NVS_KEY_FONT, s_font, &font_len) != ESP_OK) {
         s_font[0] = '\0';
@@ -557,6 +572,23 @@ void app_settings_set_home_full_refresh(bool enabled) {
     if (enabled == s_home_full_refresh) return;
     s_home_full_refresh = enabled;
     nvs_put_u8(NVS_KEY_HOME_FULL, enabled ? 1 : 0);
+}
+
+bool app_settings_touch_haptics(void) { return s_touch_haptics; }
+void app_settings_set_touch_haptics(bool on) {
+    if (on == s_touch_haptics) return;
+    s_touch_haptics = on;
+    nvs_put_u8(NVS_KEY_TOUCH_HAPTIC, on ? 1 : 0);
+    haptics_set_enabled(on);
+}
+
+uint8_t app_settings_haptic_intensity(void) { return s_haptic_intensity; }
+void app_settings_set_haptic_intensity(uint8_t intensity) {
+    if (intensity > APP_HAPTIC_STRONG) intensity = APP_HAPTIC_STRONG;
+    if (intensity == s_haptic_intensity) return;
+    s_haptic_intensity = intensity;
+    nvs_put_u8(NVS_KEY_HAPTIC_LEVEL, intensity);
+    haptics_set_intensity(intensity);
 }
 
 static bool nvs_put_str(const char *key, const char *value) {
@@ -1195,6 +1227,17 @@ static bool backup_shutdown_style_valid(const settings_backup_shutdown_style_t *
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)style->checksum[i] << (8 * i);
     return style->style <= APP_SHUTDOWN_LIGHT && stored == backup_shutdown_style_checksum(style);
 }
+// v28 追加触摸震动开关与强度；旧备份回落开启、弱档。
+// V28 appends the touch-vibration switch and intensity; older backups fall back to on and weak.
+typedef struct { uint8_t on, level, checksum[4]; } settings_backup_haptic_t;
+static uint32_t backup_haptic_checksum(const settings_backup_haptic_t *haptic) {
+    return ((2166136261u ^ haptic->on) * 16777619u ^ haptic->level) * 16777619u;
+}
+static bool backup_haptic_valid(const settings_backup_haptic_t *haptic) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)haptic->checksum[i] << (8 * i);
+    return haptic->on <= 1 && haptic->level <= APP_HAPTIC_STRONG && stored == backup_haptic_checksum(haptic);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1220,9 +1263,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1304,7 +1347,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_v1_t backup = {0};
     // v27：在 v26 的上键单击尾部再追加书内字体、竖排正文与完整关机方式。
     // v27: appends embedded book fonts, vertical body text and the full shutdown style to v26.
-    memcpy(backup.magic, "PICOSETR", sizeof(backup.magic));
+    // v28：在 v27 尾部再追加触摸震动开关与强度。
+    // v28: appends the touch-vibration switch and intensity after the v27 tail.
+    memcpy(backup.magic, "PICOSETS", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1396,6 +1441,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_shutdown_style_t shutdown_style = {.style = (uint8_t)s_shutdown_style};
     uint32_t shutdown_style_hash = backup_shutdown_style_checksum(&shutdown_style);
     for (unsigned i = 0; i < 4; ++i) shutdown_style.checksum[i] = (uint8_t)(shutdown_style_hash >> (8 * i));
+    settings_backup_haptic_t haptic = {.on = s_touch_haptics ? 1 : 0, .level = s_haptic_intensity};
+    uint32_t haptic_hash = backup_haptic_checksum(&haptic);
+    for (unsigned i = 0; i < 4; ++i) haptic.checksum[i] = (uint8_t)(haptic_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1436,6 +1484,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&book_fonts, 1, sizeof(book_fonts), file) == sizeof(book_fonts);
     if (ok) ok = fwrite(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical);
     if (ok) ok = fwrite(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style);
+    if (ok) ok = fwrite(&haptic, 1, sizeof(haptic), file) == sizeof(haptic);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1531,6 +1580,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_book_fonts_t book_fonts = {.on = 1};
     settings_backup_book_vertical_t book_vertical = {.on = 0};
     settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_STAGED};
+    settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1623,6 +1673,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 27) ok = fread(&book_fonts, 1, sizeof(book_fonts), file) == sizeof(book_fonts) && backup_book_fonts_valid(&book_fonts);
     if (ok && version >= 27) ok = fread(&book_vertical, 1, sizeof(book_vertical), file) == sizeof(book_vertical) && backup_book_vertical_valid(&book_vertical);
     if (ok && version >= 27) ok = fread(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style) && backup_shutdown_style_valid(&shutdown_style);
+    if (ok && version >= 28) ok = fread(&haptic, 1, sizeof(haptic), file) == sizeof(haptic) && backup_haptic_valid(&haptic);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1695,6 +1746,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TOUCH_HAPTIC, haptic.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
@@ -1767,6 +1820,10 @@ esp_err_t app_settings_backup_restore(void) {
     s_shutdown_style = shutdown_mode;
     s_book_fonts = book_fonts.on != 0;
     s_book_vertical = book_vertical.on != 0;
+    s_touch_haptics = haptic.on != 0;
+    s_haptic_intensity = haptic.level;
+    haptics_set_enabled(s_touch_haptics);
+    haptics_set_intensity(s_haptic_intensity);
     s_auto_lock_minutes = idle_minutes;
     s_ble_turner = (profile.home_full_refresh & 8) != 0;
     s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;

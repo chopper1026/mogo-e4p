@@ -43,6 +43,12 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 设置：撤下「升级和恢复 → BOOT 刷机」入口，该组只保留保存与恢复、屏幕修复；BOOT 页面代码保留，需要时加回一行即可恢复。
   Settings: the Maintenance group no longer lists BOOT flashing, keeping only backup/restore and panel repair; the BOOT page code stays and one row restores the entry.
 
+- 底栏：点击切换主页时，被点的图标不再放大、下移再复位（此前读成图标跳动）；现在图标、文字与选中横条全程静止，点击只负责切页。返回键的按下反馈保持不变。
+  Footer: tapping a root tab no longer enlarges, shifts and settles the tapped icon (previously read as the icon jumping); icons, labels and the selection marker now stay completely still and the tap only navigates. Back-button press feedback is unchanged.
+
+- 设置：个性化功能新增「触摸震动」入口（状态栏签名下面），页内包含开关与弱/中/强三档强度（35/50/70 毫秒，默认开启弱档）。单指按下沿震一记；多点、触摸读错和阻塞回放的帧不震；打开开关或改档即时震一下作预览。锁屏、浅睡和关机前强制关断，浅睡期间马达不会残留通电；无马达的旧板显示「不支持」。配置备份升到 v28，旧备份回落开启弱档。
+  Settings: personal settings gain a Touch vibration entry below the status-bar signature; its page holds the switch and weak/medium/strong intensity steps (35/50/70 ms, on and weak by default). One pulse fires per single-finger press edge; multi-touch, read errors and replayed frames stay silent; enabling the switch or changing the step previews a pulse. The motor is forced off before lock, light sleep and power-off so it never stays powered through sleep, and boards without a motor show "Unsupported". Backups move to v28; older backups fall back to on and weak.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。

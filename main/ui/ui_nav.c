@@ -4,8 +4,10 @@
  *
  * 中文：绘制与命中四栏导航；细线图标分别表示首页、书架、文件和设置，图形来自 Lucide。
  * English: Draw and hit-test the four-tab navigation with thin-line home, books, files and settings icons from Lucide.
- * 用户增加点击反馈：共享返回键和底栏图标登记局部命中，主循环只在按下和复位推该控件。
- * User adds click feedback: register local hits for shared backs and navigation icons; the loop presents only that control on press and restoration.
+ * 用户修订：只有共享返回键登记局部命中；底栏图标点击只切页，不放大、不移位。
+ * User revision: only shared backs register local hits; footer icon taps just navigate, never enlarging or shifting.
+ * 变更原因：底栏放大后复位被读成图标跳动，底栏改为完全静止。
+ * Why it changed: enlarge-then-settle read as the icon jumping, so the footer now stays completely still.
  * 用户修订：所有模式把内容扫描截止到分隔线之间的8行固定为白色留白；滚动不能把列表画进这条扫描保护带。
  * User revision: every mode keeps the eight rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
  * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
@@ -117,13 +119,14 @@ void ui_nav_wifi_icon(uint8_t *fb, int cx, int cy, int size, uint8_t gray) {
 
 static void icon(uint8_t *fb, int tab, int cx, int y) {
     // 四个底栏图标固定用 Lucide 细线原图，线宽与状态栏一致；y 是图标盒顶边。
+    // 点击只切页，图标不放大也不移位，底栏保持静止。
     // The four bar icons stay on upstream Lucide line art at the status-bar stroke weight; y is the box top.
+    // A tap only navigates; icons neither enlarge nor shift, so the footer stays still.
     static const ui_icon_t tabs[4] = {
         UI_ICON_HOUSE, UI_ICON_LIBRARY_BIG,
         UI_ICON_FOLDER_OPEN, UI_ICON_SLIDERS_HORIZONTAL,
     };
     if (tab < 0 || tab >= 4) return;
-    ui_click_feedback_register(fb, (EpdRect){cx - 30, y - 12, 60, 60}, UI_CLICK_NAV, tabs[tab]);
     ui_draw_icon(fb, cx, y + 18, UI_NAV_TAB_ICON_PX, tabs[tab], UI_GRAY_BLACK);
 }
 

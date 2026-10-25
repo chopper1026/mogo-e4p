@@ -126,6 +126,13 @@ esp_err_t read_pico_tp_rst(bool high);
 /// / Metalio: TCA P13 power-off pulse. The S3 board has no such pin.
 esp_err_t read_pico_pwr_pulse(bool high);
 
+/// 板上有无震动马达；没有时设置页隐藏入口，驱动静默空操作。
+/// / Whether the board wires a vibration motor; without one the settings row hides and the driver no-ops.
+bool read_pico_has_motor(void);
+/// 震动马达开关（Metalio：TCA9555 P03，高有效）。调用方只做短脉冲，睡前必须关断。
+/// / Vibration motor switch (Metalio: TCA9555 P03, active high). Callers pulse briefly and must turn it off before sleep.
+esp_err_t read_pico_motor(bool on);
+
 /// 读一遍 9555 输入。INT# 不锁存，输入稳定后会自行松开；浅睡前/醒后都要调。
 /// / Read 9555 inputs. INT# is not latched and releases once inputs are stable;
 /// call before light sleep and after wake.

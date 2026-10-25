@@ -14,8 +14,8 @@ The TSX sources are verbatim. SVGs extract their default paths, retaining the 24
   Circular backs use the complete Circle Chevron Left artwork at existing control positions.
 - 阅读非全屏题头未收藏使用 Bookmark，已收藏使用 Bookmark Plus；Bookmark 与现有 Lucide 路径一致，复用掩模，Plus 单独生成。原 TSX 的 Git blob 分别为 `2bfc7060468cc153e24e45901cc040b75ae79238` 和 `d6aabff13f39832e180b676e7de33e1361ffb63e`。
   The non-fullscreen reader header uses Bookmark/Bookmark Plus for unsaved/saved favorites. Bookmark shares the identical Lucide mask; Plus is generated separately. Their original TSX blobs are pinned above.
-- 底栏按用户要求恢复按下放大/定时复位，触控即反馈，与是否切页无关；复用一个小控件缓存，不回放旧页面。
-  Footer taps restore enlargement/settle feedback independent of navigation, using one small control cache without stale page replay.
+- 底栏图标点击只切页，图标保持静止（按下放大/复位会读成跳动）；圆形返回键保留按下反馈，复用一个小控件缓存，不回放旧页面。
+  Footer taps only navigate and the icons stay still (enlarge/settle read as jumping); circular backs keep their pressed feedback through one small control cache without stale page replay.
 
 许可 / License: [AnimateIcons MIT](../../../licenses/AnimateIcons-MIT.txt),
 [upstream notices](UPSTREAM_NOTICES.md) and [Lucide ISC](../lucide/LICENSE).

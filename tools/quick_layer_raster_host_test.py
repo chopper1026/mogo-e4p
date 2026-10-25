@@ -37,7 +37,7 @@ code=r'''
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
-typedef enum {UI_CLICK_NAV,UI_CLICK_BACK,UI_CLICK_BACK_SMALL} ui_click_kind_t;
+typedef enum {UI_CLICK_BACK,UI_CLICK_BACK_SMALL} ui_click_kind_t;
 enum {EPD_ROT_LANDSCAPE,EPD_ROT_PORTRAIT,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
 static int rotation;
 #define W 1216
@@ -127,37 +127,6 @@ int main(void){
    if(fast)break;
   }
  }
- rotation=3;patterned();ui_click_feedback_begin(frame);
- ui_click_feedback_register(frame,(EpdRect){55,1111,60,60},UI_CLICK_NAV,UI_ICON_HOUSE);
- EpdRect r;assert(ui_click_feedback_press(frame,85,1188,&r));
- assert(!ui_click_feedback_cancel_at(90,1188)&&ui_click_feedback_cancel_at(258,1188));
- assert(ui_click_feedback_release(frame,&r)&&!memcmp(frame,saved,BYTES));
- assert(ui_click_feedback_press(frame,85,1188,&r));ui_click_feedback_begin(frame);assert(!live&&!ui_click_feedback_release(frame,&r));
- // 三种主页模式的底栏共用灰底：按压不能改外沿、文字、横条或相邻图标。
- // All three main modes share a gray footer: presses must preserve its perimeter, labels, marker and neighboring icons.
- static const ui_icon_t tabs[]={UI_ICON_HOUSE,UI_ICON_LIBRARY_BIG,UI_ICON_FOLDER_OPEN,UI_ICON_SLIDERS_HORIZONTAL};
- for(int tab=0;tab<4;++tab)for(int policy=0;policy<3;++policy)for(int edge=0;edge<2;++edge){
-  fast=policy==1;memset(frame,0xee,BYTES);
-  int cx=(tab*2+1)*684/8;
-  epd_fill_rect((EpdRect){0,1097,684,5},0,frame);
-  epd_fill_rect((EpdRect){0,1170,684,2},0x70,frame);
-  ui_draw_icon(frame,cx,1141,44,tabs[tab],0);
-  memcpy(saved,frame,BYTES);ui_click_feedback_begin(frame);
-  ui_click_feedback_register(frame,(EpdRect){cx-30,1111,60,60},UI_CLICK_NAV,tabs[tab]);
-  assert(!ui_click_feedback_press(frame,cx,UI_NAV_TOUCH_TOP-1,&r));
-  assert(!ui_click_feedback_press(frame,cx,1216,&r));
-  assert(!ui_click_feedback_press(frame,-1,UI_NAV_TOUCH_TOP,&r));
-  assert(!ui_click_feedback_press(frame,684,UI_NAV_TOUCH_TOP,&r));
-  assert(ui_click_feedback_press(frame,cx,edge?UI_NAV_TOUCH_TOP:1188,&r));
-  assert(!ui_click_feedback_cancel_at(cx,edge?UI_NAV_TOUCH_TOP+12:1188));
-  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
-   if(x<cx-25||x>=cx+25||y<1118||y>=1168)assert(pixel(frame,x,y)==pixel(saved,x,y));
-  }
-  if(policy==0)memcpy(again,frame,BYTES);else assert(!memcmp(frame,again,BYTES));
-  assert(r.y>=UI_NAV_MARKER_SCAN_END&&r.y+r.height<=1170);
-  EpdRect pressed=r;
-  assert(ui_click_feedback_release(frame,&r)&&!memcmp(&r,&pressed,sizeof(r))&&!live&&!memcmp(frame,saved,BYTES));
- }
  // 原尺寸保持精确位图；缩放产生中间覆盖率且不改变空白与满墨端点。
  // Native sizes remain exact; scaling produces intermediate coverage with preserved blank/full endpoints.
  uint8_t han[UI_HANZI_RECORD]={0};han[2]=han[3]=24;int intermediate=0;
@@ -167,7 +136,7 @@ int main(void){
  assert(intermediate>100);
  memset(han+5,0,sizeof(han)-5);for(int y=0;y<72;++y)for(int x=0;x<72;++x)assert(!ui_hanzi_coverage(han,72,72,x,y));
  memset(han+5,255,sizeof(han)-5);assert(ui_hanzi_coverage(han,39,39,19,19)==255);
- puts("PASS: actual quick layer uses no allocations, grayscale in all three modes and deterministic masks across four rotations; 12 navigation presses preserve gray backgrounds/labels/marker/neighbors in all modes; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
+ puts("PASS: actual quick layer uses no allocations, grayscale in all three modes and deterministic masks across four rotations; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
  return 0;
 }
 '''

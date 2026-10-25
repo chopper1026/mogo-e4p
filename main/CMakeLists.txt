@@ -58,6 +58,7 @@ idf_component_register(
         "lock_pin_flow.c"
         "lock_screen.c"
         "settings.c"
+        "haptics.c"
         "app/app_loop.c"
         "app/touch_sampler.c"
         "app/crash_note.c"

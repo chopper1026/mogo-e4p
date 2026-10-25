@@ -43,6 +43,12 @@ void app_settings_set_shutdown_style(app_shutdown_style_t style);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);
+/// 触摸震动开关与强度（0 弱 / 1 中 / 2 强）；默认开启、弱档。
+/// / Touch vibration switch and intensity (0 weak / 1 medium / 2 strong); on and weak by default.
+bool app_settings_touch_haptics(void);
+void app_settings_set_touch_haptics(bool on);
+uint8_t app_settings_haptic_intensity(void);
+void app_settings_set_haptic_intensity(uint8_t intensity);
 /// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
 typedef enum {
     APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,
