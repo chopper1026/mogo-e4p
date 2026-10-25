@@ -863,6 +863,27 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
     app_present(ctx, current, APP_REDRAW_PAGE);
 }
 
+// 锁屏期间的输入到不了主循环：密码层自己直读触摸，采样任务却照常把每次点击写入
+// 队列，解锁后主循环会把积压帧整批回放到已解锁页面（实测密码四连点在主页乱跳）。
+// 锁屏返回即作废全部积压帧，并把最近帧与边沿状态归零，复用路径才不会拿阻塞前的
+// 旧按下帧制造假按下沿。锁屏被传书推迟的罕见路径会多丢一次反馈窗口内的点击，可接受。
+// / Lock-context input never reaches the main loop: the PIN layer reads touch
+// directly while the sampler task keeps queueing every tap, and after unlock the
+// loop replays the backlog onto the unlocked page (measured: four PIN taps jump
+// the home screen). Discard the whole backlog on lock return and zero the last
+// frame and edge state so the reuse path cannot synthesize a stale press edge. A
+// postponed lock loses the taps inside its feedback window, which is acceptable.
+static void discard_lock_input(app_ctx_t* ctx, cst836u_touch_t* latest, bool* was_touched) {
+    touch_frame_t frame;
+    while (touch_sampler_pop(&frame)) {}
+    memset(&s_last_frame, 0, sizeof(s_last_frame));
+    memset(latest, 0, sizeof(*latest));
+    *was_touched = false;
+    ctx->pressed = false;
+    ctx->released = false;
+    ctx->consumed = true;
+}
+
 bool app_poll_main_navigation(app_ctx_t *ctx) {
     if(!ctx||!ctx->tp)return false;
     if(ctx->request_app)return true;
@@ -1412,6 +1433,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true, lock_light_only());
+                        discard_lock_input(&ctx, &latest, &was_touched);
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
@@ -1455,6 +1477,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                              !menu_open && current == &app_book && app_book_reader_body_visible(), lock_light_only());
+                        discard_lock_input(&ctx, &latest, &was_touched);
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
@@ -1569,6 +1592,7 @@ void app_loop_run(const app_loop_config_t* config) {
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                  !menu_open && current == &app_book && app_book_reader_body_visible(), lock_light_only());
+            discard_lock_input(&ctx, &latest, &was_touched);
             display_request_full_refresh();
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;
