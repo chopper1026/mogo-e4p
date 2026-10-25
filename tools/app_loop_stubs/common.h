@@ -25,6 +25,9 @@ enum EpdFontFlags { EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_R
 #define MODE_GC16 3
 extern int E0470_WAVEFORM;
 extern int E0470_FOLLOW_WAVEFORM;
+extern int E0470_CAPSULE_DRAG_WAVEFORM;
+extern int E0470_CAPSULE_WHITE_WAVEFORM;
+extern int E0470_CAPSULE_GRAY_WAVEFORM;
 bool continuous_du_init(void);
 int64_t esp_timer_get_time(void);
 void vTaskDelay(int);

@@ -1,18 +1,23 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮改成
- * 前光开关，圆钮下方常驻亮度与色温两条大滑杆。三个主页模式统一灰阶和清晰边框。
+ * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
+ * 开关。灯灭时层高只有圆钮区；点按开灯后圆钮下方才展开两条横向胶囊滑杆：直接
+ * 浮在遮罩上，无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长，
+ * 无极滑动；再次熄灯即收起。
  * English: A shallow full-width top layer with rounded bottom corners and four
- * unlabeled circles; boards with a frontlight use the fourth circle as its
- * switch and keep two large brightness/colour-temperature sliders below. All
- * main modes share grayscale and clear borders.
- * 用户修订：锁屏图标移出快捷栏；第四枚圆钮用活动灰底黑太阳表示开灯、浅底黑太阳
- * 表示熄灭，卡片只留两条加粗滑杆且不显示百分比。滑杆不自动开灯，灯关时调档
- * 只记录数值。
- * User revision: drop the lock icon from the quick layer; the fourth circle is
- * the frontlight switch, on the active gray with a black sun when on and on the
- * light face when off, and the card keeps only the two heavier sliders without
- * percentage labels. Sliders never turn the light on by themselves, so an off
- * light only records the new values.
+ * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
+ * circle. While the light is off the layer keeps only the circle band; switching
+ * it on expands two horizontal capsule sliders below the circles: they float on
+ * the shade with no card, text or knob, the icon sits inside the left end, a
+ * white fill grows from the left edge, and dragging is continuous; switching off
+ * collapses them again.
+ * 用户修订：锁屏图标移出快捷栏；常驻大滑杆先改为随开关展开的卡片行，再按用户
+ * 参考图去掉卡片容器，改成控制中心式横向胶囊；亮度用半填充圆图标，色温用温度
+ * 计图标，滑杆只在开灯时可触。
+ * User revision: drop the lock icon; the always-present sliders first became a
+ * card of rows, then per the user's reference the card was dropped for control
+ * centre style horizontal capsules; brightness uses the half-filled circle and
+ * colour temperature the thermometer, and the sliders respond only while the
+ * light is on.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -27,29 +32,31 @@
 #define UI_QUICK_RADIUS 54
 #define UI_QUICK_HIT_RADIUS 66
 
-// 前光卡片：圆钮下方 224..444，给收放把手留到 456。
-// Frontlight card: 224..444 below the circles, leaving the handle at 456.
-#define UI_QUICK_FL_CARD_X 36
-#define UI_QUICK_FL_CARD_Y 224
-#define UI_QUICK_FL_CARD_W 612
-#define UI_QUICK_FL_CARD_H 220
-#define UI_QUICK_FL_CARD_RADIUS 18
-#define UI_QUICK_FL_TRACK_X 60
-#define UI_QUICK_FL_TRACK_W 564
-#define UI_QUICK_FL_TRACK_H 14
-#define UI_QUICK_FL_THUMB_R 22
-#define UI_QUICK_FL_BRI_TRACK_Y 293
-#define UI_QUICK_FL_CCT_TRACK_Y 383
-// 命中区覆盖整行：细轨两侧留足手指，不要求压到轨道本身。
-// Hit zones cover the whole row, so a finger never has to land on the thin track.
+// 前光胶囊：开灯时圆钮下方展开两条横向胶囊滑杆，直接浮在遮罩上，无卡片、无
+// 文字、无旋钮；胶囊内活动灰为空档，白色填充从左缘生长，图标放在胶囊内左端；
+// 再次熄灯即收起。
+// Frontlight capsules: switching the light on expands two horizontal capsule
+// sliders below the circles, floating on the shade with no card, text or knob;
+// the capsule interior is the active gray when empty, a white fill grows from
+// the left edge, and the icon sits inside the left end; switching off collapses
+// them again.
+#define UI_QUICK_FL_ICON_CX 96
+#define UI_QUICK_FL_ICON_SIZE 44
+#define UI_QUICK_FL_BRI_CY 284
+#define UI_QUICK_FL_CCT_CY 384
+#define UI_QUICK_FL_TRACK_X 48
+#define UI_QUICK_FL_TRACK_W 588
+#define UI_QUICK_FL_TRACK_H 64
+// 行局刷矩形：覆盖整条胶囊并留出手指余量。/ Local row repaint: the whole capsule plus finger margin.
+#define UI_QUICK_FL_ROW_X 40
+#define UI_QUICK_FL_ROW_W 604
+#define UI_QUICK_FL_ROW_H 80
+// 命中区覆盖整行：不要求压到胶囊本身。
+// Hit zones cover the whole row, so a finger never has to land on the capsule.
 #define UI_QUICK_FL_BRI_HIT_Y0 228
-#define UI_QUICK_FL_BRI_HIT_Y1 331
-#define UI_QUICK_FL_CCT_HIT_Y0 332
+#define UI_QUICK_FL_BRI_HIT_Y1 333
+#define UI_QUICK_FL_CCT_HIT_Y0 334
 #define UI_QUICK_FL_CCT_HIT_Y1 440
-#define UI_QUICK_FL_BRI_ROW_Y 228
-#define UI_QUICK_FL_BRI_ROW_H 104
-#define UI_QUICK_FL_CCT_ROW_Y 332
-#define UI_QUICK_FL_CCT_ROW_H 108
 
 typedef enum {
     UI_QUICK_NONE, UI_QUICK_OPEN, UI_QUICK_CLOSE,
@@ -76,6 +83,13 @@ typedef struct {
     bool fl_on;
     uint8_t fl_bri;
     uint8_t fl_cct;
+    /// 每条滑杆自上次定稿以来达到的最大档位：定稿第一段据此把弄脏范围洗白。
+    /// 由输入层在拖动中只增不减，松手两段定稿后收回当前档位。
+    /// Per slider, the highest level reached since the last settle: stage one
+    /// whitens this extent. The input layer only grows it during drags and the
+    /// two-stage settle shrinks it back to the current level on release.
+    uint8_t fl_bri_dirty;
+    uint8_t fl_cct_dirty;
     ui_quick_control_t drag;
 } ui_quick_menu_t;
 
@@ -90,7 +104,8 @@ typedef struct {
 
 /// 清除层和手势；保留本板前光能力与预览值。/ Clear layer and contact state while keeping frontlight capability and preview values.
 void ui_quick_menu_reset(ui_quick_menu_t *menu);
-/// 设置本板前光能力并同步预览值。/ Set frontlight capability and sync the preview values.
+/// 设置本板前光能力并同步预览值；层高随开灯状态伸缩。
+/// Set frontlight capability and sync the preview values; the layer height follows the on state.
 void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on,
                                   uint8_t brightness, uint8_t cct);
 /// 返回true表示整条触摸序列被接管；多指/读错不执行按钮与滑杆，收起之后仍吞到抬手。
@@ -100,8 +115,8 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
 /// 取消接触但保留已打开的层；正在拖动的滑杆保留当前值，由主循环决定是否落盘。
 /// Cancel a contact while retaining an already open layer; a dragged slider keeps its value and the loop decides persistence.
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu);
-/// 只覆盖顶部，保留下层其他像素；有前光时连同卡片一起绘制。
-/// Cover the top only, leaving other pixels intact; draw the frontlight card when present.
+/// 只覆盖顶部，保留下层其他像素；开灯时连同卡片一起绘制，熄灯只有圆钮区。
+/// Cover the top only, leaving other pixels intact; draw the card while the light is on, otherwise only the circle band.
 void ui_quick_menu_draw(uint8_t *fb, const ui_quick_menu_t *menu, bool wifi, bool bluetooth);
 /// 当前按住的圆键，取消/滑出/释放或按住卡片时为-1。/ The held key, or -1 after cancellation, movement, release or a card press.
 int ui_quick_menu_pressed(const ui_quick_menu_t *menu);
@@ -112,13 +127,21 @@ int ui_quick_menu_pressed(const ui_quick_menu_t *menu);
 /// (or the lock elsewhere); the light-on face is the active gray under a black sun.
 bool ui_quick_menu_draw_button(uint8_t *fb, const ui_quick_menu_t *menu, int button,
                                bool active, bool pressed, EpdRect *dirty);
-/// 只重画卡片的一行并返回受影响的矩形，供滑杆拖动局刷。
-/// Repaint one card row and report the affected rectangle for local slider refreshes.
+/// 只重画胶囊行并返回受影响的矩形，供滑杆拖动局刷；熄灯时行不存在。
+/// Repaint one capsule row and report the affected rectangle for local slider refreshes; rows do not exist while the light is off.
 bool ui_quick_menu_draw_control(uint8_t *fb, const ui_quick_menu_t *menu,
                                 ui_quick_control_t control, EpdRect *dirty);
+/// 定稿第一段：把该行画成「白填充到弄脏上沿」的中间态并返回受影响的矩形，
+/// 供主循环先洗白再落灰；熄灯时行不存在。
+/// Settle stage one: paint the row with the white fill grown to the dirty
+/// extent and report the rectangle, so the loop whitens before landing gray;
+/// rows do not exist while the light is off.
+bool ui_quick_menu_draw_control_white(uint8_t *fb, const ui_quick_menu_t *menu,
+                                      ui_quick_control_t control, EpdRect *dirty);
 /// 只重画清晰状态栏，供网络状态变化时局刷。/ Repaint only the sharp status strip for network changes.
 void ui_quick_menu_draw_status(uint8_t *fb);
-/// 当前层的整块区域；收起前用旧高度并集擦除卡片。/ The whole layer; close uses the union with the previous height to erase the card.
+/// 当前层的整块区域；高度随开灯伸缩，收起前用旧高度并集擦除卡片。
+/// The whole layer; the height follows the light state, and close uses the union with the previous height to erase the card.
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu);
 /// 兼容主循环的关闭出口；实心控件没有缓存需要释放。/ Close hook for the loop; solid controls hold no cache.
 void ui_quick_menu_end(void);

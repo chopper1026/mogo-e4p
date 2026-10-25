@@ -2,10 +2,11 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * E0470A01 波形装配：裁剪默认表、8 灰阶、跟随 DU。
+ * E0470A01 波形装配：裁剪默认表、8 灰阶、跟随 DU、快捷栏胶囊三表。
  * 自行调整屏幕波形会使设备失去保修。
  *
- * E0470A01 waveform assembly: trimmed default, 8-gray, follow DU.
+ * E0470A01 waveform assembly: trimmed default, 8-gray, follow DU, and the
+ * three quick-layer capsule tables.
  * Changing panel waveforms voids the warranty.
  */
 
@@ -84,6 +85,75 @@ const EpdWaveform E0470_FOLLOW_WAVEFORM = {
     .num_modes = 1,
     .num_temp_ranges = 1,
     .mode_data = e0470_follow_modes,
+    .temp_intervals = e0470_intervals,
+};
+
+/* ---- 快捷栏胶囊滑杆表 / Quick-layer capsule sliders ---- */
+// 胶囊内部只有底灰 3（0x30，与首页最近阅读进度条已读段同色）与白 15 互转：
+// 拖动表给近似短序列（FAST 扫描保跟手），松手提交同样按拖动表补推终态
+// （2026-10-25 取消两段定稿，见头文件）；白表/灰表保留备用——灰表单行落灰，
+// 因为裁剪 GC16 的 (9,15) 行被 sat_cut 砍掉 5 相压灰落不准，GL16 的 (9,15)
+// 行是 11 推深压 + 回拉尾，单行播放会黑闪。
+// The capsule interior only round-trips body gray 3 (0x30, the dashboard
+// reading-progress read fill) and white 15: the drag table holds short
+// approximate runs (FAST scan for tracking), and the release commit also
+// replays the drag table for the final row (the two-stage settle was removed
+// 2026-10-25, see the header); the white/gray tables stay for a restored
+// settle — the gray table lands in a single run because the trimmed GC16
+// (9,15) row lost five darken phases to sat_cut and cannot land gray 9, while
+// GL16's (9,15) row is the damped 11-darken plus braking tail and flashes
+// black when played alone.
+static uint8_t e0470_capsule_drag_data[E0470_CAPSULE_DRAG_FRAMES][16][4];
+static uint8_t e0470_capsule_white_data[E0470_CAPSULE_WHITE_FRAMES][16][4];
+static uint8_t e0470_capsule_gray_data[E0470_CAPSULE_GRAY_K][16][4];
+
+static const EpdWaveformPhases e0470_capsule_drag_phases = {
+    .phases = E0470_CAPSULE_DRAG_FRAMES,
+    .phase_times = NULL,
+    .luts = (const uint8_t*)&e0470_capsule_drag_data[0],
+};
+static const EpdWaveformPhases e0470_capsule_white_phases = {
+    .phases = E0470_CAPSULE_WHITE_FRAMES,
+    .phase_times = NULL,
+    .luts = (const uint8_t*)&e0470_capsule_white_data[0],
+};
+static const EpdWaveformPhases e0470_capsule_gray_phases = {
+    .phases = E0470_CAPSULE_GRAY_K,
+    .phase_times = NULL,
+    .luts = (const uint8_t*)&e0470_capsule_gray_data[0],
+};
+static const EpdWaveformPhases* e0470_capsule_drag_ranges[] = { &e0470_capsule_drag_phases };
+static const EpdWaveformPhases* e0470_capsule_white_ranges[] = { &e0470_capsule_white_phases };
+static const EpdWaveformPhases* e0470_capsule_gray_ranges[] = { &e0470_capsule_gray_phases };
+static const EpdWaveformMode e0470_capsule_drag_mode = {
+    .type = 1, .temp_ranges = 1, .range_data = &e0470_capsule_drag_ranges[0],
+};
+static const EpdWaveformMode e0470_capsule_white_mode = {
+    .type = 1, .temp_ranges = 1, .range_data = &e0470_capsule_white_ranges[0],
+};
+static const EpdWaveformMode e0470_capsule_gray_mode = {
+    .type = 1, .temp_ranges = 1, .range_data = &e0470_capsule_gray_ranges[0],
+};
+static const EpdWaveformMode* e0470_capsule_drag_modes[] = { &e0470_capsule_drag_mode };
+static const EpdWaveformMode* e0470_capsule_white_modes[] = { &e0470_capsule_white_mode };
+static const EpdWaveformMode* e0470_capsule_gray_modes[] = { &e0470_capsule_gray_mode };
+
+const EpdWaveform E0470_CAPSULE_DRAG_WAVEFORM = {
+    .num_modes = 1,
+    .num_temp_ranges = 1,
+    .mode_data = e0470_capsule_drag_modes,
+    .temp_intervals = e0470_intervals,
+};
+const EpdWaveform E0470_CAPSULE_WHITE_WAVEFORM = {
+    .num_modes = 1,
+    .num_temp_ranges = 1,
+    .mode_data = e0470_capsule_white_modes,
+    .temp_intervals = e0470_intervals,
+};
+const EpdWaveform E0470_CAPSULE_GRAY_WAVEFORM = {
+    .num_modes = 1,
+    .num_temp_ranges = 1,
+    .mode_data = e0470_capsule_gray_modes,
     .temp_intervals = e0470_intervals,
 };
 
@@ -349,6 +419,34 @@ void e0470_waveform_init(void) {
     const int gl = e0470_waveform_trim(&e0470_full_gl16_phases, &trim, e0470_gl16_data);
     assert(gc == E0470_GC16_FRAMES);
     assert(gl == E0470_GL16_FRAMES);
+
+    // 胶囊拖动表：底灰压 4 相、白擦 8 相的近似序列，中途与松手提交都接受其
+    // 近似结果（2026-10-25 取消两段定稿）；其他转换全部保持。
+    // Capsule drag table: approximate 4-darken / 8-erase runs for the body gray
+    // and white; both mid-drag and the release commit accept its approximation
+    // (the two-stage settle was removed 2026-10-25). Every other transition holds.
+    memset(e0470_capsule_drag_data, 0, sizeof(e0470_capsule_drag_data));
+    for (int f = 0; f < E0470_CAPSULE_DRAG_K; ++f)
+        lut_or(e0470_capsule_drag_data, f, E0470_CAPSULE_BODY_LEVEL, 15, 1);
+    for (int f = 0; f < E0470_CAPSULE_DRAG_W; ++f)
+        lut_or(e0470_capsule_drag_data, f, 15, E0470_CAPSULE_BODY_LEVEL, 2);
+    // 备用白表：按 CAPSULE_WHITE_FRAMES 把底灰洗成饱和白（原厂 DU 同款 18 推）。
+    // Spare white table: CAPSULE_WHITE_FRAMES erase pushes saturate the body
+    // gray to white (the vendor DU's proven 18-push ladder).
+    memset(e0470_capsule_white_data, 0, sizeof(e0470_capsule_white_data));
+    for (int f = 0; f < E0470_CAPSULE_WHITE_FRAMES; ++f)
+        lut_or(e0470_capsule_white_data, f, 15, E0470_CAPSULE_BODY_LEVEL, 2);
+    // 备用灰表：从饱和白单调压灰 CAPSULE_GRAY_K 相（旧底灰 9 时的实测标定：
+    // 响应前载，1 推即接近灰 9，多推过冲发黑；换 0x30 后需重标）；GL16 的
+    // (9,15) 行是 11 推深压 + 回拉尾的阻尼落法，单行播放会黑闪。
+    // Spare gray table: darken monotonically for CAPSULE_GRAY_K phases from
+    // saturated white (panel-calibrated at the old body gray 9: the response is
+    // front-loaded, one push landed near gray 9 and more overshoot dark;
+    // recalibrate for 0x30); GL16's (9,15) row is the damped 11-darken plus
+    // braking tail and flashes black when played alone.
+    memset(e0470_capsule_gray_data, 0, sizeof(e0470_capsule_gray_data));
+    for (int f = 0; f < E0470_CAPSULE_GRAY_K; ++f)
+        lut_or(e0470_capsule_gray_data, f, E0470_CAPSULE_BODY_LEVEL, 15, 1);
 
     memcpy(e0470_full_gl16_live, e0470_full_gl16_data, sizeof(e0470_full_gl16_live));
     e0470_gl16_white_tick(e0470_full_gl16_live, E0470_FULL_GL16_FRAMES);

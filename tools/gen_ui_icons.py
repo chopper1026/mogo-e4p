@@ -67,7 +67,7 @@ ICONS = (
     "eye-closed",          # 自动休眠锁屏 / auto sleep lock
     "lock",              # 锁屏密码 / lock screen password
     "clock",             # 日期与时间 / date and time
-    "contrast",          # 系统对比度 / system contrast
+    "contrast",          # 系统对比度、快捷栏·亮度 / system contrast, quick layer brightness
     "copy",              # 保存与恢复 / save and restore
     "power",             # 关机睡眠 / shutdown and sleep
     "text-align-start",  # 状态栏签名 / status bar signature
@@ -93,6 +93,7 @@ ICONS = (
     "animate-circle-chevron-left", # AnimateIcons / shared back
     "animate-bookmark-plus", # 阅读题头已收藏 / saved reader-header favorite
     "sun",               # 快捷栏·前光 / quick layer, frontlight
+    "thermometer",       # 快捷栏·色温 / quick layer, colour temperature
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")

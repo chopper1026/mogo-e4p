@@ -1,15 +1,20 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成
- * 太阳开关，并在下方常驻亮度、色温两条大滑杆。开关与滑杆互不代劳：灯关着时
- * 调档只记数值，必须点亮图标才会开灯。
+ * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
+ * 开关。灯灭时层高只有圆钮区；开灯后圆钮下方展开两条横向胶囊滑杆，直接浮在遮
+ * 罩上：无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长。
  * English: A shallow full-width top layer with rounded bottom corners and four
  * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
- * circle and keep two large brightness/colour-temperature sliders below. The
- * switch is the only way on: adjusting a slider while off records the value
- * without turning the light on.
- * 用户修订：锁屏图标移出快捷栏；细轨和小滑块换成整行可点的大滑杆。
- * User revision: drop the lock icon from the quick layer and replace the thin
- * tracks and small knobs with full-row, large sliders.
+ * circle. While the light is off the layer keeps only the circle band; switching
+ * it on expands two horizontal capsule sliders below the circles, floating on
+ * the shade: no card, text or knob, the icon inside the left end and a white
+ * fill growing from the left edge.
+ * 用户修订：常驻大滑杆先改为随开关展开的卡片行，再按用户参考图去掉卡片容器，
+ * 改成控制中心式横向胶囊；亮度用半填充圆图标，色温用温度计图标；填充不足一个
+ * 帽宽时按行收进左端半圆。
+ * User revision: the always-present sliders first became a card of rows, then per
+ * the user's reference the card was dropped for control-centre style horizontal
+ * capsules; brightness uses the half-filled circle and colour temperature the
+ * thermometer; a fill narrower than one cap tucks into the left cap row by row.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -92,63 +97,86 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
     }
 }
 
-/* ---- 前光卡片 / Frontlight card ---- */
+/* ---- 前光胶囊 / Frontlight capsules ---- */
 
-static EpdRect fl_card_rect(void) {
-    return (EpdRect){UI_QUICK_FL_CARD_X, UI_QUICK_FL_CARD_Y,
-                     UI_QUICK_FL_CARD_W, UI_QUICK_FL_CARD_H};
+// 胶囊只在开灯时存在：层高随之伸缩，熄灯即收起。
+// The capsules exist only while the light is on: the layer height follows and collapses when off.
+static bool fl_expanded(const ui_quick_menu_t *menu) {
+    return menu != NULL && menu->frontlight && menu->fl_on;
 }
 static EpdRect fl_row_rect(ui_quick_control_t control) {
-    // 行矩形内缩到卡片边框以内，局部重画不会擦掉圆角描边。
-    // Row rectangles stay inside the card border so local repaints never erase its rounded outline.
+    // 行矩形只作为局刷范围：胶囊整片自绘，行内胶囊以外的像素保持遮罩不动。
+    // The row rectangle is only the local refresh scope: the capsule paints its
+    // whole body, so pixels outside it in the row keep the shade untouched.
     if (control == UI_QUICK_CTL_BRIGHTNESS)
-        return (EpdRect){40, UI_QUICK_FL_BRI_ROW_Y, 604, UI_QUICK_FL_BRI_ROW_H};
+        return (EpdRect){UI_QUICK_FL_ROW_X, UI_QUICK_FL_BRI_CY - UI_QUICK_FL_ROW_H / 2,
+                         UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
     if (control == UI_QUICK_CTL_CCT)
-        return (EpdRect){40, UI_QUICK_FL_CCT_ROW_Y, 604, UI_QUICK_FL_CCT_ROW_H};
+        return (EpdRect){UI_QUICK_FL_ROW_X, UI_QUICK_FL_CCT_CY - UI_QUICK_FL_ROW_H / 2,
+                         UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
     return (EpdRect){0};
 }
 static int fl_thumb_x(uint8_t value) {
     return UI_QUICK_FL_TRACK_X + (UI_QUICK_FL_TRACK_W * value) / 100;
 }
 
-static void draw_slider(uint8_t *fb, int track_y, uint8_t value) {
-    const EpdRect track = {UI_QUICK_FL_TRACK_X, track_y, UI_QUICK_FL_TRACK_W, UI_QUICK_FL_TRACK_H};
-    ui_fill_round_rect(fb, track, UI_QUICK_FL_TRACK_H / 2, 0xcc);
-    const int tx = fl_thumb_x(value);
-    if (tx > track.x) {
-        ui_fill_round_rect(fb, (EpdRect){track.x, track_y, tx - track.x, UI_QUICK_FL_TRACK_H},
-                           UI_QUICK_FL_TRACK_H / 2, UI_GRAY_BLACK);
+// 左端半圆帽在当前行的内缩量；整数解且偏保守，填充不出轨道的胶囊端。
+// Per-row inset of the left semicircular cap; integer and conservative, so the fill never leaves the capsule end.
+static int cap_inset(int offset) {
+    const int r = UI_QUICK_FL_TRACK_H / 2;
+    int chord = 0;
+    while ((chord + 1) * (chord + 1) + offset * offset <= r * r) ++chord;
+    return r - chord;
+}
+
+// 控制中心式胶囊滑杆：活动灰胶囊为空档，白色填充从左缘生长，图标常驻左端，
+// 无旋钮无文字无档位线。整片自绘，局部行刷不需要还原遮罩底色。
+// Control-centre style capsule slider: the active-gray capsule is the empty
+// track, a white fill grows from the left edge, and the icon stays at the left
+// end with no knob, text or level line. The whole body repaints, so a local row
+// refresh never needs the shade restored underneath.
+static void draw_capsule(uint8_t *fb, int cy, ui_icon_t icon, uint8_t value) {
+    const int r = UI_QUICK_FL_TRACK_H / 2;
+    const EpdRect track = {UI_QUICK_FL_TRACK_X, cy - r, UI_QUICK_FL_TRACK_W, UI_QUICK_FL_TRACK_H};
+    // 底灰与首页最近阅读进度条已读段同用 0x30：拖动表的近似落点就在这附近，残影随底色隐没。
+    // The track gray matches the dashboard reading-progress read fill (0x30):
+    // the drag table's approximate landing sits nearby, so residue blends in.
+    ui_fill_round_rect(fb, track, r, 0x30);
+    const int width = fl_thumb_x(value) - track.x;
+    if (width >= UI_QUICK_FL_TRACK_H) {
+        ui_fill_round_rect(fb, (EpdRect){track.x, cy - r, width, UI_QUICK_FL_TRACK_H}, r, UI_GRAY_WHITE);
+    } else if (width > 0) {
+        // 不足一个帽宽的填充按行收进左端半圆，与轨道的圆端保持同形。
+        // A fill narrower than one cap tucks into the left cap row by row, matching the track's rounded end.
+        for (int dy = 0; dy < UI_QUICK_FL_TRACK_H; ++dy) {
+            const int inset = cap_inset(dy < r ? r - dy : dy - r);
+            if (inset >= width) continue;
+            ui_fill_rect_fast((EpdRect){track.x + inset, cy - r + dy, width - inset, 1},
+                             UI_GRAY_WHITE, fb);
+        }
     }
-    const int cy = track_y + UI_QUICK_FL_TRACK_H / 2;
-    epd_fill_circle(tx, cy, UI_QUICK_FL_THUMB_R, UI_GRAY_WHITE, fb);
-    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R, 0x38, fb);
-    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R - 1, 0x38, fb);
-    epd_draw_circle(tx, cy, UI_QUICK_FL_THUMB_R - 2, 0x38, fb);
+    // 图标恒黑：黑↔白翻转的 (0,15)/(15,0) 单元不在拖动表里，真驱动需 18 相
+    // 满梯子并把拖动表拉长一倍以上；低档位的对比度损失是接受的取舍。
+    // The icon stays black: its black↔white flip has no (0,15)/(15,0) cells in
+    // the drag table, and real driving needs the 18-push ladder plus a table
+    // over twice as long; the low-level contrast loss is an accepted trade-off.
+    ui_draw_icon(fb, UI_QUICK_FL_ICON_CX, cy, UI_QUICK_FL_ICON_SIZE, icon, UI_GRAY_BLACK);
+    ui_draw_round_rect(fb, track, r, 0x38);
+    ui_draw_round_rect(fb, ui_inset_rect(track, 1), r - 1, 0x38);
+}
+
+static void draw_fl_row_at(uint8_t *fb, ui_quick_control_t control, uint8_t value) {
+    // 亮度用半填充圆图标，与前光开关的太阳明显不同；色温用温度计。
+    // Brightness uses the half-filled circle, clearly unlike the sun switch; colour temperature uses the thermometer.
+    if (control == UI_QUICK_CTL_BRIGHTNESS)
+        draw_capsule(fb, UI_QUICK_FL_BRI_CY, UI_ICON_CONTRAST, value);
+    else if (control == UI_QUICK_CTL_CCT)
+        draw_capsule(fb, UI_QUICK_FL_CCT_CY, UI_ICON_THERMOMETER, value);
 }
 
 static void draw_fl_row(uint8_t *fb, const ui_quick_menu_t *menu, ui_quick_control_t control) {
-    const EpdRect row = fl_row_rect(control);
-    if (row.width <= 0) return;
-    ui_fill_rect_fast(row, UI_GRAY_WHITE, fb);
-    if (control == UI_QUICK_CTL_BRIGHTNESS) {
-        ui_text_fixed_vc(fb, 60, 252, 30, "亮度", EPD_DRAW_ALIGN_LEFT, false);
-        draw_slider(fb, UI_QUICK_FL_BRI_TRACK_Y, menu->fl_bri);
-    } else if (control == UI_QUICK_CTL_CCT) {
-        ui_text_fixed_vc(fb, 60, 350, 30, "色温", EPD_DRAW_ALIGN_LEFT, false);
-        draw_slider(fb, UI_QUICK_FL_CCT_TRACK_Y, menu->fl_cct);
-        ui_text_fixed_vc(fb, 60, 430, 22, "暖", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_fixed_vc(fb, 624, 430, 22, "冷", EPD_DRAW_ALIGN_RIGHT, false);
-    }
-}
-
-static void draw_fl_card(uint8_t *fb, const ui_quick_menu_t *menu) {
-    const EpdRect card = fl_card_rect();
-    ui_fill_round_rect(fb, card, UI_QUICK_FL_CARD_RADIUS, UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, card, UI_QUICK_FL_CARD_RADIUS, 0x50);
-    ui_draw_round_rect(fb, (EpdRect){card.x + 1, card.y + 1, card.width - 2, card.height - 2},
-                       UI_QUICK_FL_CARD_RADIUS - 1, 0x50);
-    draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
-    draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
+    draw_fl_row_at(fb, control,
+                   control == UI_QUICK_CTL_BRIGHTNESS ? menu->fl_bri : menu->fl_cct);
 }
 
 void ui_quick_menu_end(void) {}
@@ -164,10 +192,24 @@ bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int butto
 
 bool ui_quick_menu_draw_control(uint8_t *fb, const ui_quick_menu_t *menu,
                                 ui_quick_control_t control, EpdRect *dirty) {
-    if (!fb || !menu || !menu->frontlight || !dirty) return false;
+    if (!fb || !fl_expanded(menu) || !dirty) return false;
     const EpdRect row = fl_row_rect(control);
     if (row.width <= 0) return false;
     draw_fl_row(fb, menu, control);
+    *dirty = row;
+    return true;
+}
+
+bool ui_quick_menu_draw_control_white(uint8_t *fb, const ui_quick_menu_t *menu,
+                                      ui_quick_control_t control, EpdRect *dirty) {
+    if (!fb || !fl_expanded(menu) || !dirty) return false;
+    const EpdRect row = fl_row_rect(control);
+    if (row.width <= 0 || control < UI_QUICK_CTL_BRIGHTNESS) return false;
+    // 定稿第一段：白填充长到本次弄脏的上沿，底色区域先归一到已知白。
+    // Settle stage one: grow the white fill to the dirty extent so the body
+    // region is normalized to known white first.
+    draw_fl_row_at(fb, control,
+                   control == UI_QUICK_CTL_CCT ? menu->fl_cct_dirty : menu->fl_bri_dirty);
     *dirty = row;
     return true;
 }
@@ -178,16 +220,15 @@ void ui_quick_menu_draw_status(uint8_t *fb) {
 }
 
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
-    const int height = menu != NULL && menu->frontlight
-        ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
-    return (EpdRect){0, 0, UI_LOCK_WIDTH, height};
+    return (EpdRect){0, 0, UI_LOCK_WIDTH,
+                     fl_expanded(menu) ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT};
 }
 
 void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool bluetooth) {
     if(!fb)return;
     const int width = epd_rotated_display_width();
     const int height = epd_rotated_display_height();
-    const int layer_height = menu != NULL && menu->frontlight
+    const int layer_height = fl_expanded(menu)
         ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
     // 每个像素只采一次原图，直接合成灰阶，不让主页快刷模式把菜单变成点阵。
     // Sample each underlay pixel once and compose grays directly, independently of fast main-page rendering.
@@ -215,9 +256,12 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
         draw_key(fb, i, menu, active, false);
         draw_badge(fb, i, active);
     }
-    // 前光卡片在圆钮下方常驻；没有前光的板保持原来的 264 高度。
-    // The frontlight card stays below the circles; boards without one keep the original 264 height.
-    if (menu != NULL && menu->frontlight) draw_fl_card(fb, menu);
+    // 胶囊滑杆只在开灯时展开，直接浮在遮罩上；熄灯或没有前光的板保持原来的 264 高度。
+    // The capsule sliders expand only while the light is on, floating on the shade; off or no-frontlight boards keep the original 264 height.
+    if (fl_expanded(menu)) {
+        draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
+        draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
+    }
     ui_fill_round_rect(fb, (EpdRect){width / 2 - 26, layer_height - 24, 52, 6}, 3, 0x70);
     // 只画遮罩内的双像素轮廓，顶部直角、底部圆角，不越过下层边界。
     // Draw a two-pixel outline within the mask: square top, rounded bottom, no underlay leakage.

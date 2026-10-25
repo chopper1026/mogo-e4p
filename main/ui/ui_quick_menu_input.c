@@ -15,6 +15,13 @@ enum { HIT_BRIGHTNESS = 4, HIT_CCT = 5 };
 
 static int center_x(int button) { return (button * 2 + 1) * UI_LOCK_WIDTH / 8; }
 
+// 层高随开灯伸缩：熄灯时胶囊卡片收起，只剩圆钮区，与绘图侧 ui_quick_menu_rect 一致。
+// The layer height follows the light: with it off the capsule card collapses to the
+// circle band, matching ui_quick_menu_rect on the drawing side.
+static int layer_height(const ui_quick_menu_t *menu) {
+    return menu->frontlight && menu->fl_on ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
+}
+
 static int circle_hit(int x, int y) {
     for (int i = 0; i < 4; ++i) {
         const int dx = x - center_x(i), dy = y - UI_QUICK_CIRCLE_Y;
@@ -26,7 +33,9 @@ static int circle_hit(int x, int y) {
 static int hit_test(const ui_quick_menu_t *menu, int x, int y) {
     int key = circle_hit(x, y);
     if (key >= 0) return key;
-    if (!menu->frontlight) return -1;
+    // 胶囊行只在开灯时存在；熄灯时卡片区域不是命中目标，也不命中第四枚以外的键。
+    // Capsule rows exist only while the light is on; with it off the card area matches nothing.
+    if (!menu->frontlight || !menu->fl_on) return -1;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
         y >= UI_QUICK_FL_BRI_HIT_Y0 && y <= UI_QUICK_FL_BRI_HIT_Y1) return HIT_BRIGHTNESS;
     if (x >= 40 && x < UI_LOCK_WIDTH - 40 &&
@@ -48,11 +57,15 @@ void ui_quick_menu_reset(ui_quick_menu_t *menu) {
     const bool on = menu->fl_on;
     const uint8_t bri = menu->fl_bri ? menu->fl_bri : 40;
     const uint8_t cct = menu->fl_cct;
+    const uint8_t bri_dirty = menu->fl_bri_dirty;
+    const uint8_t cct_dirty = menu->fl_cct_dirty;
     memset(menu, 0, sizeof(*menu));
     menu->frontlight = frontlight;
     menu->fl_on = on;
     menu->fl_bri = bri;
     menu->fl_cct = cct;
+    menu->fl_bri_dirty = bri_dirty;
+    menu->fl_cct_dirty = cct_dirty;
     menu->hit = -1;
     menu->drag = UI_QUICK_CTL_NONE;
 }
@@ -63,6 +76,10 @@ void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on
     menu->fl_on = on;
     menu->fl_bri = brightness < 1 ? 1 : brightness > 100 ? 100 : brightness;
     menu->fl_cct = cct > 100 ? 100 : cct;
+    // 展开层时屏上状态视为已定稿：脏范围从当前档位起算。
+    // The on-screen state counts as settled when the layer opens: dirty extents start at the current levels.
+    menu->fl_bri_dirty = menu->fl_bri;
+    menu->fl_cct_dirty = menu->fl_cct;
 }
 
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu) {
@@ -126,8 +143,15 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
     // A slider positions itself on touch: apply the tapped step before the drag threshold.
     if (menu->open && (menu->hit == HIT_BRIGHTNESS || menu->hit == HIT_CCT)) {
         const uint8_t value = slider_value(menu->hit, x);
-        if (menu->hit == HIT_BRIGHTNESS) menu->fl_bri = value;
-        else menu->fl_cct = value;
+        // 脏范围只增不减：记录本次定稿以来达到的最大档位，松手据此洗白。
+        // The dirty extent only grows: track the highest level since the last settle for the whitening stage.
+        if (menu->hit == HIT_BRIGHTNESS) {
+            menu->fl_bri = value;
+            if (value > menu->fl_bri_dirty) menu->fl_bri_dirty = value;
+        } else {
+            menu->fl_cct = value;
+            if (value > menu->fl_cct_dirty) menu->fl_cct_dirty = value;
+        }
         // 滑杆只记录数值，不替开关开灯；灯灭时拖动只更新下次点亮要用的档位。
         // A slider only records the value and never acts as the switch; with the light off it queues the level for the next on.
         menu->drag = menu->hit == HIT_BRIGHTNESS
@@ -164,10 +188,14 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
                 event->value = menu->drag == UI_QUICK_CTL_BRIGHTNESS
                     ? menu->fl_bri : menu->fl_cct;
                 event->commit = true;
-            } else if (menu->y0 >= (menu->frontlight ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT) &&
-                       y >= (menu->frontlight ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT)) {
-                dismiss(menu, event);
-                menu->swallow = false;
+            } else {
+                // 层高随开灯伸缩：熄灯时点在圆钮区以下同样收起整层。
+                // The layer height follows the light: with it off, taps below the circle band still dismiss.
+                const int height = layer_height(menu);
+                if (menu->y0 >= height && y >= height) {
+                    dismiss(menu, event);
+                    menu->swallow = false;
+                }
             }
         } else if (menu->open && menu->drag != UI_QUICK_CTL_NONE) {
             // 拖动后松手：提交最后一档，避免只改硬件不落盘。

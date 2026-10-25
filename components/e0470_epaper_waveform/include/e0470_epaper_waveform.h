@@ -89,6 +89,44 @@ extern const EpdWaveform E0470_TEXTTURN_WAVEFORM;
 #define E0470_FOLLOW_FRAMES 8
 extern const EpdWaveform E0470_FOLLOW_WAVEFORM;
 
+/// 快捷栏胶囊滑杆专用表：胶囊内部只有底灰 0x30（level 3，取首页最近阅读进度
+/// 条已读段同色，拖动近似落点与之相近、残影随底色隐没）与白 15 互转，其余
+/// (from,to) 全部保持不驱动。拖动表 8 帧走 FAST 扫描保跟手，近似即可；松手
+/// 提交也按拖动表补推终态（用户 2026-10-25 决定取消两段定稿：左滑暴露带终态
+/// 为灰，洗白段白闪约 200ms）。白表/灰表保留备用——白表按原厂 DU 同款擦白
+/// CAPSULE_WHITE_FRAMES 帧，灰表单调压灰 CAPSULE_GRAY_K 相，从饱和白按
+/// 「18 推黑 = 全黑」的线性梯子落底灰（GL16 的 (9,15) 行是 11 推深压 + 回拉
+/// 尾的阻尼落法，单行播放会黑闪）。阈值 DU 把 to≥8 当纯白、to<8 走全黑路径，
+/// 绝不能用于胶囊。
+/// / Dedicated tables for the quick-layer capsule sliders: the capsule interior
+/// only round-trips body gray 0x30 (level 3, matching the dashboard
+/// reading-progress read fill so the drag's approximate landing blends into the
+/// body) and white 15; every other (from,to) holds. The drag table is 8 frames
+/// on FAST scan for approximate tracking; the release commit also replays the
+/// drag table for the final row (user decision 2026-10-25 removed the two-stage
+/// settle: the left-swipe band ends gray, so the wash flashed white for
+/// ~200 ms). The white/gray tables stay for a restored settle — the white table
+/// erases for CAPSULE_WHITE_FRAMES pushes (the vendor DU's proven ladder), the
+/// gray table darkens monotonically for CAPSULE_GRAY_K phases to land the body
+/// gray from saturated white on the vendor's 18-push-to-black ladder (GL16's
+/// (9,15) row is the damped 11-darken plus braking tail, which flashes black
+/// when played alone). The threshold DU drives to>=8 as pure white and to<8 as
+/// full black, and must never drive the capsules.
+#define E0470_CAPSULE_DRAG_FRAMES 8
+#define E0470_CAPSULE_DRAG_K 4
+#define E0470_CAPSULE_DRAG_W 8
+#define E0470_CAPSULE_WHITE_FRAMES 18
+#define E0470_CAPSULE_GRAY_K 1
+/// 胶囊底灰级数：与首页最近阅读进度条已读段的 0x30 同级，所有胶囊表单元引用
+/// 本定义，换色只需改这里并重标定 DRAG_K / DRAG_W。
+/// / Capsule body-gray level: same 0x30 as the dashboard reading-progress read
+/// fill; every capsule table cell references this define, so a recolor only
+/// changes this plus a DRAG_K / DRAG_W recalibration.
+#define E0470_CAPSULE_BODY_LEVEL 3
+extern const EpdWaveform E0470_CAPSULE_DRAG_WAVEFORM;
+extern const EpdWaveform E0470_CAPSULE_WHITE_WAVEFORM;
+extern const EpdWaveform E0470_CAPSULE_GRAY_WAVEFORM;
+
 /// 单相位执行表供水波纹的错相 GL16 扫描使用；像素动作来自逐带相位 LUT。
 /// One-phase apply waveform for staggered GL16; per-band phase LUTs supply pixel actions.
 extern const EpdWaveform E0470_APPLY_WAVEFORM;

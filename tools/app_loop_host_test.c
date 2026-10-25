@@ -122,9 +122,12 @@ static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, remounts, loss_step;
 static bool fl_ready, fl_on;
 static uint8_t fl_bri=40, fl_cct=50;
-static int fl_applies, fl_control_draws, fl_row_du, fl_row_gl, fl_row_padded, fl_key_gl, quick_gl_height;
+static int fl_applies, fl_control_draws, fl_sweep_draws, fl_drag_pushes, fl_white_pushes, fl_gray_pushes, fl_key_gl, quick_gl_height;
 int E0470_WAVEFORM;
 int E0470_FOLLOW_WAVEFORM;
+int E0470_CAPSULE_DRAG_WAVEFORM;
+int E0470_CAPSULE_WHITE_WAVEFORM;
+int E0470_CAPSULE_GRAY_WAVEFORM;
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
         assert(a.width==108&&a.y==102);
@@ -133,17 +136,21 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
     }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
     if (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
-    if (a.width==604&&(a.y==UI_QUICK_FL_BRI_ROW_Y||a.y==UI_QUICK_FL_CCT_ROW_Y)) {
-        if(m==MODE_GL16)++fl_row_gl;else if(m==MODE_DU)++fl_row_du;
-    }
     if (a.y==1120) assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU&&a.height==48&&a.width==50);
     return update_display_area_with(h,w,m,a);
 }
 enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const void*w,int m,EpdRect a,
                                                   int pad_lines,int pad_col_bytes) {
-    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_ROW_Y||a.y==UI_QUICK_FL_CCT_ROW_Y)){
-        assert(m==MODE_DU&&w==&E0470_FOLLOW_WAVEFORM&&pad_lines==1&&pad_col_bytes==1);
-        ++fl_row_padded;
+    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+        // 胶囊行只允许三张专用表：拖动近似、定稿洗白、定稿落灰；阈值 DU 把 to=9
+        // 当纯白，绝不能出现。
+        // Capsule rows only allow the three dedicated tables: approximate drag,
+        // settle whitening and settle gray; the threshold DU treats to=9 as pure
+        // white and must never appear.
+        assert(m==MODE_DU&&pad_lines==1&&pad_col_bytes==1);
+        if(w==&E0470_CAPSULE_DRAG_WAVEFORM)++fl_drag_pushes;
+        else if(w==&E0470_CAPSULE_WHITE_WAVEFORM)++fl_white_pushes;
+        else {assert(w==&E0470_CAPSULE_GRAY_WAVEFORM&&m==MODE_DU);++fl_gray_pushes;}
     }
     return update_display_area_diff_with(h,w,m,a);
 }
@@ -171,14 +178,24 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
 void ui_quick_menu_end(void) {}
 void ui_quick_menu_draw_status(uint8_t *fb) {(void)fb;++quick_status_draws;}
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
-    return (EpdRect){0,0,684,menu->frontlight?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
+    return (EpdRect){0,0,684,menu->frontlight&&menu->fl_on?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
 }
 bool ui_quick_menu_draw_control(uint8_t *fb,const ui_quick_menu_t *menu,
                                 ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_control_draws;
-    if(control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)return false;
-    *dirty=(EpdRect){40, control==UI_QUICK_CTL_BRIGHTNESS?UI_QUICK_FL_BRI_ROW_Y:UI_QUICK_FL_CCT_ROW_Y,
-                     604, control==UI_QUICK_CTL_BRIGHTNESS?UI_QUICK_FL_BRI_ROW_H:UI_QUICK_FL_CCT_ROW_H};
+    if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
+    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
+                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
+                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
+    return true;
+}
+bool ui_quick_menu_draw_control_white(uint8_t *fb,const ui_quick_menu_t *menu,
+                                      ui_quick_control_t control,EpdRect *dirty) {
+    (void)fb;(void)menu;++fl_sweep_draws;
+    if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
+    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
+                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
+                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
     return true;
 }
 bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
@@ -321,7 +338,7 @@ static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
-    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_row_du=fl_row_gl=fl_row_padded=fl_key_gl=quick_gl_height=0;
+    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
@@ -644,19 +661,28 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
-    // 第四枚圆钮是前光开关，卡片只有两条大滑杆：开关点按 GL16 定稿，滑杆拖动 DU、松手 GL16，收起按 480 高度擦除。
-    // The fourth circle is the frontlight switch and the card holds only the two large sliders:
-    // a switch tap settles with GL16, sliders use DU then GL16, and closing erases by 480px.
+    // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
+    // 提交都走胶囊拖动表（不再两段定稿，白表/灰表零推送），熄灯收回 264，收层
+    // 按 480 高度擦除；开关点按不再单独重画圆钮。
+    // The fourth circle is the frontlight switch: the capsules expand with a
+    // whole-layer re-composite to 480, drag frames and the release commit both
+    // use the capsule drag table (no two-stage settle; zero white/gray pushes),
+    // switching off returns to 264 and closing erases by 480px; the switch tap
+    // no longer repaints its circle alone.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(598,156,1,0);add(0,0,0,0);
     add(399,300,1,0);add(512,300,1,0);add(0,0,0,0);
     add(399,398,1,0);add(0,0,0,0);
     add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
-    assert(fl_on&&fl_bri==80&&fl_cct==60);
+    assert(fl_on&&fl_bri==78&&fl_cct==59);
     assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT);
-    assert(fl_key_gl==1&&fl_control_draws>=4&&fl_row_du>=2&&fl_row_gl>=2&&fl_row_padded>=2);
-    puts("frontlight: fourth-circle switch, full-width slider rows, DU drag, GL16 settle, commit on release and 480px close passed");
+    assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
+    // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
+    // Opening and the switch tap each re-composite and redraw the layer; on close the
+    // layer is already gone, so only the underlay page is re-rendered.
+    assert(quick_draws==2&&quick_gl==3&&base_renders==4);
+    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag, drag-table commit on release and 480px close passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.
@@ -685,7 +711,7 @@ int main(void) {
     reset();power_trigger_step=1;time_step=3000000;
     add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+112,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);run();
     assert(power_open_draws==1&&power_controls_draws==2&&shutdowns==1&&!restarts&&power_final_draws==1&&!touch_calls&&ticks==1&&du_areas==2&&gl_areas==1);
-    /* 先浅后深不再改变「关机」按钮：任何档位都立即断电。/ The staged style no longer rebinds 关机: every style powers off immediately. */
+    /* 「彻底关机」档不再改变「关机」按钮：任何档位都立即断电。/ The full-off style no longer rebinds 关机: every style powers off immediately. */
     reset();power_trigger_step=1;time_step=3000000;staged_shutdown=true;
     add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);add(0,0,0,0);run();
     assert(power_open_draws==1&&shutdowns==1&&power_final_draws==1&&!restarts&&!idle_locks&&!wake_clean_requests);

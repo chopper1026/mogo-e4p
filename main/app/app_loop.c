@@ -298,30 +298,61 @@ static void quick_toggle_wifi(void) {
 }
 static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
-// 前光事件只动它自己的控件：开关点按与旁边圆钮同走基础表 DU 重画第四枚圆钮，
-// 滑杆走本行 DU、松手 GL16 定稿，随后才写 NVS。
-// A frontlight event touches only its own control: a switch tap repaints the fourth
-// circle with the same base-table DU as its neighbours, while a slider uses DU per
-// frame and settles with GL16 on release, then writes NVS.
+// 前光事件只动它自己的控件：开关点按同时展开或收起胶囊滑杆，层高变化，走整层
+// 重排并按新旧高度并集推 GL16；拖动帧与松手提交都走胶囊拖动表 DU，松手不做
+// 两段式定稿（用户 2026-10-25 决定：左滑暴露带终态为灰，洗白段白闪约 200ms，
+// 拖动近似可接受），随后才写 NVS。
+// A frontlight event touches only its own control: a switch tap also expands or
+// collapses the capsule sliders, so the layer height changes and the whole layer
+// is re-composited and pushed with GL16 over the height union; drag frames and
+// the release commit both drive the capsule drag table's DU, and the release no
+// longer settles in two stages (user decision 2026-10-25: the left-swipe band
+// ends gray, so the wash flashed white for ~200 ms, and the drag approximation
+// is acceptable) — before NVS is written.
 static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
                                      const ui_quick_event_t *event) {
     EpdRect dirty;
     enum EpdDrawError error = EPD_DRAW_SUCCESS;
     if (event->control == UI_QUICK_CTL_ON) {
-        if (!ui_quick_menu_draw_button(ctx->fb, &s_quick, 3, s_quick.fl_on, false, &dirty)) return;
-        s_fl_shown_on = s_quick.fl_on;
-        error = update_display_area_diff_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
-        guard_draw_result(ctx->hl, error);
+        quick_present(ctx, current, false);
+        return;
+    }
+    if (event->commit) {
+        // 松手不再洗白定稿：白表会把终态为灰的左滑暴露带打成 18 相饱和白再落
+        // 回底灰，肉眼可见地白闪一次。拖动帧本来就是真实差分，普通松手时 fb
+        // 与阴影一致，这里按拖动表补推一次终态即可——差分为空、一相都不驱动；
+        // 合并回放的积压批次则由这次推送把终态落上屏。拖动近似的落灰误差留在
+        // 面板上，由下次开层的整层 GL16 与周期 GC16 归一。
+        // The release no longer whitens and settles: the white table drove the
+        // left-swipe band (whose final state is gray) through 18 phases of
+        // saturated white before landing the body gray again — a visible flash.
+        // Drag frames are already real differentials and an ordinary release
+        // leaves fb and shadow agreeing, so one final drag-table push suffices
+        // — the diff is empty and drives nothing; a coalesced replay batch
+        // lands its final row through this push. The drag's approximate landing
+        // stays on the panel until the next layer-open GL16 or periodic GC16
+        // normalizes it.
+        if (ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) {
+            error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
+                                                    MODE_DU, dirty, 1, 1);
+            guard_draw_result(ctx->hl, error);
+        }
+        // 提交完成，脏范围收回当前档位；跟踪保留，便于恢复定稿时直接使用。
+        // Committed: the dirty extent shrinks back to the current level; the
+        // tracking stays so a restored settle can use it directly.
+        if (error == EPD_DRAW_SUCCESS) {
+            if (event->control == UI_QUICK_CTL_BRIGHTNESS) s_quick.fl_bri_dirty = s_quick.fl_bri;
+            else if (event->control == UI_QUICK_CTL_CCT) s_quick.fl_cct_dirty = s_quick.fl_cct;
+        }
     } else {
         if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
-        // 拖动帧是 DU 差分，必须显式扩脏行/脏列：圆圈上下边缘每次只变一两像素，
-        // 不扩边会留下浅残影；松手仍走 GL16 定稿清干净。
+        // 拖动帧是 DU 差分，必须显式扩脏行/脏列：胶囊上下边缘每次只变一两像素，
+        // 不扩边会留下浅残影；中途与松手都接受拖动表的近似结果。
         // Drag frames are DU differentials and must dilate dirty rows/columns:
-        // the circle's top and bottom edges change by a pixel or two and otherwise
-        // leave a light ghost. Release still settles with GL16.
-        error = event->commit
-            ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, dirty)
-            : update_display_area_diff_padded(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty, 1, 1);
+        // the capsule's top and bottom edges change by a pixel or two per frame.
+        // Mid-drag and release both accept the drag table's approximation.
+        error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
+                                                MODE_DU, dirty, 1, 1);
         guard_draw_result(ctx->hl, error);
     }
     if (error != EPD_DRAW_SUCCESS) {
@@ -795,8 +826,8 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // Save the current page first, then settle a clock-free static frame so shutdown never leaves a misleading frozen time.
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
-// 待机方式选「仅浅睡」时，所有锁屏入口都无期限浅睡、永不断电。
-// With standby style "light-only" every lock entry sleeps without a deadline and never powers off.
+// 待机方式选「仅浅睡」时，所有锁屏入口都无期限浅睡、永不断电；「彻底关机」则锁屏出图后立即断电交接。
+// With standby style "light-only" every lock entry sleeps without a deadline and never powers off; "full off" hands off to power-down right after the lock art.
 static bool lock_light_only(void) {
     return app_settings_shutdown_style() == APP_SHUTDOWN_LIGHT;
 }
@@ -1191,8 +1222,8 @@ void app_loop_run(const app_loop_config_t* config) {
                     power_dialog_open = false;
                     ui_power_dialog_end();
                     ui_power_dialog_reset(&power_dialog, false);
-                    // 「关机」固定立即断电；先浅后深只决定锁屏后的十分钟阶梯，与本按钮无关。
-                    // 关机 always powers off immediately; the staged style only governs the lock ladder.
+                    // 「关机」固定立即断电；「彻底关机」待机只决定锁屏是否立即断电，与本按钮无关。
+                    // 关机 always powers off immediately; the "full off" standby style only decides whether locking powers off at once.
                     run_power_action(&ctx, current, false);
                 } else if (action == UI_POWER_ACTION_RESTART) {
                     power_dialog_open = false;

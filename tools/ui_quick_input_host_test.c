@@ -45,41 +45,35 @@ int main(void){
  open();assert(feed(0,0,0,false,false,false,true).action==UI_QUICK_CLOSE&&!menu.open);
  puts("PASS: 32/33px edge, 72px/1500ms limits, diagonal rejection, upward/outside/back dismissal, multitouch/error/drag cancellation and consumed release");
 
- // 第四枚圆钮是前光开关，卡片只留两条整行可点的大滑杆；灯灭时滑杆不代开关开灯。
- // The fourth circle is the frontlight switch and the card keeps two full-row sliders;
- // while the light is off a slider records its value without switching the light on.
+ // 第四枚圆钮是前光开关：开灯后胶囊行才展开、层高变 480，熄灯收回 264。
+ // The fourth circle is the frontlight switch: the capsule rows expand with a
+ // 480px layer only while the light is on and collapse back to 264px when off.
  ui_quick_menu_set_frontlight(&menu,true,false,40,50);
  open();
  ui_quick_event_t e=feed(598,156,1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_NONE&&!menu.fl_on);
  e=feed(598,156,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&e.commit&&menu.fl_on);
- // 熄灭后再拖滑杆：数值更新，灯仍灭。
- // Drag after switching off: the value follows, the light stays off.
- e=feed(598,156,1,true,false,true,true);
- e=feed(598,156,0,false,true,true,true);
- assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&e.commit&&!menu.fl_on);
+ // 开灯拖亮度：无极定位，松手提交。
+ // With the light on, dragging brightness positions continuously and commits on release.
  e=feed(399,300,1,true,false,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==60&&!e.commit&&!menu.fl_on);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==59&&!e.commit&&menu.fl_on);
  e=feed(512,300,1,false,false,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&!e.commit&&!menu.fl_on);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==78&&!e.commit);
  e=feed(512,300,0,false,true,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==80&&e.commit&&menu.fl_bri==80&&!menu.fl_on);
- // 整行可点：落在标签高度也能直接定位到滑杆档位。
- // The whole row is a hit target, so the label line positions the slider directly.
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==78&&e.commit&&menu.fl_bri==78&&menu.fl_on);
+ // 整行可点：胶囊上方整行也能直接定位到档位。
+ // The whole row is a hit target, so taps above the capsule still position it directly.
  e=feed(300,232,1,true,false,true,true);
- assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==42&&!menu.fl_on);
+ assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==42&&menu.fl_on);
  e=feed(300,232,0,false,true,true,true);
- assert(e.commit&&menu.fl_bri==42&&!menu.fl_on);
- // 重新点亮后色温照常提交。
- // After switching on again, CCT commits as usual.
- e=feed(598,156,1,true,false,true,true);
- e=feed(598,156,0,false,true,true,true);
- assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&menu.fl_on);
+ assert(e.commit&&menu.fl_bri==42&&menu.fl_on);
+ // 色温照常提交。
+ // CCT commits as usual.
  e=feed(399,398,1,true,false,true,true);
- assert(e.control==UI_QUICK_CTL_CCT&&e.value==60&&!e.commit&&menu.fl_on);
+ assert(e.control==UI_QUICK_CTL_CCT&&e.value==59&&!e.commit&&menu.fl_on);
  e=feed(399,398,0,false,true,true,true);
- assert(e.control==UI_QUICK_CTL_CCT&&e.value==60&&e.commit&&menu.fl_cct==60);
+ assert(e.control==UI_QUICK_CTL_CCT&&e.value==59&&e.commit&&menu.fl_cct==59);
  // 按住滑杆向上拖不应把整层收起；松手仍提交最后一档。
  // Dragging a slider upward must not dismiss the layer; release still commits the last step.
  e=feed(399,398,1,true,false,true,true);
@@ -87,10 +81,16 @@ int main(void){
  assert(e.action==UI_QUICK_NONE&&menu.open);
  e=feed(399,330,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.commit&&menu.open);
- e=feed(300,500,1,true,false,true,true);
- e=feed(300,300,1,false,false,true,true);
+ // 熄灯：胶囊行收回，卡片区域不再命中，点在圆钮区以下直接收层。
+ // Switching off collapses the rows; the card area stops matching and taps below the circles dismiss.
+ e=feed(598,156,1,true,false,true,true);
+ e=feed(598,156,0,false,true,true,true);
+ assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&e.commit&&!menu.fl_on);
+ e=feed(399,300,1,true,false,true,true);
+ assert(e.control==UI_QUICK_CTL_NONE);
+ e=feed(399,300,0,false,true,true,true);
  assert(e.action==UI_QUICK_CLOSE&&!menu.open);
- puts("PASS: fourth circle toggles the frontlight, sliders never auto-on, full-row hit areas, 1%-step commit and drag protection");
+ puts("PASS: fourth circle toggles the frontlight, capsule rows expand only while on, full-row hit areas, 1%-step commit and drag protection");
 
  // 没有前光的板：第四枚仍是锁屏，卡片区域不命中，层高仍是 264。
  // Boards without a frontlight keep the lock on the fourth circle, ignore the card area and stay 264px tall.
