@@ -81,6 +81,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 快捷栏：修复设置阅读背景后，在主页、书架、设置、文件管理等非阅读页收起快捷栏，墨色归一几乎不起作用——整屏归一表此前按「设置里是否存了阅读背景」选变体，于是这些页面拿到的是只重驱纯黑字芯、其余灰阶保持的版本，被半透明遮罩盖过的灰卡、封面、图标和文字边缘无法拉齐。现在改由页面自己报告画面里是否有需要保护的图片灰阶：只有阅读背景正文返回是，其他页面一律走完整归一；阅读页的归一行为保持不变。
   Quick layer: after setting a reading background, closing the layer on non-reader pages (home, shelf, settings, files) barely normalized the ink—the whole-screen table picked its variant from "is a reading background stored", so those pages got the one that re-drives only pure-black glyph cores and holds every other gray, leaving the gray cards, covers, icons and glyph edges the translucent shade had covered misaligned. The page now reports whether the frame carries picture grays worth protecting: only a background reading body says yes, every other page takes the full pass, and the reader's behavior is unchanged.
 
+- 设置页：列表最底部新增一行居中的版本号与固件构建日期（形如「版本 0.3.3-rcNN · 构建 2026-10-26」），随列表滚动到最后露出，参数取应用描述里的版本与 UTC 编译日期；滚动上限随之按该行高度计算，系统字号放大后也能完整露出。
+  Settings: the list now ends with a centred version and firmware build date line (e.g. "版本 0.3.3-rcNN · 构建 2026-10-26"), revealed by scrolling to the bottom. It reads the app description's version and UTC build date, and the scroll limit accounts for the line's scaled height so a larger system font still clears the nav bar.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。

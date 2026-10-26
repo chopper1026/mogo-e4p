@@ -30,6 +30,9 @@
  * User addition of 2026-10-25: personalization gains a Reading background entry under Touch
  * vibration; list-plus-preview mirrors the wallpaper picker, decoding defers to the tick, and the
  * reader's retired panel is deleted now that the entry lives here.
+ * 用户 2026-10-26 新增：设置列表最底部一行居中的版本号与固件构建日期，随列表滚动露出。
+ * User addition of 2026-10-26: the settings list ends with a centred version and firmware build
+ * date line, revealed by scrolling to the bottom.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -348,11 +351,21 @@ static int settings_main_row_height(void) {
 // Setting row icons: a 32 px box centred in the 68 px row with one shared ink level.
 #define SETTINGS_ICON_PX 32
 #define SETTINGS_ICON_INK 0x58
-// 主页面滚动上限：把最后一组的最后一行刚好推到导航栏之上，多留 8px 余量。
-// Main-page scroll limit: just enough to bring the last row of the last group above the nav bar,
-// with 8 px to spare.
-#define SETTINGS_SCROLL_MAX \
-    (SETTINGS_POWER_Y + SETTINGS_POWER_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
+// 版本行排在最后一组下方，是列表的最后一行内容；间距按行距留白，不跟设置组抢位置。
+// The version footer follows the last group as the list's final content line, spaced like a group
+// gap so it never crowds the settings.
+#define SETTINGS_VERSION_GAP 40
+static int settings_version_center_y(void) {
+    return SETTINGS_POWER_Y + SETTINGS_POWER_ROWS * SETTINGS_ROW_H + SETTINGS_VERSION_GAP
+           + ui_text_effective_px(20) / 2;
+}
+// 主页面滚动上限：把版本行完整推到导航栏之上，多留 12px 余量。
+// Main-page scroll limit: bring the whole version line above the nav bar with 12 px to spare.
+static int settings_scroll_max(void) {
+    return settings_version_center_y() + (ui_text_effective_px(20) + 1) / 2
+           - UI_NAV_REFRESH_END + 12;
+}
+#define SETTINGS_SCROLL_MAX settings_scroll_max()
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -934,6 +947,32 @@ static char s_avatar_path[288];
 static bool s_avatar_ready, s_avatar_pending;
 static char s_main_wifi[33];
 static bool s_main_wifi_saved;
+// 版本行取应用描述里的版本号与 UTC 构建日期，把 __DATE__ 的 "Oct 26 2026" 排成 2026-10-26。
+// The footer takes the app description's version and UTC build date, rendering __DATE__'s
+// "Oct 26 2026" as 2026-10-26.
+static const char *settings_version_text(void) {
+    static char text[128];
+    const esp_app_desc_t *desc = esp_app_get_description();
+    static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    int month = 0;
+    for (int i = 0; i < 12; ++i)
+        if (!strncmp(desc->date, months[i], 3)) { month = i + 1; break; }
+    int day = atoi(desc->date + 4), year = atoi(desc->date + 7);
+    if (month && day > 0 && year > 0)
+        snprintf(text, sizeof(text), "版本 %s · 构建 %04d-%02d-%02d", desc->version, year, month, day);
+    else
+        snprintf(text, sizeof(text), "版本 %s · 构建 %s", desc->version, desc->date);
+    return text;
+}
+// 系统字号最大 200% 时版本行会顶到两侧白边，按可用宽度收一级字号再画。
+// At the 200% system size the footer would reach the white margins, so step the face down to fit.
+static void draw_settings_version(uint8_t *fb, int center_y) {
+    const char *text = settings_version_text();
+    int px = ui_text_effective_px(20);
+    while (px > 14 && ui_text_fixed_width_px(px, text) > 600) --px;
+    ui_text_fixed_vc(fb, 342, center_y, px, text, EPD_DRAW_ALIGN_CENTER, false);
+}
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
@@ -1617,6 +1656,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int power_icons[]={20};
     setting_group(fb,SETTINGS_POWER_Y-49,"电源管理",SETTINGS_POWER_Y,
                   power_icons,power_labels,power_values,SETTINGS_POWER_ROWS);
+    const int version_half = (ui_text_effective_px(20) + 1) / 2;
+    const int version_center_y = settings_version_center_y() - s_main_scroll;
+    if (version_center_y - version_half > 160 && version_center_y + version_half < UI_NAV_TOP)
+        draw_settings_version(fb, version_center_y);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
