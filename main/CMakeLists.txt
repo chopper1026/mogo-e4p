@@ -38,6 +38,13 @@ set(main_requires
     mbedtls
     espressif__cjson
 )
+# S31/P4 的硬件 JPEG 解码；S3 CI 目标没有该外设，不能无条件依赖。
+# S31/P4 hardware JPEG decode; the S3 CI target has no such peripheral, so keep it conditional.
+# 用 IDF_TARGET 而不是 CONFIG_SOC_*：main 的 CMakeLists 在 sdkconfig 导入前会被先评估一次。
+# Use IDF_TARGET rather than CONFIG_SOC_*: main's CMakeLists is evaluated once before sdkconfig is imported.
+if(IDF_TARGET STREQUAL "esp32s31" OR IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND main_requires esp_driver_jpeg)
+endif()
 idf_component_register(
     SRCS
         "app_main.c"
@@ -107,6 +114,7 @@ idf_component_register(
         "book/book_txt.c"
         "book/book_epub.c"
         "book/book_cover.c"
+        "book/book_jpeg_hw.c"
         "book/book_cover_jobs.c"
         "book/book_image_header.c"
         "book/book_cover_auto.c"
@@ -141,4 +149,9 @@ target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
 # 本地 USB 测时入口，普通构建不包含。/ Local USB timing probe, omitted from ordinary product builds.
 if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_LOCAL_LATENCY=1)
+endif()
+# 本地 A/B：强制软件封面解码，用来对比同一构建的硬件路径。
+# Local A/B: force software cover decode to compare against the hardware path in the same build.
+if("$ENV{KIIKO_DISABLE_HW_JPEG}" STREQUAL "1")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE BOOK_JPEG_HW_FORCE_SOFTWARE=1)
 endif()

@@ -38,6 +38,10 @@ struct zip_reader {
     uint16_t slot_mask;
     uint32_t size, directory;
     uint16_t count;
+    // 中央目录整块缓冲；分配失败时为空，逐条读取回退。
+    // Whole central-directory buffer; NULL falls back to per-entry reads.
+    uint8_t* dir_buf;
+    uint32_t dir_size;
 };
 
 static uint32_t name_hash(const char* name) {
@@ -54,12 +58,23 @@ static bool read_at(zip_reader_t* z, uint32_t pos, void* dst, size_t size) {
         fseek(z->file, (long)pos, SEEK_SET) == 0 && fread(dst, 1, size, z->file) == size;
 }
 
+// 中央目录已经整块读入 PSRAM 时直接从缓冲取；否则回退到逐条 seek+read。
+// Serve central-directory reads from the whole-directory buffer; otherwise fall back to seek+read.
+static bool dir_read(zip_reader_t* z, uint32_t pos, void* dst, size_t size) {
+    if (z->dir_buf && pos >= z->directory && size <= z->dir_size &&
+        pos - z->directory <= z->dir_size - (uint32_t)size) {
+        memcpy(dst, z->dir_buf + (pos - z->directory), size);
+        return true;
+    }
+    return read_at(z, pos, dst, size);
+}
+
 // ZIP64 扩展即使没有哨兵值也拒绝；扩展字段必须完整。
 // Reject ZIP64 extras even without sentinel sizes; every extra field must be complete.
 static bool extras_valid(zip_reader_t* z, uint32_t pos, uint16_t len) {
     while (len) {
         uint8_t h[4];
-        if (len < 4 || !read_at(z, pos, h, 4) || u16(h) == 1 || u16(h + 2) > len - 4) return false;
+        if (len < 4 || !dir_read(z, pos, h, 4) || u16(h) == 1 || u16(h + 2) > len - 4) return false;
         uint32_t step = 4U + u16(h + 2);
         pos += step;
         len = (uint16_t)(len - step);
@@ -89,6 +104,7 @@ void zip_close(zip_reader_t* z) {
     if (z->entries) for (unsigned i = 0; i < z->count; ++i) free(z->entries[i].name);
     free(z->entries);
     free(z->slots);
+    free(z->dir_buf);
     free(z);
 }
 
@@ -139,12 +155,21 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
         z->slots = heap_caps_calloc(slots, sizeof(*z->slots), PSRAM);
         z->slot_mask = (uint16_t)(slots - 1);
         if (!z->entries || !z->slots) { err = ESP_ERR_NO_MEM; goto fail; }
+        // 整块读入中央目录，避免每个条目一次 seek+read；分配失败时逐条回退。
+        // Read the whole central directory once instead of one seek+read per entry;
+        // a failed allocation falls back to per-entry reads.
+        z->dir_size = dir_size;
+        z->dir_buf = heap_caps_malloc(dir_size, PSRAM);
+        if (z->dir_buf && !read_at(z, z->directory, z->dir_buf, dir_size)) {
+            free(z->dir_buf);
+            z->dir_buf = NULL;
+        }
     }
     uint32_t pos = z->directory;
     for (unsigned i = 0; i < z->count; ++i) {
         uint8_t h[46];
         err = ESP_ERR_INVALID_SIZE;
-        if (pos > eocd_pos || eocd_pos - pos < sizeof(h) || !read_at(z, pos, h, sizeof(h)) || u32(h) != UINT32_C(0x02014b50)) goto fail;
+        if (pos > eocd_pos || eocd_pos - pos < sizeof(h) || !dir_read(z, pos, h, sizeof(h)) || u32(h) != UINT32_C(0x02014b50)) goto fail;
         zip_entry_t* entry = &z->entries[i];
         entry->flags = u16(h + 8); entry->method = u16(h + 10);
         entry->crc = u32(h + 16); entry->packed = u32(h + 20); entry->unpacked = u32(h + 24); entry->offset = u32(h + 42);
@@ -163,7 +188,7 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
             (entry->method == 0 && entry->packed != entry->unpacked)) goto fail;
         entry->name = heap_caps_malloc((size_t)name_len + 1, PSRAM);
         if (!entry->name) { err = ESP_ERR_NO_MEM; goto fail; }
-        if (!read_at(z, pos + 46, entry->name, name_len) || memchr(entry->name, 0, name_len)) goto fail;
+        if (!dir_read(z, pos + 46, entry->name, name_len) || memchr(entry->name, 0, name_len)) goto fail;
         entry->name[name_len] = 0;
         uint16_t slot = (uint16_t)(name_hash(entry->name) & z->slot_mask);
         while (z->slots[slot]) {
@@ -175,6 +200,8 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
         pos += record_len;
     }
     if (pos != eocd_pos) goto fail;
+    free(z->dir_buf);
+    z->dir_buf = NULL;
     *out = z;
     return ESP_OK;
 fail:

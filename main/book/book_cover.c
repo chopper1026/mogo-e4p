@@ -2,6 +2,7 @@
 #include "book_cover.h"
 #include "book_cover_auto.h"
 #include "book_epub.h"
+#include "book_jpeg_hw.h"
 #include "book_title.h"
 #include <errno.h>
 #include <setjmp.h>
@@ -135,6 +136,71 @@ book_crop_t book_cover_crop(unsigned src_width, unsigned src_height,
 // JPEGDEC.
 
 
+// 把整幅 RGB565 重采样到目标灰阶：长边铺满、居中裁剪，再双线性。
+// Resample a full RGB565 frame into the target gray: fill the longer side, centre-crop, then bilinear.
+static bool resample_rgb565(const uint8_t *pixels, unsigned stride, unsigned width,
+                            unsigned height, unsigned out_width, unsigned out_height,
+                            uint8_t *out) {
+    if (!pixels || !out || !stride || !width || !height) return false;
+    const book_crop_t crop = book_cover_crop(width, height, out_width, out_height);
+    scale_step_t *xmap = scale_map(out_width, crop.width);
+    scale_step_t *ymap = scale_map(out_height, crop.height);
+    bool ok = false;
+    if (xmap && ymap) {
+        for (unsigned y = 0; y < out_height; ++y) {
+            const int sy = ymap[y].at, fy = ymap[y].frac;
+            const int sy1 = scale_next(sy, crop.height);
+            const uint8_t *r0 = pixels + (size_t)(crop.y + (unsigned)sy) * stride * 2;
+            const uint8_t *r1 = pixels + (size_t)(crop.y + (unsigned)sy1) * stride * 2;
+            for (unsigned x = 0; x < out_width; ++x) {
+                const int sx = xmap[x].at, fx = xmap[x].frac;
+                const int sx1 = scale_next(sx, crop.width);
+                out[y * out_width + x] = bilinear4(
+                    rgb565_gray(r0, crop.x + (unsigned)sx), rgb565_gray(r0, crop.x + (unsigned)sx1),
+                    rgb565_gray(r1, crop.x + (unsigned)sx), rgb565_gray(r1, crop.x + (unsigned)sx1),
+                    fx, fy);
+            }
+            decode_yield(y);
+        }
+        ok = true;
+    }
+    free(xmap);
+    free(ymap);
+    return ok;
+}
+
+// 单字节灰阶平面同样按长边铺满 + 居中裁剪；硬件灰度 JPEG 与渐进式 1/8 平面共用。
+// The same aspect-fill + centre crop for an 8-bit gray plane; shared by hardware gray JPEGs and progressive 1/8 planes.
+static bool resample_gray8(const uint8_t *pixels, unsigned stride, unsigned width,
+                           unsigned height, unsigned out_width, unsigned out_height,
+                           uint8_t *out) {
+    if (!pixels || !out || !stride || !width || !height) return false;
+    const book_crop_t crop = book_cover_crop(width, height, out_width, out_height);
+    scale_step_t *xmap = scale_map(out_width, crop.width);
+    scale_step_t *ymap = scale_map(out_height, crop.height);
+    bool ok = false;
+    if (xmap && ymap) {
+        for (unsigned y = 0; y < out_height; ++y) {
+            const int sy = ymap[y].at, fy = ymap[y].frac;
+            const int sy1 = scale_next(sy, crop.height);
+            const uint8_t *r0 = pixels + (size_t)(crop.y + (unsigned)sy) * stride;
+            const uint8_t *r1 = pixels + (size_t)(crop.y + (unsigned)sy1) * stride;
+            for (unsigned x = 0; x < out_width; ++x) {
+                const int sx = xmap[x].at, fx = xmap[x].frac;
+                const int sx1 = scale_next(sx, crop.width);
+                out[y * out_width + x] = bilinear4(
+                    r0[crop.x + (unsigned)sx], r0[crop.x + (unsigned)sx1],
+                    r1[crop.x + (unsigned)sx], r1[crop.x + (unsigned)sx1], fx, fy);
+            }
+            decode_yield(y);
+        }
+        ok = true;
+    }
+    free(xmap);
+    free(ymap);
+    return ok;
+}
+
 /* ---- 渐进式 JPEG / Progressive JPEG ---- */
 
 // EIGHT_BIT_GRAYSCALE 下 pPixels 每像素一个字节。JPEGDEC 按 MCU 块回调：块内 stride 是
@@ -191,30 +257,10 @@ static bool jpegdec_gray(const uint8_t *data, size_t size, unsigned frame_width,
                                                  NULL, NULL) != 0;
     bool ok = false;
     if (decoded) {
-        // 1/8 小平面同样按长边铺满 + 居中裁剪映射到目标。
+        // 1/8 小平面按长边铺满 + 居中裁剪映射到目标。
         // The 1/8 plane maps to the target the same way: fill the longer side, centre-crop.
-        const book_crop_t crop = book_cover_crop(plane.stride, plane.height, out_width, out_height);
-        scale_step_t *xmap = scale_map(out_width, crop.width);
-        scale_step_t *ymap = scale_map(out_height, crop.height);
-        if (xmap && ymap) {
-            for (unsigned y = 0; y < out_height; ++y) {
-                const int sy = ymap[y].at, fy = ymap[y].frac;
-                const int sy1 = scale_next(sy, crop.height);
-                const uint8_t *r0 = plane.plane + (size_t)(crop.y + (unsigned)sy) * plane.stride;
-                const uint8_t *r1 = plane.plane + (size_t)(crop.y + (unsigned)sy1) * plane.stride;
-                for (unsigned x = 0; x < out_width; ++x) {
-                    const int sx = xmap[x].at, fx = xmap[x].frac;
-                    const int sx1 = scale_next(sx, crop.width);
-                    out[y * out_width + x] = bilinear4(
-                        r0[crop.x + (unsigned)sx], r0[crop.x + (unsigned)sx1],
-                        r1[crop.x + (unsigned)sx], r1[crop.x + (unsigned)sx1], fx, fy);
-                }
-                decode_yield(y);
-            }
-            ok = true;
-        }
-        free(xmap);
-        free(ymap);
+        ok = resample_gray8(plane.plane, plane.stride, plane.stride, plane.height,
+                            out_width, out_height, out);
     }
     free(plane.plane);
     return ok;
@@ -225,8 +271,26 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     if (size > UINT32_MAX) return false;
     uint8_t sof = 0;
     unsigned frame_width = 0, frame_height = 0;
-    if (book_jpeg_frame(data, size, &sof, &frame_width, &frame_height) && sof == 0xC2)
+    const bool framed = book_jpeg_frame(data, size, &sof, &frame_width, &frame_height);
+    if (framed && sof == 0xC2)
         return jpegdec_gray(data, size, frame_width, frame_height, out_width, out_height, out);
+#if BOOK_JPEG_HW
+    // 基线 JPEG 先试 S31 硬件整幅解码；失败或超预算时继续走下面的软件 1/1…1/8 路径。
+    // Try the S31 hardware full-frame decode for baseline JPEGs; any failure or budget
+    // overrun continues into the software 1/1...1/8 path below.
+    if (framed && sof == 0xC0) {
+        book_jpeg_hw_image_t image;
+        if (book_jpeg_hw_decode(data, size, 8u * 1024u * 1024u, &image)) {
+            const bool ok = image.gray
+                ? resample_gray8(image.pixels, image.stride, image.width, image.height,
+                                 out_width, out_height, out)
+                : resample_rgb565(image.pixels, image.stride, image.width, image.height,
+                                  out_width, out_height, out);
+            book_jpeg_hw_free(&image);
+            if (ok) return true;
+        }
+    }
+#endif
     esp_jpeg_image_cfg_t cfg = { .indata = (uint8_t *)data, .indata_size = (uint32_t)size,
                                  .out_format = JPEG_IMAGE_FORMAT_RGB565 };
     esp_jpeg_image_output_t info = {0};
@@ -241,33 +305,12 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
         if (!pixels) continue;
         cfg.outbuf = pixels;
         cfg.outbuf_size = info.output_len;
-        if (esp_jpeg_decode(&cfg, &info) == ESP_OK) {
-            // 长边铺满再居中裁剪，长宽比不同也不拉伸。
-            // Fill by the longer side and centre-crop, so a different aspect ratio is not stretched.
-            const book_crop_t crop = book_cover_crop(info.width, info.height, out_width, out_height);
-            scale_step_t *xmap = scale_map(out_width, crop.width);
-            scale_step_t *ymap = scale_map(out_height, crop.height);
-            if (xmap && ymap) {
-                for (unsigned y = 0; y < out_height; ++y) {
-                    const int sy = ymap[y].at, fy = ymap[y].frac;
-                    const int sy1 = scale_next(sy, crop.height);
-                    const uint8_t *r0 = pixels + (size_t)(crop.y + (unsigned)sy) * info.width * 2;
-                    const uint8_t *r1 = pixels + (size_t)(crop.y + (unsigned)sy1) * info.width * 2;
-                    for (unsigned x = 0; x < out_width; ++x) {
-                        const int sx = xmap[x].at, fx = xmap[x].frac;
-                        const int sx1 = scale_next(sx, crop.width);
-                        out[y * out_width + x] = bilinear4(
-                            rgb565_gray(r0, crop.x + (unsigned)sx), rgb565_gray(r0, crop.x + (unsigned)sx1),
-                            rgb565_gray(r1, crop.x + (unsigned)sx), rgb565_gray(r1, crop.x + (unsigned)sx1),
-                            fx, fy);
-                    }
-                    decode_yield(y);
-                }
-                decoded = true;
-            }
-            free(xmap);
-            free(ymap);
-        }
+        // 长边铺满再居中裁剪，长宽比不同也不拉伸。
+        // Fill by the longer side and centre-crop, so a different aspect ratio is not stretched.
+        if (esp_jpeg_decode(&cfg, &info) == ESP_OK &&
+            resample_rgb565(pixels, info.width, info.width, info.height,
+                            out_width, out_height, out))
+            decoded = true;
         free(pixels);
         if (decoded) break;
     }
@@ -493,7 +536,11 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
         free(data);
         if (err == ESP_ERR_NO_MEM) cache_result = false;
     }
-    if (!good && !allow_auto) { if(pending)*pending=true;if(auto_cache)*auto_cache=cache_result;return false; }
+    if (!good && !allow_auto) {
+        if (pending) *pending = true;
+        if (auto_cache) *auto_cache = cache_result;
+        return false;
+    }
     if (!good) good = book_auto_cover_render(path, title, author, BOOK_COVER_W, BOOK_COVER_H, out);
     if (good && cache_result) cover_cache_write(cache_path, &key, out);
     return good;
