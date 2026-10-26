@@ -58,7 +58,9 @@ int epd_rotated_display_width(void) { return 684; }
 int epd_rotated_display_height(void) { return 1216; }
 
 #define FB_BYTES 128
-const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1}, E0470_GRAY8_WAVEFORM = {2}, E0470_FULL_WAVEFORM = {3};
+const EpdWaveform E0470_WAVEFORM = {0}, E0470_FOLLOW_WAVEFORM = {1}, E0470_GRAY8_WAVEFORM = {2}, E0470_FULL_WAVEFORM = {3},
+    E0470_CAPSULE_DRAG_WAVEFORM = {4}, E0470_CAPSULE_WHITE_WAVEFORM = {5},
+    E0470_CAPSULE_GRAY_WAVEFORM = {6}, E0470_APPLY_WAVEFORM = {7};
 static uint8_t target[FB_BYTES], presented[FB_BYTES];
 static int clocks, powerons, clears, draws, full_draws, safe_clock, prefill, last_mode, last_scan;
 static bool white_baseline, correct_target_at_draw;

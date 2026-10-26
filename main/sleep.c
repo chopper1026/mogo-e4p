@@ -234,6 +234,16 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_KEY;
+    // 蓝牙控制器不能带着活动状态进浅睡：醒来后的第一条 HCI 命令会踩到 BTDM 控制器内部的
+    // 链表断言（ble_hw.c）。锁屏不是用户关蓝牙，停栈时保留重连目标，解锁后主循环重新起栈
+    // 并自动连回；停不下来就不进浅睡，保持唤醒轮询，绝不把活动控制器送进浅睡。
+    // The BT controller must not stay active across light sleep: its first HCI command after wake
+    // trips an internal linked-list assert in the BTDM controller (ble_hw.c). Locking is not an
+    // explicit Bluetooth-off, so the teardown keeps the reconnect target and the main loop
+    // restarts the stack after unlock. If the teardown fails, never light-sleep; keep polling
+    // awake rather than handing an active controller to the sleep path.
+    const bool ble_stopped = ble_pt_stop_for_sleep(2000) == ESP_OK;
+    if (!ble_stopped) ESP_LOGW(TAG, "BLE stop before light sleep failed; staying awake");
     // 首次浅睡前抓 CACHE_L1 配置快照；之后每次醒来写回，喂行产能才回得来。
     // Snapshot CACHE_L1 before the first light sleep; restore on every wake so
     // the feed capacity comes back with it.
@@ -316,6 +326,12 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         if (pickup && sc7a20h_int1_level(acc) > 0) {
             pickup_ack(acc);
             pickup_wait_quiet(acc, 400, 1500);
+            continue;
+        }
+        if (!ble_stopped) {
+            // 停栈失败：不睡，按同一轮询节奏等按键，锁屏画面保持不动。
+            // Teardown failed: stay awake and poll at the same cadence; the lock face stays put.
+            vTaskDelay(pdMS_TO_TICKS(APP_LOCK_KEY_POLL_US / 1000));
             continue;
         }
         int64_t sleep_us = APP_LOCK_KEY_POLL_US;

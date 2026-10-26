@@ -72,8 +72,10 @@ CONFIG_HTTPD_MAX_URI_LEN=1024
 # 蓝牙翻页器：BLE HID 主机（central），配对市面上的 BLE 翻页器／键盘。
 # Bluetooth page-turner: a BLE HID host (central) pairing off-the-shelf BLE remotes.
 #
-# 只用 BLE。ESP32-S3 没有 Bluetooth Classic 射频，纯 Classic 的翻页器连不上。
-# BLE only. The ESP32-S3 has no Bluetooth Classic radio, so Classic-only remotes cannot pair.
+# 目前 host 用 NimBLE，只做 BLE。S31 本身有 Bluetooth Classic 硬件，但 NimBLE 不支持
+# BR/EDR；要接纯 Classic 翻页器得换 Bluedroid（另一轮评估）。
+# The host is NimBLE, so this build is BLE only. The S31 itself has Bluetooth Classic hardware,
+# but NimBLE has no BR/EDR; Classic-only remotes would need Bluedroid (separate work).
 CONFIG_BT_ENABLED=y
 CONFIG_BT_BLUEDROID_ENABLED=n
 CONFIG_BT_NIMBLE_ENABLED=y
@@ -95,20 +97,16 @@ CONFIG_BT_NIMBLE_MAX_CCCDS=2
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=23
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=6
-CONFIG_BT_NIMBLE_ACL_BUF_COUNT=6
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=6
 CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4
-# 控制器只能用内部 RAM——它跑在硬件路径上，读不到 PSRAM。这组值是 CrossMux 在同一块
-# 板子上验证过的：BLE_MAX_ACT 是"同时允许几个控制器活动"，扫描与建立连接各占一个，
-# 压到 1 会让扫描和连接互相排斥，起不来。文件/图片/壁纸列表等搬进 PSRAM 之后 DIRAM
-# 空闲约 148KB，这里不需要再省。
-# The controller must stay in internal RAM (it sits on the hardware path and cannot read PSRAM).
-# These are the values CrossMux verified on this same board: BLE_MAX_ACT is how many controller
-# activities may coexist, scanning and connection setup each take one, and squeezing it to 1 makes
-# them mutually exclusive so the stack cannot come up. After the file, image and wallpaper lists
-# moved into PSRAM, DIRAM has about 148 KB free, so there is nothing left to economise here.
-CONFIG_BT_CTRL_BLE_MAX_ACT=3
+# 控制器只能用内部 RAM——它跑在硬件路径上，读不到 PSRAM；内部 RAM 就是启动门槛卡的那一项。
+# S31 的控制器换成 BTDM 之后，S3 上的 BLE_MAX_ACT / ADV_DUP_FILT_MAX 已不存在，这里只留
+# 仍然有效的报告流控深度；扫描去重深度用控制器默认值。
+# The controller must stay in internal RAM (it sits on the hardware path and cannot read PSRAM),
+# and internal RAM is what the start gate checks. With the S31's BTDM controller, the S3 settings
+# BLE_MAX_ACT / ADV_DUP_FILT_MAX no longer exist; only the report flow-control depth remains,
+# and the scan dedup depth keeps the controller default.
 CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
-CONFIG_BT_CTRL_ADV_DUP_FILT_MAX=10
 CONFIG_BLE_MESH=n
 
 CONFIG_TINYUSB_MSC_ENABLED=y
@@ -126,7 +124,6 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # 建立链路的回调链跑在 NimBLE 任务上，通知解析里 4096 字节会触到栈上限。
 # The bring-up callback chain runs on the NimBLE task; 4096 bytes reaches its limit inside report parsing.
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
-CONFIG_BT_NIMBLE_TASK_STACK_SIZE=8192
 
 # S31 的 RTC 时钟源只有内部 RC 与外部晶振；先沿用内部 RC，标定周期按 Metalio。
 # S31 offers only internal RC or an external crystal for RTC; keep internal RC for now.

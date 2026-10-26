@@ -80,7 +80,7 @@ static int64_t esp_timer_get_time(void){return now*1000;}
 static int read_pico_pmu_poll(void){return 0;}
 static int read_pico_pmu_take_key_action(void){int action=power_pending;power_pending=0;return action;}
 static void read_pico_pmu_drain_events(void){}
-static int ble_pt_stop(int ms){assert(ms==2000);++stops;return 0;}
+static int ble_pt_stop_for_sleep(int ms){assert(ms==2000);++stops;return 0;}
 static bool ble_pt_pop_key(ble_pt_event_t *e){(void)e;return false;}
 static bool ble_pt_pop_raw(ble_pt_raw_t *e){(void)e;return false;}
 static void pico_boot_ready(void){++ready;}

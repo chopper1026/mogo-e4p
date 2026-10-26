@@ -1557,7 +1557,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             char label[40];
             snprintf(label, sizeof(label), "%s", bond->name[0] ? bond->name : bond->addr);
             fit_value(label, 300);
-            const bool live = ble_pt_connected() && !strcmp(ble_pt_connected_name(), bond->name);
+            // 连接状态按地址判断：名字可能重复、也可能回落成 MAC，按名字比会认错行。
+            // Match by address: names can repeat or fall back to the MAC, so comparing names
+            // marks the wrong row.
+            const bool live = ble_pt_connected() && !strcasecmp(ble_pt_connected_addr(), bond->addr);
             ble_row(fb, l.bond_top[i], label, live ? "已连接" : "连接  ›");
             ui_draw_button(fb, ble_button_rect(l.bond_top[i]), "删除", false);
         }

@@ -36,6 +36,7 @@
 #include "host/ble_hs.h"
 #include "host/ble_hs_adv.h"
 #include "host/ble_sm.h"
+#include "host/ble_store.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
@@ -211,22 +212,33 @@ static uint8_t s_own_addr_type;
 // 定义在扫描那一节，但 note_peer() 也要用。/ Defined in the discovery section, also used by note_peer().
 static const ble_pt_device_t *device_find(const char *addr);
 
-// 已发现的可订阅输入报告。/ Subscribable input reports found on the peer.
+// 已发现的可订阅输入报告。defs 是特征定义句柄，描述符遍历要用它定界。
+// Subscribable input reports found on the peer. defs holds the characteristic definition handle,
+// which bounds descriptor discovery.
 static uint16_t s_input_chr_vals[MAX_INPUT_CHRS];
+static uint16_t s_input_chr_defs[MAX_INPUT_CHRS];
 static uint16_t s_input_chr_cccds[MAX_INPUT_CHRS];
 static uint8_t s_input_chr_count;
 static uint8_t s_subscribed_count;
-// HID 服务的结束句柄。ble_gatt_chr 只有 def_handle/val_handle，没有 end_handle，
-// 所以发现描述符时用服务自己的范围。
-// The HID service's end handle. ble_gatt_chr carries def_handle/val_handle but no end_handle,
-// so descriptor discovery uses the service's own range.
+// HID 服务的结束句柄，以及服务里每个特征的定义句柄。NimBLE 的 ble_gattc_disc_all_dscs()
+// 要求 end 是「该特征定义的最后一句柄」；只给服务末尾会让遍历走进后面特征的地盘，把它们的
+// CCCD 也收进来。用下一个特征的定义句柄减一定界，最后一个特征才退到服务末尾。
+// The HID service's end handle plus every characteristic's definition handle. NimBLE's
+// ble_gattc_disc_all_dscs() wants end to be "the last handle in the characteristic definition";
+// passing the service end walks into later characteristics and collects their CCCDs too. Bound
+// each pass at the next characteristic's def_handle - 1, falling back to the service end for the
+// last one.
+#define MAX_HID_CHRS 24
+static uint16_t s_hid_chr_defs[MAX_HID_CHRS];
+static uint8_t s_hid_chr_def_count;
 static uint16_t s_hid_svc_end = 0xFFFF;
 // 发现是否已经发起过。/ Whether discovery has been kicked off for this link.
 static bool s_discovery_started;
 
-// 报告映射给出的提示：哪个字节更可能是键码。/ Report-map hint for the byte that holds the code.
+// 报告映射给出的提示：对端声明了哪些用法页。解码时按页取键码字节，两个页都存在就依次尝试。
+// Report-map hints: which usage pages the peer declares. Decoding reads each page's key byte and
+// tries both when the peer exposes both.
 static bool s_has_keyboard_page, s_has_consumer_page;
-static uint8_t s_preferred_byte = 0xFF;
 
 // 静止帧：外设什么都没按时发的报告。它唯一的用途是判断一帧算不算「按下了」。学习界面会把
 // 点「学习」那一刻的帧定为基准——有些遥控器的静止帧带着非零常量（协议字节、状态字节），只按
@@ -500,8 +512,8 @@ static void raw_frame(const uint8_t *data, size_t len, uint32_t now) {
 #define YXT_CODE_PREV 0x01u
 #define YXT_CODE_NEXT 0x02u
 
-// Report-map hints: 0x05 0x07 marks the keyboard page, 0x05 0x0C the consumer page. On the
-// keyboard page the code sits in byte 2 (after the modifier byte), on the consumer page in byte 1.
+// Report-map hints: 0x05 0x07 marks the keyboard page, 0x05 0x0C the consumer page. Both can be
+// present on the same peer, so keep them as independent flags rather than one preferred index.
 static void report_map_hints(const uint8_t *map, size_t len) {
     if (!map || len < 2) return;
     for (size_t i = 0; i + 1 < len; ++i) {
@@ -509,19 +521,38 @@ static void report_map_hints(const uint8_t *map, size_t len) {
         if (map[i + 1] == 0x07) s_has_keyboard_page = true;
         else if (map[i + 1] == 0x0C) s_has_consumer_page = true;
     }
-    if (s_has_keyboard_page) s_preferred_byte = 2;
-    else if (s_has_consumer_page) s_preferred_byte = 1;
 }
 
-// 取报告里的主码值：优先用报告映射指出的字节，否则扫前几字节取第一个非零。
-// Extract the primary code: prefer the byte the report map pointed at, else the first non-zero
-// byte within the first few.
+// 取报告里的主码值。键盘页键码在修饰键之后（9 字节帧再跳过报告号）；消费者页取 16 位用法码的
+// 低字节。两个页都存在时先试键盘页，为零再试消费者页——翻页器常把两个页放进同一份报告映射。
+// Extract the primary code. On the keyboard page it sits after the modifier byte (and after the
+// report id in a 9-byte frame); on the consumer page it is the low byte of the 16-bit usage. With
+// both pages present the keyboard byte is tried first and the consumer byte only when it is zero,
+// because page turners often publish both pages in one report map.
 static uint8_t extract_primary_code(const uint8_t *p, size_t n) {
-    const size_t preferred = s_preferred_byte == 0xFF ? n : s_preferred_byte + (n == 9 ? 1u : 0u);
-    // 已知布局的零键码是释放，不能把报告 ID 或修饰键误当按键。/ A known zero usage is release, not a report ID or modifier key.
-    if (preferred < n) return p[preferred];
+    const size_t key = n == 9 ? 3u : 2u;
+    if (s_has_keyboard_page && key < n) {
+        if (p[key]) return p[key];
+        // 8/9 字节键盘帧里键位全零就是松开：继续往后扫会把修饰键当成键码。
+        // All-zero key bytes on an 8/9-byte keyboard frame mean release; scanning on would read
+        // the modifier byte as a key code.
+        if (n > 4) return 0;
+    }
+    // 2 字节帧没有报告号，用法码在 0；带报告号的短帧在 1。
+    // A 2-byte frame has no report id (code at 0); a short frame with report id carries it at 1.
+    if (s_has_consumer_page) {
+        const size_t code = n == 2 ? 0u : 1u;
+        if (code < n) return p[code];
+    }
+    // 已知布局的零键码就是松开，不能把报告 ID 或修饰键误当按键。
+    // A zero code on a known layout is release, not a report id or modifier key.
+    if ((s_has_keyboard_page && key < n) || (s_has_consumer_page && n >= 2)) return 0;
+    // 没有报告映射提示（或是不认识的布局）：扫前几字节取第一个非零，跳过 9 字节帧的报告号。
+    // No report-map hint (or an unknown layout): take the first non-zero byte of the leading few,
+    // skipping the report id of a 9-byte frame.
+    const size_t first = n == 9 ? 1u : 0u;
     const size_t limit = n < 8 ? n : 8;
-    for (size_t i = 0; i < limit; ++i)
+    for (size_t i = first; i < limit; ++i)
         if (p[i] != 0) return p[i];
     return 0;
 }
@@ -752,6 +783,10 @@ static void remember_live_peer(void) {
     if (s_peer_remembered || !s_conn_addr[0]) return;
     s_peer_remembered = true;
     bond_add(s_conn_addr, s_conn_name, s_conn_addr_type);
+    // 明文 HID 不会走 ENC_CHANGE，自动重连目标也在这里记：否则掉线后 poll() 没有目标可拉回。
+    // Plaintext HID never reaches ENC_CHANGE, so the reconnect target is armed here too; without
+    // it a dropped plaintext peer has nothing for poll() to reconnect to.
+    snprintf(s_reconnect_addr, sizeof(s_reconnect_addr), "%s", s_conn_addr);
 }
 
 // 订阅一个 HID 输入报告：在 CCCD 上写 0x0001（通知）。第一个订阅成功就算链路可用。
@@ -849,7 +884,9 @@ static int dsc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
         case 0: {
             const ble_uuid16_t cccd = BLE_UUID16_INIT(HID_CHR_CCCD);
             const bool is_cccd = ble_uuid_cmp(&dsc->uuid.u, &cccd.u) == 0;
-            if (is_cccd) s_input_chr_cccds[index] = dsc->handle;  // 只记录，不在这里订阅
+            // 一条特征最多一个 CCCD；已经记下就不再让后面的覆盖。
+            // A characteristic has at most one CCCD; never let a later one overwrite it.
+            if (is_cccd && !s_input_chr_cccds[index]) s_input_chr_cccds[index] = dsc->handle;
             return 0;
         }
         case BLE_HS_EDONE:
@@ -862,21 +899,40 @@ static int dsc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 }
 
 // 读 Report Map 拿解码提示：照 CrossMux 的 setupHid，先读 0x2A4B 再订阅。
-// 这个回调以前根本不存在，于是 report_map_hints() 从未被调用，按键落在哪个字节上全靠猜，
-// 遥控器按下去自然没有反应。
+// 单次读响应只有 MTU-1 字节（MTU 23 时 22 字节），报告映射通常更长；用 read_long 分段收齐，
+// 否则 0x05 0x07 / 0x05 0x0C 提示可能整段落在后面，解码只能靠猜。
 // Read the Report Map for decoding hints, the way CrossMux's setupHid does before subscribing.
-// The callback simply did not exist before, so report_map_hints() was never called and which byte
-// carried the key was pure guesswork -- which is why a press did nothing.
+// A single read response carries only MTU-1 bytes (22 at MTU 23) while report maps are usually
+// longer, so read_long collects every chunk; otherwise the 0x05 0x07 / 0x05 0x0C hints can fall
+// past the first chunk and decoding is guesswork again.
+#define REPORT_MAP_MAX 768
+static uint8_t s_report_map[REPORT_MAP_MAX];
+static uint16_t s_report_map_len;
+
+static void report_map_finish(void) {
+    if (s_report_map_len) report_map_hints(s_report_map, s_report_map_len);
+    subscribe_ready();
+}
+
 static int report_map_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                          struct ble_gatt_attr *attr, void *arg) {
     (void)conn_handle; (void)arg;
     if (error != NULL && error->status == 0 && attr != NULL && attr->om != NULL) {
         const uint8_t *data = OS_MBUF_DATA(attr->om, const uint8_t *);
         const uint16_t len = (uint16_t)OS_MBUF_PKTLEN(attr->om);
-        report_map_hints(data, len);
-    } else {
+        const uint16_t offset = attr->offset;
+        if (offset < REPORT_MAP_MAX) {
+            uint16_t copy = len;
+            if (copy > REPORT_MAP_MAX - offset) copy = (uint16_t)(REPORT_MAP_MAX - offset);
+            memcpy(s_report_map + offset, data, copy);
+            if ((uint16_t)(offset + copy) > s_report_map_len)
+                s_report_map_len = (uint16_t)(offset + copy);
+        }
+        return 0;  // 还有下一段，继续读 / more chunks may follow
     }
-    subscribe_ready();
+    // EDONE 或读失败：用已经收齐的部分解析，然后订阅。
+    // EDONE or a failed chunk: parse what arrived, then subscribe.
+    report_map_finish();
     return 0;
 }
 
@@ -886,14 +942,25 @@ static void dsc_next(void) {
         // 订阅之前先把 Report Map 读出来，CrossMux 的次序就是这样。
         // The Report Map is read before subscribing, which is CrossMux's order.
         if (s_report_map_handle) {
-            if (ble_gattc_read(s_conn_handle, s_report_map_handle, report_map_cb, NULL) == 0)
+            s_report_map_len = 0;
+            if (ble_gattc_read_long(s_conn_handle, s_report_map_handle, 0, report_map_cb, NULL) == 0)
                 return;
         }
         subscribe_ready();
         return;
     }
     const uint8_t i = s_dsc_index++;
-    const int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_input_chr_vals[i], s_hid_svc_end,
+    // 只遍历这个特征自己的描述符：范围到下一个特征的定义句柄前一条为止。
+    // Walk only this characteristic's own descriptors: the range stops before the next
+    // characteristic's definition handle.
+    uint16_t end = s_hid_svc_end;
+    for (uint8_t j = 0; j < s_hid_chr_def_count; ++j) {
+        const uint16_t def = s_hid_chr_defs[j];
+        if (def <= s_input_chr_defs[i]) continue;
+        if ((uint16_t)(def - 1) >= s_input_chr_vals[i] && (uint16_t)(def - 1) < end)
+            end = (uint16_t)(def - 1);
+    }
+    const int rc = ble_gattc_disc_all_dscs(s_conn_handle, s_input_chr_vals[i], end,
                                            dsc_cb, (void *)(uintptr_t)i);
     if (rc != 0) {
         // 起不来就跳过这一个，别把整条链卡死。
@@ -928,6 +995,11 @@ static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
     (void)conn_handle; (void)arg;
     switch (error->status) {
         case 0: {
+            // 每个特征的起点都要记：描述符遍历要用「下一个特征的定义句柄减一」定界。
+            // Record every characteristic's start: descriptor passes bound themselves at the next
+            // characteristic's def_handle - 1.
+            if (s_hid_chr_def_count < MAX_HID_CHRS)
+                s_hid_chr_defs[s_hid_chr_def_count++] = chr->def_handle;
             // Protocol Mode(0x2A4E)：只记下手柄，写操作等特征枚举结束后再做。
             // Protocol Mode (0x2A4E): record the handle only; the write waits until characteristic
             // enumeration has finished.
@@ -959,6 +1031,7 @@ static int chr_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                 s_input_chr_count < MAX_INPUT_CHRS) {
                 const uint8_t index = s_input_chr_count++;
                 s_input_chr_vals[index] = chr->val_handle;
+                s_input_chr_defs[index] = chr->def_handle;
                 s_input_chr_cccds[index] = 0;
             }
             return 0;
@@ -1224,7 +1297,12 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             s_discovery_started = false;
             s_input_chr_count = 0;
             s_subscribed_count = 0;
-            for (uint8_t i = 0; i < MAX_INPUT_CHRS; ++i) s_input_chr_cccds[i] = 0;
+            s_hid_chr_def_count = 0;
+            s_report_map_len = 0;
+            for (uint8_t i = 0; i < MAX_INPUT_CHRS; ++i) {
+                s_input_chr_cccds[i] = 0;
+                s_input_chr_defs[i] = 0;
+            }
             // 顺序照 CrossMux：连接 → 确认服务 → 配对 → setup。这里只发起配对请求，
             // 发现由状态机在 STEP_DISCOVER 里发起（加密未完成时 ATT 会被拒）。
             // CrossMux's order: connect, confirm the service, pair, then set up. This only starts
@@ -1260,6 +1338,8 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             raw_reset();
             s_subscribed_count = 0;
             s_input_chr_count = 0;
+            s_hid_chr_def_count = 0;
+            s_report_map_len = 0;
             s_discovery_started = false;
             return 0;
 
@@ -1284,6 +1364,20 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             // GATT discovery only after encryption completes, matching CrossMux's order.
             if (!s_discovery_started) start_discovery();
             return 0;
+        }
+
+        case BLE_GAP_EVENT_REPEAT_PAIRING: {
+            // 对端丢了配对（换电池、在别处重新配对）后又来配对，而旧 bond 还在本地：不删掉
+            // 这次配对会被协议栈直接作废。删旧 bond，让协议栈重试一次。
+            // The peer lost its bond (battery swap, paired elsewhere) and pairs again while the
+            // stale bond is still local; without deleting it the stack discards this attempt.
+            // Drop the old bond and let the stack retry once.
+            struct ble_gap_conn_desc desc;
+            if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
+                ble_store_util_delete_peer(&desc.peer_id_addr);
+                ESP_LOGI(TAG, "repeat pairing, dropped stale bond");
+            }
+            return BLE_GAP_REPEAT_PAIRING_RETRY;
         }
 
         case BLE_GAP_EVENT_PASSKEY_ACTION: {
@@ -1317,15 +1411,15 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             // 收到数据就上屏：按键没反应时，第一步要分清"对端根本没发"还是"发了没解出来"。
             // A received report goes on screen: when a press does nothing, the first question is
             // whether the peer sent anything at all or sent something undecodable.
-            if (len > 0)
-            // 每一条通知都记下原始字节：遥控器到底发了什么、是不是空报告，一眼可见。
-            // Every notification records its raw bytes, so what the remote actually sent -- and
-            // whether it sent an empty report -- is right there.
-            {
+            if (len > 0) {
                 char hex[3 * 24 + 1] = {0};
                 const uint16_t shown = len < 24 ? len : 24;
                 for (uint16_t i = 0; i < shown; ++i)
                     snprintf(hex + i * 3, 4, "%02x ", body[i]);
+                // 默认日志级别下不输出；把串口开到 Debug 就能看到遥控器实际发了什么。
+                // Silent at the default log level; raising the console to Debug shows exactly what
+                // the remote sent.
+                ESP_LOGD(TAG, "rx %s", hex);
             }
             // 收到报告本身就是"链路可用"最可靠的证据：CCCD 订阅可能因为链路未加密而写失败，
             // 但已配对设备的订阅状态由对端保留，翻页器照样会发。之前拿"订阅写成功"当判据，
@@ -1373,7 +1467,6 @@ static int start_connect(const char *addr, uint8_t type) {
     s_rest_known = false;
     raw_reset();
     s_has_keyboard_page = s_has_consumer_page = false;
-    s_preferred_byte = 0xFF;
     s_held_usage = 0;
     s_subscribed_count = 0;
     s_conn_addr_type = type;
@@ -1476,6 +1569,7 @@ void ble_pt_disconnect(void) {
 bool ble_pt_connected(void) { return s_link_up; }
 bool ble_pt_connecting(void) { return s_connecting && !s_link_up; }
 const char *ble_pt_connected_name(void) { return s_conn_name; }
+const char *ble_pt_connected_addr(void) { return s_conn_addr; }
 
 bool ble_pt_take_failure(char *out, size_t cap) {
     if (!s_failure[0]) return false;
@@ -1611,6 +1705,23 @@ esp_err_t ble_pt_stop(uint32_t timeout_ms) {
     if (!lifecycle_take(timeout_ms > 2000 ? 2000 : timeout_ms)) return ESP_ERR_TIMEOUT;
     const esp_err_t error = stop_locked();
     lifecycle_give();
+    return error;
+}
+
+esp_err_t ble_pt_stop_for_sleep(uint32_t timeout_ms) {
+    // 锁屏不是用户关蓝牙：记下自动重连目标，拆栈后放回去。解锁时主循环重新起栈，
+    // poll() 立刻按它连回；否则停栈内部的 disconnect 会把目标清掉，用户得手动再连。
+    // Locking is not an explicit Bluetooth-off: keep the auto-reconnect target across the
+    // teardown and restore it afterwards. The main loop restarts the stack after unlock and
+    // poll() reconnects to it at once; otherwise the disconnect inside stop() clears the target
+    // and the user has to connect by hand.
+    char target[sizeof(s_reconnect_addr)];
+    snprintf(target, sizeof(target), "%s", s_reconnect_addr);
+    const esp_err_t error = ble_pt_stop(timeout_ms);
+    if (error == ESP_OK && target[0]) {
+        snprintf(s_reconnect_addr, sizeof(s_reconnect_addr), "%s", target);
+        s_reconnect_at = 0;  // 起栈后立刻重连 / reconnect as soon as the stack is up
+    }
     return error;
 }
 esp_err_t ble_pt_network_acquire(void) {
@@ -2005,10 +2116,11 @@ bool ble_pt_binding(ble_pt_action_t action, ble_pt_frame_t *out) {
     return true;
 }
 
-// 内置映射：上/下、左右、PageUp/PageDown 都算翻页。市面上的翻页器按键五花八门，
-// 全认下来比让用户逐个配置省事得多。
-// Built-in map: up/down, left/right and PageUp/PageDown all turn pages. Remotes differ wildly
-// in which keys they send, so accepting them all beats configuring each one.
+// 内置映射：上/下、左右、PageUp/PageDown，以及消费者页的上一曲/下一曲都算翻页。市面上的
+// 翻页器按键五花八门，全认下来比让用户逐个配置省事得多。
+// Built-in map: up/down, left/right, PageUp/PageDown and the consumer page's previous/next track
+// all turn pages. Remotes differ wildly in which keys they send, so accepting them all beats
+// configuring each one.
 ble_pt_action_t ble_pt_action_for_usage(uint8_t usage, uint8_t mods) {
     (void)mods;
     switch (usage) {
@@ -2030,6 +2142,15 @@ ble_pt_action_t ble_pt_action_for_usage(uint8_t usage, uint8_t mods) {
         case 0x4E:  // PageDown
         case 0x2C:  // Space
         case 0x28:  // Enter
+            return BLE_PT_ACTION_NEXT;
+        // 消费者页：上一曲 / 后退、下一曲 / 快进。翻页器常把这两个当上一页、下一页发。
+        // Consumer page: scan previous / rewind and scan next / fast forward. Page turners
+        // commonly send these for back and forward.
+        case 0xB6:  // Scan Previous Track
+        case 0xB4:  // Rewind
+            return BLE_PT_ACTION_PREV;
+        case 0xB5:  // Scan Next Track
+        case 0xB3:  // Fast Forward
             return BLE_PT_ACTION_NEXT;
         default:
             return BLE_PT_ACTION_NONE;

@@ -88,7 +88,10 @@ static void present_input(EpdiyHighlevelState *hl,EpdRect area){
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot){
     if(!lock_pin_enabled())return;
     uint8_t *fb=epd_hl_get_framebuffer(hl);
-    (void)ble_pt_stop(2000);
+    // 锁屏不是用户关蓝牙：保留自动重连目标，解锁后主循环起栈并连回。
+    // Locking is not an explicit Bluetooth-off: keep the reconnect target so the main loop can
+    // restart the stack and reconnect after unlock.
+    (void)ble_pt_stop_for_sleep(2000);
     lock_screen_save(fb);
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;

@@ -141,6 +141,14 @@ void ble_pt_reset_failure(void);
 /// than disconnect() when the user turns Bluetooth off, so memory-hungry work such as EPUB
 /// inflate can allocate again. Waits at most timeout_ms (capped at 2s).
 esp_err_t ble_pt_stop(uint32_t timeout_ms);
+/// 锁屏/浅睡前拆栈，但保留自动重连目标。锁屏不是用户关蓝牙：解锁后主循环重新起栈，
+/// poll() 会按保留的目标自动连回。控制器不能带着活动状态进浅睡——醒来后的第一条 HCI
+/// 命令会触发 BTDM 控制器内部断言。
+/// Tear the stack down before lock/light sleep while keeping the auto-reconnect target.
+/// Locking is not an explicit Bluetooth-off: the main loop restarts the stack after unlock and
+/// poll() reconnects to the retained target. The controller must not stay active across light
+/// sleep -- its first HCI command after wake trips an internal BTDM controller assert.
+esp_err_t ble_pt_stop_for_sleep(uint32_t timeout_ms);
 bool ble_pt_running(void);
 /// WiFi 分配前释放蓝牙并禁止重启，结束后释放占用；失败不允许继续分配网络。
 /// Stop BLE before WiFi allocations and inhibit restarts until released; abort networking on failure.
@@ -177,6 +185,10 @@ void ble_pt_disconnect(void);
 bool ble_pt_connected(void);
 bool ble_pt_connecting(void);
 const char *ble_pt_connected_name(void);
+/// 已连接对端的地址；未连接时为空串。界面按地址而不是名字判断哪一行是当前设备。
+/// Address of the connected peer; an empty string when none. The UI uses the address, not the
+/// name, to tell which bonded row is the live one.
+const char *ble_pt_connected_addr(void);
 
 /// 取走一次连接失败原因（取走后清空）。/ Take a pending connect-failure reason, clearing it.
 bool ble_pt_take_failure(char *out, size_t cap);
