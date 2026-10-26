@@ -522,6 +522,14 @@ bool app_book_request_resume(const char *path, bool fullscreen) {
     s_requested_fullscreen = fullscreen;
     return true;
 }
+bool app_book_request_return_to_body(const char *path, bool fullscreen) {
+    // 走普通开书来源：正文的返回仍是书架，不继承深睡恢复的「回首页」语义。
+    // Use the ordinary open origin: the body still returns to the shelf, unlike the
+    // deep-sleep resume's "back to home" semantics.
+    if (!app_book_request_open(path)) return false;
+    s_requested_fullscreen = fullscreen;
+    return true;
+}
 bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen) {
     if (!s_text || !s_path[0] || s_view == SHELF || s_view == MANAGE || s_view == BULK ||
         !path || !fullscreen || strlen(s_path) >= capacity || s_save_failed) return false;

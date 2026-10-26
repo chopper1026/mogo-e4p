@@ -184,6 +184,26 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         return true;
     }
     if (abs(dx) > UI_TOUCH_SLOP_PX || abs(dy) > UI_TOUCH_SLOP_PX) menu->moved = true;
+    // WiFi / 蓝牙圆键按住 0.5 秒：关层并请求对应设置页，抬手不再触发点按。手指允许
+    // 在圆键命中半径内轻微漂移；层状态先收起，由主循环在同轮末尾切页，swallow
+    // 保证这条接触序列不落到新页面。
+    // Holding the WiFi / Bluetooth circle for 0.5 s closes the layer and requests
+    // its settings page; the release no longer taps. The finger may drift inside
+    // the circle's hit radius. The layer closes first and the loop switches pages
+    // at the end of the tick; swallow keeps this contact stream from reaching the
+    // new page.
+    const int hx = x - (int)menu->x0, hy = y - (int)menu->y0;
+    if (menu->open && (menu->hit == 0 || menu->hit == 1) &&
+        hx * hx + hy * hy <= UI_QUICK_HIT_RADIUS * UI_QUICK_HIT_RADIUS &&
+        ctx->now_ms - menu->started_ms >= UI_QUICK_HOLD_SETTINGS_MS) {
+        menu->open = menu->tracking = false;
+        menu->swallow = true;
+        menu->fl_pull = false;
+        menu->drag = UI_QUICK_CTL_NONE;
+        event->action = menu->hit == 0 ? UI_QUICK_WIFI_SETTINGS
+                                       : UI_QUICK_BLUETOOTH_SETTINGS;
+        return true;
+    }
     // 滑杆按下即定位：不等拖动阈值，手指落在哪一档就应用到哪一档。
     // A slider positions itself on touch: apply the tapped step before the drag threshold.
     if (menu->open && (menu->hit == HIT_BRIGHTNESS || menu->hit == HIT_CCT)) {

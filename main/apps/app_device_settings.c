@@ -46,6 +46,7 @@
 
 #include "app.h"
 #include "app_content_open.h"
+#include "app_device_settings_mode.h"
 #include "app_registry.h"
 #include "app_transfer_mode.h"
 #include "settings.h"
@@ -109,6 +110,14 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
 static settings_page_t s_page;
+// 快捷栏长按蓝牙圆键的待定子页；on_enter 消费一次后回到主列表。
+// Pending sub-page from the quick bar's Bluetooth hold; on_enter consumes it once and returns to the main list.
+static settings_page_t s_enter_page;
+// 本次直达是否从其他页面进入（返回键回到来源页）；以及蓝牙子页当前是否仍按这次直达返回。
+// Whether this direct visit came from another page (back returns to the origin), and
+// whether the Bluetooth sub-page still uses that back target.
+static bool s_enter_ble_from_quick;
+static bool s_ble_shortcut_back;
 static ui_pinpad_t s_pinpad;
 static lock_pin_flow_t s_pinflow;
 static bool s_pin_pending;
@@ -1688,6 +1697,10 @@ static void settings_prepare_profile(void) {
     ui_avatar_state_t state=ui_avatar_poll(path,82,s_avatar_pixels);
     s_avatar_ready=state==UI_AVATAR_READY;s_avatar_pending=state==UI_AVATAR_PENDING;
 }
+void app_device_settings_request_bluetooth(bool return_to_origin) {
+    s_enter_page = SETTINGS_BLUETOOTH;
+    s_enter_ble_from_quick = return_to_origin;
+}
 static void on_enter(app_ctx_t *ctx) {
     (void)ctx;
     pin_setup_close();
@@ -1708,6 +1721,26 @@ static void on_enter(app_ctx_t *ctx) {
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
     settings_prepare_profile();
+    // 每次进页先清掉上一次直达的返回目标，避免离开时未经过主列表而留下旧值。
+    // Clear the previous direct-visit back target on every entry so a visit that
+    // left without passing the main list cannot leave a stale target behind.
+    s_ble_shortcut_back = false;
+    // 快捷栏长按直达蓝牙子页：初始状态与主列表「蓝牙」行一致，消费后回到主列表。
+    // Quick-bar shortcut straight to the Bluetooth sub-page: same initial state as
+    // the main list's Bluetooth row, falling back to the main list after one use.
+    if (s_enter_page == SETTINGS_BLUETOOTH) {
+        s_page = SETTINGS_BLUETOOTH;
+        s_ble_scroll = s_ble_learning = 0;
+        s_ble_notice[0] = s_ble_feedback[0] = 0;
+        ble_pt_raw_t unused;
+        while (ble_pt_pop_raw(&unused)) {}
+        // 从其他页面直达时，左上角返回回到来源页；设置页内部重进仍回主列表。
+        // A direct visit from another page sends the top-left back to that origin;
+        // re-entering from inside Settings keeps the main-list back.
+        s_ble_shortcut_back = s_enter_ble_from_quick;
+    }
+    s_enter_page = SETTINGS_MAIN;
+    s_enter_ble_from_quick = false;
 }
 
 // 主循环主动消费按键；识别不需要再触摸屏幕。/ Consume key edges on ticks without requiring another touch.
@@ -2000,6 +2033,10 @@ static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, in
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    // 快捷栏直达的蓝牙返回只属于这次访问：回到设置主列表后恢复普通返回。
+    // The quick-bar Bluetooth back belongs to this visit only: once the main list
+    // is shown again the ordinary back returns.
+    if (s_ble_shortcut_back && s_page == SETTINGS_MAIN) s_ble_shortcut_back = false;
     if (s_page==SETTINGS_SYSTEM_FONT && s_font_sync_confirm) {
         if (ev->type!=UI_GESTURE_TAP) return APP_REDRAW_NONE;
         for (int i=0;i<2;++i) {
@@ -2261,6 +2298,16 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_BLE_SCAN && y < 190) {
         ble_pt_scan_stop(); s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE;
+    }
+    if (s_page == SETTINGS_BLUETOOTH && s_ble_shortcut_back && y < 190) {
+        // 快捷栏直达蓝牙子页：左上角返回直接回到来源页；阅读正文由主循环按离开时
+        // 的书与全屏状态重开。
+        // Direct quick-bar visit to the Bluetooth sub-page: the top-left back returns
+        // to the origin page; the loop reopens the reading body with the book and
+        // full-screen state captured on the way out.
+        s_ble_shortcut_back = false;
+        ctx->request_return = true;
+        return APP_REDRAW_NONE;
     }
     if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
@@ -2641,6 +2688,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 }
 
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (s_ble_shortcut_back && s_page == SETTINGS_MAIN) s_ble_shortcut_back = false;
     if(s_font_sync_confirm) {
         s_font_sync_confirm=false;s_notice[0]=0;
         if(key!=1)return APP_REDRAW_PAGE;

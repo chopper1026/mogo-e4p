@@ -30,6 +30,8 @@
  * User adopts the top quick layer: capture only a 72px downward swipe starting within the top 32px; suspend page input/ticks while covered. WiFi connects saved credentials or disconnects on the next tap; Bluetooth enables and queues a connection to the most recently successful turner. Reuse full refresh and lock. Per the user, all modes retain grays with clearer outlines. Closing redraws and locally settles the underlay, retaining navigation.
  * 用户修订：快捷层只在展开/收起重绘顶部；圆键按下立即局部DU反馈，状态变化不重排底页或生成玻璃。
  * User revision: only opening/closing repaints the top; key presses receive immediate local DU feedback without underlay re-layout or glass regeneration.
+ * 用户新增：快捷层 WiFi / 蓝牙圆键按住 0.5 秒直达对应设置页（配网页 / 蓝牙翻页器子页），点按仍只切换开关。
+ * User addition: a 0.5s hold on the quick layer's WiFi / Bluetooth circle opens its settings page (provisioning / Bluetooth turner sub-page); a tap still only toggles the switch.
  * 用户点击反馈：底栏及圆形返回键按下局部放大，释放复位；只暂存一个小控件，切页、全刷及锁屏丢弃缓存，不回放旧画面。
  * User click feedback: locally enlarge navigation/round backs on press and restore on release. Retain one small control only; navigation, full refresh and lock discard it without replaying old frames.
  * 用户修订：确认主动锁屏后，拼贴样式先给局部圆锁反馈，再保存/等待阅读预渲染；自动休眠和直接关机/重启不加此反馈。
@@ -44,6 +46,8 @@
 
 #include "app_registry.h"
 #include "app_content_open.h"
+#include "app_device_settings_mode.h"
+#include "app_transfer_mode.h"
 #include "boot_state.h"
 #include "ble_page_turner.h"
 #include "ota_online.h"
@@ -143,6 +147,7 @@ void touch_diag_block(const char* src, int64_t t0_us) {
 
 static int64_t s_lock_ignore_until_ms;
 extern const app_desc_t app_transfer;
+extern const app_desc_t app_device_settings;
 extern const app_desc_t app_book;
 
 static const app_desc_t* s_presented_main;
@@ -160,6 +165,12 @@ static ui_quick_control_t s_fl_pending_control;
 // 屏幕上第四枚圆钮当前画出的开灯状态；点按翻转后据此决定是否重画。
 // The frontlight state currently painted on the fourth circle; a tap uses it to decide the repaint.
 static bool s_fl_shown_on;
+// 快捷栏从阅读正文离开时记下恢复点：设置页左上角返回直接回到正文，而不是书架。
+// A quick-bar hold that leaves the reading body keeps its resume point, so the
+// settings page's back returns to the body instead of the shelf.
+static bool s_quick_return_body;
+static char s_quick_return_path[256];
+static bool s_quick_return_fullscreen;
 static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current);
 // 快捷层只持有预览值；落盘只发生在松手、点选或关闭/读错时，一次拖动只写一遍 NVS。
 // The layer holds preview values; NVS writes happen on release, tap, close or a read error, once per drag.
@@ -398,6 +409,27 @@ static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current) {
     quick_frontlight_present(ctx, current, &event);
 }
 
+// 目标页就是当前页：重进一次让 on_enter 消费待定子视图，再整页重绘。快捷层已在
+// 输入层收起，这里只负责把页面画回来；通用切页分支保持「同页请求不动作」。
+// The target page is already current: re-enter so on_enter consumes the pending
+// sub-view, then repaint the page. The quick layer already closed in the input
+// layer, and the generic transition branch keeps treating a same-page request as
+// a no-op (tapping the active tab must drop a pending switch).
+static void quick_reenter_page(app_ctx_t *ctx, const app_desc_t *current) {
+    if (current->on_exit) current->on_exit(ctx);
+    if (current->on_enter) current->on_enter(ctx);
+    app_present(ctx, current, APP_REDRAW_PAGE);
+}
+
+// 从阅读正文离开前记下书与全屏状态；其他页面或非正文视图不记，返回仍按原逻辑。
+// Record the book and full-screen state before leaving the reading body; other
+// pages and non-body views record nothing and keep the ordinary return path.
+static void quick_capture_return_body(const app_desc_t *current) {
+    s_quick_return_body = current == &app_book && app_book_reader_body_visible() &&
+        app_book_resume_context(s_quick_return_path, sizeof(s_quick_return_path),
+                                &s_quick_return_fullscreen);
+}
+
 // 快捷层单帧输入：识别并执行动作；本帧由快捷层持有输入时返回 true。
 // 正常 tick 与采样回放共用同一入口，回放不能只看最后一帧，否则按下沿会丢。
 // One quick-layer input frame: recognize and run the action; true when the layer owns
@@ -437,6 +469,31 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
         app_settings_set_ble_turner(enable);
         if (enable) ble_pt_reconnect_recent();
         else { ble_pt_cancel_recent(); ble_pt_sync(false); }
+    } else if (event.action == UI_QUICK_WIFI_SETTINGS) {
+        // 长按 WiFi 圆键：与设置页「WiFi」行同一入口，直接进入配网设置页。已在
+        // 该页时重进一次，让 on_enter 重新消费配网请求。
+        // WiFi hold: the same entry as the settings page's WiFi row, straight into
+        // provisioning. When already there, re-enter so on_enter consumes the request again.
+        app_transfer_request_wifi_setup();
+        if (current == &app_transfer) quick_reenter_page(ctx, current);
+        else {
+            quick_capture_return_body(current);
+            ctx->request_app = &app_transfer;
+        }
+    } else if (event.action == UI_QUICK_BLUETOOTH_SETTINGS) {
+        // 长按蓝牙圆键：直接进入设置页的蓝牙翻页器子页；已在设置页时同上。从其他
+        // 页面进入时，子页左上角返回回到来源页。
+        // Bluetooth hold: straight into the settings page's Bluetooth turner sub-page;
+        // when already in settings, re-enter the same way. Entering from another page
+        // makes the sub-page's top-left back return to the origin.
+        if (current == &app_device_settings) {
+            app_device_settings_request_bluetooth(false);
+            quick_reenter_page(ctx, current);
+        } else {
+            quick_capture_return_body(current);
+            app_device_settings_request_bluetooth(true);
+            ctx->request_app = &app_device_settings;
+        }
     } else if (event.action == UI_QUICK_FULL) quick_present(ctx, current, true);
     else if (event.action == UI_QUICK_LOCK) *lock_requested = true;
     if (event.control != UI_QUICK_CTL_NONE) quick_frontlight_event(ctx, current, &event, coalesce);
@@ -1722,11 +1779,20 @@ void app_loop_run(const app_loop_config_t* config) {
                     current = return_app;
                     return_app = NULL;
                     app_font_activate_system();
+                    // 快捷栏长按离开阅读正文后的返回：按离开时的书与全屏状态重开正文。
+                    // Returning from a quick-bar hold that left the reading body reopens
+                    // that book and full-screen state instead of landing on the shelf.
+                    if (current == &app_book && s_quick_return_body)
+                        (void)app_book_request_return_to_body(s_quick_return_path,
+                                                             s_quick_return_fullscreen);
                     if (current->on_enter) current->on_enter(&ctx);
                     // 初始化后恢复通用页码，避免 on_enter 的默认页码覆盖来源。
                     // Restore the shared leaf after initialization overrides its default.
                     ctx.leaf = return_leaf;
                 }
+                // 一次返回就用掉恢复点；没有来源页时也不留到下次。
+                // One return consumes the resume point, even when there is no origin page.
+                s_quick_return_body = false;
                 if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                 else {
                     if (main_source && main_page_ready(&ctx, current)) display_main_transition_arm(current, shelf_source, true);
@@ -1735,6 +1801,10 @@ void app_loop_run(const app_loop_config_t* config) {
                 }
             } else if (next) {
                 if (next != current) {
+                    // 快捷栏从正文离开的那次切页保留恢复点；之后从别的页面再切页就作废。
+                    // Keep the resume point for the switch that left the reading body; a
+                    // later switch from another page invalidates it.
+                    if (current != &app_book) s_quick_return_body = false;
                     return_app = current;
                     return_leaf = ctx.leaf;
                     return_to_menu = selected_from_menu;

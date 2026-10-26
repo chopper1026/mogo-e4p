@@ -14,7 +14,6 @@ void app_book_cover_mode_changed(void) {}
 void app_home_cover_mode_changed(void) {}
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; return ESP_OK; }
 void pico_boot_clear_resume(void) {}
-bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f;return false; }
 #include "read_pico_transfer.h"
 #include "ble_page_turner.h"
 #include "ui_nav_layout.h"
@@ -26,8 +25,49 @@ bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f
 void touch_sampler_test_enable(bool active);
 void touch_sampler_test_push(uint32_t t_ms, uint16_t x, uint16_t y, uint8_t count);
 
-const app_desc_t app_book = {.title="book"};
-const app_desc_t app_transfer = {.title="transfer"};
+static void enter(app_ctx_t*);
+static void leave(app_ctx_t*);
+static void render(app_ctx_t*,uint8_t*);
+static app_redraw_t transfer_return_tick(app_ctx_t*);
+
+const app_desc_t app_book = {.title="book",.render=render,.on_enter=enter,.on_exit=leave};
+const app_desc_t app_transfer = {.title="transfer",.on_tick=transfer_return_tick};
+const app_desc_t app_device_settings = {.title="settings"};
+// 快捷栏长按直达设置页只记录请求；页面本身的进入由 switch_to 计数。
+// Quick-bar holds only record their request; entering the page is counted by switch_to.
+static int wifi_setup_requests, bt_settings_requests;
+static bool bt_return_to_origin;
+void app_transfer_request_wifi_setup(void) {++wifi_setup_requests;}
+void app_device_settings_request_bluetooth(bool return_to_origin) {
+    ++bt_settings_requests;
+    bt_return_to_origin = return_to_origin;
+}
+// 阅读正文返回：正文可见且恢复点可用时由主循环记下，返回时重开同一本书。
+// Reader-body return: the loop captures the resume point when the body is visible
+// and reopens the same book on the way back.
+static bool reader_body, reader_resume_ok, reader_resume_fullscreen;
+static char reader_resume_path[64];
+static int reader_returns;
+static char reader_return_path[64];
+static bool reader_return_fullscreen;
+static bool transfer_returns;
+bool app_book_reader_body_visible(void) {return reader_body;}
+bool app_book_resume_context(char *p,size_t c,bool *f) {
+    if (!reader_resume_ok || !p || !f || strlen(reader_resume_path) >= c) return false;
+    memcpy(p, reader_resume_path, strlen(reader_resume_path) + 1);
+    *f = reader_resume_fullscreen;
+    return true;
+}
+bool app_book_request_return_to_body(const char *p,bool f) {
+    ++reader_returns;
+    if (p) snprintf(reader_return_path,sizeof(reader_return_path),"%s",p);
+    reader_return_fullscreen = f;
+    return true;
+}
+static app_redraw_t transfer_return_tick(app_ctx_t *c) {
+    if (transfer_returns) c->request_return = true;
+    return APP_REDRAW_NONE;
+}
 static int power_open_draws, power_controls_draws, power_final_draws;
 static int power_trigger_step = -1, shutdowns, restarts;
 static bool staged_shutdown;
@@ -101,7 +141,7 @@ static int quick_draws, quick_gl, quick_du, wifi_starts, wifi_stops, ble_resets,
 static app_redraw_t long_key(app_ctx_t* c, int k) { assert(k==UI_KEY_2); ++long_keys; c->request_menu=true; return APP_REDRAW_NONE; }
 static app_redraw_t response;
 static bool request_on_touch, request_on_tick, menu_on_tick, menu_on_touch, cancel_clobber;
-static bool home_on_touch, home_on_tick, home_on_key, start_second;
+static bool home_on_touch, home_on_tick, home_on_key, start_second, start_book;
 static int home_enters, home_renders, last_menu_leaf, rendered_leaf;
 static const app_desc_t* menu_background;
 static app_desc_t first, second;
@@ -347,6 +387,12 @@ static void reset(void) {
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
+    wifi_setup_requests=bt_settings_requests=0;
+    bt_return_to_origin=false;
+    reader_body=reader_resume_ok=reader_resume_fullscreen=false;
+    reader_resume_path[0]=0;
+    reader_returns=0;reader_return_path[0]=0;reader_return_fullscreen=false;
+    transfer_returns=false;
     haptic_pulses=haptic_stops=0;
     fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=quick_norm=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
@@ -355,7 +401,7 @@ static void reset(void) {
     media_test=sd_font=saved_sd_font=false;media_lost=media_ready=builtin_opens=font_opens=probes=remounts=0;loss_step=-1;
     memset(mounted_steps,0,sizeof(mounted_steps));memset(present_steps,0,sizeof(present_steps));
     long_keys=0;
-    home_on_touch=home_on_tick=home_on_key=start_second=false;
+    home_on_touch=home_on_tick=home_on_key=start_second=start_book=false;
     home_enters=home_renders=0;rendered_leaf=-1;last_menu_leaf=-1;menu_background=NULL;
     full_tick=lock_due=font_due=shake_activity=false;time_offset=0;time_step=10000;du_areas=gl_areas=0;
     memset(samples,0,sizeof(samples));memset(keys,0,sizeof(keys));memset(events,0,sizeof(events));memset(tick_consumed,0,sizeof(tick_consumed));
@@ -365,7 +411,7 @@ static void reset(void) {
     second=(app_desc_t){.title="second",.render=render,.on_enter=enter};
 }
 static void add(int x,int y,int count,int error) {samples[sample_count++]=(sample_t){x,y,count,error};}
-static void run(void) {app_loop_config_t cfg={.first_app=start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
+static void run(void) {app_loop_config_t cfg={.first_app=start_book?&app_book:start_second?&second:&first};if(!setjmp(done))app_loop_run(&cfg);}
 static app_redraw_t consumed_return_tick(app_ctx_t*c) { if(step==0){c->leaf=7;c->request_app=&second;}else c->request_return=true;return APP_REDRAW_NONE; }
 static app_redraw_t return_tick(app_ctx_t*c) { c->request_return=true; return APP_REDRAW_NONE; }
 static app_redraw_t origin_tick(app_ctx_t*c) { c->leaf=7; if(step==0 && request_on_tick)c->request_app=&second; return APP_REDRAW_NONE; }
@@ -670,6 +716,29 @@ int main(void) {
         assert(quick_press_draws==1&&quick_du==2&&quick_gl==1&&!wifi_starts&&!touch_calls);
     }
     puts("quick layer/click scheduler: modal ownership, local BW/gray, immediate local presses without underlay re-render/glass regeneration, one saved-network connect/disconnect, upload/no-credential guards, BLE on/recent request and off before connection, full/lock and release/multitouch/read-error restoration passed");
+    // 长按 WiFi / 蓝牙圆键 0.5 秒直达设置页：只请求页面，不切换开关，抬手也不补点按。
+    // A 0.5s hold on the WiFi / Bluetooth circle opens its settings page without
+    // toggling the switch, and the release never replays the tap.
+    reset();saved_wifi=true;time_step=1000000;
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(85,156,1,0);add(85,156,1,0);add(85,156,1,0);add(0,0,0,0);run();
+    assert(wifi_setup_requests==1&&!wifi_starts&&!wifi_stops&&exits==1);
+    reset();time_step=1000000;
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(256,156,1,0);add(256,156,1,0);add(256,156,1,0);add(0,0,0,0);run();
+    assert(bt_settings_requests==1&&bt_return_to_origin&&!ble_enabled&&exits==1);
+    puts("quick layer holds: 0.5s WiFi/Bluetooth presses open their settings pages without toggling switches or replaying the tap");
+    // 从阅读正文长按离开：返回时按离开时的书与全屏状态重开正文，而不是落到书架。
+    // Leaving the reading body via a quick-bar hold: the return reopens that book
+    // and full-screen state instead of landing on the shelf.
+    reset();start_book=true;reader_body=reader_resume_ok=true;reader_resume_fullscreen=true;
+    snprintf(reader_resume_path,sizeof(reader_resume_path),"%s","/sdcard/books/a.epub");
+    transfer_returns=true;time_step=1000000;
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(85,156,1,0);add(85,156,1,0);add(85,156,1,0);add(0,0,0,0);run();
+    assert(wifi_setup_requests==1&&reader_returns==1&&!strcmp(reader_return_path,"/sdcard/books/a.epub")&&
+           reader_return_fullscreen&&enters==2);
+    puts("quick layer return: leaving the reading body restores the same book and full-screen state");
     // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
     // 提交都走胶囊拖动表（不再两段定稿，白表/灰表零推送），熄灯收回 264，收层
     // 按 480 高度擦除；开关点按不再单独重画圆钮。

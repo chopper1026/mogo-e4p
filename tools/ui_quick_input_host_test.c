@@ -45,6 +45,36 @@ int main(void){
  open();assert(feed(0,0,0,false,false,false,true).action==UI_QUICK_CLOSE&&!menu.open);
  puts("PASS: 32/33px edge, 72px/1500ms limits, diagonal rejection, upward/outside/back dismissal, multitouch/error/drag cancellation and consumed release");
 
+ // WiFi / 蓝牙圆键按住 0.5 秒：到阈值即关层并给出对应设置页事件，抬手不再点按；
+ // 手指在圆键命中半径内可轻微漂移，移出圆键或按住其他圆键都不触发。
+ // Holding the WiFi / Bluetooth circle for 0.5 s closes the layer and emits the
+ // matching settings action at the threshold; the release no longer taps. The
+ // finger may drift inside the circle's hit radius, but moving off the circle or
+ // holding another circle never fires it.
+ open();
+ assert(feed(85,156,1,true,false,true,true).action==UI_QUICK_NONE&&ui_quick_menu_pressed(&menu)==0);
+ time_ms+=UI_QUICK_HOLD_SETTINGS_MS-1;
+ assert(feed(85,156,1,false,false,true,true).action==UI_QUICK_NONE&&menu.open);
+ time_ms+=1;
+ assert(feed(110,170,1,false,false,true,true).action==UI_QUICK_WIFI_SETTINGS&&!menu.open);
+ assert(feed(110,170,0,false,true,true,true).action==UI_QUICK_NONE);
+ open();
+ feed(256,156,1,true,false,true,true);
+ time_ms+=UI_QUICK_HOLD_SETTINGS_MS;
+ assert(feed(256,156,1,false,false,true,true).action==UI_QUICK_BLUETOOTH_SETTINGS&&!menu.open);
+ assert(feed(256,156,0,false,true,true,true).action==UI_QUICK_NONE);
+ open();
+ feed(85,156,1,true,false,true,true);
+ time_ms+=UI_QUICK_HOLD_SETTINGS_MS;
+ assert(feed(160,156,1,false,false,true,true).action==UI_QUICK_NONE&&menu.open);
+ assert(feed(160,156,0,false,true,true,true).action==UI_QUICK_NONE);
+ open();
+ feed(427,156,1,true,false,true,true);
+ time_ms+=UI_QUICK_HOLD_SETTINGS_MS;
+ assert(feed(427,156,1,false,false,true,true).action==UI_QUICK_NONE&&menu.open);
+ assert(feed(427,156,0,false,true,true,true).action==UI_QUICK_FULL&&menu.open);
+ puts("PASS: 0.5s holds on WiFi/Bluetooth emit their settings pages and never double as taps");
+
  // 第四枚圆钮是前光开关：开灯后胶囊行才展开、层高变 480，熄灯收回 264。
  // The fourth circle is the frontlight switch: the capsule rows expand with a
  // 480px layer only while the light is on and collapse back to 264px when off.

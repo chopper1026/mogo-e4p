@@ -23,6 +23,9 @@
  * centre style horizontal capsules; brightness uses the half-filled circle and
  * colour temperature the thermometer, and the sliders respond only while the
  * light is on.
+ * 用户新增：WiFi 与蓝牙圆键按住 0.5 秒直接进入各自的设置页；点按仍只切换开关。
+ * User addition: holding the WiFi or Bluetooth circle for 0.5 s opens its settings
+ * page; a tap still only toggles the switch.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -39,6 +42,10 @@
 // natural swipe routinely spans 150px+, so a total-travel test chains opening and
 // expanding inside one flick (user report 2026-10-25).
 #define UI_QUICK_PULL_SETTLE_MS 300
+// WiFi / 蓝牙圆键按住这么久直接进对应设置页；阈值到了就关层，抬手不再算点按。
+// Holding the WiFi / Bluetooth circle this long opens its settings page; the
+// layer closes at the threshold and the release no longer counts as a tap.
+#define UI_QUICK_HOLD_SETTINGS_MS 500
 #define UI_QUICK_HEIGHT 264
 #define UI_QUICK_FRONTLIGHT_HEIGHT 480
 #define UI_QUICK_CIRCLE_Y 156
@@ -74,6 +81,7 @@
 typedef enum {
     UI_QUICK_NONE, UI_QUICK_OPEN, UI_QUICK_CLOSE, UI_QUICK_EXPAND,
     UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
+    UI_QUICK_WIFI_SETTINGS, UI_QUICK_BLUETOOTH_SETTINGS,
 } ui_quick_action_t;
 
 /// 前光控件；快捷层只产出事件，硬件和设置由主循环执行。
