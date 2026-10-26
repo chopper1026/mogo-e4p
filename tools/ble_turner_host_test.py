@@ -39,6 +39,7 @@ unit = r'''
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include "ble_page_turner.h"
 #define ESP_LOGI(...) ((void)0)
@@ -64,6 +65,10 @@ unit = r'''
 #define YXT_CODE_NEXT 0x02u
 #define HID_SVC_UUID 0x1812u
 #define BLE_GAP_EVENT_DISC 1
+#define BLE_GAP_EVENT_EXT_DISC 2
+#define BLE_GAP_EXT_ADV_DATA_STATUS_COMPLETE 0
+#define BLE_GAP_EXT_ADV_DATA_STATUS_INCOMPLETE 1
+#define CONFIG_BT_NIMBLE_EXT_ADV 1
 #define MALLOC_CAP_INTERNAL 1
 #define MALLOC_CAP_8BIT 2
 #define MALLOC_CAP_SPIRAM 4
@@ -75,9 +80,10 @@ static uint8_t s_device_count;
 struct fake_uuid {uint16_t u;};
 struct ble_hs_adv_fields {const uint8_t *name;uint8_t name_len;int num_uuids16;struct fake_uuid *uuids16;};
 struct ble_gap_disc_desc {struct {uint8_t val[6],type;}addr;int rssi;const uint8_t *data;uint8_t length_data;};
-struct ble_gap_event {int type;struct ble_gap_disc_desc disc;};
+struct ble_gap_ext_disc_desc {uint8_t props,data_status,legacy_event_type;struct {uint8_t val[6],type;}addr;int8_t rssi,tx_power;uint8_t sid,prim_phy,sec_phy;uint16_t periodic_adv_itvl;uint8_t length_data;const uint8_t *data;};
+struct ble_gap_event {int type;struct ble_gap_disc_desc disc;struct ble_gap_ext_disc_desc ext_disc;};
 static struct ble_hs_adv_fields advertised;
-static int ble_hs_adv_parse_fields(struct ble_hs_adv_fields *out,const uint8_t *data,uint8_t len){(void)data;(void)len;*out=advertised;return 0;}
+static int ble_hs_adv_parse_fields(struct ble_hs_adv_fields *out,const uint8_t *data,uint8_t len){(void)data;if(!len){memset(out,0,sizeof(*out));return 0;}*out=advertised;return 0;}
 static uint16_t ble_uuid_u16(const uint16_t *uuid){return *uuid;}
 static void *bond_find(const char *addr){assert(addr);return NULL;}
 static atomic_flag s_lifecycle=ATOMIC_FLAG_INIT;
@@ -85,6 +91,9 @@ static atomic_uint s_network_users;
 static atomic_bool s_running;
 static bool s_connected=true,s_connecting,s_scanning,s_link_up;
 static uint16_t s_conn_handle;
+#define BLE_PT_MTU_DFLT 23
+static uint16_t s_mtu = BLE_PT_MTU_DFLT;
+static bool s_mtu_tried;
 static uint32_t s_stable_since;
 static void *s_host_task;
 static char s_failure[128];
@@ -128,20 +137,33 @@ static ble_pt_frame_t persisted[BLE_PT_MAX_BINDINGS];
 static int binding_handles;
 typedef int nvs_handle_t;
 #define NVS_NS_BINDINGS "bindings"
+#define NVS_NS_BONDS "bonds"
+#define NVS_READONLY 0
 #define NVS_READWRITE 1
-static esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){assert(!strcmp(ns,NVS_NS_BINDINGS)&&mode==1);if(binding_error==1)return ESP_FAIL;*h=1;binding_handles++;return ESP_OK;}
+// 句柄 1 = 手动映射，句柄 2 = bond 命名空间里的解码提示缓存。
+// Handle 1 is manual bindings; handle 2 is the decode-hint cache in the bond namespace.
+static esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){
+ if(!strcmp(ns,NVS_NS_BONDS)){assert(mode==NVS_READONLY||mode==NVS_READWRITE);*h=2;return ESP_OK;}
+ assert(!strcmp(ns,NVS_NS_BINDINGS)&&mode==NVS_READWRITE);if(binding_error==1)return ESP_FAIL;*h=1;binding_handles++;return ESP_OK;}
 static const char *bond_key(char*k,size_t cap,const char*addr){assert(addr[0]);snprintf(k,cap,"test");return k;}
 static esp_err_t nvs_set_blob(nvs_handle_t h,const char*k,const void*in,size_t len){assert(h==1&&!strcmp(k,"test")&&len==sizeof(persisted));if(binding_error==2)return ESP_FAIL;memcpy(persisted,in,len);return ESP_OK;}
-static esp_err_t nvs_commit(nvs_handle_t h){assert(h==1);return binding_error==3?ESP_FAIL:ESP_OK;}
-static void nvs_close(nvs_handle_t h){assert(h==1);binding_handles--;}
+static char hint_key_stored[16];
+static uint8_t hint_bits;
+static bool hint_stored;
+static esp_err_t nvs_get_u8(nvs_handle_t h,const char*k,uint8_t*v){assert(h==2);if(!hint_stored||strcmp(k,hint_key_stored))return ESP_FAIL;*v=hint_bits;return ESP_OK;}
+static esp_err_t nvs_set_u8(nvs_handle_t h,const char*k,uint8_t v){assert(h==2&&strlen(k)<sizeof(hint_key_stored));snprintf(hint_key_stored,sizeof(hint_key_stored),"%s",k);hint_bits=v;hint_stored=true;return ESP_OK;}
+static esp_err_t nvs_erase_key(nvs_handle_t h,const char*k){assert(h==2);if(!strcmp(k,hint_key_stored))hint_stored=false;return ESP_OK;}
+static esp_err_t nvs_commit(nvs_handle_t h){assert(h==1||h==2);return binding_error==3?ESP_FAIL:ESP_OK;}
+static void nvs_close(nvs_handle_t h){if(h==1)binding_handles--;}
 
 '''
 for name in ('lifecycle_take','lifecycle_give','ble_pt_input_serial','key_push','raw_push','frame_of','frame_same',
              'frame_idle','raw_release','raw_frame','extract_primary_code',
              'usage_to_special','emit_usage','ingest_report','ble_pt_pop_key','ble_pt_pop_raw',
              'ble_pt_learn_begin','ble_pt_bind','ble_pt_binding','start_locked','stop_locked','ble_pt_start','ble_pt_stop',
-             'ble_pt_network_acquire','ble_pt_network_release','scan_cb','ble_pt_device_count',
-             'ble_pt_device','ble_pt_action_for_frame','ble_pt_action_for_usage'):
+             'ble_pt_network_acquire','ble_pt_network_release','note_report','scan_cb','ble_pt_device_count',
+             'ble_pt_device','ble_pt_action_for_frame','ble_pt_action_for_usage',
+             'addr_hash','hint_key','hints_load','hints_save','hints_clear'):
     unit += '\n' + function(BLE, name)
 unit += '\n' + function(SETTINGS, 'ble_receive_feedback')
 unit += '\n' + function(SETTINGS, 'format_bound_key')
@@ -166,7 +188,7 @@ static void wait_ms(int ms){clock_us+=(int64_t)ms*1000;}
 int main(void){
  // 同地址的扫描响应补齐名字；过滤后的行仍选择正确设备。
  // A later scan response supplies a name; filtered rows still select the correct peer.
- struct ble_gap_event event={.type=BLE_GAP_EVENT_DISC,.disc={.rssi=-50}};
+ struct ble_gap_event event={.type=BLE_GAP_EVENT_DISC,.disc={.rssi=-50,.length_data=1}};
  assert(!scan_cb(&event,NULL)&&s_device_count==1&&!ble_scan_visible_count());
  advertised.name=(const uint8_t*)"YueXingTong";advertised.name_len=11;
  assert(!scan_cb(&event,NULL)&&s_device_count==1&&ble_scan_visible_count()==1);
@@ -182,6 +204,20 @@ int main(void){
  for(unsigned i=3;i<BLE_PT_MAX_DEVICES+2;i++){event.disc.addr.val[0]=i;scan_cb(&event,NULL);}
  assert(s_device_count==BLE_PT_MAX_DEVICES);
  event.disc.addr.val[0]=1;scan_cb(&event,NULL);assert(s_devices[1].has_name);
+ // 扩展广播：Legacy 与扩展报告共用入库逻辑；数据不完整时只记地址，名字等完整报告。
+ // Extended advertising: legacy and extended reports share the ingest path; incomplete data records
+ // only the address, and the name waits for a complete report.
+ s_device_count=0;
+ struct ble_gap_event ext={.type=BLE_GAP_EVENT_EXT_DISC,
+     .ext_disc={.data_status=BLE_GAP_EXT_ADV_DATA_STATUS_COMPLETE,.rssi=-40}};
+ ext.ext_disc.addr.val[0]=0x33;ext.ext_disc.addr.type=1;ext.ext_disc.length_data=1;
+ ext.ext_disc.data=(const uint8_t*)"";
+ advertised.name=(const uint8_t*)"Ext";advertised.name_len=3;
+ assert(!scan_cb(&ext,NULL)&&s_device_count==1&&ble_scan_visible_count()==1);
+ assert(!strcmp(s_devices[0].name,"Ext")&&s_devices[0].addr_type==1&&s_devices[0].rssi==-40);
+ ext.ext_disc.addr.val[0]=0x34;ext.ext_disc.data_status=BLE_GAP_EXT_ADV_DATA_STATUS_INCOMPLETE;
+ assert(!scan_cb(&ext,NULL)&&s_device_count==2&&!s_devices[1].has_name);
+ assert(!strcmp(s_devices[1].name,"00:00:00:00:00:34")&&ble_scan_visible_count()==1);
  // 阅星瞳无需学习；手动绑定覆盖默认映射；键盘修饰键与报告号不能误翻页。
  // YueXingTong needs no learning; manual bindings override defaults, and neither keyboard modifiers
  // nor report ids turn pages.
@@ -338,8 +374,22 @@ int main(void){
  assert(ble_pt_start()==ESP_OK);assert(ble_pt_stop(2000)==ESP_OK && !s_running);
  atomic_flag_test_and_set(&s_lifecycle);assert(ble_pt_start()==ESP_ERR_TIMEOUT && !s_running);lifecycle_give();
  for(int n=0;n<100;n++){assert(ble_pt_start()==ESP_OK);assert(ble_pt_network_acquire()==ESP_OK);ble_pt_network_release();}
+ // 解码提示按对端缓存：两个页各占一位，别的地址读不到，忘掉设备后也查不到。
+ // Decode hints are cached per peer with one bit per page; another address cannot read them and
+ // forgetting the peer clears them.
+ bool kbd=false,cons=false;
+ assert(!hints_load("AA:BB:CC:DD:EE:FF",&kbd,&cons));
+ hints_save("AA:BB:CC:DD:EE:FF",true,false);
+ assert(hints_load("AA:BB:CC:DD:EE:FF",&kbd,&cons)&&kbd&&!cons);
+ hints_save("AA:BB:CC:DD:EE:FF",false,true);
+ assert(hints_load("AA:BB:CC:DD:EE:FF",&kbd,&cons)&&!kbd&&cons);
+ assert(!hints_load("11:22:33:44:55:66",&kbd,&cons));
+ hints_save("AA:BB:CC:DD:EE:FF",false,false);
+ assert(hints_load("AA:BB:CC:DD:EE:FF",&kbd,&cons)&&!kbd&&!cons);
+ hints_clear("AA:BB:CC:DD:EE:FF");
+ assert(!hints_load("AA:BB:CC:DD:EE:FF",&kbd,&cons));
  assert(!s_running && !atomic_load(&s_network_users));
- puts("PASS: named discovery, YueXingTong/manual/modifier mappings, keyboard+consumer fallback, whole-frame raw identity, first-press learning, missing release reports, bounded queues, memory/task failures and network resource leases");
+ puts("PASS: named discovery, extended-report ingest, per-peer hint cache, YueXingTong/manual/modifier mappings, keyboard+consumer fallback, whole-frame raw identity, first-press learning, missing release reports, bounded queues, memory/task failures and network resource leases");
 }
 '''
 # Active tick dispatch must consume reports before a state-only redraw can return.
@@ -362,6 +412,22 @@ assert 'ble_gattc_read_long' in function(BLE, 'dsc_next')
 assert 'ble_gattc_read(' not in function(BLE, 'dsc_next')
 assert 'report_map_finish()' in function(BLE, 'report_map_cb')
 assert 'BLE_GAP_EVENT_REPEAT_PAIRING' in function(BLE, 'gap_cb')
+# 连接后交换 MTU，缓存命中时跳过 Report Map，扩展广播与 Legacy 共用入库路径。
+# MTU is exchanged after connecting, a cached hint skips the Report Map, and extended advertising
+# shares the ingest path with legacy reports.
+assert 'mtu_exchange()' in function(BLE, 'gap_cb')
+assert 'mtu_exchange()' in function(BLE, 'step_poll')
+assert 's_hints_cached' in function(BLE, 'dsc_next')
+# start_connect 的正文里有同名的 if 调用，按整段源码核对这一行。
+# start_connect's body also contains an if-statement calling it, so check the exact line in the
+# source rather than the extracted function.
+assert 's_hints_cached = hints_load(addr, &s_has_keyboard_page, &s_has_consumer_page);' in BLE.read_text()
+assert 'hints_save' in function(BLE, 'report_map_finish')
+assert 'BLE_GAP_EVENT_EXT_DISC' in function(BLE, 'scan_cb')
+assert 'BLE_GAP_EXT_ADV_DATA_STATUS_COMPLETE' in function(BLE, 'scan_cb')
+# Secure Connections 只声明支持，不用 sm_sc_only：老遥控器仍走 Legacy。
+# Secure Connections is advertised, not required (sm_sc_only): legacy remotes still pair.
+assert 'ble_hs_cfg.sm_sc = 1;' in function(BLE, 'start_locked')
 with tempfile.TemporaryDirectory(prefix='pico-ble-test-') as directory:
     work = Path(directory)
     (work/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\nenum {ESP_OK,ESP_FAIL,ESP_ERR_NO_MEM,ESP_ERR_TIMEOUT,ESP_ERR_INVALID_STATE,ESP_ERR_INVALID_ARG};\n')

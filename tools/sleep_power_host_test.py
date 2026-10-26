@@ -30,6 +30,7 @@ typedef int app_sleep_mode_t;
 #define ESP_ERR_INVALID_STATE -2
 #define ESP_ERR_INVALID_ARG -3
 #define ESP_ERR_TIMEOUT -4
+#define ESP_ERR_NOT_SUPPORTED -5
 #define APP_SLEEP_LIGHT 0
 #define APP_SLEEP_DEEP 1
 #define APP_SLEEP_OFF 2
@@ -84,6 +85,11 @@ static bool pico_online_busy(void) { return ota; }
 static bool read_pico_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
 static void read_pico_transfer_resume_after_sleep(void) { ++resumes; }
 static int ble_pt_stop(int timeout) { assert(timeout == 2000); ++radio_stops; return ESP_OK; }
+// 前光在锁屏/下电时先灭、醒来再恢复；测试只关心这两次调用发生。
+// The frontlight goes dark before parking and comes back on wake; the test only checks the calls.
+static int fl_pauses, fl_resumes;
+static void frontlight_suspend(void) { ++fl_pauses; }
+static void frontlight_resume(void) { ++fl_resumes; }
 static int app_sync_time_to_pmu(void) { ++syncs; return ESP_OK; }
 static void app_time_service_cancel(void) {}
 static void pmu_selftest_prepare_powerdown(void) { ++prepared; rails_on = false; }
@@ -111,6 +117,7 @@ static void reset(void) {
     buzzer = acc_on = true; s_acc_was_on = false; tp_mode = CST836U_MODE_NORMAL;
     touch_wakes = acc_ups = acc_downs = off_calls = deep_calls = pauses = resumes = 0;
     syncs = prepared = radio_stops = waits = 0; error_result = ESP_FAIL; transfer_ok = true; ota = false;
+    fl_pauses = fl_resumes = 0;
 }
 int main(void) {
     reset(); app_sleep_bind((void *)2, (void *)3); assert(cpu_requests == 1);
@@ -130,6 +137,7 @@ int main(void) {
         periph_resume();
         assert(config[0] == 0x64 && config[1] == 0xff && (output[0] & IOE_MODE));
         assert(acc_on && acc_ups == 1 && touch_wakes == 1 && tp_mode == CST836U_MODE_NORMAL);
+        assert(fl_pauses == 1 && fl_resumes == 1);
     }
     reset(); acc_on = false; periph_suspend(false); periph_resume(); assert(!acc_on && !acc_ups);
     reset(); s_ioe = NULL; assert(read_pico_ioe_sleep(true) == ESP_ERR_INVALID_STATE);

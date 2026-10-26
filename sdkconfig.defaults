@@ -93,12 +93,32 @@ CONFIG_BT_NIMBLE_MAX_BONDS=4
 # bond 密钥必须落 NVS，否则每次重启都要重新配对，自动重连形同虚设。这项默认是 n。
 # Bond keys must reach NVS, or every reboot re-pairs and auto-reconnect is useless. Defaults to n.
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_MAX_CCCDS=2
-CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=23
+# 输入报告最多 4 个（MAX_INPUT_CHRS），CCCD 数要跟得上，否则只有前两条订阅能跨重启保留。
+# Up to four input reports (MAX_INPUT_CHRS); the CCCD budget must match or only the first two
+# subscriptions survive a reboot.
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+# 连接后交换到 185：Report Map 的分段读一次走 MTU-1 字节，23 时要几十个往返，185 时只剩几个，
+# 解锁后重连的等待随之缩短。对端拒绝时协议栈仍按 23 工作。
+# Exchange up to 185 after connecting: the chunked Report Map read moves MTU-1 bytes per round
+# trip, dozens at 23 and only a few at 185, which shortens the wait after unlocking. A peer that
+# refuses leaves the link at 23.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=185
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=6
 CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4
+# BLE 5 扩展扫描：只发扩展广播的设备（新遥控器）也要扫得到。打开后所有发现报告改走
+# BLE_GAP_EVENT_EXT_DISC，Legacy 广播同样从这条路来；本机不广播，所以广播数据与周期同步
+# 全部关掉，只留扫描。
+# BLE 5 extended scanning: devices that only advertise in extended form (newer remotes) must be
+# visible too. With it on, every discovery report arrives as BLE_GAP_EVENT_EXT_DISC, legacy
+# advertisements included. This board never advertises, so advertising data and periodic sync are
+# switched off and only scanning remains.
+CONFIG_BT_NIMBLE_EXT_ADV=y
+CONFIG_BT_NIMBLE_EXT_SCAN=y
+CONFIG_BT_NIMBLE_EXT_ADV_MAX_SIZE=31
+CONFIG_BT_NIMBLE_ENABLE_PERIODIC_ADV=n
+CONFIG_BT_NIMBLE_ENABLE_PERIODIC_SYNC=n
 # 控制器只能用内部 RAM——它跑在硬件路径上，读不到 PSRAM；内部 RAM 就是启动门槛卡的那一项。
 # S31 的控制器换成 BTDM 之后，S3 上的 BLE_MAX_ACT / ADV_DUP_FILT_MAX 已不存在，这里只留
 # 仍然有效的报告流控深度；扫描去重深度用控制器默认值。

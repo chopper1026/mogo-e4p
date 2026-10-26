@@ -239,6 +239,9 @@ static bool s_discovery_started;
 // Report-map hints: which usage pages the peer declares. Decoding reads each page's key byte and
 // tries both when the peer exposes both.
 static bool s_has_keyboard_page, s_has_consumer_page;
+// 本次链路是否直接用了缓存的提示；用了就不再读 Report Map。
+// Whether this link adopted the cached hints, in which case the Report Map is not read.
+static bool s_hints_cached;
 
 // 静止帧：外设什么都没按时发的报告。它唯一的用途是判断一帧算不算「按下了」。学习界面会把
 // 点「学习」那一刻的帧定为基准——有些遥控器的静止帧带着非零常量（协议字节、状态字节），只按
@@ -296,6 +299,52 @@ static uint32_t addr_hash(const char *addr) {
 static const char *bond_key(char *buf, size_t cap, const char *addr) {
     snprintf(buf, cap, "b_%08x", (unsigned)addr_hash(addr));
     return buf;
+}
+
+// 解码提示（Report Map 里有没有键盘页/消费者页）按对端缓存。Report Map 决定键码落在哪个字节，
+// 同一台遥控器不会变；缓存在重连时省掉整段分段读。缓存不放进 bond 的 blob：那是裸 struct，
+// 加字段会让旧记录因长度不匹配静默失效。
+// Decode hints (whether the Report Map carries the keyboard and consumer pages) are cached per
+// peer. The map decides which byte holds the code and does not change for a given remote, so the
+// cache removes the whole chunked read on reconnect. It stays out of the bond blob: that is a raw
+// struct, and a new field would silently invalidate every old record.
+static const char *hint_key(char *buf, size_t cap, const char *addr) {
+    snprintf(buf, cap, "h_%08x", (unsigned)addr_hash(addr));
+    return buf;
+}
+
+static bool hints_load(const char *addr, bool *kbd, bool *cons) {
+    if (!addr || !addr[0]) return false;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BONDS, NVS_READONLY, &h) != ESP_OK) return false;
+    char key[16];
+    uint8_t bits = 0;
+    const bool found = nvs_get_u8(h, hint_key(key, sizeof(key), addr), &bits) == ESP_OK;
+    nvs_close(h);
+    if (!found) return false;
+    *kbd = (bits & 1u) != 0;
+    *cons = (bits & 2u) != 0;
+    return true;
+}
+
+static void hints_save(const char *addr, bool kbd, bool cons) {
+    if (!addr || !addr[0]) return;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BONDS, NVS_READWRITE, &h) != ESP_OK) return;
+    char key[16];
+    const uint8_t bits = (uint8_t)((kbd ? 1u : 0u) | (cons ? 2u : 0u));
+    if (nvs_set_u8(h, hint_key(key, sizeof(key), addr), bits) == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+}
+
+static void hints_clear(const char *addr) {
+    if (!addr || !addr[0]) return;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BONDS, NVS_READWRITE, &h) != ESP_OK) return;
+    char key[16];
+    nvs_erase_key(h, hint_key(key, sizeof(key), addr));
+    nvs_commit(h);
+    nvs_close(h);
 }
 
 static void bonds_load(void) {
@@ -656,14 +705,14 @@ static void ingest_report(const uint8_t *data, size_t len) {
 
 /* ---- 扫描 / Discovery ---- */
 
-static int scan_cb(struct ble_gap_event *event, void *arg) {
-    (void)arg;
-    if (event->type != BLE_GAP_EVENT_DISC) return 0;
-    const struct ble_gap_disc_desc *d = &event->disc;
-
+// 一条广播报告入库：按地址去重、补齐名字、标出 HID 与已配对。Legacy 与扩展报告共用。
+// One advertising report into the list: deduplicate by address, fill in the name, flag HID and
+// bonded. Legacy and extended reports share it.
+static void note_report(const uint8_t *addr_val, uint8_t addr_type, int8_t rssi,
+                        const uint8_t *data, uint16_t len) {
     char addr[18];
-    snprintf(addr, sizeof(addr), "%02x:%02x:%02x:%02x:%02x:%02x", d->addr.val[5], d->addr.val[4],
-             d->addr.val[3], d->addr.val[2], d->addr.val[1], d->addr.val[0]);
+    snprintf(addr, sizeof(addr), "%02x:%02x:%02x:%02x:%02x:%02x", addr_val[5], addr_val[4],
+             addr_val[3], addr_val[2], addr_val[1], addr_val[0]);
 
     // 地址去重，但后续扫描响应仍可补齐名称，避免把有名设备永远隐藏。
     // Deduplicate addresses while allowing later scan responses to supply names for hidden entries.
@@ -671,16 +720,16 @@ static int scan_cb(struct ble_gap_event *event, void *arg) {
     for (uint8_t i = 0; i < s_device_count; ++i)
         if (!strcasecmp(s_devices[i].addr, addr)) { slot = &s_devices[i]; break; }
     if (!slot) {
-        if (s_device_count >= BLE_PT_MAX_DEVICES) return 0;
+        if (s_device_count >= BLE_PT_MAX_DEVICES) return;
         slot = &s_devices[s_device_count++];
         memset(slot, 0, sizeof(*slot));
         snprintf(slot->addr, sizeof(slot->addr), "%s", addr);
     }
-    slot->rssi = d->rssi;
-    slot->addr_type = d->addr.type;
+    slot->rssi = rssi;
+    slot->addr_type = addr_type;
 
     struct ble_hs_adv_fields fields;
-    if (ble_hs_adv_parse_fields(&fields, d->data, d->length_data) == 0) {
+    if (ble_hs_adv_parse_fields(&fields, data, (uint8_t)len) == 0) {
         if (fields.name && fields.name_len) {
             const size_t copy = fields.name_len < sizeof(slot->name) - 1 ? fields.name_len
                                                                         : sizeof(slot->name) - 1;
@@ -693,7 +742,34 @@ static int scan_cb(struct ble_gap_event *event, void *arg) {
     }
     if (!slot->name[0]) snprintf(slot->name, sizeof(slot->name), "%s", addr);
     slot->bonded = bond_find(slot->addr) != NULL;
-    return 0;
+}
+
+static int scan_cb(struct ble_gap_event *event, void *arg) {
+    (void)arg;
+    switch (event->type) {
+#if CONFIG_BT_NIMBLE_EXT_ADV
+        case BLE_GAP_EVENT_EXT_DISC: {
+            // 开了扩展广播后所有发现报告都走这个事件（Legacy 广播也在内），
+            // BLE_GAP_EVENT_DISC 不再出现。
+            // With extended advertising on, every discovery report arrives here -- legacy
+            // advertisements included -- and BLE_GAP_EVENT_DISC never fires.
+            const struct ble_gap_ext_disc_desc *d = &event->ext_disc;
+            // 数据被截断或分段时只有地址与 RSSI 可信：先记下设备，名字与 HID 服务等完整报告。
+            // When the payload is truncated or fragmented only the address and RSSI are reliable:
+            // record the device now and let a complete report supply the name and HID service.
+            const bool complete = d->data_status == BLE_GAP_EXT_ADV_DATA_STATUS_COMPLETE;
+            note_report(d->addr.val, d->addr.type, d->rssi,
+                        complete ? d->data : NULL, complete ? d->length_data : 0);
+            return 0;
+        }
+#endif
+        case BLE_GAP_EVENT_DISC:
+            note_report(event->disc.addr.val, event->disc.addr.type, event->disc.rssi,
+                        event->disc.data, event->disc.length_data);
+            return 0;
+        default:
+            return 0;
+    }
 }
 
 void ble_pt_scan_start(uint32_t ms) {
@@ -838,6 +914,11 @@ static void subscribe_finish(void) {
     ESP_LOGI(TAG, "subscribing %u of %u input report(s)", s_sub_started,
              (unsigned)s_input_chr_count);
     if (!s_sub_started && !s_input_chr_count) {
+        // 一个报告都订不上：缓存的解码提示可能已经不适用，清掉让下次重连重新读。
+        // Nothing subscribed at all: the cached hints may no longer apply, so drop them and let
+        // the next connect read the map again.
+        if (s_hints_cached) hints_clear(s_conn_addr);
+        s_hints_cached = false;
         if (!s_connected) {
             s_connected = true;
             s_connecting = false;
@@ -910,7 +991,14 @@ static uint8_t s_report_map[REPORT_MAP_MAX];
 static uint16_t s_report_map_len;
 
 static void report_map_finish(void) {
-    if (s_report_map_len) report_map_hints(s_report_map, s_report_map_len);
+    if (s_report_map_len) {
+        report_map_hints(s_report_map, s_report_map_len);
+        // 读全了就按对端存下结论：同一台遥控器的映射不会变，下次重连省掉整段分段读。
+        // Store the verdict per peer once the map arrived in full: a remote's map does not change,
+        // so the next reconnect skips the whole chunked read.
+        hints_save(s_conn_addr, s_has_keyboard_page, s_has_consumer_page);
+        s_hints_cached = true;
+    }
     subscribe_ready();
 }
 
@@ -939,9 +1027,12 @@ static int report_map_cb(uint16_t conn_handle, const struct ble_gatt_error *erro
 // 一个报告接一个报告地找它的 CCCD。/ Walk the report characteristics one at a time.
 static void dsc_next(void) {
     if (s_dsc_index >= s_input_chr_count) {
-        // 订阅之前先把 Report Map 读出来，CrossMux 的次序就是这样。
-        // The Report Map is read before subscribing, which is CrossMux's order.
-        if (s_report_map_handle) {
+        // 订阅之前先把 Report Map 读出来，CrossMux 的次序就是这样。缓存里已经有结论的
+        // 对端跳过这一步：同一台遥控器的映射不会变，重连不必再等几十个往返。
+        // The Report Map is read before subscribing, which is CrossMux's order. A peer whose
+        // verdict is already cached skips it: a remote's map does not change, so a reconnect need
+        // not wait out another few dozen round trips.
+        if (s_report_map_handle && !s_hints_cached) {
             s_report_map_len = 0;
             if (ble_gattc_read_long(s_conn_handle, s_report_map_handle, 0, report_map_cb, NULL) == 0)
                 return;
@@ -1112,6 +1203,33 @@ static bool start_discovery(void) {
     return true;
 }
 
+// 连接后交换 MTU：Report Map 的分段读一次只走 MTU-1 字节，23 时要几十个往返，185 时只剩几个。
+// 与发现并行发出即可——NimBLE 的 GATT client procedure 各自独立——失败只意味着继续用 23。
+// Exchange MTU after connecting: the chunked Report Map read moves MTU-1 bytes per round trip,
+// dozens of them at 23 and only a few at 185. It can run alongside discovery -- NimBLE's GATT
+// client procedures are independent -- and a failure only means the link stays at 23.
+#define BLE_PT_MTU_DFLT 23
+static uint16_t s_mtu = BLE_PT_MTU_DFLT;
+static bool s_mtu_tried;
+
+static int mtu_cb(uint16_t conn_handle, const struct ble_gatt_error *error, uint16_t mtu, void *arg) {
+    (void)conn_handle;
+    (void)arg;
+    if (error && error->status == 0 && mtu > BLE_PT_MTU_DFLT) s_mtu = mtu;
+    return 0;
+}
+
+static void mtu_exchange(void) {
+    if (s_mtu_tried) return;
+    s_mtu_tried = true;
+    if (ble_gattc_exchange_mtu(s_conn_handle, mtu_cb, NULL) != 0) {
+        // 被拒（多半是加密还没完成）就保持 23；STEP_SECURE 在加密结束后再补一次。
+        // A refusal (usually encryption still in flight) keeps 23; STEP_SECURE retries once the
+        // security step is over.
+        s_mtu_tried = false;
+    }
+}
+
 // 已用另一种对端地址类型重试过几次。地址类型猜错是"部分设备连不上"最常见的来由，
 // 而地址在字面上分不出 public 还是 random，CrossMux 的做法就是失败后换一种再试。
 // How many times the alternate peer address type has been tried. Guessing the address type wrong
@@ -1208,13 +1326,15 @@ static void step_poll(void) {
             break;
 
         case STEP_SECURE:
-            if (s_enc_done) {
+            // 明文 HID 不发加密事件：超时就放行，不能一直等。
+            // A plaintext HID peer never reports encryption, so the timeout moves on instead of
+            // waiting forever.
+            if (s_enc_done || step_over(6000)) {
                 ble_pt_crumb(BLE_PT_CRUMB_PAIR);
-                step_begin(STEP_SETUP);
-            } else if (step_over(6000)) {
-                // 明文 HID 不发加密事件：放行，但不能一直等。
-                // A plaintext HID peer never reports encryption: move on, but do not wait forever.
-                ble_pt_crumb(BLE_PT_CRUMB_PAIR);
+                // 加密结束后 MTU 交换才有把握成功；连接时那次被拒的在这里补一次。
+                // The exchange is reliable once encryption is done; a refusal at connect time is
+                // retried here.
+                mtu_exchange();
                 step_begin(STEP_SETUP);
             }
             break;
@@ -1222,6 +1342,11 @@ static void step_poll(void) {
         case STEP_SETUP:
             if (s_connected) {
                 ble_pt_crumb(BLE_PT_CRUMB_READY);
+                // 从发起连接到可用的耗时：MTU 与缓存的效果就靠这一行量。
+                // Time from starting the connect to usable: this line is how the MTU and cache
+                // changes get measured.
+                ESP_LOGI(TAG, "ready in %u ms, mtu %u", (unsigned)(now_ms() - s_connect_ms),
+                         (unsigned)s_mtu);
                 step_begin(STEP_READY);
             } else if (step_over(8000)) {
                 step_fail("没有可订阅的输入报告");
@@ -1311,6 +1436,14 @@ static int gap_cb(struct ble_gap_event *event, void *arg) {
             s_connect_ms = (uint32_t)(esp_timer_get_time() / 1000);
             s_enc_done = false;
             s_discovery_done = false;
+            // MTU 交换先发出去：它只要一个往返，能在发现与加密进行的同时完成，后面的
+            // Report Map 分段读就按新 MTU 走。失败不阻塞任何一步。
+            // The MTU exchange goes out first: it costs one round trip, completes while discovery
+            // and encryption run, and the later Report Map read then uses the new MTU. A failure
+            // blocks nothing.
+            s_mtu = BLE_PT_MTU_DFLT;
+            s_mtu_tried = false;
+            mtu_exchange();
             // 明文设备不会回这个事件，加密步骤靠状态机的超时放行。
             // A plaintext peer never answers this, and the state machine's timeout lets it pass.
             (void)ble_gap_security_initiate(s_conn_handle);
@@ -1466,7 +1599,11 @@ static int start_connect(const char *addr, uint8_t type) {
     s_connecting = true;
     s_rest_known = false;
     raw_reset();
-    s_has_keyboard_page = s_has_consumer_page = false;
+    // 缓存过的解码提示直接采用，重连时省掉 Report Map 的整段分段读。
+    // A cached decode hint is adopted directly, which removes the whole chunked Report Map read on
+    // reconnect.
+    s_hints_cached = hints_load(addr, &s_has_keyboard_page, &s_has_consumer_page);
+    if (!s_hints_cached) s_has_keyboard_page = s_has_consumer_page = false;
     s_held_usage = 0;
     s_subscribed_count = 0;
     s_conn_addr_type = type;
@@ -1633,16 +1770,17 @@ static esp_err_t start_locked(void) {
     }
 
     ble_hs_cfg.sync_cb = on_sync;
-    // 与 CrossMux 的 BleKeyboardHost 对齐：Just Works + LE Legacy 配对。
-    // 要求 Secure Connections（sc=1）时，不支持 SC 的老翻页器会直接以认证失败收场，
-    // 表现正是"配对表里有它、按键一个都进不来"。
-    // Aligned with CrossMux's BleKeyboardHost: Just Works over LE Legacy pairing. Demanding
-    // Secure Connections (sc=1) makes an older remote that lacks SC fail authentication outright,
-    // which looks exactly like "it is in the paired list and no key ever arrives".
+    // Just Works，同时声明支持 LE Secure Connections：要求 SC 的新遥控器才配得上，老遥控器
+    // 不受影响——NimBLE 只有 sm_sc_only 才会拒绝不支持 SC 的对端，sm_sc 只在对端也支持时走
+    // SC 路径。旧注释把这两者混为一谈，于是把 SC 整个关掉了。
+    // Just Works with LE Secure Connections advertised: a newer remote that requires SC can pair,
+    // while older ones are unaffected -- NimBLE rejects a peer without SC only when sm_sc_only is
+    // set; sm_sc merely selects the SC path when the peer supports it too. The old comment
+    // conflated the two and switched SC off entirely.
     ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_DISP_YES_NO;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 0;
-    ble_hs_cfg.sm_sc = 0;
+    ble_hs_cfg.sm_sc = 1;
     // 只分发加密密钥，与参考实现一致；多要 ID 密钥（IRK）会让部分对端在配对上挑刺。
     // Distribute the encryption key only, as the reference does; asking for the identity key as
     // well makes some peers fuss during pairing.
@@ -1688,6 +1826,8 @@ static esp_err_t stop_locked(void) {
     s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
     s_stable_since = 0;
     s_held_usage = 0;
+    s_mtu = BLE_PT_MTU_DFLT;
+    s_mtu_tried = false;
     portENTER_CRITICAL(&s_ring_lock);
     memset(&s_keys, 0, sizeof(s_keys));
     memset(&s_raws, 0, sizeof(s_raws));
@@ -2060,6 +2200,9 @@ void ble_pt_forget(const char *addr) {
         nvs_commit(h);
         nvs_close(h);
     }
+    // 解码提示缓存也一起丢掉，免得下次重新配上时沿用旧结论。
+    // Drop the cached decode hints too, so a later re-pairing does not inherit the old verdict.
+    hints_clear(addr);
 }
 
 /* ---- 手动映射 / Manual bindings ---- */

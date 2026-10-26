@@ -45,12 +45,20 @@ CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=4
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
-CONFIG_BT_NIMBLE_MAX_CCCDS=2
-CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=23
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=185
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=6
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=6
 CONFIG_BT_NIMBLE_ATT_MAX_PREP_ENTRIES=4
+# 扩展扫描与产品默认一致：CI 要编过这条路径，否则只在 S31 上验证的改动到了 S3 没人验。
+# Extended scanning matches the product default: CI has to compile this path, or a change verified
+# only on the S31 reaches the S3 build unverified.
+CONFIG_BT_NIMBLE_EXT_ADV=y
+CONFIG_BT_NIMBLE_EXT_SCAN=y
+CONFIG_BT_NIMBLE_EXT_ADV_MAX_SIZE=31
+CONFIG_BT_NIMBLE_ENABLE_PERIODIC_ADV=n
+CONFIG_BT_NIMBLE_ENABLE_PERIODIC_SYNC=n
 # CI 仍编 esp32s3（S3 控制器有下面两项），产品默认的 S31 配置在 sdkconfig.defaults。
 # CI still builds esp32s3, whose controller has the two settings below; the product S31
 # configuration lives in sdkconfig.defaults.

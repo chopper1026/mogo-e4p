@@ -47,6 +47,9 @@ static esp_err_t nvs_erase_key(nvs_handle_t h,const char *key){if(h==1)on_disk[k
 static esp_err_t nvs_commit(nvs_handle_t h){assert(h==1||h==2);++commits;return ESP_OK;}
 static void nvs_close(nvs_handle_t h){assert(h==1||h==2);--handles;}
 static const char *bond_key(char *out,size_t cap,const char *addr){assert(addr[0]);snprintf(out,cap,"binding");return out;}
+// 解码提示缓存由 ble_turner 测试覆盖；这里只需要 forget 能调到它。
+// The decode-hint cache is covered by the ble_turner test; forget only has to reach it.
+static void hints_clear(const char *addr){(void)addr;}
 esp_err_t ble_pt_connect(const char *addr){++connects;snprintf(connected_addr,sizeof(connected_addr),"%s",addr);return connect_error;}
 '''
 for name in ['bonds_load','bonds_save','bond_find','bond_add','ble_pt_reconnect_recent','ble_pt_cancel_recent','reconnect_recent_requested','ble_pt_reset_failure','ble_pt_forget']:
