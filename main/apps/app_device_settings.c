@@ -1810,6 +1810,15 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             ? profile_editor_paint(ctx, false) : APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_BLUETOOTH && ble_receive_feedback()) return APP_REDRAW_PAGE;
+    // 扫描页保持扫描：进页时链路可能还没断干净（断开是异步事件），那次 start 会落空；
+    // 链路一落下就在下一轮补起。正在扫描时这里是空操作。
+    // Keep the scan page scanning: the link may still be tearing down when the page opens (the
+    // teardown is an asynchronous event) and that first start is dropped; once the link is down
+    // the next tick starts it. This is a no-op while already scanning.
+    if (s_page == SETTINGS_BLE_SCAN && ble_pt_running()) {
+        if (ble_pt_connected()) ble_pt_disconnect();
+        else if (!ble_pt_scanning()) ble_pt_scan_start(BLE_PT_SCAN_FOREVER);
+    }
     // 蓝牙启动失败的原因转成提示。放在这里而不是 render()：render 必须是纯绘制，
     // 而 take_* 会清空状态。
     // Fold a Bluetooth start failure into the notice here rather than in render(), which must
@@ -2485,7 +2494,14 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if (!app_settings_ble_turner() || !ble_pt_running()) {
                 snprintf(s_ble_notice, sizeof(s_ble_notice), "请先开启蓝牙翻页器"); return APP_REDRAW_PAGE;
             }
-            // 进扫描页就开持续扫描，离页时停掉。/ Scan continuously while the page is open.
+            // 进扫描页先断开当前链路：扫描与连接抢同一个控制器，连着时 ble_pt_scan_start()
+            // 直接返回，用户只看到一张空列表。断开是异步的，真正的扫描由 on_tick 在链路
+            // 落下后补起。
+            // Entering the scan page drops the current link first: scanning and an active link
+            // compete for the controller, and ble_pt_scan_start() returns early while connected,
+            // which left the user staring at an empty list. The teardown is asynchronous, so
+            // on_tick starts the scan once the link is actually down.
+            if (ble_pt_connected() || ble_pt_connecting()) ble_pt_disconnect();
             ble_pt_scan_start(BLE_PT_SCAN_FOREVER);
             s_ble_scroll = 0;
             s_ble_notice[0] = 0;

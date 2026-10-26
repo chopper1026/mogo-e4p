@@ -93,6 +93,9 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 蓝牙翻页器：解锁后的重连明显加快——连接后主动交换 ATT MTU（23 → 185），Report Map 从最多 35 个往返降到 5 个；解码提示（键盘页/消费者页）按遥控器缓存在 NVS，重连直接跳过 Report Map 读取。同时声明支持 LE Secure Connections，要求 SC 的新遥控器可以配对，老遥控器仍走 Legacy。扫描改用 BLE 5 扩展广播，只发扩展广播的设备也能出现在列表里，Legacy 广播同样可见。暴露多个输入报告的遥控器，其订阅现在也能跨重启保留。
   Bluetooth page-turner: reconnecting after unlock is noticeably faster—the link now exchanges ATT MTU (23 → 185), cutting the Report Map read from up to 35 round trips to 5, and the decode hints (keyboard/consumer page) are cached per remote in NVS so a reconnect skips the Report Map read entirely. It also advertises LE Secure Connections, so newer remotes that require SC can pair while older ones still use Legacy pairing. Scanning now uses BLE 5 extended advertising, so devices that only advertise in extended form appear in the list while legacy advertisements remain visible. Remotes exposing several input reports now keep every subscription across a reboot.
 
+- 蓝牙翻页器：连着翻页器时进「扫描」页，现在会先断开当前连接再开始扫描。此前扫描与连接抢同一个控制器，扫描请求被直接忽略，页面只会显示空列表。离开扫描页后点一下已配对设备即可重新连接。
+  Bluetooth page-turner: opening the scan page while a remote is connected now drops the current link first and then scans. Previously the request was ignored because an active link owns the controller, so the page stayed empty. After leaving the scan page, tap the paired device to reconnect.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。

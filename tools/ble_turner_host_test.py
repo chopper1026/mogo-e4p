@@ -395,6 +395,10 @@ int main(void){
 # Active tick dispatch must consume reports before a state-only redraw can return.
 assert 'ble_receive_feedback()' in function(SETTINGS, 'on_tick')
 assert 'while (ble_pt_pop_raw(&stale))' in function(SETTINGS, 'on_gesture')
+# 进扫描页先断开当前链路，链路落下后由 tick 补起扫描。
+# Entering the scan page drops the current link; the tick starts the scan once it is down.
+assert 'ble_pt_disconnect()' in function(SETTINGS, 'on_gesture')
+assert 'ble_pt_scan_start(BLE_PT_SCAN_FOREVER)' in function(SETTINGS, 'on_tick')
 # 对时入口经 sync_time_run 落到持有 BLE 租约的 sync_time_impl；扫描与传输入口直接取租约。
 # The sync-time entry delegates through sync_time_run to the leased sync_time_impl; scan and
 # transfer start hold the lease directly.
