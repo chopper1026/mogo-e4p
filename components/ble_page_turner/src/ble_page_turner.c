@@ -783,9 +783,15 @@ void ble_pt_scan_start(uint32_t ms) {
     const struct ble_gap_disc_params params = {
         .itvl = 0, .window = 0, .filter_duplicates = 0, .passive = 0,
     };
-    if (ble_gap_disc(s_own_addr_type, (int32_t)ms, &params, scan_cb, NULL) == 0) {
+    const int rc = ble_gap_disc(s_own_addr_type, (int32_t)ms, &params, scan_cb, NULL);
+    if (rc == 0) {
         s_scanning = true;
     } else {
+        // 起不来时界面只是一张空列表；留下错误码才分得清是控制器拒绝了扩展扫描，
+        // 还是参数或状态问题。
+        // A failed start leaves an empty list; the code is what separates a controller that
+        // rejects extended scanning from a parameter or state problem.
+        ESP_LOGW(TAG, "scan start failed: %d", rc);
     }
 }
 
