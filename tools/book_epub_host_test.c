@@ -26,6 +26,30 @@ int main(int argc, char **argv) {
             printf("epub rejection passed: %s\n", argv[a]); continue;
         }
         assert(book_epub_open(argv[a], &book) == ESP_OK && book);
+        if (strstr(argv[a], "good_footnote")) {
+            html_text_t text = {0};
+            assert(book_epub_load(book, 0, &text) == ESP_OK);
+            assert(text.link_count == 1 && text.links && text.strings);
+            assert(text.links[0].len == 3 &&
+                   !memcmp(text.utf8 + text.links[0].offset, "[1]", 3));
+            assert(text.links[0].href_len == 6 &&
+                   !memcmp(text.strings + text.links[0].href, "#note1", 6));
+            size_t anchor = SIZE_MAX;
+            for (size_t i = 0; i < text.anchor_count; ++i)
+                if (text.anchors[i].id_len == 5 &&
+                    !memcmp(text.strings + text.anchors[i].id, "note1", 5))
+                    anchor = text.anchors[i].offset;
+            assert(anchor != SIZE_MAX);
+            size_t note = SIZE_MAX;
+            for (size_t i = 0; i < text.count; ++i)
+                if (text.blocks[i].offset == anchor) note = i;
+            assert(note != SIZE_MAX && text.blocks[note].len >= 3 &&
+                   !memcmp(text.utf8 + anchor, "[1]", 3));
+            html_text_free(&text);
+            book_epub_close(book);
+            printf("epub footnote fixture passed: %s\n", argv[a]);
+            continue;
+        }
         if (strstr(argv[a], "good_bounded_cover")) {
             book_epub_close(book);
             uint8_t *cover = NULL; size_t size = 0; bool png = false;

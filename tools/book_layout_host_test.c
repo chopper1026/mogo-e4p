@@ -958,5 +958,43 @@ int main(void) {
     assert(!strcmp(drawn,zero_width));book_layout_free();test_heap_fail_after=3;
     assert(!book_layout_build(zero_width,6000,(EpdRect){0,0,600,1000},10));
     test_heap_fail_after=-1;test_zero_width=false;book_layout_free();
+    // 正文内链：绘制时记下的矩形只覆盖标记本身，并按页、按布局代次失效。
+    // Body links: the rectangle recorded while drawing covers only the marker and expires with
+    // the page and the layout generation.
+    const char link_html[] = "<html><body><p>甲乙<a href=\"#note1\">[1]</a>丙丁</p>"
+                             "<p id=\"note1\">[1] 注释正文</p></body></html>";
+    html_text_t linked = {0};
+    assert(html_to_blocks(link_html, strlen(link_html), &linked) == ESP_OK);
+    assert(linked.link_count == 1 && linked.anchor_count >= 1);
+    assert(linked.links[0].len == 3 && !memcmp(linked.utf8 + linked.links[0].offset, "[1]", 3));
+    assert(linked.anchors[0].offset == linked.blocks[1].offset);
+    EpdRect link_rect = {0, 0, 200, 200};
+    book_layout_set_links(linked.links, linked.link_count);
+    assert(book_layout_build_blocks(linked.utf8, linked.len, linked.blocks, linked.count,
+                                    link_rect, 10));
+    drawn[0] = 0;
+    book_layout_draw_page(&fb, 0, link_rect, 10);
+    // 首行缩进 2 字 = 20px，链接从第 3 个字起：x = 20 + 2*10 = 40，宽 3*10 = 30。
+    // Two-em indent = 20 px and the link starts at the third glyph: x = 40, width = 30.
+    assert(book_layout_link_at(0, 45, 5) == 0);
+    assert(book_layout_link_at(0, 5, 5) == -1);
+    assert(book_layout_link_at(1, 45, 5) == -1);
+    // 预绘路径：分片绘制后命中表同样可用（翻页常常直接用预绘缓冲）。
+    // Prefetch path: the hit table works after slice drawing too, since turns often present
+    // the prefetch buffer directly.
+    book_layout_set_links(linked.links, linked.link_count);
+    book_layout_draw_cursor_t link_cursor = {0};
+    uint8_t link_fb = 0;
+    drawn[0] = 0;
+    int link_slice = 0;
+    do { link_slice = book_layout_draw_slice(&link_fb, 0, link_rect, 10, &link_cursor); }
+    while (link_slice == 0);
+    assert(link_slice == 1);
+    assert(book_layout_link_at(0, 45, 5) == 0);
+    book_layout_adopt_page(0);
+    assert(book_layout_link_at(0, 45, 5) == 0);
+    book_layout_free();
+    book_layout_set_links(NULL, 0);
+    html_text_free(&linked);
     puts("book_layout_host_test: PASS; idle rows/columns equal full rendering, stale cursor rejected and large chapter supported");
 }

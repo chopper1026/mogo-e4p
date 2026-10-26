@@ -53,6 +53,22 @@ typedef struct {
     size_t run_count; ///< 本块的 run 数；零表示整块用系统字体 / Runs owned by this block; zero means the system face throughout
 } blk_t;
 
+/// 正文里的一条链接：规范化正文区间加原 href（池内偏移）。
+/// One body link: a normalized text span plus the original href (offset into the string pool).
+typedef struct {
+    size_t offset; ///< 链接文字的字节起点 / Byte start of the link text
+    size_t len; ///< 链接文字的字节数 / Link text bytes
+    size_t href; ///< href 在 strings 池中的起点 / href offset in the strings pool
+    size_t href_len; ///< href 字节数 / href bytes
+} html_link_t;
+
+/// 章节锚点：id/name 到规范化正文偏移。/ An in-chapter anchor: id/name to normalized text offset.
+typedef struct {
+    size_t offset; ///< 正文偏移 / Text offset
+    size_t id; ///< id 在 strings 池中的起点 / id offset in the strings pool
+    size_t id_len; ///< id 字节数 / id bytes
+} html_anchor_t;
+
 typedef struct {
     char* utf8; ///< 模块分配且零结尾的文本 / Owned NUL-terminated text
     size_t len; ///< 不含结尾零的字节数 / Bytes excluding terminating NUL
@@ -62,6 +78,12 @@ typedef struct {
     size_t image_count; ///< 图片数 / Image count
     html_run_t* runs; ///< 模块分配的 run 表，被块表借用 / Owned run table, borrowed by the blocks
     size_t run_count; ///< run 总数 / Total run count
+    html_link_t* links; ///< 模块分配的内链表 / Owned body link table
+    size_t link_count; ///< 内链数 / Body link count
+    html_anchor_t* anchors; ///< 模块分配的锚点表 / Owned anchor table
+    size_t anchor_count; ///< 锚点数 / Anchor count
+    char* strings; ///< 模块分配的 href/id 池 / Owned href and id pool
+    size_t strings_len; ///< 池内字节数 / Bytes in the pool
 } html_text_t;
 
 /// 输出须为空；成功交出所有权，失败清空输出；空输入成功且零块。/ Output must be empty; success transfers ownership, failure clears output; empty input succeeds with zero blocks.

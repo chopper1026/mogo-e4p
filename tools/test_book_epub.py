@@ -111,6 +111,12 @@ def main():
         case('good_defaults', lambda f: (f.pop('OPS/toc/book.ncx'), f.pop('OPS/toc/nav.xhtml')))
         case('good_defaults_emptytoc', lambda f: (f.pop('OPS/toc/book.ncx'), f.__setitem__('OPS/toc/nav.xhtml', '<html><nav epub:type="toc"/><a href="../text/part%201%26x.xhtml">WRONG</a></html>')))
         case('good_samefile', lambda f: (f.pop('OPS/toc/book.ncx'), f.__setitem__('OPS/pkg/book.opf', f['OPS/pkg/book.opf'].replace('../text/part%201%26x.xhtml#start', '../toc/nav.xhtml')), f.__setitem__('OPS/toc/nav.xhtml', f['OPS/toc/nav.xhtml'].replace('../text/part%201%26x.xhtml', '#start'))))
+        def footnote(files):
+            files['OPS/text/part 1&x.xhtml'] = (
+                '<html><body><h1>Chapter 1</h1>'
+                '<p>正文<a href="#note1"><sup>[1]</sup></a> &amp; safe</p>'
+                '<hr/><span id="note1"></span><p>[1] 注释正文</p></body></html>')
+        case('good_footnote', footnote)
         def frontmatter(files, fallback=False):
             files['OPS/pkg/book.opf'] = files['OPS/pkg/book.opf'].replace(
                 '<item id="c1"', '<item id="front" href="../text/front.xhtml" media-type="application/xhtml+xml"/><item id="c1"').replace(

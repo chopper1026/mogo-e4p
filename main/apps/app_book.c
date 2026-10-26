@@ -246,6 +246,7 @@ typedef enum {
     READER_PANEL_KEY_SETTINGS,
     READER_PANEL_KEY_PICKER,
     READER_PANEL_TITLE_STYLE,
+    READER_PANEL_NOTE,
 } reader_panel_t;
 typedef struct {
     char name[256];
@@ -402,6 +403,19 @@ static blk_t* s_blocks;
 // parse, and the layout borrows them.
 static html_run_t* s_runs;
 static size_t s_run_count;
+// 内链与锚点和 run 表同源，随章节一起换。点按脚注只查这两张表，不再解析章节。
+// Body links and anchors come from the same parse as the run table and change with the
+// chapter. A footnote tap only reads these tables; it never re-parses the chapter.
+static html_link_t* s_links;
+static size_t s_link_count;
+static html_anchor_t* s_anchors;
+static size_t s_anchor_count;
+static char* s_link_strings;
+// 注释弹层只保存一段纯文本；脚注通常一两行，2 KB 足够，超长截断。
+// The note sheet holds one plain paragraph; footnotes are a line or two, so 2 KB is plenty
+// and longer notes are truncated.
+#define READER_NOTE_BYTES 2048u
+static char s_note_text[READER_NOTE_BYTES];
 // 上一次排版用的书内字体开关：字体页改过之后，回阅读页要重排当前章才看得出来。
 // The embedded-face setting the current layout was built with: after the font page changes
 // it, the reader must re-typeset the chapter before the change is visible.
@@ -2877,6 +2891,226 @@ static void draw_reader_stats_recent(uint8_t* fb) {
     reader_panel_text(fb, 642, base_y + 22, 19, "今天", EPD_DRAW_ALIGN_RIGHT, false);
 }
 
+/* ---- 脚注 / Footnotes ---- */
+
+// 链接里的 %XX 只在文件名和锚点上出现；解不开就当作普通字节。
+// %XX appears only in file names and fragments; undecodable bytes pass through unchanged.
+static bool note_decode(const char *src, size_t len, char *dst, size_t cap, size_t *out) {
+    size_t n = 0;
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)src[i];
+        // XHTML 里文件名中的 & 必须写成 &amp;；比较前还原，否则带 & 的文件名永远对不上。
+        // XHTML requires &amp; for an ampersand in a file name; restore it before comparing or
+        // such a name never matches.
+        if (c == '&' && i + 5 <= len && !memcmp(src + i, "&amp;", 5)) { c = '&'; i += 4; }
+        else if (c == '%' && i + 2 < len) {
+            int hi = src[i + 1] >= '0' && src[i + 1] <= '9' ? src[i + 1] - '0' :
+                     src[i + 1] >= 'a' && src[i + 1] <= 'f' ? src[i + 1] - 'a' + 10 :
+                     src[i + 1] >= 'A' && src[i + 1] <= 'F' ? src[i + 1] - 'A' + 10 : -1;
+            int lo = src[i + 2] >= '0' && src[i + 2] <= '9' ? src[i + 2] - '0' :
+                     src[i + 2] >= 'a' && src[i + 2] <= 'f' ? src[i + 2] - 'a' + 10 :
+                     src[i + 2] >= 'A' && src[i + 2] <= 'F' ? src[i + 2] - 'A' + 10 : -1;
+            if (hi >= 0 && lo >= 0) { c = (unsigned char)((hi << 4) | lo); i += 2; }
+        }
+        if (n + 1 >= cap) return false;
+        dst[n++] = (char)c;
+    }
+    dst[n] = 0;
+    if (out) *out = n;
+    return true;
+}
+
+static const blk_t *note_block_at(size_t off) {
+    if (!s_blocks || !s_block_count) return NULL;
+    size_t lo = 0, hi = s_block_count;
+    while (lo + 1 < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (s_blocks[mid].offset <= off) lo = mid;
+        else hi = mid;
+    }
+    return &s_blocks[lo];
+}
+
+// 只有 "[1]" 这样的标记才当脚注：目录链接、正文超链接仍按原翻页规则处理。
+// Only markers like "[1]" count as footnotes; TOC entries and body hyperlinks keep the usual
+// page-turn rules.
+static bool note_is_marker(const char *text, size_t len) {
+    size_t i = 0;
+    while (i < len && (unsigned char)text[i] <= ' ') ++i;
+    if (i >= len || text[i] != '[') return false;
+    size_t digits = 0;
+    ++i;
+    while (i < len && text[i] >= '0' && text[i] <= '9' && digits < 4) { ++i; ++digits; }
+    return digits && i < len && text[i] == ']';
+}
+
+// 点中的内链若指向本章锚点，就把锚点所在段落收进弹层。跨章链接暂不处理：
+// 阅读页没有返回栈，跳过去会把当前位置弄丢。
+// A tapped link that resolves to an anchor in this chapter puts that paragraph on the sheet.
+// Cross-chapter targets are left alone: the reader has no back stack, so jumping would lose
+// the current position.
+static bool note_open_link(int link) {
+    if (link < 0 || (size_t)link >= s_link_count || !s_links || !s_link_strings) return false;
+    const html_link_t *entry = &s_links[link];
+    if (entry->offset >= s_text_len || entry->len > s_text_len - entry->offset) return false;
+    if (!note_is_marker(s_text + entry->offset, entry->len)) return false;
+    const char *href = s_link_strings + entry->href;
+    const char *hash = entry->href_len ? memchr(href, '#', entry->href_len) : NULL;
+    if (!hash || hash + 1 >= href + entry->href_len) return false;
+    size_t path_len = (size_t)(hash - href);
+    if (path_len) {
+        char chapter_name[128];
+        if (book_chapter_source_name(s_chapter, chapter_name, sizeof(chapter_name)) != ESP_OK)
+            return false;
+        char path[160];
+        size_t path_bytes = 0;
+        if (!note_decode(href, path_len, path, sizeof(path), &path_bytes)) return false;
+        const char *base = strrchr(path, '/');
+        base = base ? base + 1 : path;
+        if (strcmp(base, chapter_name)) return false;
+    }
+    char fragment[128];
+    size_t fragment_len = 0;
+    if (!note_decode(hash + 1, entry->href_len - (size_t)(hash + 1 - href),
+                     fragment, sizeof(fragment), &fragment_len) || !fragment_len)
+        return false;
+    size_t offset = SIZE_MAX;
+    for (size_t i = 0; i < s_anchor_count; ++i) {
+        const html_anchor_t *anchor = &s_anchors[i];
+        if (anchor->id_len == fragment_len &&
+            !memcmp(s_link_strings + anchor->id, fragment, fragment_len)) {
+            offset = anchor->offset;
+            break;
+        }
+    }
+    if (offset == SIZE_MAX || offset >= s_text_len) return false;
+    // 锚点通常落在注释段落的起点；落在段尾时让给下一段。
+    // The anchor normally sits at the start of the note paragraph; at a block end, use the next one.
+    const blk_t *block = note_block_at(offset);
+    size_t start = offset, end = s_text_len;
+    if (block) {
+        // 段中间的锚点是脚注标记的返回点，不是注释段落；展开正文只会得到一个半段话。
+        // An anchor in the middle of a block is the note's backlink target, not a note
+        // paragraph; expanding it would show half a body paragraph.
+        for (size_t i = block->offset; i < start && i < s_text_len; ++i)
+            if ((unsigned char)s_text[i] > ' ') return false;
+        size_t block_end = block->offset + block->len;
+        if (start >= block_end && (size_t)(block - s_blocks) + 1 < s_block_count) {
+            ++block;
+            block_end = block->offset + block->len;
+        }
+        if (start < block->offset) start = block->offset;
+        end = block_end;
+    }
+    if (start >= end) return false;
+    while (start < end && ((unsigned char)s_text[start] <= ' ' || s_text[start] == '\r'))
+        ++start;
+    // 注释段以返回标记 "[1]" 开头；弹层里不需要它。
+    // The note paragraph opens with the "[1]" backlink; the sheet does not need it.
+    if (start < end && s_text[start] == '[') {
+        size_t close = start + 1;
+        while (close < end && close - start <= 8 && s_text[close] != ']') ++close;
+        if (close < end && s_text[close] == ']') {
+            start = close + 1;
+            while (start < end && (unsigned char)s_text[start] <= ' ') ++start;
+        }
+    }
+    while (end > start && (unsigned char)s_text[end - 1] <= ' ') --end;
+    if (start >= end) return false;
+    size_t len = end - start, limit = READER_NOTE_BYTES - 4;
+    bool cut = len > limit;
+    if (cut) {
+        len = limit;
+        // 截断只能落在整字边界上，否则最后会多出一个半个汉字。
+        // Truncate on a codepoint boundary so the tail is not half a character.
+        while (len && ((unsigned char)s_text[start + len] & 0xc0) == 0x80) --len;
+    }
+    memcpy(s_note_text, s_text + start, len);
+    s_note_text[len] = 0;
+    if (cut) memcpy(s_note_text + len, "…", sizeof("…"));
+    s_reader_panel = READER_PANEL_NOTE;
+    invalidate_prep();
+    return true;
+}
+
+// 按 UI 字号折行；返回行数，truncated 表示还有内容没放下。
+// Wrap by the UI font size; return the line count and whether content was left over.
+static int note_wrap(int px, int width, int *starts, int *lens, int max_lines, bool *truncated) {
+    static char line[1024];
+    size_t total = strlen(s_note_text), pos = 0;
+    int lines = 0;
+    *truncated = false;
+    while (pos < total && lines < max_lines) {
+        size_t at = 0, best = 0;
+        while (pos + at < total) {
+            unsigned char lead = (unsigned char)s_note_text[pos + at];
+            size_t n = lead < 0x80 ? 1 : lead >= 0xc2 && lead <= 0xdf ? 2 :
+                       lead >= 0xe0 && lead <= 0xef ? 3 :
+                       lead >= 0xf0 && lead <= 0xf4 ? 4 : 1;
+            if (at + n >= sizeof(line)) break;
+            memcpy(line, s_note_text + pos, at + n);
+            line[at + n] = 0;
+            if (ttf_text_width_px(px, line) > width) break;
+            at += n;
+            best = at;
+        }
+        // 单字就比整行还宽时至少前进一个完整字，不能切在 UTF-8 中间。
+        // If one glyph is wider than the line, advance by that whole glyph and never split a
+        // UTF-8 sequence.
+        if (!best) {
+            unsigned char lead = (unsigned char)s_note_text[pos];
+            best = lead < 0x80 ? 1 : lead >= 0xc2 && lead <= 0xdf ? 2 :
+                   lead >= 0xe0 && lead <= 0xef ? 3 :
+                   lead >= 0xf0 && lead <= 0xf4 ? 4 : 1;
+            if (best > total - pos) best = total - pos;
+        }
+        starts[lines] = (int)pos;
+        lens[lines] = (int)best;
+        ++lines;
+        pos += best;
+    }
+    if (pos < total) *truncated = true;
+    return lines;
+}
+
+static void draw_note_sheet(uint8_t *fb) {
+    // 注释正文跟随阅读字体，但字号固定 32px：弹层是辅助信息，不随正文设置变大变小。
+    // The note body uses the reader face at a fixed 32 px: the sheet is auxiliary information
+    // and does not scale with the body setting.
+    const int px = 32;
+    int line_height = px * 150 / 100;
+    const int width = UI_LOCK_WIDTH - 2 * 48;
+    int available = UI_LOCK_HEIGHT - 150 - 104 - 56;
+    int max_lines = available / line_height;
+    if (max_lines > 18) max_lines = 18;
+    if (max_lines < 1) max_lines = 1;
+    int starts[18], lens[18];
+    int previous_slot = ttf_font_selected();
+    ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+    bool truncated = false;
+    int lines = note_wrap(px, width, starts, lens, max_lines, &truncated);
+    if (lines < 1) lines = 1;
+    int top = UI_LOCK_HEIGHT - (104 + lines * line_height + 56);
+    if (top < 150) top = 150;
+    draw_sheet(fb, top, "注释");
+    static char line[1024];
+    for (int i = 0; i < lines; ++i) {
+        size_t n = (size_t)lens[i];
+        if (n >= sizeof(line)) n = sizeof(line) - 1;
+        memcpy(line, s_note_text + starts[i], n);
+        line[n] = 0;
+        if (truncated && i == lines - 1) {
+            size_t used = strlen(line);
+            if (used + sizeof("…") <= sizeof(line)) memcpy(line + used, "…", sizeof("…"));
+        }
+        int baseline = top + 104 + i * line_height + ttf_ascender_px(px);
+        ttf_draw_text_px(fb, 48, baseline, px, line, EPD_DRAW_ALIGN_LEFT, 0, 15);
+    }
+    reader_panel_text(fb, 342, top + 104 + lines * line_height + 4, 22,
+                      "点击任意处关闭", EPD_DRAW_ALIGN_CENTER, false);
+    ttf_font_select(previous_slot);
+}
+
 static void draw_reader_panel(uint8_t* fb) {
     if (s_reader_panel==READER_PANEL_NONE) return;
     ui_text_set_system_scale(true);
@@ -2908,6 +3142,7 @@ static void draw_reader_panel(uint8_t* fb) {
     else if (s_reader_panel == READER_PANEL_KEY_SETTINGS) draw_key_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_PICKER) draw_key_picker(fb);
     else if (s_reader_panel == READER_PANEL_TITLE_STYLE) draw_title_style_picker(fb);
+    else if (s_reader_panel == READER_PANEL_NOTE) draw_note_sheet(fb);
     ui_text_set_system_scale(false);
 }
 
@@ -4043,6 +4278,10 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
                    reader_prefetch_resume(s_page));
     if (cached) {
         memcpy(ctx->fb, s_next_fb, fb_bytes());
+        // 这一页没有经过同步绘制，接管预绘时记下的内链命中表。
+        // This page skipped the synchronous draw, so take over the hit table recorded during
+        // its prefetch.
+        book_layout_adopt_page(s_page);
         draw_reader_outer(ctx->fb,s_page);
     }
     else draw_reader(ctx->fb, s_page);
@@ -4120,6 +4359,9 @@ static void free_book(void) {
     free(s_text);
     free(s_blocks);
     free(s_runs);
+    free(s_links);
+    free(s_anchors);
+    free(s_link_strings);
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = NULL; s_image_count = 0;
@@ -4129,7 +4371,13 @@ static void free_book(void) {
     s_block_count = 0;
     s_runs = NULL;
     s_run_count = 0;
+    s_links = NULL;
+    s_link_count = 0;
+    s_anchors = NULL;
+    s_anchor_count = 0;
+    s_link_strings = NULL;
     book_layout_set_runs(NULL, 0);
+    book_layout_set_links(NULL, 0);
     s_text = NULL;
     s_text_len = 0;
     s_selected_toc = SIZE_MAX;
@@ -4357,6 +4605,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
     book_layout_set_runs(loaded.runs, loaded.run_count);
+    book_layout_set_links(loaded.links, loaded.link_count);
     bool ok = book_layout_build_blocks(loaded.utf8, loaded.len, loaded.blocks, loaded.count, body_rect(), s_px);
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
@@ -4366,6 +4615,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
         book_layout_set_runs(s_runs, s_run_count);
+        book_layout_set_links(s_links, s_link_count);
         // 题头几何也跟着回滚，否则这一章的题头参数会留在失败的那次上。
         // Roll the heading geometry back too, or the failed chapter's parameters would stick.
         s_chapter_lead_skip = old_lead_skip;
@@ -4387,12 +4637,20 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     free(s_text);
     free(s_blocks);
     free(s_runs);
+    free(s_links);
+    free(s_anchors);
+    free(s_link_strings);
     s_text = loaded.utf8;
     s_text_len = loaded.len;
     s_blocks = loaded.blocks;
     s_block_count = loaded.count;
     s_runs = loaded.runs;
     s_run_count = loaded.run_count;
+    s_links = loaded.links;
+    s_link_count = loaded.link_count;
+    s_anchors = loaded.anchors;
+    s_anchor_count = loaded.anchor_count;
+    s_link_strings = loaded.strings;
     for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
     free(s_images);
     s_images = loaded.images; s_image_count = loaded.image_count;
@@ -5686,6 +5944,13 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
 }
 
 static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
+    // 注释弹层没有按钮：点任意处收起，回到刚才那一页。
+    // The note sheet has no buttons: any tap dismisses it and returns to the same page.
+    if (s_reader_panel == READER_PANEL_NOTE) {
+        s_reader_panel = READER_PANEL_NONE;
+        invalidate_prep();
+        return APP_REDRAW_PAGE;
+    }
     if (s_reader_panel == READER_PANEL_TOOLS) {
         for (int i = 0; i < BOOK_TOOL_COUNT; ++i) if (ui_rect_hit(tool_rect(i), x, y)) {
             invalidate_prep();
@@ -6386,6 +6651,11 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // A body tap with the tools bar open only dismisses it instead of also turning; the
         // other panels keep their own rules.
         if (s_toolbar) return reader_panel_action(ctx, x, y);
+        // 脚注标记优先于翻页热区：它常落在正文右三分之一，先判内链再判翻页。
+        // Footnote markers win over the turn zones: they often sit in the right third, so the
+        // link test runs before the page-turn test.
+        int link = book_layout_link_at(s_page, x, y);
+        if (link >= 0 && note_open_link(link)) return APP_REDRAW_PAGE;
         // 页眉只显示书名、时间与电池，无控件；点页眉不翻页，落入下方正文热区判定。
         // The header shows only the title, clock and battery with no controls; header taps do
         // not turn pages and fall through to the body hit test below.
@@ -7076,6 +7346,14 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
             s_view = SHELF; return APP_REDRAW_PAGE;
         }
         if (s_view == SHELF) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    }
+    // 注释弹层和点按一致：任意键只收起弹层，不顺手翻页或换面板。
+    // The note sheet behaves like a tap: any key only dismisses it, without also turning or
+    // switching panels.
+    if (s_view == READING && s_reader_panel == READER_PANEL_NOTE) {
+        s_reader_panel = READER_PANEL_NONE;
+        invalidate_prep();
+        return APP_REDRAW_PAGE;
     }
     if (s_scan_pending || s_clear_confirm) return APP_REDRAW_NONE;
     if (s_view == READING && (key == UI_KEY_1 || key == UI_KEY_2 || key == UI_KEY_3)) {

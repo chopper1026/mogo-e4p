@@ -1558,6 +1558,18 @@ esp_err_t book_epub_chapter_title(book_epub_t *book, size_t i, char *buf, size_t
     if (n >= cap) return ESP_ERR_INVALID_SIZE;
     memcpy(buf, book->chapters[i].title, n + 1); return ESP_OK;
 }
+esp_err_t book_epub_chapter_name(book_epub_t *book, size_t i, char *buf, size_t cap) {
+    if (!book || i >= book->count || !buf || !cap) return ESP_ERR_INVALID_ARG;
+    buf[0] = 0;
+    const char *path = zip_entry_name(book->zip, book->chapters[i].zip_index);
+    if (!path) return ESP_ERR_NOT_FOUND;
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    size_t n = strlen(base);
+    if (n >= cap) return ESP_ERR_INVALID_SIZE;
+    memcpy(buf, base, n + 1);
+    return ESP_OK;
+}
 /* ---- 书内字体 / Embedded faces ---- */
 
 // 单个字体的字节上限。正文汉字字体常见几百 KB，两 MB 已属超大；再大就只可能是

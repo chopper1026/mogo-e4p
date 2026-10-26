@@ -99,6 +99,11 @@ Official release consolidating the rc98 local builds; per-item details remain un
 - 蓝牙翻页器：连着翻页器时进「扫描」页，现在会先断开当前连接再开始扫描。此前扫描与连接抢同一个控制器，扫描请求被直接忽略，页面只会显示空列表。离开扫描页后点一下已配对设备即可重新连接。
   Bluetooth page-turner: opening the scan page while a remote is connected now drops the current link first and then scans. Previously the request was ignored because an active link owns the controller, so the page stayed empty. After leaving the scan page, tap the paired device to reconnect.
 
+## 0.3.3-rc101 本地 / 2026-10-27
+
+- 阅读正文：EPUB 里的脚注标记（如 `[1]`）可以点开。章节解析时记下正文内链区间和本章锚点，绘制时记下每条链接的落笔矩形；点中标记弹出「注释」弹层，显示锚点所在段落并去掉段首的 `[n]` 返回标记，点任意处或按任意键收起。脚注标记常落在正文右三分之一，所以内链判定先于翻页热区；预绘的下一页同样记录命中表，翻页后立即可以点开。跨章链接和站外链接不展开，仍按原翻页规则处理。
+  EPUB reader: footnote markers such as `[1]` are tappable again. A chapter parse now records body link spans and in-chapter anchors, and drawing records each link's rectangle; tapping a marker opens a Note sheet with the anchored paragraph (the leading `[n]` backlink is dropped), dismissed by any tap or key. Markers often sit in the right third of the body, so the link test runs before the page-turn zones, and the prefetched next page records its own hit table so a footnote is tappable as soon as the turn lands. Cross-chapter and external links are left alone and still follow the usual turn rules.
+
 ## 0.3.3-rc100 本地 / 2026-10-24
 
 - 待机方式更名并恢复彻底断电：「先浅后深」更名为「彻底关机」，锁屏出图后不再有十分钟浅睡阶梯，立即按原厂方式打电源键脉冲彻底断电（f326902 的反复脉冲重试），主机与面板断电；此后开机需长按电源键约 1 秒。锁屏画面仍保留，开机回到锁屏与阅读位置（有密码时先验证）。「仅浅睡」与菜单「关机」行为不变。

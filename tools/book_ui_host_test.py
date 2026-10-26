@@ -239,7 +239,7 @@ static bool app_font_activate_system(void){assert(test_draw_locked);test_system_
 static bool app_font_activate_reading(void){assert(test_draw_locked);test_system_face=false;return true;}
 static bool s_toc_jump_open,s_toc_jump_drag;
 static int s_toc_jump_percent;
-typedef enum {READER_PANEL_NONE,READER_PANEL_TOOLS} reader_panel_t;
+typedef enum {READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_NOTE} reader_panel_t;
 static reader_panel_t s_reader_panel;
 #define READER_MIDDLE_DOUBLE_MS 340
 static bool s_middle_pending;

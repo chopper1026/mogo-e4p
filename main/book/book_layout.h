@@ -25,6 +25,18 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
 /// faces span by span; NULL restores single-face layout. It is borrowed like the block table
 /// and must outlive free; slots that never loaded fall back to the system face.
 void book_layout_set_runs(const html_run_t* runs, size_t count);
+/// 借用内链表（来自同一次解析），绘制当前页时记下每条链接的可点矩形；NULL 清除。
+/// Borrow the link table from the same parse; drawing a page records one clickable rectangle
+/// per link, and NULL clears it. It must outlive the layout like the block and run tables.
+void book_layout_set_links(const html_link_t* links, size_t count);
+/// 预绘页直接上屏时接管它的命中表，避免下一次预绘把它清掉。
+/// Take over the prefetched page's hit table when that page goes straight to the screen, so
+/// the next prefetch cannot clear it.
+void book_layout_adopt_page(size_t page);
+/// 返回上次绘制的该页上被点中的内链下标；页、布局代次或位置不匹配时返回 -1。
+/// Return the link index hit on that page as last drawn, or -1 when the page, layout
+/// generation or position does not match.
+int book_layout_link_at(size_t page, int x, int y);
 /// 设置行高百分比与段后距离百分比，重排时生效。/ Set line height and paragraph gap percentages for the next layout.
 void book_layout_set_spacing(unsigned line_percent, unsigned paragraph_percent);
 /// 正文额外字间距为 -15..+15 像素。/ Extra body tracking is -15..+15 pixels.

@@ -20,6 +20,13 @@
 #define HTML_IMAGE_PATH_MAX 511u
 #define CSS_RULE_MAX 64u
 #define CSS_ANCESTOR_MAX 64u
+// 链接与锚点只为阅读页的点击服务：href 取前 192 字节就够定位，id 同理。
+// Links and anchors exist only for reader taps, so 192 bytes of href or id is enough to resolve.
+#define HTML_LINK_MAX 512u
+#define HTML_ANCHOR_MAX 1024u
+#define HTML_STRING_MAX (32u * 1024u)
+#define HTML_LINK_HREF_MAX 192u
+#define HTML_ANCHOR_ID_MAX 96u
 
 enum {
     CSS_ALIGN = 1u << 0,
@@ -70,6 +77,12 @@ typedef struct {
     // success and reclaimed by the same free on failure.
     size_t run_cap, run_start, block_run_first;
     uint8_t family, run_slot;
+    // 内链在 <a> 打开时记起点和 href，闭合时才落表；锚点在带 id 的标签处直接落表。
+    // A link records its start and href when <a> opens and lands in the table on close; an
+    // anchor lands as soon as a tag with an id appears.
+    size_t link_cap, anchor_cap, string_cap, link_start, link_href_len;
+    char link_href[HTML_LINK_HREF_MAX + 1];
+    bool link_pending;
     // 内联标签也会换字体，按开标签深度逐层记下当前槽，闭标签回退上一层。
     // Inline tags switch faces too: record the slot per open depth and fall back on close.
     uint8_t family_at[CSS_ANCESTOR_MAX];
@@ -400,7 +413,69 @@ void html_text_free(html_text_t* text) {
     for (size_t i = 0; i < text->image_count; ++i) free(text->images[i]);
     free(text->images);
     free(text->runs);
+    free(text->links);
+    free(text->anchors);
+    free(text->strings);
     *text = (html_text_t){0};
+}
+
+/* ---- 内链与锚点 / Body links and anchors ---- */
+
+// 字符串池只增不减；满了就放弃这条记录，正文本身不受影响。
+// The string pool only grows; a full pool drops the entry and leaves the body untouched.
+static size_t strings_push(writer_t* w, const char* s, size_t len) {
+    if (!len || len > HTML_STRING_MAX || w->text.strings_len > HTML_STRING_MAX - len)
+        return SIZE_MAX;
+    size_t need = w->text.strings_len + len;
+    if (need > w->string_cap) {
+        size_t cap = w->string_cap ? w->string_cap : 512;
+        while (cap < need) cap = cap > HTML_STRING_MAX / 2 ? HTML_STRING_MAX : cap * 2;
+        char* pool = heap_caps_realloc(w->text.strings, cap, PSRAM_CAPS);
+        if (!pool) return SIZE_MAX;
+        w->text.strings = pool;
+        w->string_cap = cap;
+    }
+    memcpy(w->text.strings + w->text.strings_len, s, len);
+    size_t at = w->text.strings_len;
+    w->text.strings_len += len;
+    return at;
+}
+
+static esp_err_t link_record(writer_t* w, size_t start, size_t end) {
+    if (end <= start || !w->link_href_len) return ESP_OK;
+    if (w->text.link_count == w->link_cap) {
+        if (w->link_cap >= HTML_LINK_MAX) return ESP_OK;
+        size_t cap = w->link_cap ? w->link_cap * 2 : 16;
+        if (cap > HTML_LINK_MAX) cap = HTML_LINK_MAX;
+        html_link_t* links = heap_caps_realloc(w->text.links, cap * sizeof(*links), PSRAM_CAPS);
+        if (!links) return ESP_ERR_NO_MEM;
+        w->text.links = links;
+        w->link_cap = cap;
+    }
+    size_t href = strings_push(w, w->link_href, w->link_href_len);
+    if (href == SIZE_MAX) return ESP_OK;
+    w->text.links[w->text.link_count++] = (html_link_t){
+        .offset = start, .len = end - start, .href = href, .href_len = w->link_href_len,
+    };
+    return ESP_OK;
+}
+
+static esp_err_t anchor_record(writer_t* w, const char* id, size_t len, size_t offset) {
+    if (!len || len > HTML_ANCHOR_ID_MAX) return ESP_OK;
+    if (w->text.anchor_count == w->anchor_cap) {
+        if (w->anchor_cap >= HTML_ANCHOR_MAX) return ESP_OK;
+        size_t cap = w->anchor_cap ? w->anchor_cap * 2 : 32;
+        if (cap > HTML_ANCHOR_MAX) cap = HTML_ANCHOR_MAX;
+        html_anchor_t* anchors = heap_caps_realloc(w->text.anchors, cap * sizeof(*anchors), PSRAM_CAPS);
+        if (!anchors) return ESP_ERR_NO_MEM;
+        w->text.anchors = anchors;
+        w->anchor_cap = cap;
+    }
+    size_t at = strings_push(w, id, len);
+    if (at == SIZE_MAX) return ESP_OK;
+    w->text.anchors[w->text.anchor_count++] =
+        (html_anchor_t){.offset = offset, .id = at, .id_len = len};
+    return ESP_OK;
 }
 
 static esp_err_t reserve_text(writer_t* w, size_t extra) {
@@ -739,7 +814,14 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                 // 在块结束之前保留其来源；关闭容器后不影响后面的正文块。
                 // Preserve provenance until the block ends; closing a container must not taint later body text.
                 if (closing) {
-                    if (w.depth == w.link_depth) w.link_depth = 0;
+                    if (w.depth == w.link_depth) {
+                        w.link_depth = 0;
+                        if (w.link_pending) {
+                            w.link_pending = false;
+                            esp_err_t link_err = link_record(&w, w.link_start, w.text.len);
+                            if (link_err != ESP_OK) { err = link_err; goto fail; }
+                        }
+                    }
                     if (w.depth == w.auxiliary_depth) w.auxiliary_depth = 0;
                     if (w.depth) --w.depth;
                     if (w.family_rules && w.depth <= CSS_ANCESTOR_MAX)
@@ -776,8 +858,15 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                         w.auxiliary_depth = w.depth;
                     const char* href = NULL; size_t href_len = 0;
                     if (!w.link_depth && name_equal(name, "a") &&
-                        attr_value(html + at, html + end, "href", &href, &href_len) && href_len)
+                        attr_value(html + at, html + end, "href", &href, &href_len) && href_len) {
                         w.link_depth = w.depth;
+                        // 起点与锚点同一条公式：块间分隔符还没写进正文时先算上它。
+                        // Same formula as anchors: count the block separator before it is written.
+                        w.link_start = w.text.len + (!w.active && w.text.count ? 1 : 0);
+                        w.link_href_len = href_len > HTML_LINK_HREF_MAX ? HTML_LINK_HREF_MAX : href_len;
+                        memcpy(w.link_href, href, w.link_href_len);
+                        w.link_pending = true;
+                    }
                 }
                 if (!closing && (name_equal(name, "img") || name_equal(name, "image") ||
                                  name_equal(name, "svg:image") || name_equal(name, "object"))) {
@@ -806,16 +895,22 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                     if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && !name[2])
                         w.heading_level = !closing && !self_closing ? (uint8_t)(name[1] - '0') : 0;
                 }
-                if (!closing && !skip[0] && anchor_offset) {
+                if (!closing && !skip[0]) {
                     const char *value = NULL; size_t length = 0;
-                    bool matched = tag_offset == source_offset;
-                    if (!matched && anchor && *anchor &&
-                        (attr_value(html + at, html + end, "id", &value, &length) ||
-                         attr_value(html + at, html + end, "xml:id", &value, &length) ||
-                         attr_value(html + at, html + end, "name", &value, &length)) &&
-                        length == strlen(anchor) && !memcmp(value, anchor, length)) matched = true;
-                    if (matched)
-                        *anchor_offset = w.text.len + (!w.active && w.text.count ? 1 : 0);
+                    bool has_id = attr_value(html + at, html + end, "id", &value, &length) ||
+                                  attr_value(html + at, html + end, "xml:id", &value, &length) ||
+                                  attr_value(html + at, html + end, "name", &value, &length);
+                    size_t offset = w.text.len + (!w.active && w.text.count ? 1 : 0);
+                    if (has_id && length) {
+                        esp_err_t anchor_err = anchor_record(&w, value, length, offset);
+                        if (anchor_err != ESP_OK) { err = anchor_err; goto fail; }
+                    }
+                    if (anchor_offset) {
+                        bool matched = tag_offset == source_offset;
+                        if (!matched && anchor && *anchor && has_id &&
+                            length == strlen(anchor) && !memcmp(value, anchor, length)) matched = true;
+                        if (matched) *anchor_offset = offset;
+                    }
                 }
                 continue;
             }

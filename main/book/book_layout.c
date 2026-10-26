@@ -116,6 +116,74 @@ void book_layout_set_runs(const html_run_t* runs, size_t count) {
     s_run_count = s_runs != NULL ? count : 0;
 }
 
+/* ---- 正文内链 / Body links ---- */
+
+// 内链与 run 表一样由调用方借用；绘制时把每条链接在当前页的落笔范围记下来，
+// 点按只需查这张小表，不必在触摸回调里重新折行或量字。
+// The link table is borrowed like the run table. Drawing records where each link landed on
+// the page, so a tap only reads this small table instead of re-wrapping or measuring text in
+// the touch callback.
+#define LINK_HIT_MAX 64u
+typedef struct {
+    int16_t link;
+    int16_t x, y, width, height;
+} link_hit_t;
+static const html_link_t* s_links;
+static size_t s_link_count;
+// 两张表：一张给屏上这一页，一张给预绘的下一页。翻页常常直接用预绘缓冲，
+// 那张页没有经过同步绘制，命中表必须在那次预绘里就记好。
+// Two tables: one for the page on screen and one for the prefetched page. A turn often
+// presents the prefetch buffer without a synchronous draw, so that page's hits must already
+// have been recorded during the prefetch.
+static link_hit_t s_link_hits[LINK_HIT_MAX], s_link_hits_next[LINK_HIT_MAX];
+static size_t s_link_hit_count, s_link_hit_count_next;
+static size_t s_link_hit_page, s_link_hit_page_next;
+static uint32_t s_link_hit_generation, s_link_hit_generation_next;
+// 当前绘制写入哪张表；同步绘制写本页，预绘写下一页。
+// Which table the current draw fills: the screen page for a synchronous draw, the next page
+// for a prefetch.
+static link_hit_t* s_link_hits_out = s_link_hits;
+static size_t* s_link_hits_out_count = &s_link_hit_count;
+
+void book_layout_set_links(const html_link_t* links, size_t count) {
+    s_links = (links != NULL && count > 0) ? links : NULL;
+    s_link_count = s_links != NULL ? count : 0;
+    s_link_hit_count = s_link_hit_count_next = 0;
+    s_link_hit_generation = s_link_hit_generation_next = 0;
+}
+
+void book_layout_adopt_page(size_t page) {
+    // 预绘页直接上屏时把它那张命中表接管过来，下一次预绘才能安全清空另一张。
+    // When a prefetched page goes straight to the screen, take over its hit table so the next
+    // prefetch can clear the other one safely.
+    if (page != s_link_hit_page_next || s_link_hit_generation_next != s_generation) return;
+    memcpy(s_link_hits, s_link_hits_next, s_link_hit_count_next * sizeof(link_hit_t));
+    s_link_hit_count = s_link_hit_count_next;
+    s_link_hit_page = page;
+    s_link_hit_generation = s_generation;
+}
+
+int book_layout_link_at(size_t page, int x, int y) {
+    // 两张表都可能属于这一页（预绘续画后屏幕页没有同步重绘），先查屏上那张再查预绘那张。
+    // Both tables can belong to this page after a prefetch resume, so try the screen table and
+    // then the prefetch table.
+    for (int pass = 0; pass < 2; ++pass) {
+        const link_hit_t* table = pass ? s_link_hits_next : s_link_hits;
+        size_t count = pass ? s_link_hit_count_next : s_link_hit_count;
+        size_t hit_page = pass ? s_link_hit_page_next : s_link_hit_page;
+        uint32_t generation = pass ? s_link_hit_generation_next : s_link_hit_generation;
+        if (page != hit_page || generation != s_generation) continue;
+        for (size_t i = 0; i < count; ++i) {
+            const link_hit_t* hit = &table[i];
+            if (x < hit->x || x >= hit->x + hit->width ||
+                y < hit->y || y >= hit->y + hit->height)
+                continue;
+            return hit->link;
+        }
+    }
+    return -1;
+}
+
 // 该字节属于哪个字体槽。没有 run 表就一律系统字体，排版与从前完全一致。
 // Which face owns this byte. Without a run table everything is the system face and the
 // layout behaves exactly as before.
@@ -204,6 +272,78 @@ static uint32_t codepoint_value(const char* text, size_t n) {
     return cp;
 }
 
+// 区间内的自然字宽，算法与 take_line 一致：每个字按自己那段的字体量宽，
+// 行首字不加字距。用于把链接区间换算成行内横坐标。
+// Natural advance of a byte range, matching take_line: each glyph measures in its own span's
+// face and the line's first glyph carries no tracking. Used to turn a link span into an x range.
+static int advance_between(size_t from, size_t to, int px, bool heading, bool at_line_start) {
+    int64_t width = 0;
+    bool first = true;
+    for (size_t at = from; at < to;) {
+        size_t n = codepoint_size(s_text + at, to - at);
+        if (!n) break;
+        char glyph[5];
+        memcpy(glyph, s_text + at, n);
+        glyph[n] = 0;
+        slot_select_for(at);
+        width += ttf_text_width_px(px, glyph);
+        if (!(first && at_line_start) && !heading) width += s_tracking_px;
+        first = false;
+        at += n;
+    }
+    return width > INT_MAX ? INT_MAX : (int)width;
+}
+
+// 把一行里的链接落成可点矩形。两端对齐的行按目标宽度等比换算：中文行几乎每个字间都在
+// 拉伸，等比与字体的实际分配只差一两个像素。
+// Record a line's links as clickable rectangles. A justified line scales by target width:
+// Chinese lines stretch at almost every gap, so proportional scaling matches the font's
+// distribution within a pixel or two.
+static void record_line_links(size_t line_start, size_t line_end, int x, int y, int px,
+                              bool heading, int line_width, int target) {
+    if (s_links == NULL || line_end <= line_start) return;
+    // 量宽会按 run 切换字体游标；记录完还回去，页脚与界面仍用系统字体。
+    // Measuring moves the face cursor across spans; hand it back afterwards so the footer and
+    // UI stay on the system face.
+    int previous_slot = ttf_font_selected();
+    for (size_t i = 0; i < s_link_count && *s_link_hits_out_count < LINK_HIT_MAX; ++i) {
+        size_t lo = s_links[i].offset, hi = lo + s_links[i].len;
+        if (hi <= line_start || lo >= line_end) continue;
+        size_t from = lo > line_start ? lo : line_start;
+        size_t to = hi < line_end ? hi : line_end;
+        if (to <= from) continue;
+        int prefix = advance_between(line_start, from, px, heading, true);
+        int span = advance_between(from, to, px, heading, from == line_start);
+        int64_t x0 = x + prefix, width = span;
+        if (target > 0 && line_width > 0) {
+            x0 = x + (int64_t)prefix * target / line_width;
+            width = (int64_t)span * target / line_width;
+        }
+        if (width < 6) width = 6;
+        if (x0 < INT16_MIN || x0 > INT16_MAX || y < INT16_MIN || y > INT16_MAX ||
+            width > INT16_MAX || px > INT16_MAX) continue;
+        s_link_hits_out[(*s_link_hits_out_count)++] =
+            (link_hit_t){(int16_t)i, (int16_t)x0, (int16_t)y, (int16_t)width, (int16_t)px};
+    }
+    ttf_font_select(previous_slot);
+}
+
+// 竖排一列里的链接按整列字格记录：列只有几十像素宽，列内纵向再细分收益不大。
+// A vertical column's links use the whole glyph cell: the column is only tens of pixels wide,
+// so splitting it vertically buys little.
+static void record_column_links(size_t line_start, size_t line_end, int x, int y,
+                                int width, int height) {
+    if (s_links == NULL || line_end <= line_start) return;
+    for (size_t i = 0; i < s_link_count && *s_link_hits_out_count < LINK_HIT_MAX; ++i) {
+        size_t lo = s_links[i].offset, hi = lo + s_links[i].len;
+        if (hi <= line_start || lo >= line_end) continue;
+        if (x < INT16_MIN || x > INT16_MAX || y < INT16_MIN || y > INT16_MAX ||
+            width <= 0 || width > INT16_MAX || height <= 0 || height > INT16_MAX) continue;
+        s_link_hits_out[(*s_link_hits_out_count)++] =
+            (link_hit_t){(int16_t)i, (int16_t)x, (int16_t)y, (int16_t)width, (int16_t)height};
+    }
+}
+
 // 插图容器常带全角空白、零宽字符和换行实体；它们不是可阅读的独立段落。
 // Image wrappers often contain fullwidth spaces, zero-width characters and line-break entities, not readable paragraphs.
 static bool image_spacing_block(const blk_t* block) {
@@ -290,6 +430,11 @@ void book_layout_free(void) {
     s_px = 0;
     s_blocks = NULL;
     s_block_count = 0;
+    // 内链表和 run 表一样是借用的：重排不重建它，释放权归调用方。
+    // The link table is borrowed like the run table: a re-layout keeps it and the caller owns
+    // its lifetime.
+    s_link_hit_count = s_link_hit_count_next = 0;
+    s_link_hit_generation = s_link_hit_generation_next = 0;
     s_image_rect = (EpdRect){0, 0, 0, 0};
 }
 
@@ -493,7 +638,8 @@ static bool line_append(size_t at, const char *text, size_t bytes) {
 static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* next,
                       bool* paragraph_end, int* px, bool* heading,
                       int* line_width, int* indent, uint8_t* align,
-                      int* margin_before, int* margin_after) {
+                      int* margin_before, int* margin_after,
+                      size_t* line_start, size_t* line_end) {
     const blk_t* block = block_at(off);
     *heading = block && block->heading;
     *px = s_px + (*heading ? 8 : 0);
@@ -626,6 +772,8 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
     line_runs_build(block, visible_off, end);
     *line_width = (int)width;
     *next = end;
+    if (line_start) *line_start = visible_off;
+    if (line_end) *line_end = end;
     if (end < s_len && (s_text[end] == '\r' || s_text[end] == '\n')) {
         *next = end + 1;
         if (s_text[end] == '\r' && *next < s_len && s_text[*next] == '\n') (*next)++;
@@ -687,7 +835,8 @@ static bool build_vertical(size_t len) {
         int px, run_height, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, s_rect.height - lead, 0, &next, &paragraph_end, &px, &heading,
-                       &run_height, &indent, &align, &margin_before, &margin_after)) return false;
+                       &run_height, &indent, &align, &margin_before, &margin_after,
+                       NULL, NULL)) return false;
         int pitch = line_height_for(px);
         if (pitch > s_rect.width) return false;
         int leading = used ? margin_before : 0;
@@ -797,7 +946,8 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
         int line_px, line_width, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
-                       &line_width, &indent, &align, &margin_before, &margin_after)) goto fail;
+                       &line_width, &indent, &align, &margin_before, &margin_after,
+                       NULL, NULL)) goto fail;
         (void)line_width; (void)indent; (void)align;
         line_height = line_height_for(line_px);
         if (line_height > rect.height) goto fail;
@@ -945,11 +1095,13 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         }
         int lead = page == 0 ? (int)s_lead_height : 0;
         size_t next;
+        size_t line_start = off, line_end = off;
         bool paragraph_end, heading;
         int px, run_height, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, rect.height - lead, 0, &next, &paragraph_end, &px, &heading,
-                       &run_height, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
+                       &run_height, &indent, &align, &margin_before, &margin_after,
+                       &line_start, &line_end)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int pitch = line_height_for(px);
         int leading = used ? margin_before : 0;
         if (used + leading + pitch > rect.width) return;
@@ -958,10 +1110,13 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
             const blk_t* block = block_at(off);
             bool final_column = paragraph_end || next >= s_len ||
                 (block && next >= block->offset + block->len);
-            draw_vertical_column(fb, rect, rect.x + rect.width - (int)used - pitch, pitch, lead,
+            int left = rect.x + rect.width - (int)used - pitch;
+            draw_vertical_column(fb, rect, left, pitch, lead,
                                  px, indent, align, run_height,
                                  !heading && !align &&
                                  (!final_column || run_height > rect.height - lead - indent));
+            record_column_links(line_start, line_end, left + (pitch - px) / 2,
+                                rect.y + lead, px, rect.height - lead);
         }
         used += pitch;
         if (paragraph_end) used += gap_for(pitch, heading) + margin_after;
@@ -978,6 +1133,27 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     if (!fb || page >= s_count || px != s_px || rect.width != s_rect.width ||
         rect.height != s_rect.height || rect.x < 0 || rect.y < 0 ||
         rect.x > INT_MAX - rect.width || rect.y > INT_MAX - rect.height) return;
+    // 预绘的是下一页，不能覆盖当前页的点击表；两页各记一张。
+    // Prefetch draws the next page, so it must not overwrite the current page's hit table;
+    // each page gets its own.
+    if (s_idle_draw == NULL) {
+        s_link_hit_count = 0;
+        s_link_hit_page = page;
+        s_link_hit_generation = s_generation;
+        s_link_hits_out = s_link_hits;
+        s_link_hits_out_count = &s_link_hit_count;
+    } else {
+        // 预绘从游标续画：只有第一片才清表，后续片继续往里追加。
+        // A prefetch resumes from its cursor: only the first slice clears the table and later
+        // slices keep appending.
+        if (!s_idle_draw->started) {
+            s_link_hit_count_next = 0;
+            s_link_hit_page_next = page;
+            s_link_hit_generation_next = s_generation;
+        }
+        s_link_hits_out = s_link_hits_next;
+        s_link_hits_out_count = &s_link_hit_count_next;
+    }
     // 走回退路径的"整页插图"没有图片记录：这里没有文字可画，那张图由调用方绘制，直接返回。
     // 有记录时说明图片已经流进正文，文字和图一起排。
     // A whole-page image from the fallback path has no record: there is no text to draw here and
@@ -1014,11 +1190,13 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             continue;
         }
         size_t next;
+        size_t line_start = off, line_end = off;
         bool paragraph_end, heading;
         int line_px, line_width, indent, margin_before, margin_after;
         uint8_t align;
         if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
-                       &line_width, &indent, &align, &margin_before, &margin_after)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
+                       &line_width, &indent, &align, &margin_before, &margin_after,
+                       &line_start, &line_end)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
         int line_height = line_height_for(line_px);
         // 与分页同一判定：页底只要求字形高度放得下，行盒尾随行距可以悬出正文底。
         // Same test as pagination: only the glyph height must fit at the page bottom; the line
@@ -1063,6 +1241,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             // Drawing follows the runs: width, tracking and justification math are untouched,
             // only the slot each glyph comes from changes.
             ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
+            int justify_target = 0;
             if (!heading && !align && (!final_line || line_width > available)) {
                 // 完整正文行对齐到统一右边界；悬挂标点最多使用少量右侧留白。
                 // Justify complete body lines; a hanging closer may use a small part of the right margin.
@@ -1070,6 +1249,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 int hang = slack > 4 ? line_px / 3 : 0;
                 if (hang > slack - 4) hang = slack - 4;
                 int target = line_width > available ? available + hang : available;
+                justify_target = target;
                 ttf_draw_text_px_fitted(fb, x, baseline, line_px, s_line, s_tracking_px,
                                         target, 0, 15);
             } else if (s_tracking_px && !heading)
@@ -1081,6 +1261,8 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             // face.
             ttf_draw_set_runs(NULL, 0);
             ttf_font_select(TTF_FONT_SLOT_SYSTEM);
+            record_line_links(line_start, line_end, x, rect.y + (int)used, line_px,
+                              heading, line_width, justify_target);
         }
         used += line_height;
         if (paragraph_end) pending_gap = gap_for(line_height, heading) + margin_after;

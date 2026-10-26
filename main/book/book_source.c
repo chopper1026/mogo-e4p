@@ -53,6 +53,11 @@ esp_err_t book_chapter_title(size_t i, char *buf, size_t cap) {
     if (n >= cap) { buf[0] = 0; return ESP_ERR_INVALID_SIZE; }
     memcpy(buf, s_book.entries[i].title, n + 1); return ESP_OK;
 }
+esp_err_t book_chapter_source_name(size_t i, char *buf, size_t cap) {
+    if (buf && cap) buf[0] = 0;
+    if (!s_epub) return ESP_ERR_NOT_SUPPORTED;
+    return book_epub_chapter_name(s_epub, i, buf, cap);
+}
 esp_err_t book_chapter_load(size_t i, char **utf8, size_t *len) {
     if (!utf8 || !len) return ESP_ERR_INVALID_ARG;
     *utf8 = NULL; *len = 0;

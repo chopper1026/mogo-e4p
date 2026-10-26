@@ -35,6 +35,10 @@ const char *book_navigation_anchor(size_t position);
 size_t book_navigation_source_offset(size_t position);
 /// 复制 UTF-8 标题，空间不足返回错误。/ Copy a UTF-8 title, failing if capacity is insufficient.
 esp_err_t book_chapter_title(size_t i, char *buf, size_t cap);
+/// 复制该章在容器里的文件名（不含目录）；用于判断正文链接是否指向本章。
+/// Copy the chapter's container file name without its directory; body links use it to tell
+/// whether a target lives in this chapter.
+esp_err_t book_chapter_source_name(size_t i, char *buf, size_t cap);
 /// 加载 NUL 结尾的 PSRAM UTF-8；调用方 free。/ Load NUL-terminated PSRAM UTF-8; caller frees it.
 esp_err_t book_chapter_load(size_t i, char **utf8, size_t *len);
 /// 保留 EPUB 标题/段落块；TXT 的 blocks 为 NULL，调用方 html_text_free。
