@@ -135,6 +135,23 @@ int main(void) {
  reset(); step(0, 4382, 8, true, true, true, -1);    assert(s_pm==1000);  // 判满 / full
  step(60000000, 4351, -186, true, false, false, -1); assert(s_pm==1000); // 拔线第一分钟不掉 / stays full off the charger
  step(120000000, 4345, -96, true, false, false, -1); assert(s_pm>=970);  // 之后随负载电压缓降 / then eases down under load
+ // 11) 中段锚点回充对账（2026-10-27 卡上日志）
+ // Mid-anchor refill accounting (2026-10-27 card log)
+ // 静置 4305 -> 曲线 957‰，回充实测 ~955‰ / resting 4305 -> curve 957‰, refill measured ~955‰
+ reset(); step(0, 4305, 0, false, false, false, -1); assert(s_pm>=950 && s_pm<=965);
+ // 静置 4241(-100mA 补偿后 4259) -> 曲线 922‰，回充腿（~93mAh≈955）容差带
+ // resting 4241 (4259 compensated) -> curve 922‰, refill leg (~93 mAh ≈ 955) tolerance band
+ reset(); step(0, 4259, 0, false, false, false, -1); assert(s_pm>=910 && s_pm<=940);
+ // 深放底点 ocv 4091 -> 曲线 769‰，回充法 828、ic_soc 85 的容差带
+ // deep-discharge floor ocv 4091 -> curve 769‰, refill 828 / ic_soc 85 tolerance band
+ reset(); step(0, 4091, -91, true, false, false, -1); assert(s_pm>=755 && s_pm<=845);
+ // 4100/4200/4300 网格值抽查（回充腿与积分对账的中位点）
+ // grid spot checks for 4100/4200/4300 (midpoints reconciled by refill legs and integrals)
+ reset(); step(0, 4300, 0, false, false, false, -1); assert(s_pm==955);
+ reset(); step(0, 4200, 0, false, false, false, -1); assert(s_pm==875);
+ reset(); step(0, 4100, 0, false, false, false, -1); assert(s_pm==790);
+ // 4.09 V 以下无数据，锚点不动 / no data below 4.09 V, low anchors untouched
+ reset(); step(0, 4000, 0, false, false, false, -1); assert(s_pm==560);
  puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence, load compensation, taper-full and the full-charge plateau");
 }
 '''

@@ -276,11 +276,11 @@ static esp_err_t bq_read_current(int16_t* ma) {
 // 滤波参数：真机日志（batt: ...）校准后可调。 / Filter tunables; calibrate from the "batt:" logs.
 // 电池内阻：2026-10-25 卡上日志 13 次充放电切换（60 s 采样、ΔI≥80 mA）中位 180 mΩ。
 // 原 100 mΩ 补偿不足，拔掉充电器那一分钟负载压降只补了一半，满电显示瞬间掉 3%。
-// 取该组中位；实测区间 160–216 mΩ，等更长放电日志再复核。
+// 取该组中位；2026-10-27 复核 14 次切换中位 206 mΩ，其中三次 1 A 大步 175–192 mΩ，维持 180。
 // Pack resistance: the 2026-10-25 card log's 13 charge/discharge switches (60 s samples,
 // ΔI ≥ 80 mA) median 180 mΩ. The old 100 mΩ under-compensated the load step, so the full
-// display fell 3% in the first minute off the charger. This takes that median; the measured
-// range was 160–216 mΩ, to be re-checked against a longer discharge log.
+// display fell 3% in the first minute off the charger. Re-checked 2026-10-27: 14 switches
+// median 206 mΩ, the three clean 1 A steps 175–192 mΩ; 180 stays.
 #define BATT_R_MOHM 180
 #define BATT_COMP_CAP_MV 150             // 负载补偿上限。 / Load compensation cap.
 #define BATT_EMA_TAU_MS 25000            // 电压 EMA 时间常数。 / Voltage EMA time constant.
@@ -307,15 +307,25 @@ static esp_err_t bq_read_current(int16_t* ma) {
 // 4.4 V 高压电池 OCV-SOC 锚点（mV → ‰），mV 降序。2026-10-25 卡上日志实测充满平台
 // 4374–4385 mV（289 点、|I|≤15 mA，中位 4379、免载最高 4385）：原 4400 mV 锚点不可达，
 // 曲线满电只算到 98%，再被涓流判满硬拉到 100%，形成 2% 跳变。顶锚点改为 4380 mV。
-// 4.30 V 以下日志没有放电数据，低段锚点保持原值，等一次完整放电再校准。
+// 中段锚点 2026-10-27 用回充对账校准（batt_副本.log，849 行、34.5 h）：满电拔线深放
+// 8.4 h 至 4075 mV 后回满，净充 346 mAh；另一次夜间放到 4241 mV 回充 ~93 mAh。两条
+// 回充腿与放电库仑积分互相一致（容量取规格 2050 mAh）：4300→955、4200→875、4100→790。
+// 原锚点为无数据推测，中段偏低 6–11%。4.09 V 以下仍无放电数据，低段锚点保持原值，
+// 不能按中段斜率外推——高压锂电池低段有膝盖，等一次放电到关机再校准。
 // OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV. The
 // 2026-10-25 card log measured a full-charge plateau of 4374–4385 mV (289 samples,
 // |I| ≤ 15 mA, median 4379, 4385 unloaded max): the old 4400 mV anchor was unreachable, so
 // the curve topped out near 98% and the taper-full snap pulled it to 100% as a 2% jump.
-// The top anchor is now 4380 mV. The log has no discharge below 4.30 V, so the low anchors
-// stay as-is until a full discharge is captured.
+// The top anchor is now 4380 mV. Mid anchors were recalibrated 2026-10-27 by refill
+// accounting (batt_副本.log, 849 rows, 34.5 h): a full pack discharged 8.4 h to 4075 mV
+// took 346 mAh net to recharge, and a second overnight leg to 4241 mV took ~93 mAh. Both
+// refill legs agree with the discharge coulomb integral (capacity per spec, 2050 mAh):
+// 4300→955, 4200→875, 4100→790. The old mid anchors were guesses and read 6–11% low.
+// Below 4.09 V there is still no discharge data, so the low anchors stay as-is; do not
+// extrapolate the mid-section slope — LiHV packs have a low knee. Calibrate after one
+// full discharge to shutdown.
 static const int32_t s_soc_curve[][2] = {
-    {4380, 1000}, {4300, 900}, {4200, 800}, {4100, 680}, {4000, 560},
+    {4380, 1000}, {4300, 955}, {4200, 875}, {4100, 790}, {4000, 560},
     {3900, 450},  {3800, 340}, {3700, 230}, {3600, 140}, {3500, 80},
     {3400, 40},   {3300, 0},
 };
