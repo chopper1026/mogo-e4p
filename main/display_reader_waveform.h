@@ -35,3 +35,11 @@ const EpdWaveform* display_reader_water_waveform(void);
 /// pushes, so erased text reaches pure white. Both page and water accessors return it while
 /// a background is set.
 const EpdWaveform* display_reader_bg_waveform(void);
+
+/// 插图页派生表：与背景表同源，但深色对保留前导擦白（旧字落到图片灰也从白轨落位），
+/// 相等对仍置保持（脏区膨胀带上的未变化像素不再被黑白往返推出一圈细线）。
+/// Illustration derivative: same base as the background table, but dark pairs keep their
+/// leading erase so old glyphs settle on an image gray from the white rail. Equal pairs still
+/// hold, so the unchanged pixels that dilation drags along no longer take a white-black trip
+/// that draws a thin outline.
+const EpdWaveform* display_reader_image_waveform(void);

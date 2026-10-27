@@ -83,6 +83,11 @@ static void *dims_ctx;
 static size_t measured_chapter;
 static uint32_t generation=1;
 static bool app_settings_reader_hide_images(void){return hidden;}
+// 阅读背景只改变插图与正文栏的对齐方式，测试直接改这个路径来模拟。
+// A reading background only changes how the illustration aligns with the body column, so the
+// test flips this path to simulate it.
+static const char *background_path="";
+static const char *app_settings_book_background_path(void){return background_path;}
 static EpdRect body_rect(void){return body;}
 static EpdRect reader_area(void){return reader_area_rect;}
 static EpdRect book_layout_image_rect(void){return image_band;}
@@ -150,6 +155,15 @@ static blk_t *s_blocks;
 static html_run_t *s_runs;
 static size_t s_run_count;
 static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
+// 内链/锚点表由解析器分配，本套用例只验证插图路径，桩保持为空表。
+// Links and anchors are parser-owned; this suite only exercises the image paths, so the stubs
+// stay empty.
+static html_link_t *s_links;
+static size_t s_link_count;
+static html_anchor_t *s_anchors;
+static size_t s_anchor_count;
+static char *s_link_strings;
+static void book_layout_set_links(const html_link_t *links,size_t count){(void)links;(void)count;}
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height,s_chapter_lead_row_height;
@@ -276,6 +290,14 @@ int main(void){
  pixel_min_y=1<<30;pixel_max_y=-1;
  draw_reader_images(&fb,s_page,body);assert(pixel_min_y==24&&pixel_max_y==43);
  s_margin[MARGIN_TOP]=0;
+ // 有阅读背景时插图跟正文栏走：页首图不再借用正文上方那道固定留白，否则会压到背景内框。
+ // With a reading background the illustration follows the body column, so a page-start image
+ // no longer borrows the fixed inset above the body and cannot cross the background's frame.
+ background_path="/sdcard/pictures/a.jpg";
+ slots[0].height=20;++generation;prepare_inline_image();
+ pixel_min_y=1<<30;pixel_max_y=-1;
+ draw_reader_images(&fb,s_page,body);assert(pixel_min_y==body.y&&pixel_max_y==body.y+19);
+ background_path="";
  reader_area_rect=body;release_page_images();
  // 通栏：插图在整屏宽的一条带里居中，正文栏的左右边距不再限制它。
  // Full bleed: the illustration centers in the panel-wide band and the body margins no longer

@@ -36,6 +36,14 @@
  * User report 2026-10-26: erased text stayed pale on background pages because the second trim
  * left only 15 white pushes. The to=15 row now carries the main water table's verified 24
  * pushes; every other transition and the phase count stay put, so turns keep their timing.
+ * 用户 2026-10-27：水波纹落到插图页时，剥掉深色对前导擦白的代价显形——旧字转图片灰留下
+ * 字形残影；改用整页表后旧字清了，但整页表保留原厂相等对，脏区膨胀带上的未变化像素被
+ * 黑白往返推出一圈细线。插图页现在用独立派生表：深色对保留擦白，相等对保持。
+ * User report 2026-10-27: on water-turn illustration pages the stripped dark-pair erase showed
+ * up as the previous page's glyph ghosts where text gave way to image gray. The page table fixed
+ * that but keeps the vendor equal pairs, so dilation's unchanged pixels took a white-black trip
+ * and drew a thin outline. Illustration pages now have their own derivative: dark pairs keep
+ * the erase, equal pairs hold.
  */
 #include "display_reader_waveform.h"
 #include "display_main_waveform.h"
@@ -53,6 +61,10 @@
 #define BG_TRIM_SAT_CUT 4
 #define BG_TRIM_WHITE_SAT_CUT 3
 #define BG_TRIM_HOLD 3
+// 插图页不裁擦除：原厂最长 19 相全留，旧字转图片灰才不会半路停住留下字形。
+// Illustration pages keep the vendor erase uncut (19 phases max), so an old glyph turning
+// into an image gray cannot stall halfway and leave its shape behind.
+#define BG_IMAGE_ERASE_MAX 19
 
 static uint8_t s_data[E0470_GL16_FRAMES][16][4];
 static const EpdWaveformPhases s_phases = {E0470_GL16_FRAMES, (const uint8_t*)s_data, NULL};
@@ -87,6 +99,17 @@ static const EpdWaveformMode s_bg_mode = {5, 1, s_bg_ranges};
 static const EpdWaveformMode* s_bg_modes[] = {&s_bg_mode};
 static EpdWaveform s_bg_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_bg_modes};
 static bool s_bg_ready;
+
+// 插图页派生表：与背景表同源，但深色对保留前导擦白；相数同样运行时定。
+// Illustration derivative: same base as the background table, but dark pairs keep their
+// leading erase; the phase count also lands at runtime.
+static uint8_t s_image_data[E0470_GL16_FRAMES][16][4];
+static EpdWaveformPhases s_image_phases;
+static const EpdWaveformPhases* s_image_ranges[1];
+static const EpdWaveformMode s_image_mode = {5, 1, s_image_ranges};
+static const EpdWaveformMode* s_image_modes[] = {&s_image_mode};
+static EpdWaveform s_image_waveform = {.num_modes=1, .num_temp_ranges=1, .mode_data=s_image_modes};
+static bool s_image_ready;
 
 // E4P 原厂 GL16 的白饱和不足：大片旧文字转白后会在数秒内回灰。主页水波纹已验证
 // 把全部剩余相用作同向擦白可以消除；这里只替换 to=15 一列，其余迁移和帧时序不动。
@@ -194,13 +217,13 @@ static const EpdWaveform* water_table(void) {
 
 // 表字节布局与裁表工具一致：data[frame][to][from/4]，每字节高位起 4 个 2bit 动作。
 // Same byte layout as the trim tool: data[frame][to][from/4], four 2-bit actions MSB-first.
-static int bg_get(int f, int to, int from) {
-    return (s_bg_data[f][to][from / 4] >> (6 - 2 * (from % 4))) & 3;
+static int bg_get(const uint8_t (*data)[16][4], int f, int to, int from) {
+    return (data[f][to][from / 4] >> (6 - 2 * (from % 4))) & 3;
 }
-static void bg_set(int f, int to, int from, int v) {
+static void bg_set(uint8_t (*data)[16][4], int f, int to, int from, int v) {
     const int shift = 6 - 2 * (from % 4);
-    s_bg_data[f][to][from / 4] =
-        (uint8_t)((s_bg_data[f][to][from / 4] & ~(3u << shift)) | ((unsigned)v << shift));
+    data[f][to][from / 4] =
+        (uint8_t)((data[f][to][from / 4] & ~(3u << shift)) | ((unsigned)v << shift));
 }
 
 // 原厂对深色对的骨架是「先冲白轨擦除、再压黑轨饱和、灰尾落位」——深底图片上的
@@ -214,18 +237,18 @@ static void bg_set(int f, int to, int from, int v) {
 // from dark pairs and keep only [black saturation + gray tail] right-aligned, turning the
 // move into a darkening pulse in the same direction the text lands, with no contrast
 // strobe; the vendor gray tail still ends on the exact target.
-static void bg_strip_dark_erase(int frames) {
+static void bg_strip_dark_erase(uint8_t (*data)[16][4], int frames) {
     uint8_t kept[E0470_GL16_FRAMES];
     for (int to = 0; to <= BG_DARK_MAX; ++to) {
         for (int from = 0; from <= BG_DARK_MAX; ++from) {
             if (from == to) continue;
             int a = 0;
-            while (a < frames && !bg_get(a, to, from)) ++a;
-            if (a >= frames || bg_get(a, to, from) != 2) continue;  // 无前导擦白则不动。/ Skip without a leading white run.
+            while (a < frames && !bg_get(data, a, to, from)) ++a;
+            if (a >= frames || bg_get(data, a, to, from) != 2) continue;  // 无前导擦白则不动。/ Skip without a leading white run.
             int z = frames;
-            while (z > a && !bg_get(z - 1, to, from)) --z;
+            while (z > a && !bg_get(data, z - 1, to, from)) --z;
             int e = a;
-            while (e < z && bg_get(e, to, from) == 2) ++e;
+            while (e < z && bg_get(data, e, to, from) == 2) ++e;
             int len = z - e, start = frames - BG_TRIM_HOLD - len;
             if (start < a) {  // 剥离后仍超窗则再截头，保住结尾保持相。/ Still too long: cut more head, keep the trailing holds.
                 start = a;
@@ -233,9 +256,9 @@ static void bg_strip_dark_erase(int frames) {
                 e = z - len;
                 if (len <= 0) continue;
             }
-            for (int i = 0; i < len; ++i) kept[i] = (uint8_t)bg_get(e + i, to, from);
-            for (int f = 0; f < frames; ++f) bg_set(f, to, from, 0);
-            for (int i = 0; i < len; ++i) bg_set(start + i, to, from, kept[i]);
+            for (int i = 0; i < len; ++i) kept[i] = (uint8_t)bg_get(data, e + i, to, from);
+            for (int f = 0; f < frames; ++f) bg_set(data, f, to, from, 0);
+            for (int i = 0; i < len; ++i) bg_set(data, start + i, to, from, kept[i]);
         }
     }
 }
@@ -247,7 +270,7 @@ static void bg_strip_dark_erase(int frames) {
 // three more, leaving 15 to erase text to white -- too few, so glyphs stay pale gray. The
 // main water table's to=15 row is the panel-verified 24 pushes; move it in right-aligned
 // with its interior holds, compressing them only when the shorter table cannot take it.
-static void bg_boost_white_column(int frames) {
+static void bg_boost_white_column(uint8_t (*data)[16][4], int frames) {
     const EpdWaveformPhases* water = e0470_waveform_phases(display_main_water_waveform(), MODE_GL16);
     if (!water || !water->luts || water->phases != E0470_GL16_FRAMES || water->phase_times) return;
     const int limit = frames - BG_TRIM_HOLD;
@@ -260,12 +283,12 @@ static void bg_boost_white_column(int frames) {
             last = f;
         }
         if (first < 0) continue;
-        for (int f = 0; f < frames; ++f) bg_set(f, 15, from, 0);
+        for (int f = 0; f < frames; ++f) bg_set(data, f, 15, from, 0);
         const int span = last - first + 1;
         if (span <= limit) {
             const int start = limit - span;
             for (int i = 0; i < span; ++i)
-                bg_set(start + i, 15, from, e0470_phase_action(water, first + i, 15, from));
+                bg_set(data, start + i, 15, from, e0470_phase_action(water, first + i, 15, from));
             continue;
         }
         // 只留非零动作并右对齐；仍放不下就丢掉最早的白推，保留最靠近落位的部分。
@@ -279,38 +302,67 @@ static void bg_boost_white_column(int frames) {
         }
         const int skip = n > limit ? n - limit : 0;
         const int start = limit - (n - skip);
-        for (int i = skip; i < n; ++i) bg_set(start + i - skip, 15, from, seq[i]);
+        for (int i = skip; i < n; ++i) bg_set(data, start + i - skip, 15, from, seq[i]);
     }
+}
+
+// 背景系派生表的共同前半：水波纹基底上再裁擦除与白/黑饱和，to=0 补 18 连推，
+// 相等对全部置保持（变白列随后补强）。擦除上限与是否剥深色对由调用方决定：
+// 纯文字页裁到 7 相并剥掉深色对擦白，插图页保留原厂擦除（≤19 相）。
+// Shared first half of the background derivatives: one more trim of erase and both
+// saturation runs on the water base, the 18-push to=0 boost, and every equal pair held
+// (the white column is boosted afterwards). The caller picks the erase cap and whether dark
+// pairs lose their erase: text pages cap at 7 and strip, illustration pages keep the vendor
+// erase (up to 19).
+static int build_bg_derivative(uint8_t (*data)[16][4], int erase_max, bool strip_dark_erase) {
+    const EpdWaveformPhases* base = e0470_waveform_phases(water_table(), MODE_GL16);
+    if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times) return 0;
+    const e0470_trim_t trim = {erase_max, BG_TRIM_SAT_CUT, BG_TRIM_WHITE_SAT_CUT, BG_TRIM_HOLD};
+    const int frames = e0470_waveform_trim(base, &trim, data);
+    if (!frames) return 0;
+    e0470_boost_black_column(data, frames);
+    if (strip_dark_erase) bg_strip_dark_erase(data, frames);
+    // 黑闪主体在相等对：原厂表里除纯白外的 (g,g) 都带完整擦白+推黑，差分又只驱动脏行脏列，
+    // 被脏区膨胀带上的未变化像素也会走一遍白黑往返。这里一律置保持。
+    // The bulk of the flashing lives on equal pairs: every vendor (g,g) except pure white
+    // carries a full white-then-black run, and a differential still drives the unchanged
+    // pixels that dirty-mask dilation brings along. Hold them all.
+    for (int g = 0; g < 15; ++g)
+        for (int f = 0; f < frames; ++f) bg_set(data, f, g, g, 0);
+    bg_boost_white_column(data, frames);
+    return frames;
 }
 
 const EpdWaveform* display_reader_bg_waveform(void) {
     if (s_bg_ready) return &s_bg_waveform;
-    const EpdWaveformPhases* base = e0470_waveform_phases(water_table(), MODE_GL16);
-    if (!base || !base->luts || base->phases != E0470_GL16_FRAMES || base->phase_times)
-        return water_table();
-    // 再裁一轮擦除与白/黑饱和；to=0 仍补 18 连推，文字黑度不减。
-    // A second trim of erase and both saturation runs; to=0 keeps the 18-push boost so
-    // text blackness does not regress.
-    const e0470_trim_t trim = {BG_TRIM_ERASE_MAX, BG_TRIM_SAT_CUT, BG_TRIM_WHITE_SAT_CUT, BG_TRIM_HOLD};
-    const int frames = e0470_waveform_trim(base, &trim, s_bg_data);
+    // 纯文字页：深色对也剥掉前导擦白，深底图形上的黑闪最短。
+    // Text pages: dark pairs lose their leading erase too, the shortest flash over dark art.
+    const int frames = build_bg_derivative(s_bg_data, BG_TRIM_ERASE_MAX, true);
     if (!frames) return water_table();
-    e0470_boost_black_column(s_bg_data, frames);
-    bg_strip_dark_erase(frames);
-    // 黑闪主体在相等对：原厂表里除纯白外的 (g,g) 都带完整擦白+推黑，而条带整带标脏，
-    // 深色图形的每个未变化像素都被推一遍白黑往返。差分路径从不驱动相等对，这里同样置保持。
-    // The bulk of the flashing lives on equal pairs: every vendor (g,g) except pure white
-    // carries a full white-then-black run, and the ripple dirties whole bands, so every
-    // unchanged pixel of a dark graphic is driven through that excursion. The ordinary
-    // differential never drives equal pairs; hold here the same way.
-    for (int g = 0; g < 15; ++g)
-        for (int f = 0; f < frames; ++f) bg_set(f, g, g, 0);
-    bg_boost_white_column(frames);
     s_bg_phases = (EpdWaveformPhases){.phases = frames, .luts = (const uint8_t*)s_bg_data, .phase_times = NULL};
     s_bg_ranges[0] = &s_bg_phases;
     s_bg_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
     s_bg_ready = true;
     ESP_LOGI("reader_wf", "background table frames=%d", frames);
     return &s_bg_waveform;
+}
+
+const EpdWaveform* display_reader_image_waveform(void) {
+    if (s_image_ready) return &s_image_waveform;
+    // 插图页：深色对保留原厂前导擦白，旧字（from=0）落到图片灰也从白轨落位，字形不留；
+    // 相等对仍保持，脏区膨胀带上的未变化像素不再被黑白往返推出一圈细线。
+    // Illustration pages: dark pairs keep the vendor leading erase, so old glyphs (from=0)
+    // settle on an image gray from the white rail and leave no shape; equal pairs still hold,
+    // so the pixels dilation drags along no longer take a white-black trip that draws a thin
+    // outline.
+    const int frames = build_bg_derivative(s_image_data, BG_IMAGE_ERASE_MAX, false);
+    if (!frames) return water_table();
+    s_image_phases = (EpdWaveformPhases){.phases = frames, .luts = (const uint8_t*)s_image_data, .phase_times = NULL};
+    s_image_ranges[0] = &s_image_phases;
+    s_image_waveform.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    s_image_ready = true;
+    ESP_LOGI("reader_wf", "image table frames=%d", frames);
+    return &s_image_waveform;
 }
 
 const EpdWaveform* display_reader_water_waveform(void) {

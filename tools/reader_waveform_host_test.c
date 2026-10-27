@@ -182,6 +182,37 @@ int main(void) {
     // 白列必须给尾部保持让位，不能把最后一相也拿去推白。
     // The white column must leave the trailing hold alone instead of pushing on the last phase.
     assert(e0470_phase_action(bgp, bgp->phases - 1, 15, 0) == 0);
+    // 插图页派生表：深色对保留前导擦白（旧字落到图片灰时从白轨落位，不留字形），相等对
+    // 仍置保持（脏区膨胀带上的未变化像素不会被黑白往返推出一圈细线）。背景派生表只保
+    // 前半段的裁剪，深色对的前导擦白为 0。
+    // Illustration derivative: dark pairs keep their leading erase, so old glyphs settle on an
+    // image gray from the white rail and leave no shape; equal pairs still hold, so the
+    // unchanged pixels dilation drags along never take a white-black trip that draws a thin
+    // outline. The background derivative keeps only the trim and drops the dark-pair erase.
+    const EpdWaveformPhases* img = e0470_waveform_phases(display_reader_image_waveform(), MODE_GL16);
+    assert(img && img->luts && !img->phase_times);
+    for (int g = 0; g < 15; ++g)
+        for (int f = 0; f < img->phases; ++f)
+            assert(e0470_phase_action(img, f, g, g) == 0);
+    for (int to = 0; to <= 7; ++to)
+        for (int from = 0; from <= 7; ++from) {
+            if (from == to) continue;
+            int ink_erase = 0, bg_erase = 0;
+            for (int f = 0; f < img->phases; ++f) {
+                const int action = e0470_phase_action(img, f, to, from);
+                if (action == 1 || action == 3) break;
+                ink_erase += action == 2;
+            }
+            for (int f = 0; f < bgp->phases; ++f) {
+                // 只数前导擦白；灰尾里的白推负责落位，不算擦除。
+                // Count the leading erase only; white pushes in the gray tail settle, they do not erase.
+                const int action = e0470_phase_action(bgp, f, to, from);
+                if (action == 1 || action == 3) break;
+                bg_erase += action == 2;
+            }
+            assert(ink_erase >= 11);
+            assert(bg_erase == 0);
+        }
     // 归一表：基底不随阅读背景切换。背景派生表相数更少，旧实现会原样返回它，归一化
     // 在开了阅读背景时静默失效。两张变体：纯文字页保留原厂非黑相等对，背景页清成保持。
     // Normalize table: the base never follows the reading-background switch. The background

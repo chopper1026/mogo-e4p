@@ -23,6 +23,11 @@
  * 用户 2026-10-22 修订：按键控制的动作列表新增「前光开关」，可绑给任一单键、长按、双击或上键。
  * User revision 2026-10-22: the key-control action list gains a frontlight toggle that can be bound
  * to any short key, the middle hold, the middle double press or the up key.
+ * 用户 2026-10-27 修订：阅读背景加水波纹时插图页残留上一页字影；插图页改用独立波形表（深色对
+ * 保留前导擦白、相等对保持），背景派生表只留给纯文字页。
+ * User revision 2026-10-27: with a reading background the ripple left the previous page's glyphs on
+ * illustration pages; those frames now take their own waveform (dark pairs keep the leading erase,
+ * equal pairs hold), and the background derivative serves text pages only.
  * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
@@ -3717,11 +3722,15 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
                 int left = band.x + (band.width - image->width) / 2;
                 int top = band.y + y + (height - image->height) / 2;
                 // 页首插图贴到阅读区顶端：正文上方那点呼吸空间只属于正文，不该把插图压下来。
-                // 用户设置的上边距则要保留，否则页首图会无视新留白。
+                // 用户设置的上边距则要保留，否则页首图会无视新留白。有阅读背景时插图跟着
+                // 正文栏走，那道固定留白也要算进去，否则图会越过背景内框的上边。
                 // A page-start illustration sits at the top of the reading area: the fixed inset
                 // above body text belongs to text and must not push the illustration down. A
-                // user-set top margin is honoured, otherwise the first image ignores it.
-                if (y == 0) top = reader_area().y + s_margin[MARGIN_TOP];
+                // user-set top margin is honoured, otherwise the first image ignores it. With a
+                // reading background the illustration follows the body column, so the fixed inset
+                // counts too or the image crosses the background's top edge.
+                if (y == 0 && !app_settings_book_background_path()[0])
+                    top = reader_area().y + s_margin[MARGIN_TOP];
 
                 for (int iy = 0; iy < image->height; ++iy)
                     for (int ix = 0; ix < image->width; ++ix)
@@ -4130,12 +4139,22 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     enum EpdDrawError err;
     bool image_gray_refresh = s_reader_image_refresh_pending && s_view == READING &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm;
+    // 含插图的一帧不用背景派生表：那张表把深色对的前导擦白剥掉了，旧字（from=0）落到图片灰
+    // 时从黑轨直接进灰尾，落点和纸灰起点不一致，差分会把上一页的字形留在图上。纯文字帧仍走
+    // 背景派生表。插图表还保留相等对保持，脏区膨胀带上的未变化像素不会被黑白往返推出一圈细线。
+    // Frames holding an illustration skip the background derivative: it strips the dark pairs'
+    // leading erase, so old glyphs (from=0) settle on an image gray from the black rail instead
+    // of the white rail, land differently from paper-origin pixels and keep their shape. Text
+    // frames keep the derivative. The illustration table also holds equal pairs, so the
+    // unchanged pixels that dilation brings along are not pushed through a white-black trip
+    // that draws a thin outline.
+    const EpdWaveform* frame_waveform = reader_image_slots(s_page)
+        ? display_reader_image_waveform() : display_reader_page_waveform();
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
         err = app_settings_reader_turn_effect() == 1
-            ? update_display_area_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16,
-                                            reader_area())
+            ? update_display_area_diff_with(ctx->hl, frame_waveform, MODE_GL16, reader_area())
             : update_display_area_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, reader_area());
         if (err == EPD_DRAW_SUCCESS && s_reader_footer_pending)
             err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect());
@@ -4145,7 +4164,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     else if (image_gray_refresh) err = app_settings_reader_turn_effect() == 1 &&
         redraw != APP_REDRAW_FULL && !s_reader_cleanup
-        ? update_display_mode_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16)
+        // 换章那一帧走整屏差分，表的选择与正文带差分一致。
+        // The chapter-change frame diffs the whole screen and takes the same table.
+        ? update_display_mode_diff_with(ctx->hl, frame_waveform, MODE_GL16)
         : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
     else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
@@ -4225,7 +4246,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     }
     else err = s_view == READING
-        ? update_display_mode_diff_with(ctx->hl, display_reader_page_waveform(), APP_PAGE_REFRESH_MODE)
+        ? update_display_mode_diff_with(ctx->hl, frame_waveform, APP_PAGE_REFRESH_MODE)
         : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
     reader_prefetch_end(prep);
@@ -6726,10 +6747,16 @@ static void on_enter(app_ctx_t* ctx) {
     while (ble_pt_pop_raw(&old_raw)) {}
     book_layout_set_spacing(app_settings_book_line_spacing(), app_settings_book_paragraph_spacing());
     book_layout_set_images_visible(!app_settings_reader_hide_images());
-    // 插图通栏：整屏宽是面板常量，进入阅读页说一次，之后每次重排都沿用同一条带。
-    // Full-bleed illustrations: the panel width is a constant, so publish it once per entry and
-    // every later re-layout reuses the same band.
-    book_layout_set_image_bleed_width(UI_LOCK_WIDTH);
+    // 插图通栏：无背景时整屏宽是面板常量，进入阅读页说一次，之后每次重排都沿用同一条带。
+    // 有阅读背景时不开通栏：背景内框靠用户调边距对齐，插图必须跟着正文栏，否则会压到框上。
+    // 背景只能在设置页开关，离开阅读页会 free_book，回页重开时本句按新状态重新发布。
+    // Full-bleed illustrations: without a background the panel width is a constant, so publish
+    // it once per entry and every later re-layout reuses the same band. With a reading
+    // background there is no bleed: its inner frame is aligned by the user's margins, so
+    // illustrations must stay inside the body column instead of crossing that frame. The
+    // background only changes on the settings page, and leaving this page frees the book, so
+    // re-entry republishes from the current state.
+    book_layout_set_image_bleed_width(app_settings_book_background_path()[0] ? 0 : UI_LOCK_WIDTH);
     // 竖排是阅读设置里的手动开关，进页时同步给排版；关着就是原来的横排。
     // Vertical setting is a manual reader switch, published to the layout on entry; off is the
     // original horizontal setting.
