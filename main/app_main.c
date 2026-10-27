@@ -18,6 +18,7 @@
 #include <time.h>
 
 #include "app_loop.h"
+#include "ui_builtin_image.h"
 #include "app_content_open.h"
 #include "boot_state.h"
 #include "lock_screen.h"
@@ -74,11 +75,6 @@ static void restore_time_from_pmu(void) {
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from PMU");
 }
 
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
-extern const uint8_t lock_4bpp_bin_end[] asm("_binary_lock_4bpp_bin_end");
-extern const uint8_t loading_4bpp_bin_start[] asm("_binary_loading_4bpp_bin_start");
-extern const uint8_t loading_4bpp_bin_end[] asm("_binary_loading_4bpp_bin_end");
-
 // 已标定则开机读一次喂给 epdiy。未标定先用板级默认出开机图，随后拦住进标定页。
 // Load VCOM once when set. Otherwise keep the board default for the splash,
 // then gate into the setup page.
@@ -95,12 +91,10 @@ static bool resolve_vcom_at_boot(void) {
     return false;
 }
 
-// 开机图和锁屏图是预先转好的 4bpp 全屏位图，尺寸对不上说明资源和面板不匹配。
-// Splash and lock images are pre-baked 4bpp full-frames. A size mismatch
-// means the assets do not match the panel.
+// 压缩资源声明的原始像素长度必须匹配面板。/ The compressed resources' declared raw pixel lengths must match the panel.
 static bool images_match_panel(void) {
-    size_t lock_size = (size_t)(lock_4bpp_bin_end - lock_4bpp_bin_start);
-    size_t loading_size = (size_t)(loading_4bpp_bin_end - loading_4bpp_bin_start);
+    size_t lock_size = ui_builtin_image_size(UI_BUILTIN_IMAGE_LOCK);
+    size_t loading_size = ui_builtin_image_size(UI_BUILTIN_IMAGE_LOADING);
     size_t expected = (size_t)epd_width() * epd_height() / 2;
     if (lock_size == expected && loading_size == expected) return true;
     ESP_LOGE(
@@ -223,7 +217,7 @@ void app_main(void) {
         if(!resuming)read_pico_i2c_census_take();
         epd_clear();
         epd_hl_set_all_white(&hl);
-        ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
+        (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOADING);
         update_display_from_white(&hl);
     }
     rp_boot_mark("splash");

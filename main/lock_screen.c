@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "ui_pinpad.h"
 #include "ui_kit.h"
+#include "ui_builtin_image.h"
 #include "sleep.h"
 #include "boot_state.h"
 #include "display.h"
@@ -30,7 +31,6 @@
 #define LOCK_ART_PATH LOCK_SCREEN_CACHE_PARENT "/locks/pin-background.bin"
 #define ART_MAGIC UINT32_C(0x50414432)
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
     if(app_settings_lock_style()!=1 && app_settings_lock_style()!=3)return 0;
@@ -70,7 +70,7 @@ bool lock_screen_save(const uint8_t *frame){
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
     if(original)memcpy(fb,original,FRAME_BYTES);
-    else if(!lock_screen_restore(fb)){memset(fb,255,FRAME_BYTES);ui_draw_full_image(fb,lock_4bpp_bin_start);}
+    else if(!lock_screen_restore(fb)){memset(fb,255,FRAME_BYTES);(void)ui_builtin_image_draw(fb,UI_BUILTIN_IMAGE_LOCK);}
 }
 static void present(EpdiyHighlevelState *hl,EpdRect area){
     epd_poweron();enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);

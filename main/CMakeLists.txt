@@ -44,6 +44,19 @@ set(main_requires
 if(IDF_TARGET STREQUAL "esp32s31" OR IDF_TARGET STREQUAL "esp32p4")
     list(APPEND main_requires esp_driver_jpeg)
 endif()
+# 原始位图保留在源码中，只把可复现的压缩资源嵌入 app。/ Retain source bitmaps and embed only reproducible compressed resources in the app.
+idf_build_get_property(image_python PYTHON)
+set(builtin_image_dir "${CMAKE_CURRENT_BINARY_DIR}/builtin_images")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/assets/lock_4bpp.bin"
+    "${CMAKE_CURRENT_LIST_DIR}/assets/loading_4bpp.bin"
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/compress_builtin_images.py")
+execute_process(COMMAND "${image_python}" "${CMAKE_CURRENT_LIST_DIR}/../tools/compress_builtin_images.py"
+    --source "${CMAKE_CURRENT_LIST_DIR}/assets" --output "${builtin_image_dir}"
+    RESULT_VARIABLE builtin_image_result)
+if(NOT builtin_image_result EQUAL 0)
+    message(FATAL_ERROR "Built-in image compression failed")
+endif()
 idf_component_register(
     SRCS
         "app_main.c"
@@ -70,6 +83,7 @@ idf_component_register(
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"
+        "ui/ui_builtin_image.c"
         "ui/ui_text_edit.c"
         "ui/ui_text_input.c"
         "ui/ui_ime.c"
@@ -130,8 +144,8 @@ idf_component_register(
     REQUIRES ${main_requires}
     INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
     EMBED_FILES
-        "assets/lock_4bpp.bin"
-        "assets/loading_4bpp.bin"
+        "${builtin_image_dir}/lock_4bpp.kbz"
+        "${builtin_image_dir}/loading_4bpp.kbz"
         "assets/builtin.ttf"
         "assets/ui-hanzi.bin"
         "assets/display-test.png"

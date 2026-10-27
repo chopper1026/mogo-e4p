@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.0 · 本地测试 / Local testing · 2026-10-27
+
+- 开机图与默认锁屏图改为无损压缩存储，逐行解压绘制，保留原有像素及旋转显示，减少 app 占用；本地测试沿用当前版本，未发布。
+  Splash and fallback lock art use lossless embedded compression and row-by-row decoding, preserving pixels and rotation while reducing app usage. Local testing retains the current version; not published.
+
 ## v1.0.0 / 2026-10-27
 
 正式发布版。品牌定名 kiikoread；汇总 rc98 以来全部本地改动，含电量显示稳定化与中段 OCV 锚点回充校准、WiFi 传输对齐原厂提速、快捷栏前光重排与滑杆专用波形、触摸震动、阅读背景与插图边距、EPUB 脚注展开、彻底关机恢复等；逐条细节见下方 rc98–rc101 本地条目。

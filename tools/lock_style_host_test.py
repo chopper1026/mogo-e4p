@@ -40,7 +40,7 @@ typedef void *sc7a20h_handle_t;typedef void *cst836u_handle_t;
 typedef int app_wake_source_t;
 typedef int esp_err_t;
 static const char *esp_err_to_name(esp_err_t err){(void)err;return "stub";}
-static const uint8_t lock_4bpp_bin_start[1]={0};
+#define UI_BUILTIN_IMAGE_LOCK 0
 static uint8_t pixels[FRAME_BYTES],panel[FRAME_BYTES],style,current_background=0x32;
 static bool frame_ready, s_lock_feedback_visible, feedback_seen, final_ok=true;
 static unsigned full_presents, entry_clears;
@@ -63,7 +63,7 @@ static bool book_lock_collage_draw(uint8_t *fb){return draw(2,fb);}
 static bool book_lock_collage_prepare(uint8_t *fb){return draw(2,fb);}
 static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){(void)h;++full_presents;if(feedback_seen)assert(!s_lock_feedback_visible&&panel[0]==255&&panel[1]==0);else assert(style==3&&draw_ok&&panel[0]==current_background);if(!final_ok){panel[0]=0x77;return EPD_DRAW_FAULT;}memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
 static void book_lock_collage_cache_commit(const uint8_t *fb){assert(style==2&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
-static void ui_draw_full_image(uint8_t *fb,const uint8_t *art){assert(art==lock_4bpp_bin_start&&panel[0]==(feedback_seen?255:0x32));++fallback;memset(fb,0xfe,FRAME_BYTES);frame_ready=true;}
+static bool ui_builtin_image_draw(uint8_t *fb,int art){assert(art==UI_BUILTIN_IMAGE_LOCK&&panel[0]==(feedback_seen?255:0x32));++fallback;memset(fb,0xfe,FRAME_BYTES);frame_ready=true;return true;}
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return pixels;}
 static void epd_poweron(void){}
 static void epd_poweroff(void){}

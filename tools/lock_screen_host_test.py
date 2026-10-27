@@ -47,7 +47,7 @@ typedef struct {int unused;} EpdiyHighlevelState;
 typedef int ble_pt_event_t;typedef int ble_pt_raw_t;
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static const int xs[3]={158,342,526},ys[4]={544,703,862,1021},E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1;
-const uint8_t lock_4bpp_bin_start[1]={0};
+#define UI_BUILTIN_IMAGE_LOCK 0
 static uint8_t framebuffer[FRAME_BYTES];
 static uint8_t selected_style;
 static const char *wallpaper="";
@@ -71,7 +71,7 @@ static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return fr
 enum EpdRotation epd_get_rotation(void){return 1;}
 static void epd_poweron(void){}
 static void epd_poweroff(void){}
-static void ui_draw_full_image(uint8_t *fb,const uint8_t *bytes){(void)bytes;memset(fb,224,FRAME_BYTES);}
+static bool ui_builtin_image_draw(uint8_t *fb,int image){assert(image==UI_BUILTIN_IMAGE_LOCK);memset(fb,224,FRAME_BYTES);return true;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void app_lock_wait_key_idle(int ms){(void)ms;}

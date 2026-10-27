@@ -28,6 +28,7 @@
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
 #include "ui_avatar.h"
+#include "ui_builtin_image.h"
 #include "book_cover_jobs.h"
 
 #include "sleep.h"
@@ -87,8 +88,6 @@ static bool s_lock_feedback_visible;
 #define APP_LOCK_SLEEP_ERROR_LIMIT 5
 // PMU 确认后仍未掉 EN 时恢复调用方，禁止无限等待。/ Restore the caller if EN stays high after acknowledgement instead of waiting forever.
 #define HOST_EN_DROP_WAIT_MS 5000
-
-extern const uint8_t lock_4bpp_bin_start[] asm("_binary_lock_4bpp_bin_start");
 
 void app_lock_feedback(EpdiyHighlevelState *hl) {
     s_lock_feedback_visible = false;
@@ -532,7 +531,7 @@ void enter_lock_and_sleep(
           lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
         epd_hl_set_all_white(hl);
-        ui_draw_full_image(framebuffer, lock_4bpp_bin_start);
+        (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOCK);
     }
     const int64_t lock_t_art = esp_timer_get_time();
     int64_t lock_t_clear = lock_t_art, lock_t_panel = lock_t_art;
@@ -636,7 +635,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
             app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
-        if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); ui_draw_full_image(fb, lock_4bpp_bin_start); }
+        if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); (void)ui_builtin_image_draw(fb, UI_BUILTIN_IMAGE_LOCK); }
     }
     lock_screen_authenticate(hl, touch, acc, true);
     app_font_end_lock(&saved);
