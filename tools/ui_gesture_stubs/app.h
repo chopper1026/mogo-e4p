@@ -12,5 +12,5 @@ typedef struct {
     void *hl;
     int64_t now_ms;
     const cst836u_touch_t *touch;
-    bool pressed, released, consumed, continuous_ready;
+    bool pressed, released, consumed;
 } app_ctx_t;

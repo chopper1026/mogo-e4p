@@ -8,6 +8,11 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## 本移植仓库 / This port
+
+当前硬件为 Metalio E-INK4 Plus（ESP32-S31）；构建及硬件入口以根目录 [README.md](README.md) 为准。下文 S3 / CW32 / SY7636A 内容是上游背景；不要据此将产品目标切回 S3。现用 `read_pico_*`、`cst836u_*`、`fca9555_*` 名称包含新板兼容接口，不能仅凭旧芯片名删除。
+This port targets Metalio E-INK4 Plus (ESP32-S31); use the root [README.md](README.md) for its build and hardware entry points. S3 / CW32 / SY7636A details below describe upstream history, not the product target. Existing `read_pico_*`, `cst836u_*` and `fca9555_*` names include active compatibility interfaces for this board; a legacy chip name does not imply dead code.
+
 ## Git 提交 / Git commits
 
 今后的提交必须遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)：标题使用 `分类（范围）：中文摘要`，正文按分类顺序从 `1.` 连续编号，每项只写一件事，最后如实说明验证结果。标题、分类和正文均使用中文，技术标识保留原文；agent 提交末尾注明 `代理：<名称>`。历史提交不改写。
@@ -62,7 +67,6 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `components/read_pico_search/` | 离线拼音/首字母/英文书名匹配，设备和网页共用；字表由工具生成。/ Shared offline pinyin, initials and English matching with a generated table. |
 | `components/read_pico_pmu/` | CW32L010 协议主机端。线格式在 `read_pico_pmu_protocol.h`。/ PMU host. |
 | `components/epdiy/` | 上游裁剪 fork（LCD 路径）。改动清单在其 LICENSE。不要为注释去改它。/ Trimmed upstream fork. Leave it alone for comment work. |
-| `components/continuous_du/` | 连续 DU，触摸跟手。/ Continuous DU for finger tracking. |
 | `components/cst836u/` `sc7a20h/` `fca9555/` `sy7636a/` | 芯片驱动。/ Chip drivers. |
 | `components/e0470_epaper_waveform/` | 面板波形与裁剪。`waveforms/*.h` 是数据表。/ Panel waveforms. |
 | `components/pwm_audio/` | PWM 音频（蜂鸣器底层之一）。/ PWM audio helper. |
@@ -78,34 +82,23 @@ Deliver implementation, reproducible tests, feature documentation and necessary 
 计划、检查点、过程审查、验收结果和调试日志在 `docs/local/` 或被忽略的构建目录内部闭环，不加入提交。长期有效的行为与限制整理进对应功能文档，不要求读者查内部计划。只有需要交接未完功能或责任时才按 `docs/HANDOFF.md` 提供最小必要摘要；本机账本仍不入库。
 Keep plans, checkpoints, review records, acceptance results and debug logs in ignored `docs/local/` or build directories. Put lasting behavior and limits in feature documentation without dependencies on internal plans. Use `docs/HANDOFF.md` for the minimal necessary handoff of unfinished work or responsibility; the local ledger remains untracked.
 
-### demo 页 / Demo pages
+### 产品页 / Product pages
 
-每个文件只导出 `app_desc_t`。顺序与 `app_registry.c` 一致。
+页面入口以 `main/CMakeLists.txt` 和 `app_registry.c` 为准；旧板演示页已移除。每页导出 `app_desc_t`，页面之间不直接依赖。
+Use `main/CMakeLists.txt` and `app_registry.c` as page entry points; legacy board demos have been removed. Each page exports an `app_desc_t` and does not depend directly on other pages.
 
-One file, one `app_desc_t`. Order matches `app_registry.c`.
+| 文件 / File | 职责 / Role |
+| --- | --- |
+| `app_dashboard.c` | 首页组件、时钟与最近阅读。/ Home widgets, clocks and recent books. |
+| `app_book.c` | 书架与 TXT / EPUB 阅读。/ Shelf and TXT / EPUB reading. |
+| `app_files.c` | 文件浏览与传输入口。/ Files and transfer entry points. |
+| `app_device_settings.c` | 设备设置、蓝牙翻页与维护。/ Settings, Bluetooth page-turners and maintenance. |
+| `app_image.c` | 内置灰阶图与卡上 JPG / PNG。/ Built-in gray chart and SD JPG / PNG. |
+| `app_transfer.c` | 热点 / 已有 WiFi 传书与配网，离页停止。/ AP / STA transfer and provisioning; stops on exit. |
+| `app_boot_recovery.c` | 启动恢复；不在根导航中。/ Boot recovery, outside root navigation. |
 
-| 文件 / File | 演示 / Demo | 依赖 / Depends on |
-| --- | --- | --- |
-| `app_home.c` | 概览：I2C 普查、识别码、电池、构建时间。/ Overview. | `read_pico`, `read_pico_pmu` |
-| `app_refresh.c` | GC16 / DU / 灰阶梯子与耗时。/ Refresh matrix. | `epdiy`, `e0470_epaper_waveform` |
-| `app_reading.c` | 内置正文翻页。/ Reading demo. | `ttf_font` |
-| `app_touch.c` | 两点跟手连续 DU、深睡唤醒。/ Touch + continuous DU. | `cst836u`, `continuous_du` |
-| `app_axis.c` | 读数页 Live/Tap/Orient 与诊断页 Setup/Event/FIFO/Test。/ IMU pages. | `sc7a20h` |
-| `app_power.c` | 电池与 SY7636A 只读。/ Battery + rails. | `read_pico_pmu`, `sy7636a` |
-| `app_pmu.c` | CW32 协议五视图。/ Protocol views. | `read_pico_pmu` |
-| `app_key.c` | 电源键原始事件。/ Power-key events. | `read_pico_pmu` |
-| `app_sleep.c` | 浅睡 / 深睡 / 关机。/ Sleep modes. | `sleep`, `read_pico_pmu`, `sc7a20h` |
-| `app_sd.c` | TF 卡与蜂鸣器。/ Card + buzzer. | `read_pico_sd`, `read_pico_buzzer` |
-| `app_font_pick.c` | 卡上 TTF 列表与字重。/ Font picker. | `ttf_font` |
-| `app_ioe.c` | FCA9555 Port-0。/ Expander pins. | `fca9555` |
-| `app_selftest.c` | 设备功能自检入口。/ Device self-test UI. | `pmu_selftest` |
-| `app_book.c` | TXT / EPUB 书架、目录、字号与逐书进度；阅读背景只绘制，选择入口在设置页。/ TXT / EPUB shelf, TOC, size and progress; backgrounds are painted here but picked in Settings. | `book_*`, `ttf_font` |
-| `app_image.c` | 内置灰阶图与 TF 卡 JPG/PNG 图片对比。/ Built-in gray chart and SD JPG/PNG image comparison. | `book_cover`, `read_pico_sd` |
-| `app_transfer.c` | 设备热点/已有 WiFi 传 TXT/EPUB，触屏/网页配网与热点二维码，离页停止；停止按钮返回进入前的位置。/ AP/STA upload with touchscreen/web provisioning and hotspot QR; stops and returns to the entry origin. | `read_pico_transfer`, `book_store` |
-
-加页：在 `main/apps/` 新建文件，实现需要的回调，把它加入 `app_registry.c` 的 `s_apps[]`。锁屏前状态保存通过 `on_before_lock` 回调接入主循环。
-
-To add a page: create it in `main/apps/`, implement its callbacks, and append it to `s_apps[]`. Use `on_before_lock` to flush state before lock rendering.
+出厂 VCOM 与自检流程仍由 `main/factory/` 和启动入口调用。新增页面需同时加入构建清单和注册表；锁屏前保存状态使用 `on_before_lock`。
+Boot and `main/factory/` retain VCOM and self-test flows. Add new pages to both the build list and registry; use `on_before_lock` to save state before locking.
 
 ## `app_desc_t` 契约 / Contract
 

@@ -51,7 +51,6 @@
 #include "boot_state.h"
 #include "ble_page_turner.h"
 #include "ota_online.h"
-#include "continuous_du.h"
 #include "display.h"
 #include "display_normalize.h"
 #include "e0470_epaper_waveform.h"
@@ -1046,7 +1045,6 @@ void app_loop_run(const app_loop_config_t* config) {
         .acc = config->acc,
         .tp = config->tp,
         .sensor_ready = config->sensor_ready,
-        .continuous_ready = continuous_du_init(),
         .touch = &latest,
         .touch_info = &touch_info,
     };

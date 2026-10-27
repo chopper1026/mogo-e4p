@@ -1,5 +1,5 @@
 set(read_pico_requires epdiy e0470_epaper_waveform sc7a20h cst836u read_pico_pmu fatfs sy7636a fca9555 frontlight
-                   esp_driver_gpio esp_driver_i2c esp_driver_ledc esp_driver_rmt esp_driver_sdmmc pwm_audio)
+                   esp_driver_gpio esp_driver_i2c esp_driver_ledc esp_driver_rmt esp_driver_sdmmc)
 
 set(read_pico_sources
     "read_pico_init.c"
@@ -10,9 +10,10 @@ set(read_pico_sources
 
 # S31 板没有蜂鸣器，用静默 stub；同时避免 RMT 与 EPD CKV 抢通道。
 # The S31 board has no buzzer, so use a silent stub and avoid RMT contention with EPD CKV.
-if(CONFIG_IDF_TARGET_ESP32S31)
+if(IDF_TARGET STREQUAL "esp32s31")
     list(APPEND read_pico_sources "read_pico_buzzer_stub.c")
 else()
+    list(APPEND read_pico_requires pwm_audio)
     list(APPEND read_pico_sources
         "read_pico_buzzer.c"
         "buzzer_score.c"

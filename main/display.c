@@ -29,7 +29,6 @@
 #include "display.h"
 #include "read_pico_board.h"
 #include "ota_online.h"
-#include "continuous_du.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -891,7 +890,6 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if (!hl || !hl->front_fb || !hl->back_fb) return EPD_DRAW_INVALID_CROP;
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();
-    continuous_du_reset();
     s_full_refresh_requested = false;
     display_main_transition_cancel();
     // 先真掉一次电：VCOM/VGH/VGL 重新建立，停在半路的像素失去保持电压。

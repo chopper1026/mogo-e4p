@@ -56,3 +56,11 @@ ESP32-S31 在 IDF 6.1 中仍是 preview，`idf.py` 必须带 `--preview`。
 - `components/cst836u/cst836u.c`：S31 下走 FT6336U，保留 CST836U API。
 - `components/read_pico_pmu/read_pico_pmu_metalio.c`：BQ27220/CX25601N/PCF8563/TCA 电源键兼容层。
 - `main/epd_test.c`：M1 面板测试图案。
+
+## 代码边界 / Code boundaries
+
+产品页面由 `main/CMakeLists.txt` 和 `main/app/app_registry.c` 定义。上游未参与产品构建的硬件演示页、内置演示正文及其 continuous_du 组件已移除；当前阅读翻页、水波纹、快捷栏、蓝牙、前光、震动、存储、升级与出厂流程保留。S31 使用静默蜂鸣器接口，不依赖 PWM 音频组件。
+Product pages are defined by `main/CMakeLists.txt` and `main/app/app_registry.c`. Uncompiled upstream hardware demos, their sample text and continuous_du component have been removed. Reader turns, ripple transitions, quick controls, Bluetooth, frontlight, haptics, storage, updates and factory flows remain. S31 keeps a silent buzzer interface without the PWM audio dependency.
+
+旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`read_pico_pmu_*` 包装电量、充电、RTC 与电源键。S3 后端仍供 `sdkconfig.ci` 编译验证；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
+Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `read_pico_pmu_*` wraps battery, charging, RTC and power keys. The S3 backend still supports compile checks with `sdkconfig.ci`; prune old-board implementations along verified dependency boundaries.

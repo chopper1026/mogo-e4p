@@ -18,7 +18,6 @@ set(main_requires
     bt
     # 蓝牙翻页器本体。/ The page-turner itself.
     ble_page_turner
-    continuous_du
     e0470_epaper_waveform
     e0470_page_turn
     read_pico_pmu
@@ -135,7 +134,6 @@ idf_component_register(
         "assets/loading_4bpp.bin"
         "assets/builtin.ttf"
         "assets/ui-hanzi.bin"
-        "assets/reading.md"
         "assets/display-test.png"
 )
 

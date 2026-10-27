@@ -28,7 +28,6 @@ extern int E0470_FOLLOW_WAVEFORM;
 extern int E0470_CAPSULE_DRAG_WAVEFORM;
 extern int E0470_CAPSULE_WHITE_WAVEFORM;
 extern int E0470_CAPSULE_GRAY_WAVEFORM;
-bool continuous_du_init(void);
 int64_t esp_timer_get_time(void);
 void vTaskDelay(int);
 #define pdMS_TO_TICKS(x) (x)

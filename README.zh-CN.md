@@ -1,5 +1,9 @@
 # kiikoread
 
+> Metalio E-INK4 Plus（ESP32-S31）移植版的硬件、构建与代码边界见根目录 [README.md](README.md)。旧演示页、示例正文和 continuous_du 已移除；现有产品功能保留。本文其余旧板说明仅作上游背景。
+> For this Metalio E-INK4 Plus (ESP32-S31) port, use the root [README.md](README.md) for hardware, builds and code boundaries. Legacy demos, sample text and continuous_du have been removed; current product features remain. The remaining old-board details are upstream background.
+
+
 > **使用与授权：** 今后明确标注适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)的新增原创内容，允许个人学习，未经单独书面授权不得商用。**此政策不重新许可 rc93 及以前的代码或固件，不撤销既有 Apache-2.0 授权，也不覆盖第三方许可。** 完整范围见 [LICENSE](LICENSE)。
 
 项目对外名称统一为 **kiikoread**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 kiikoread。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。

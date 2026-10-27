@@ -1,5 +1,9 @@
 # 小纸 Pico 固件 · 新开发者上手指南 / Read Pico Firmware Onboarding
 
+> 本仓库已移植到 Metalio E-INK4 Plus（ESP32-S31），硬件与构建请先读根目录 [README.md](../README.md)。下文旧板专属参数仅作上游背景；旧演示页和仅供触摸演示的 continuous_du 已移除，当前页面见 §7。
+> This port targets Metalio E-INK4 Plus (ESP32-S31). Read the root [README.md](../README.md) for hardware and builds. Old-board parameters below are upstream background; legacy demo pages and their continuous_du component have been removed. Current pages are listed in §7.
+
+
 本文面向**第一次接触本仓库的人类开发者和 AI agent**。目标：读完后能搭好环境、编译烧写、看懂运行时结构、知道哪些地方不能碰、并且能在不同 agent / 不同会话之间无损地接手任务。
 
 This document is for **first-time human developers and AI agents**. After reading you should be able to set up, build, flash, understand the runtime, know the no-go zones, and hand a task over between agents without losing state.
@@ -212,7 +216,7 @@ idf.py size
 | 改菜单顺序 | [main/app/app_registry.c](../main/app/app_registry.c) |
 | 改刷新档位（GL16/GC16/DU、多少次软刷后压一次 GC16） | [main/app/app_config.h](../main/app/app_config.h) |
 | 改推屏、pclk、轨道空闲断电 | [main/display.c](../main/display.c) |
-| 改锁屏 / 浅睡 / 深睡 / 拿起唤醒 | [main/sleep.c](../main/sleep.c)、[main/apps/app_sleep.c](../main/apps/app_sleep.c) |
+| 改锁屏 / 浅睡 / 深睡 / 拿起唤醒 | [main/sleep.c](../main/sleep.c)、[main/apps/app_device_settings.c](../main/apps/app_device_settings.c) |
 | 加一个 NVS 设置项 | [main/settings.c](../main/settings.c)（命名空间 `read_pico`） |
 | 改排版常量、公共绘制原语 | [main/ui/ui_kit.h](../main/ui/ui_kit.h) / `ui_kit.c` |
 | 改两层菜单 / 三键区几何 | [main/ui/ui_menu.h](../main/ui/ui_menu.h) / `ui_menu.c` |
@@ -328,34 +332,21 @@ flowchart TD
 
 ---
 
-## 7. 演示页与冻结决策速查 / Demo pages & Frozen decisions
+## 7. 产品页面 / Product pages
 
-菜单顺序 = [main/app/app_registry.c](../main/app/app_registry.c) `s_apps[]`。每页文件头都有 `冻结 / Frozen:` 段，**改行为前必须先改那段并说明决策为何变化**。摘要（以文件头为准）：
+页面清单见 [AGENTS.md](../AGENTS.md#产品页--product-pages)，构建入口为 [main/CMakeLists.txt](../main/CMakeLists.txt)，根导航顺序为 [app_registry.c](../main/app/app_registry.c) 的 `s_apps[]`。传书与启动恢复通过独立入口打开。
+See [AGENTS.md](../AGENTS.md#产品页--product-pages) for page ownership, [main/CMakeLists.txt](../main/CMakeLists.txt) for compiled sources and `s_apps[]` in [app_registry.c](../main/app/app_registry.c) for root navigation order. Transfer and boot recovery use separate entry points.
 
-| 页 | 文件 | 标志 | Frozen 摘要 |
-| --- | --- | --- | --- |
-| 概览 | `app_home.c` | enter_full | — |
-| 墨水屏刷新 | `app_refresh.c` | — | GC16 / DU / 灰阶梯子与耗时矩阵 |
-| 阅读测试 | `app_reading.c` | enter_full | 后台排版任务跑在 core 1、结果放 PSRAM |
-| 触摸 | `app_touch.c` | — | 连续 DU 跟手；TAP_SLEEP 10 s 进深睡演示 |
-| 加速度 / 诊断 | `app_axis.c`（两个 `app_desc_t` 共享 `.user`） | — | 默认不跟手，点"监听"才 DU；敲击 200 Hz；FIFO 默认存满即停 |
-| 电源与电池 | `app_power.c` | — | 不关轨；**不写 SY7636A 任何寄存器**；只读条 |
-| 电源管理协议 | `app_pmu.c` | — | 四视图 信息/事件/配置/动作；Off/Reset/DL 走主机路径；不做出厂复位/硬复位/软睡；VCOM 只读 |
-| 电源按键 | `app_key.c` | holds_pmu, enter_full | 本页独占 PMU 事件，短按不锁屏；进页 GL16 后只刷变化块 |
-| 睡眠与唤醒 | `app_sleep.c` | enter_full | 底栏走 `ui_bar_rect`；拿起唤醒默认关；浅睡 350 mg / 3 拍 |
-| TF 卡与蜂鸣器 | `app_sd.c` | — | 无字体走 `ui_draw_no_font_page`；格式化两次确认（**会清空卡**）；探测 A/B/1b/4k |
-| 字体 | `app_font_pick.c` | enter_full | 列表行高 `UI_BTN_H`；行数由剩余高度解出；换字体/字重整屏 GC16 |
-| 扩展口 | `app_ioe.c` | — | CFG/INV 只读；不拨 SY_EN / VCOM_EN / MODE / XOE；只允许脉冲 TP_RST |
-| 设备功能自检 | `app_selftest.c` | holds_pmu | 底栏只留探测/清空；不等闹钟、不目视灯、不断电续跑 |
-| （出厂）VCOM 标定 | `factory/vcom_setup.c` | 非菜单页 | 副标题不写范围；数字带只用 FOLLOW DU；三位合法自动进确认；不写 ESP NVS |
+文件头的 `冻结 / Frozen:` 仍是行为契约。`factory/vcom_setup.c` 和 `factory/pmu_selftest.c` 保留启动标定、自检所需流程；不要将它们与未参与构建的旧演示页混淆。
+File-header `Frozen` blocks remain behavior contracts. `factory/vcom_setup.c` and `factory/pmu_selftest.c` retain startup calibration and self-test flows; they are separate from the removed, uncompiled demos.
 
 ---
 
 ## 8. 常见任务操作手册 / Playbooks
 
-### 8.1 加一个演示页
+### 8.1 加一个产品页 / Add a product page
 
-1. 复制一个结构相近的页（读数类抄 `app_power.c`，交互类抄 `app_sd.c`）到 `main/apps/app_xxx.c`。
+1. 参考 `main/apps/app_image.c` 的页面结构，在 `main/apps/app_xxx.c` 实现新页面。/ Use `main/apps/app_image.c` as a structural reference for a new page.
 2. 写文件头（SPDX + 中文/English 职责 + 冻结/Frozen），只实现需要的回调，末尾导出一个 `const app_desc_t app_xxx`。
 3. `main/CMakeLists.txt` `SRCS` 加文件；`main/app/app_registry.c` `s_apps[]` 加条目（位置即菜单顺序）。
 4. 若用了新组件，`REQUIRES` 加上。

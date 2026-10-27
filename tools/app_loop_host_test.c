@@ -296,7 +296,6 @@ int cst836u_get_info(void* h,cst836u_info_t* i) {(void)h;(void)i;return 0;}
 const char* esp_err_to_name(int e) {(void)e;return "test";}
 int64_t esp_timer_get_time(void) {return time_offset+(int64_t)(step+1)*time_step;}
 void vTaskDelay(int ms) {(void)ms;if (++step>=sample_count) longjmp(done,1);}
-bool continuous_du_init(void) {return true;}
 void display_request_full_refresh(void) {++wake_clean_requests;}
 void guard_draw_result(EpdiyHighlevelState* h,enum EpdDrawError e) {(void)h;assert(e==0);}
 enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {(void)h;(void)w;last_du_area=a;nav_area_draws+=nav_armed!=NULL;nav_armed=NULL;if(m==MODE_DU)du_areas++;else if(m==MODE_GL16)gl_areas++;return 0;}
