@@ -20,6 +20,11 @@ Start with [README.md](README.md) for hardware and ESP-IDF v6.1 build instructio
 
 Preserve the board-specific timing in `sdkconfig.defaults`; `sdkconfig.ci` checks compilation only. VCOM remains factory-calibrated in the PMU, and the SY7636A power page stays read-only. Explain any proposed change to a frozen decision and update its block before changing the behavior.
 
+## Git 提交 / Git commits
+
+提交信息遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)。统一使用 `分类（范围）：中文摘要`，正文按分类顺序连续编号，每项一句，最后说明实际验证结果。分类、标题和正文使用中文，技术标识保留原文；无关改动拆开提交。
+Follow the [Chinese commit convention](docs/COMMIT_CONVENTION.md): use a Chinese category and subject, a consecutively numbered change list in category order, and actual validation results. Keep technical identifiers unchanged and unrelated changes in separate commits.
+
 ## Pull requests
 
 - Describe the problem, resulting behavior, affected components, and related issue.

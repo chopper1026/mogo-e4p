@@ -8,6 +8,11 @@ Agent entry for this tree. Humans can read it too. Product overview, hardware, p
 
 Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
 
+## Git 提交 / Git commits
+
+今后的提交必须遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)：标题使用 `分类（范围）：中文摘要`，正文按分类顺序从 `1.` 连续编号，每项只写一件事，最后如实说明验证结果。标题、分类和正文均使用中文，技术标识保留原文；agent 提交末尾注明 `代理：<名称>`。历史提交不改写。
+Follow the [Chinese commit convention](docs/COMMIT_CONVENTION.md) for all future commits: Chinese category and subject, consecutively numbered changes in category order, and truthful validation results. Keep technical identifiers unchanged, add a Chinese agent label for agent commits, and preserve existing history.
+
 ## 构建 / Build
 
 需要 ESP-IDF v6.1。`components/read_pico/read_pico_flash_hpm.c` 依赖 v6 才有的 `esp_flash_chips/spi_flash_override.h`。

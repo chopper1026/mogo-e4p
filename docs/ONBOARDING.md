@@ -439,7 +439,7 @@ flowchart TD
 - 保留 SPDX 与第三方声明；不含凭据/私有 ID（PMU UID、MAC 等不要贴进文档）。
 - PR 不含 `docs/HANDOFF.local.md`（已 gitignore）、不含任何"本机观察"（串口号、本机路径、fork 远端名）。
 - 三份 README 一起改。
-- 提交信息沿用仓库现有风格：`type: summary`（如 `docs: standardize product naming…`），type ∈ feat / fix / docs / refactor / chore / ci。正文可中英双语。
+- 提交信息遵循 [中文提交规范](COMMIT_CONVENTION.md)：`分类（范围）：中文摘要`，正文按分类顺序连续编号，每项一句，最后说明验证结果；分类、标题和正文使用中文，技术标识保留原文。/ Follow the Chinese commit convention: Chinese category and subject, numbered changes in category order, then validation results; preserve technical identifiers.
 - **git 身份**：`user.name` / `user.email` 未配置时会报 `Author identity unknown`。由人类自己填（GitHub 用户名 + `<id>+<user>@users.noreply.github.com`）；agent **不得从 `git log` 推断身份**——最近提交的作者很可能是上游维护者，已经错过一次。
 - 推送前 `git remote -v` + `git push --dry-run`，确认目标是自己的 fork（`origin`）而不是 `upstream`。
 - 容器 build 后只因 EOL 变脏的 `dependencies.lock` 不要提交（§3.3）。
@@ -515,7 +515,7 @@ Read AGENTS.md, then docs/ONBOARDING.md, then docs/HANDOFF.md. Do not duplicate 
 ### 12.6 分支与提交约定（便于多 agent 不互踩）
 
 - 一个任务一个分支：`<type>/<area>-<short>`，如 `feat/apps-battery-graph`、`docs/onboarding`、`fix/sd-remount`。不要在 `main` 上直接改。
-- 小步提交；每个提交信息 `type: summary`，正文可写验证等级。agent 生成的提交请在正文标注 `Agent: <名称>`，方便追溯。
+- 小步提交；格式以 [中文提交规范](COMMIT_CONVENTION.md) 为准。agent 生成的提交在末尾标注 `代理：<名称>`，方便追溯。/ Keep commits small and follow the Chinese commit convention; agent commits end with a Chinese agent label for traceability.
 - 不要 `git push --force`、不要 `git reset --hard`、不要 amend 已推送的提交。这些操作只允许人类决定并执行。
 - 交接时**不要求**工作区干净，但要求账本与 `git status` 一致。
 - `docs/HANDOFF.local.md` 永不入库：不 `git add -f`，不从 `.gitignore` 移除。跨机器交接走 PR 描述 / issue 评论。
