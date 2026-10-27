@@ -3,6 +3,14 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.0 / 2026-10-27
+
+正式发布版。品牌定名 kiikoread；汇总 rc98 以来全部本地改动，含电量显示稳定化与中段 OCV 锚点回充校准、WiFi 传输对齐原厂提速、快捷栏前光重排与滑杆专用波形、触摸震动、阅读背景与插图边距、EPUB 脚注展开、彻底关机恢复等；逐条细节见下方 rc98–rc101 本地条目。
+Official release. Branded kiikoread; consolidates everything since rc98, including the stabilized battery display with mid-curve OCV anchors recalibrated by refill accounting, vendor-aligned WiFi transfer speedup, the quick-layer frontlight redesign with its drag waveform, touch vibration, reading backgrounds and illustration margins, EPUB footnote sheets, and the restored full power-off. Per-item details remain under the rc98–rc101 local entries below.
+
+- 电量校准：用卡上日志的回充对账修正 OCV 曲线中段锚点。新日志含一次满电深放 8.4 小时到 4075 mV 再回满的完整循环，从 4092 mV 静置回满只净充 346 mAh、另一次夜间放电回充 ~93 mAh，两条回充腿与放电库仑积分互相一致（容量按规格 2050 mAh），据此把 4300/4200/4100 mV 锚点从 900/800/680‰ 修到 955/875/790‰——原中段为无数据推测值，偏低 6–11%，深放电底点的显示从 68% 修到 77%（BQ 内部库仑计当时读 85%）。内阻复核 14 次切换中位 206 mΩ、1 A 大步 175–192 mΩ，维持 180 mΩ。4.09 V 以下仍无放电数据，低段锚点不动、不外推，等一次放电到关机。对拍测试新增回充锚点断言；`test_pmu_battery.py` 补上坏 SDK 的编译回退并剥掉本机会挂的 ASan。
+  Battery calibration: the mid-curve OCV anchors are corrected by refill accounting from the card log. The new log contains a full cycle—full pack discharged 8.4 h to 4075 mV then recharged—so refilling from 4092 mV resting took only 346 mAh net, a second overnight leg took ~93 mAh, and both refill legs agree with the discharge coulomb integral (capacity per spec, 2050 mAh). The 4300/4200/4100 mV anchors move from 900/800/680‰ to 955/875/790‰: the old mid anchors were guesses and read 6–11% low, so the deep-discharge floor now shows 77% instead of 68% (the BQ internal gauge read 85% there). Pack resistance re-checked at 14 switches (median 206 mΩ, the three 1 A steps 175–192 mΩ); 180 mΩ stays. Below 4.09 V there is still no discharge data, so the low anchors are untouched and not extrapolated—awaiting one full discharge to shutdown. The replay test gains refill-anchor assertions, and `test_pmu_battery.py` gets the broken-SDK compile fallback with the hanging ASan stripped.
+
 ## 0.3.3-rc99 / 2026-10-23
 
 正式发布版，汇总 rc98 本地构建的全部改动；逐条细节见下方 rc98 本地条目。
