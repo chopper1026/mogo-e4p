@@ -1,0 +1,74 @@
+name: Build and submit OTA firmware
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host regression tests
+        shell: bash
+        run: |
+          bash tools/run_water_turn_host_test.sh
+          bash tools/run_display_host_test.sh
+          bash tools/run_display_navigation_tests.sh
+          python3 tools/pmic_gate_host_test.py
+          python3 tools/boot_panel_actions_host_test.py
+          python3 tools/lock_pin_host_test.py
+          python3 tools/lock_screen_host_test.py
+          python3 tools/reader_spacing_host_test.py
+          python3 tools/test_book_toc.py
+          python3 tools/vertical_punctuation_host_test.py
+          python3 tools/vertical_number_host_test.py
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
+          build/book-tests/layout
+  release:
+    needs: host-tests
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    env:
+      PLATFORM_URL: ${{ vars.MOGO_PLATFORM_URL }}
+      PLATFORM_TOKEN: ${{ secrets.MOGO_FIRMWARE_SUBMISSION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re
+          tag = os.environ['GITHUB_REF_NAME']
+          if not re.fullmatch(r'v[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}(?:-rc[0-9]{1,5})?', tag):
+              raise SystemExit('Unsupported release tag')
+          version = tag[1:]
+          if len(version) > 32 or any(int(n) > 65535 for n in re.findall(r'[0-9]+', version)):
+              raise SystemExit('Version components exceed device limits')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('PICO_PROJECT_VER=' + version + '\n')
+          PY
+      - name: Build production firmware for ESP32-S31
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py --preview set-target esp32s31
+          idf.py --preview build
+          idf.py --preview size
+      - name: Verify and prepare submission
+        shell: bash
+        run: python3 tools/prepare_platform_submission.py
+      - name: Upload draft to platform
+        shell: bash
+        run: |
+          set -eu
+          case "$PLATFORM_URL" in https://*) ;; *) echo 'MOGO_PLATFORM_URL must be HTTPS' >&2; exit 1;; esac
+          test -n "$PLATFORM_TOKEN"
+          curl --fail-with-body --silent --show-error --retry 3 --retry-delay 3 \
+            -H "Authorization: Bearer $PLATFORM_TOKEN" \
+            -F 'metadata=@build/platform-submission.json;type=application/json' \
+            -F 'bootloader=@build/bootloader/bootloader.bin;type=application/octet-stream' \
+            -F 'partition-table=@build/partition_table/partition-table.bin;type=application/octet-stream' \
+            -F 'app=@build/Read_Pico.bin;type=application/octet-stream' \
+            -F 'ota-data-initial=@build/ota_data_initial.bin;type=application/octet-stream' \
+            "${PLATFORM_URL%/}/api/v2/integrations/firmware/submissions"
