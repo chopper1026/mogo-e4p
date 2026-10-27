@@ -21,8 +21,8 @@
  * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh, discrete gestures and ripple pacing.
  * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
- * 用户修订：设置「升级和恢复」只保留保存与恢复、屏幕修复，BOOT 刷机入口撤下。
- * User revision: maintenance keeps only backup/restore and panel repair; the BOOT flashing entry is withdrawn.
+ * 用户 2026-10-27 修订：设置「升级和恢复」恢复系统升级入口，BOOT 刷机入口仍撤下。
+ * User revision of 2026-10-27: restore system upgrade in maintenance; keep the BOOT flashing entry withdrawn.
  * 用户新增：个性化功能新增「触摸震动」入口，页内包含开关与强度档位，打开或改档即时震一记作预览。
  * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
  * 用户 2026-10-25 新增：个性化功能在触摸震动下方新增「阅读背景」入口；列表加预览对齐壁纸选择，
@@ -317,11 +317,6 @@ static void draw_upgrade_notes(uint8_t *fb) {
 static EpdRect upgrade_confirm_button(bool online, bool accept) {
     return (EpdRect){accept ? 364 : 60, online ? 842 : 613, 260, 64};
 }
-// 系统升级入口暂时关闭：OTA 还没做好，设置主页不露出这一行。页面代码整体保留，
-// 重新开放时恢复「升级和恢复」分组里的这一行和触摸映射即可。
-// The system-upgrade entry is closed until OTA is ready, so the settings page hides its row.
-// The page code stays; re-enabling needs only the row and its touch mapping back.
-static void upgrade_open(void) __attribute__((unused));
 static void upgrade_open(void) {
     (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
     pico_online_get_status(&s_update);
@@ -347,7 +342,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_PERSONAL_ROWS 6
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
-#define SETTINGS_MAINTENANCE_ROWS 2
+#define SETTINGS_MAINTENANCE_ROWS 3
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -1656,9 +1651,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10,18,19};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"保存与恢复","屏幕修复"};
-    const char *maintenance_values[]={"配置","清除条纹"};
-    const int maintenance_icons[]={8,17};
+    const char *maintenance_labels[]={"保存与恢复","屏幕修复","系统升级"};
+    const char *maintenance_values[]={"配置","清除条纹","TF 卡 / 联网"};
+    const int maintenance_icons[]={8,17,12};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     char batt_log_value[16];
@@ -2677,6 +2672,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
             return APP_REDRAW_PAGE;
         }
+        else if(row==2) upgrade_open();
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_POWER_Y && y<SETTINGS_POWER_Y+SETTINGS_POWER_ROWS*SETTINGS_ROW_H) {

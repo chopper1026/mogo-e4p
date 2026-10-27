@@ -5,6 +5,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.0 · 本地测试 / Local testing · 2026-10-27
 
+- 联网升级改为使用 Mogo 平台的 E4P 固件清单和下载地址，继续验证设备型号、分区、镜像大小与 SHA-256。
+  Online updates use the Mogo platform E4P feed and download origin, retaining board, layout, size and SHA-256 checks.
+
+- 恢复设置页「系统升级」入口，并将固件内部版本号统一为 `1.0.0`；本地 OTA 验证可通过独立构建配置连接测试平台。
+  Restore the system-upgrade entry and use `1.0.0` as the embedded version; isolated build configuration supports local OTA testing.
+
 - 开机图与默认锁屏图改为无损压缩存储，逐行解压绘制，保留原有像素及旋转显示，减少 app 占用；本地测试沿用当前版本，未发布。
   Splash and fallback lock art use lossless embedded compression and row-by-row decoding, preserving pixels and rotation while reducing app usage. Local testing retains the current version; not published.
 

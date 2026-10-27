@@ -64,3 +64,9 @@ Product pages are defined by `main/CMakeLists.txt` and `main/app/app_registry.c`
 
 旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`read_pico_pmu_*` 包装电量、充电、RTC 与电源键。S3 后端仍供 `sdkconfig.ci` 编译验证；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
 Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `read_pico_pmu_*` wraps battery, charging, RTC and power keys. The S3 backend still supports compile checks with `sdkconfig.ci`; prune old-board implementations along verified dependency boundaries.
+
+### 联网升级 / Online updates
+
+设备默认从 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json` 获取 stable 升级清单，只接受该平台 `/files/firmware/ota/` 下的 HTTPS 镜像（以及已有的 GitHub 来源和显式配置的额外来源）。平台需发布 E4P 对应的 app 镜像，清单的 project、board、layout、版本、大小和 SHA-256 必须匹配设备；旧板 GitHub 清单不兼容 E4P。已有 `sdkconfig` 会保留旧设置，需通过 menuconfig 更新 Primary manifest URL 或重新生成配置。更改源不会更新已安装的固件，需要先刷入包含新配置的构建。
+
+The device reads the stable E4P OTA feed from the URL above and accepts HTTPS images under the platform OTA path, the existing GitHub origins, or an explicitly configured extra origin. Publish an E4P app image with matching metadata and SHA-256. The legacy GitHub feed is not compatible with E4P. Existing `sdkconfig` values persist: update the primary URL in menuconfig or regenerate the configuration. Devices already installed need a build containing the new configuration before they can use the new source.

@@ -20,7 +20,7 @@
 #ifdef CONFIG_PICO_OTA_FEED_URL
 #define PICO_OTA_FEED_URL CONFIG_PICO_OTA_FEED_URL
 #else
-#define PICO_OTA_FEED_URL "https://kiikoread.com/update.json"
+#define PICO_OTA_FEED_URL "https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json"
 #endif
 #ifdef CONFIG_PICO_OTA_FEED_FALLBACK_URL
 #define PICO_OTA_FEED_FALLBACK_URL CONFIG_PICO_OTA_FEED_FALLBACK_URL
