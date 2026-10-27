@@ -55,7 +55,7 @@ int main(void) {
 tick = function('on_tick', SETTINGS)
 tick = tick[tick.index('    if (s_panel_repair_pending)'):tick.index('    if (s_page==SETTINGS_MAIN && s_avatar_pending')]
 gesture = function('on_gesture', SETTINGS)
-gesture = gesture[gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):gesture.rindex('    return APP_REDRAW_NONE;')]
+gesture = gesture[gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):gesture.index('    if(y>=SETTINGS_POWER_Y')]
 render = function('render', SETTINGS)
 root_render = re.sub(r'\s+', '', render[render.index('const char *maintenance_labels'):])
 assert root_render.index('if(s_notice[0])') > root_render.index(
@@ -69,12 +69,13 @@ ACTIONS = r'''
 #include <string.h>
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_BOOT };
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT };
 enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
 #define SETTINGS_MAINTENANCE_Y 500
-#define SETTINGS_MAINTENANCE_ROWS 2
+#define SETTINGS_MAINTENANCE_ROWS 3
 #define SETTINGS_ROW_H 68
-static int s_page, repairs, paints;
+static int s_page, repairs, paints, upgrade_opens;
+static void upgrade_open(void) { ++upgrade_opens; s_page = SETTINGS_UPGRADE; }
 static bool s_panel_repair_pending, s_scroll_present_pending, s_config_confirm;
 static char s_notice[96];
 static enum EpdDrawError result;
@@ -111,9 +112,9 @@ int main(void) {
     assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE);
     s_page=SETTINGS_CONFIG;
     assert(tick(&ctx)==APP_REDRAW_NONE && repairs==2 && !s_panel_repair_pending);
-    assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_NONE && s_page==SETTINGS_CONFIG);
+    assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_UPGRADE && upgrade_opens==1);
     assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_NONE);
-    puts("PASS: actual Settings rows map to config and repair, the BOOT row is gone; repair defers work, cancels after leaving, paints final notice once and reports output failure");
+    puts("PASS: actual Settings rows map to config, repair and upgrade, the BOOT row is gone; repair defers work, cancels after leaving, paints final notice once and reports output failure");
 }
 '''
 
