@@ -5455,6 +5455,10 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     return changed;
 }
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
+    // 翻页就是用户操作：音量键、上键和蓝牙翻页器都不经过触摸帧，只有在这里登记才能重置自动休眠计时。
+    // A turn is user activity: the side keys, the up key and the page turner never pass a touch frame,
+    // so only noting it here restarts the idle-lock clock.
+    ctx->user_activity = true;
     TD_LOGI("TURN dir=%d ch=%u pg=%u", dir, (unsigned)s_chapter, (unsigned)s_page);
     s_reader_footer_strong = false;
     if (!s_text || s_clear_confirm) return APP_REDRAW_NONE;

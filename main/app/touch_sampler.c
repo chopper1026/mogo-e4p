@@ -19,8 +19,8 @@
 
 #define TS_TAG "touch_sampler"
 #define TS_PERIOD_MS 5
-// 2 的幂；512 × 8B = 4KB .bss。512 帧 × 5ms = 2.56s，覆盖整刷 ~1528ms 与跨章
-// 排版大部分窗口（方案 §3.1）。/ Power of two; 4KB static. 2.56s of coverage.
+// 2 的幂；512 × 16B = 8KB .bss。512 帧 × 5ms = 2.56s，覆盖整刷 ~1528ms 与跨章
+// 排版大部分窗口（方案 §3.1）。/ Power of two; 8KB static. 2.56s of coverage.
 #define TS_QUEUE_LEN 512
 #define TS_QUEUE_MASK (TS_QUEUE_LEN - 1)
 #define TS_STACK_SIZE 3072  // 对齐 tdbeep 先例；调用深度仅 I2C 同步事务。
@@ -41,7 +41,7 @@ static void sampler_task(void* arg) {
         if (cst836u_read(s_tp, &t) == ESP_OK) {
             unsigned wr = s_wr;  // 写者私有
             touch_frame_t* slot = &s_queue[wr & TS_QUEUE_MASK];
-            slot->t_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            slot->t_ms = esp_timer_get_time() / 1000;
             slot->x = t.x;
             slot->y = t.y;
             slot->count = t.count;

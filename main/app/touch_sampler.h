@@ -11,13 +11,14 @@
 
 #include "cst836u.h"
 
-// 单帧 8 字节：手势机与去抖全部以 ms 粒度工作（长按 500ms 等窗口均用
-// ctx.now_ms），µs 精度无消费者。t_ms 取 esp_timer 毫秒的低 32 位，49.7 天回绕
-// 对存活期仅毫秒级的队列无害（回放值在回绕点两侧仍单调，手势机倒退保护不触发）。
-// / 8-byte frame: every consumer works at ms granularity. t_ms is the low 32
-// bits of esp_timer ms; the 49.7-day wrap is benign for millisecond-lived queues.
+// 单帧 16 字节：手势机与去抖全部以 ms 粒度工作（长按 500ms 等窗口均用
+// ctx.now_ms），µs 精度无消费者。t_ms 保留 esp_timer 毫秒全宽：回放会把帧时间戳
+// 写回 last_input_ms，32 位回绕会让连续开机 49.7 天后的自动休眠计时直接判成超时。
+// / 16-byte frame: every consumer works at ms granularity. t_ms keeps the full-width
+// esp_timer ms value: replay feeds frame timestamps back into last_input_ms, where a
+// 32-bit wrap would read as an expired idle timeout after 49.7 days of uptime.
 typedef struct {
-    uint32_t t_ms;
+    int64_t t_ms;
     uint16_t x;
     uint16_t y;
     uint8_t count;

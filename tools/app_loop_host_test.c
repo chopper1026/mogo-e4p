@@ -23,7 +23,7 @@ void pico_boot_clear_resume(void) {}
 #include <string.h>
 
 void touch_sampler_test_enable(bool active);
-void touch_sampler_test_push(uint32_t t_ms, uint16_t x, uint16_t y, uint8_t count);
+void touch_sampler_test_push(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count);
 
 static void enter(app_ctx_t*);
 static void leave(app_ctx_t*);
@@ -777,6 +777,18 @@ int main(void) {
     assert(wifi_starts==1&&!wifi_stops&&!touch_calls&&quick_gl==1&&quick_draws==1);
     touch_sampler_test_enable(false);tap_during_present=false;
     puts("quick layer replay: a tap buffered during the opening refresh keeps its press edge");
+    // 回放帧时间戳必须按全宽毫秒写回输入时刻：32 位回绕曾在连续开机 49.7 天后把一次
+    // 翻页判成空闲超时并立刻锁屏。
+    // Replayed frame timestamps must feed the full-width ms value back into the input
+    // time: a 32-bit wrap used to read as an expired idle timeout after 49.7 days.
+    reset();idle_minutes=1;time_offset=(int64_t)4294967296LL*1000;time_step=10000;
+    touch_sampler_test_enable(true);
+    touch_sampler_test_push((int64_t)4294967296LL,300,110,1);
+    touch_sampler_test_push((int64_t)4294967296LL+5,300,110,1);
+    touch_sampler_test_push((int64_t)4294967296LL+10,0,0,0);
+    run();assert(!idle_locks);
+    touch_sampler_test_enable(false);
+    puts("touch replay: the timestamp stays full width across the 49.7-day wrap and never fakes an idle timeout");
     // 反馈必须早于页面保存/后台收尾；下一页与自动休眠不显示主动锁屏徽标。
     // Acknowledgement precedes saves/joins; consumed page turns and idle sleep omit it.
     for(int policy=0;policy<3;++policy){

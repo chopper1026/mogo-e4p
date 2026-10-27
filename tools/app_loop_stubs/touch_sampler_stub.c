@@ -29,7 +29,7 @@ void touch_sampler_test_enable(bool active) {
     s_test_rd = s_test_wr = 0;
 }
 
-void touch_sampler_test_push(uint32_t t_ms, uint16_t x, uint16_t y, uint8_t count) {
+void touch_sampler_test_push(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count) {
     s_test_queue[s_test_wr++ % TEST_QUEUE_LEN] =
         (touch_frame_t){.t_ms = t_ms, .x = x, .y = y, .count = count, .touched = count != 0};
 }

@@ -78,6 +78,12 @@
 
 #define KEY_LONG_MS 1000
 #define KEY_DEBOUNCE_MS 30
+// 按下沿同一次轮询内复查的间隔：主循环 200 ms 才读一次键，单次 I2C 毛刺原本会直接
+// 变成短按并把设备锁屏。复查只延后确认，按下时刻仍取第一次低电平。
+// / Gap for rechecking a press edge inside one poll: the loop reads the key only every
+// 200 ms, so a single I2C glitch used to become a short press that locks the device. The
+// recheck only delays confirmation; the press time stays at the first low sample.
+#define KEY_CONFIRM_DELAY_MS 20
 
 // TCA9555 P17 = Port1 bit7。 / TCA9555 P17 = Port1 bit7.
 #define KEY_POWER_MASK 0x80
@@ -590,6 +596,13 @@ static void poll_key(void) {
     const bool down = (p1 & KEY_POWER_MASK) == 0;
     const int64_t now = esp_timer_get_time();
     if (down && !s_key_down) {
+        // 同一轮询内复查：毛刺挺不过 20 ms，真实按住两次都为低；读失败按未按下处理。
+        // / Recheck inside the same poll: a glitch does not outlast 20 ms while a real hold stays
+        // low; a failed read counts as not pressed.
+        vTaskDelay(pdMS_TO_TICKS(KEY_CONFIRM_DELAY_MS));
+        uint8_t again = 0;
+        if (fca9555_read_input(ioe, 1, &again) != ESP_OK) return;
+        if ((again & KEY_POWER_MASK) != 0) return;
         s_key_down = true;
         s_key_down_us = now;
         s_key_long_fired = false;
