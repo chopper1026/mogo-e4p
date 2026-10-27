@@ -23,6 +23,7 @@ jobs:
           python3 tools/test_book_toc.py
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
+          python3 tools/test_platform_submission.py
           cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
           build/book-tests/layout
   release:
@@ -48,6 +49,9 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               env.write('PICO_PROJECT_VER=' + version + '\n')
           PY
+      - name: Validate release notes
+        shell: bash
+        run: python3 tools/prepare_platform_submission.py --check-notes
       - name: Build production firmware for ESP32-S31
         shell: bash
         run: |

@@ -42,6 +42,12 @@ Per the user's 2026-10-06 decision, local tests retain the current published fir
 本地包放在被忽略的构建目录，禁止用同版本的测试二进制覆盖 `flash/` 中已经发布的固定版本下载文件。联网 OTA 需要不同版本号的专项测试时，先获得用户对该测试版本的明确授权。
 Keep local bundles in ignored build directories; never replace immutable published downloads in `flash/` with a same-version test image. Use a different version for an OTA-specific test only when explicitly authorized by the user.
 
+### OTA 版本更新日志 / OTA release notes
+
+每次用户要求创建 OTA 版本标签时，基于上一个对应发布版本到本次提交的实际差异，先整理准确的中文更新日志，写入 `docs/ota-release-notes/<版本号>.txt` 并与代码一起提交，然后再创建版本标签。日志以 UTF-8 编码，去除首尾空白后不得为空或超过 383 字节；不要虚构功能、修复或验证结果。标签构建自动读取对应文件，随固件提交到平台草稿；发布仍须管理员审核。已存在的版本或标签不得覆盖或重新指向。
+
+For each OTA version tag, summarize actual changes since the appropriate previous release in `docs/ota-release-notes/<version>.txt`, commit it before tagging, and keep the nonempty UTF-8 text within 383 bytes. Never invent changes or verification. The workflow submits it with the firmware draft; an administrator still reviews and publishes. Do not overwrite existing versions or move tags.
+
 ### 正式版发布 / Official releases
 
 用户 2026-10-09 确认：之后每次发布正式版，都在 `wegooo-cell/read-pico-reader` 创建对应版本的 Git tag 和 GitHub Release，附上经验证的 TF/OTA 应用 Bin、完整 USB 刷机包、SHA-256 校验值和简要更新日志；所有附件来自同一次正式构建。
