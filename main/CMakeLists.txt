@@ -144,6 +144,7 @@ idf_component_register(
         "book/gbk.c"
         "font/ttf_font.c"
         "font/ttf_block_cache.c"
+        "font/ttf_glyph_cache.c"
         "font/app_font_context.c"
         "font/ui_font.c"
         "font/ui_hanzi.c"

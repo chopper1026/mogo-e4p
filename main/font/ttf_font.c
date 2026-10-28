@@ -17,6 +17,7 @@
 #include "ttf_font.h"
 #include "ttf_stroke_filter.h"
 #include "ttf_block_cache.h"
+#include "ttf_glyph_cache.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -55,19 +56,6 @@ static void ttf_free(void* ptr, void* userdata) {
 #pragma GCC diagnostic pop
 
 /* ---- 调参 / Tunables ---- */
-// 光栅化位图 LRU 上限，PSRAM。/ Raster bitmap LRU cap, PSRAM.
-// 字形缓存的总预算。TTF_CACHE_LIMIT 原来是每槽的，多槽之后那是 4 × 512 KB，而字体字节、
-// loca 和字形表本身已经吃掉好几 MB；抽干 PSRAM 的症状不是文字出问题，而是插图解码拿不到
-// 连续内存——翻几页之后图片就没了（诊断实测：图要 384 KB，只剩 269 KB）。
-// 320 KB 够一页正文重新光栅化，代价只是翻页时多算几个字。
-// One budget for all glyph caches. TTF_CACHE_LIMIT used to be per slot, which across four slots
-// is 4 x 512 KB, on top of the face bytes, loca and the outline tables. Draining PSRAM does not
-// show up as broken text but as illustration decoding that cannot get a contiguous block: images
-// vanish after a few page turns (measured: an image wanted 384 KB with 269 KB left).
-// 320 KB still re-rasterizes a page of body text; the cost is a few extra glyphs per turn.
-#define TTF_CACHE_LIMIT (320 * 1024)
-// 哈希桶数。/ Hash buckets.
-#define TTF_CACHE_BUCKETS 256
 // 两档字号的像素高，对齐 ui_kit 正文/标题。/ Small/large px, matches ui_kit body/title.
 #define TTF_PIXEL_SMALL 43
 #define TTF_PIXEL_LARGE 67
@@ -95,23 +83,6 @@ static const char* const k_font_dirs[] = {
     "/sdcard/assets/fonts",
     NULL,
 };
-
-typedef struct glyph_entry {
-    uint32_t codepoint;
-    uint8_t size;
-    uint16_t weight;
-    int8_t stroke;
-    int16_t width;
-    int16_t height;
-    int16_t left;
-    int16_t top;
-    int16_t advance_x;
-    uint8_t* bitmap;
-    size_t bitmap_bytes;
-    struct glyph_entry* hash_next;
-    struct glyph_entry* lru_prev;
-    struct glyph_entry* lru_next;
-} glyph_entry_t;
 
 typedef struct {
     float scale;
@@ -208,10 +179,7 @@ typedef struct {
     int f_shared_tuple_count;
     int f_gvar_axis_count;
     bool f_gvar_ready;
-    glyph_entry_t* f_cache_buckets[TTF_CACHE_BUCKETS];
-    glyph_entry_t* f_lru_head;
-    glyph_entry_t* f_lru_tail;
-    size_t f_cache_bytes;
+    ttf_glyph_cache_t f_glyphs;
     bool f_used;           ///< 槽位已被占用 / the slot is in use
 } ttf_slot_t;
 
@@ -265,10 +233,6 @@ static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 #define shared_tuple_count (s_cur->f_shared_tuple_count)
 #define gvar_axis_count (s_cur->f_gvar_axis_count)
 #define gvar_ready (s_cur->f_gvar_ready)
-#define cache_buckets (s_cur->f_cache_buckets)
-#define lru_head (s_cur->f_lru_head)
-#define lru_tail (s_cur->f_lru_tail)
-#define cache_bytes (s_cur->f_cache_bytes)
 
 // gvar 的暂存缓冲不进槽：一次只光栅化一个字，共享安全，也省下每槽十几 KB。
 // The gvar scratch does not move into a slot: one glyph is rasterized at a time, so it
@@ -1586,63 +1550,12 @@ static int clamp_px(int pixel_height) {
 }
 
 /* ---- 字形缓存 / Glyph cache ---- */
-static unsigned cache_bucket(uint32_t codepoint, int size) {
-    return (unsigned)((codepoint * 33u + (uint32_t)size) % TTF_CACHE_BUCKETS);
-}
-
-// 新条目 calloc 后 prev/next 都是 NULL，但并不在链表里。若把「prev==NULL」
-// 当成「我就是头」，会把整条 LRU 掐掉，只剩刚插入的那一个；unload / 超限
-// 淘汰都只走 LRU，于是旧字形永远留在哈希桶里，换字体后还会被命中。
-static void lru_detach(glyph_entry_t* entry) {
-    if (entry->lru_prev != NULL) {
-        entry->lru_prev->lru_next = entry->lru_next;
-    } else if (lru_head == entry) {
-        lru_head = entry->lru_next;
-    }
-    if (entry->lru_next != NULL) {
-        entry->lru_next->lru_prev = entry->lru_prev;
-    } else if (lru_tail == entry) {
-        lru_tail = entry->lru_prev;
-    }
-    entry->lru_prev = NULL;
-    entry->lru_next = NULL;
-}
-
-static void lru_touch(glyph_entry_t* entry) {
-    if (lru_head == entry) return;
-    lru_detach(entry);
-    entry->lru_next = lru_head;
-    if (lru_head != NULL) lru_head->lru_prev = entry;
-    lru_head = entry;
-    if (lru_tail == NULL) lru_tail = entry;
-}
-
-// 字形缓存的总预算。TTF_CACHE_LIMIT 原来是每槽的，多槽之后那是 4 × 512 KB，而字体字节、
-// loca 和字形表本身已经吃掉好几 MB；抽干 PSRAM 的症状不是文字出问题，而是插图解码拿不到
-// 连续内存——翻几页之后图片就没了。所以这里按所有槽合起来算。
-// One budget for all glyph caches. TTF_CACHE_LIMIT used to be per slot, which across four slots
-// is 4 x 512 KB, on top of the face bytes, loca and the outline tables. Draining PSRAM does not
-// show up as broken text but as illustration decoding that cannot get a contiguous block:
-// images disappear after a few page turns. So the budget is now shared.
-static size_t s_cache_total;
+// 所有字体槽继续共享320KiB，字形分配和其他槽清理策略仍由字体层负责。
+// All font slots still share 320 KiB; allocation and the policy for clearing other slots remain in the font layer.
+static ttf_glyph_budget_t s_glyph_budget;
 
 static void cache_reset(void) {
-    size_t n = 0;
-    for (unsigned i = 0; i < TTF_CACHE_BUCKETS; i++) {
-        glyph_entry_t* entry = cache_buckets[i];
-        cache_buckets[i] = NULL;
-        while (entry != NULL) {
-            glyph_entry_t* next = entry->hash_next;
-            heap_caps_free(entry->bitmap);
-            heap_caps_free(entry);
-            entry = next;
-            n++;
-        }
-    }
-    lru_head = NULL;
-    lru_tail = NULL;
-    s_cache_total -= cache_bytes;
-    cache_bytes = 0;
+    size_t n = ttf_glyph_cache_reset(&s_cur->f_glyphs, &s_glyph_budget);
     if (n > 0) {
         ESP_LOGI(TAG, "glyph cache dropped %u entries", (unsigned)n);
     }
@@ -1664,44 +1577,12 @@ static void cache_clear_all(void) {
     s_cur = &s_slots[keep];
 }
 
-static void cache_evict_one(void) {
-    glyph_entry_t* victim = lru_tail;
-    if (victim == NULL) return;
-    lru_detach(victim);
-
-    unsigned bucket = cache_bucket(victim->codepoint, victim->size);
-    glyph_entry_t** slot = &cache_buckets[bucket];
-    while (*slot != NULL) {
-        if (*slot == victim) {
-            *slot = victim->hash_next;
-            break;
-        }
-        slot = &(*slot)->hash_next;
-    }
-
-    cache_bytes -= victim->bitmap_bytes + sizeof(*victim);
-    s_cache_total -= victim->bitmap_bytes + sizeof(*victim);
-    heap_caps_free(victim->bitmap);
-    heap_caps_free(victim);
-}
-
 static void cache_reserve(size_t extra) {
-    while (lru_tail != NULL && s_cache_total + extra > TTF_CACHE_LIMIT) {
-        cache_evict_one();
-    }
-    if (s_cache_total + extra > TTF_CACHE_LIMIT) cache_clear_all();
+    if (!ttf_glyph_cache_reserve(&s_cur->f_glyphs, &s_glyph_budget, extra)) cache_clear_all();
 }
 
 static glyph_entry_t* cache_lookup(uint32_t codepoint, int size) {
-    unsigned bucket = cache_bucket(codepoint, size);
-    for (glyph_entry_t* entry = cache_buckets[bucket]; entry != NULL; entry = entry->hash_next) {
-        if (entry->codepoint == codepoint && entry->size == (uint8_t)size
-            && entry->weight == (uint16_t)current_weight && entry->stroke == s_stroke_adjust) {
-            lru_touch(entry);
-            return entry;
-        }
-    }
-    return NULL;
+    return ttf_glyph_cache_lookup(&s_cur->f_glyphs, codepoint, size, current_weight, s_stroke_adjust);
 }
 
 // 板级诊断钩子：固件把它接到 RTC 日志，宿主测试留空指针，字体层本身不依赖板级头文件。
@@ -1833,12 +1714,7 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     entry->advance_x = (int16_t)advance_px;
     entry->bitmap_bytes = bitmap_bytes;
 
-    unsigned bucket = cache_bucket(codepoint, pixel_height);
-    entry->hash_next = cache_buckets[bucket];
-    cache_buckets[bucket] = entry;
-    cache_bytes += bitmap_bytes + sizeof(*entry);
-    s_cache_total += bitmap_bytes + sizeof(*entry);
-    lru_touch(entry);
+    ttf_glyph_cache_insert(&s_cur->f_glyphs, &s_glyph_budget, entry);
     return entry;
 }
 
@@ -2298,7 +2174,7 @@ size_t ttf_font_cache_clear_all(void) {
         if (!s_slots[i].f_ready) continue;
         s_cur_index = i;
         s_cur = &s_slots[i];
-        freed += cache_bytes;
+        freed += s_cur->f_glyphs.bytes;
         cache_reset();
         packed_root = -1;
         packed_weight = -1;

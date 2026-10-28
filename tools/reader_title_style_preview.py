@@ -171,7 +171,7 @@ def compile_unit(work, unit):
              '-I' + str(work), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
              '-I' + str(ROOT / 'main')]
     subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_block_cache.c'),
+    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             '-Wl,-dead_strip', '-lm', '-o', str(work / 'test')], check=True)
 
 
