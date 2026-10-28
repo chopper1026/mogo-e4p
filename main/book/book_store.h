@@ -14,9 +14,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "book_path.h"
 
 #define BOOK_STORE_FLASH_FILE_MAX (1024U * 1024U)
-#define BOOK_STORE_PATH_MAX 288
 #define BOOK_STORE_ROOT_MAX 3
 
 typedef struct {

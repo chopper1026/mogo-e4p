@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
     "perf": [sys.executable, "tools/reader_perf_host_test.py"],
     "board": [sys.executable, "tools/s31_board_host_test.py"],
+    "shelf": [sys.executable, "tools/shelf_categories_host_test.py"],
+    "management": [sys.executable, "tools/book_ui_host_test.py"],
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],
     "background": [sys.executable, "tools/reader_stability_host_test.py"],
     "loop": ["bash", "tools/run_app_loop_host_tests.sh"],

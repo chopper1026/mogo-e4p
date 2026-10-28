@@ -27,6 +27,7 @@ unit=r'''
 #include <string.h>
 #include <strings.h>
 #include "book_shelf_categories.h"
+#include "book_shelf_model.h"
 #define BOOK_STORE_PATH_MAX 288
 #define SHELF_CATEGORY_LIMIT 128
 #define MALLOC_CAP_SPIRAM 1
@@ -50,10 +51,10 @@ static char s_category_root[288];
 static int s_view=SHELF;
 static bool s_scan_pending,s_shelf_cache_valid,s_recent_sort;
 static int s_count,s_visible_count,s_filter;
-typedef struct{char path[288],name[256];bool removed,search_match,is_flash,favorite;uint32_t recent;}shelf_entry_t;
+typedef book_shelf_entry_t shelf_entry_t;
 static shelf_entry_t s_shelf[40];
 '''
-for name in ('shelf_category_add','shelf_category_init','shelf_category_name','shelf_category_matches','shelf_category_remember','shelf_category_restore','shelf_categories_recount','shelf_matches','compare_books','sort_shelf'):
+for name in ('shelf_category_add','shelf_category_init','shelf_category_name','shelf_query','shelf_category_remember','shelf_category_restore','shelf_categories_recount','sort_shelf'):
  unit+=function(name)+'\n'
 unit+=r'''
 int main(void){
@@ -64,7 +65,7 @@ int main(void){
  assert(!book_shelf_child("/sdcard/books","/sdcard/book",child,sizeof(child)));
  assert(!book_shelf_child("/sdcard/books","/sdcard/books/文学/a.epub",child,3));
  assert(book_shelf_saved_page(100,10,9)==1&&book_shelf_saved_page(-1,10,9)==0&&book_shelf_saved_page(2,0,9)==0);
- fail_alloc=true;shelf_category_init();assert(!s_categories&&shelf_category_matches("anything"));fail_alloc=false;shelf_category_init();assert(s_category_count==2);
+ fail_alloc=true;shelf_category_init();assert(!s_categories);book_shelf_query_t query=shelf_query();assert(book_shelf_category_matches(&query,"anything"));fail_alloc=false;shelf_category_init();assert(s_category_count==2);
  int literature=shelf_category_add("/sdcard/books/文学");int empty=shelf_category_add("/sdcard/books/空目录");assert(literature==2&&empty==3);
  assert(shelf_category_add("/sdcard/books/文学")==literature);
  for(int i=0;i<24;++i){snprintf(s_shelf[i].path,288,i<18?"/sdcard/books/文学/nested/%d.epub":"/sdcard/books/%d.epub",i);snprintf(s_shelf[i].name,256,"b%02d",i);s_shelf[i].search_match=true;}
@@ -92,5 +93,5 @@ int main(void){
 unit=unit.replace('while(s_category_count<s_category_capacity)shelf_category_add("/not-a-real-path");','while(s_category_count<s_category_capacity){char path[288];snprintf(path,sizeof(path),"/fill/%d",s_category_count);shelf_category_add(path);}')
 with tempfile.TemporaryDirectory() as directory:
  c=Path(directory)/'shelf.c';binary=c.with_suffix('');c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),str(c),'-o',str(binary)],check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main/book'),'-I'+str(root/'tools/book_source_host_stubs'),str(root/'main/book/book_shelf_model.c'),str(c),'-o',str(binary)],check=True)
  subprocess.run([str(binary)],check=True)

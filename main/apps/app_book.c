@@ -165,6 +165,7 @@
 #include "book_source.h"
 #include "book_store.h"
 #include "book_shelf_categories.h"
+#include "book_shelf_model.h"
 #include "display.h"
 #include "display_reader_waveform.h"
 #include "display_normalize.h"
@@ -254,18 +255,7 @@ typedef enum {
     READER_PANEL_TITLE_STYLE,
     READER_PANEL_NOTE,
 } reader_panel_t;
-typedef struct {
-    char name[256];
-    char author[128];
-    char path[BOOK_STORE_PATH_MAX];
-    uint32_t size;
-    uint16_t chapter;
-    bool is_flash;
-    bool has_progress;
-    uint8_t pct;
-    uint32_t recent;
-    bool selected, removed, search_match, favorite;
-} shelf_entry_t;
+typedef book_shelf_entry_t shelf_entry_t;
 
 static const char* TAG = "book";
 static book_view_t s_view;
@@ -323,7 +313,6 @@ static void shelf_category_restore(app_ctx_t *ctx);
 static void shelf_categories_recount(void);
 static void draw_category_menu(uint8_t *fb);
 static const char *shelf_category_name(int index);
-static bool shelf_category_matches(const char *path);
 static int shelf_category_add(const char *path);
 static app_redraw_t shelf_category_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev);
 static shelf_entry_t s_managed;
@@ -1279,18 +1268,16 @@ static EpdRect search_rect(int id) {
     return ui_bar_rect(id - 43, 2);
 }
 static size_t selected_count(void) {
-    size_t selected = 0;
-    for (int i = 0; i < s_count; ++i) if (s_shelf[i].selected) ++selected;
-    return selected;
+    return book_shelf_selected_count(s_shelf, s_count);
 }
 static void clear_selection(void) {
-    for (int i = 0; i < s_count; ++i) s_shelf[i].selected = false;
+    book_shelf_clear_selection(s_shelf, s_count);
 }
 static void toggle_selection(int index) {
-    if (index >= 0 && index < s_visible_count) s_shelf[index].selected = !s_shelf[index].selected;
+    book_shelf_toggle_selection(s_shelf, s_visible_count, index);
 }
 static void select_page(int page) {
-    for (int i = page * BOOK_BULK_ROWS; i < s_visible_count && i < (page + 1) * BOOK_BULK_ROWS; ++i) s_shelf[i].selected = true;
+    book_shelf_select_page(s_shelf, s_visible_count, page, BOOK_BULK_ROWS);
 }
 
 static void search_begin(void) {
@@ -4947,14 +4934,15 @@ static const char *shelf_category_name(int index) {
     const char *slash=strrchr(s_categories[index].path,'/');
     return slash ? slash+1 : s_categories[index].path;
 }
-static bool shelf_category_matches(const char *path) {
-    if (!s_category_selected || !s_categories) return true;
-    if (s_category_selected==1) {
-        char child[BOOK_STORE_PATH_MAX];
-        return !book_shelf_child(s_category_root,path,child,sizeof(child));
-    }
-    size_t size=strlen(s_categories[s_category_selected].path);
-    return !strncmp(path,s_categories[s_category_selected].path,size) && path[size]=='/';
+static book_shelf_query_t shelf_query(void) {
+    return (book_shelf_query_t){
+        .root = s_category_root,
+        .category_path = s_categories && s_category_selected >= 2
+            ? s_categories[s_category_selected].path : NULL,
+        .uncategorized = s_categories && s_category_selected == 1,
+        .filter = s_filter,
+        .recent_sort = s_recent_sort,
+    };
 }
 static void shelf_category_remember(app_ctx_t *ctx) {
     if (s_categories && s_view==SHELF && !s_scan_pending)
@@ -5031,24 +5019,10 @@ static void draw_category_menu(uint8_t *fb) {
         ui_draw_icon(fb,box.x+box.width-48,y,28,UI_ICON_CHEVRON_RIGHT,0);
     }
 }
-static bool shelf_matches(const shelf_entry_t* item) {
-    return shelf_category_matches(item->path) && item->search_match && (s_filter == 0 || (s_filter == 1 && !item->is_flash) || (s_filter == 2 && item->is_flash));
-}
-static int compare_books(const void* a, const void* b) {
-    const shelf_entry_t* x = a;
-    const shelf_entry_t* y = b;
-    if (shelf_matches(x) != shelf_matches(y)) return shelf_matches(x) ? -1 : 1;
-    if (x->favorite != y->favorite)
-        return x->favorite ? -1 : 1;
-    if (s_recent_sort && x->recent != y->recent) return x->recent > y->recent ? -1 : 1;
-    int name = strcasecmp(x->name, y->name);
-    return name ? name : strcmp(x->path, y->path);
-}
 static void sort_shelf(app_ctx_t* ctx) {
     invalidate_covers();
-    if (s_count > 1) qsort(s_shelf, s_count, sizeof(*s_shelf), compare_books);
-    s_visible_count = 0;
-    while (s_visible_count < s_count && shelf_matches(&s_shelf[s_visible_count])) ++s_visible_count;
+    book_shelf_query_t query = shelf_query();
+    s_visible_count = book_shelf_sort(s_shelf, s_count, &query);
     ctx->leaf = 0;
 }
 static app_redraw_t shelf_category_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {

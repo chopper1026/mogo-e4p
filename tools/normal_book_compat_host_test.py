@@ -25,6 +25,7 @@ unit = r'''
 #include <dirent.h>
 #include <time.h>
 #include "book_file_path.h"
+#include "book_shelf_model.h"
 #define BOOK_STORE_PATH_MAX 288
 #define NVS_READONLY 0
 #define SHELF_HIDDEN_NS "rp_shelf_hide"
@@ -57,8 +58,7 @@ static bool read_pico_search_match(const char *name,const char *query){(void)nam
 static int book_epub_metadata_cached(const char *p,char *title,size_t tcap,char *author,size_t acap){assert(book_file_path_supported(p));title[0]=author[0]=0;(void)tcap;(void)acap;return ESP_FAIL;}
 static int book_epub_metadata(const char *p,char *title,size_t tcap,char *author,size_t acap){return book_epub_metadata_cached(p,title,tcap,author,acap);}
 '''
-text = reader.read_text()
-unit += text[text.index('typedef struct {\n    char name[256];'):text.index('static const char* TAG = "book";')]
+unit += 'typedef book_shelf_entry_t shelf_entry_t;\n'
 unit += r'''
 static shelf_entry_t s_shelf[8];
 static int s_count,s_visible_count,s_view=0;

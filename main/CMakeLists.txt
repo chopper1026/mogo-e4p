@@ -116,6 +116,7 @@ idf_component_register(
         "apps/app_transfer.c"
         "apps/usb_storage.c"
         "book/book_store.c"
+        "book/book_shelf_model.c"
         "book/book_progress.c"
         "book/book_history_backup.c"
         "book/book_title.c"

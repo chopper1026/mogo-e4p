@@ -60,7 +60,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle','epd_write_line','epd_draw_line'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
- for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
+ for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=function('pixel',ROOT/'main/ui/ui_pinpad.c')+'\n'
  unit+='typedef struct {unsigned x,y,width,height;} book_crop_t;\n'
  unit+=function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
