@@ -3,6 +3,7 @@
 English: Summarize diagnostic allocation capacities and exit ranges without declaring leaks.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -62,8 +63,10 @@ def main():
     parser.add_argument('log', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    raw = args.log.read_bytes()
     result = {'schema': 1, 'log': str(args.log.resolve()),
-              'events': summarize(parse_samples(args.log.read_text(errors='replace')))}
+              'log_sha256': hashlib.sha256(raw).hexdigest(),
+              'events': summarize(parse_samples(raw.decode('utf-8', errors='replace')))}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     for event, data in result['events'].items():

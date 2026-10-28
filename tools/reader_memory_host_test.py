@@ -3,6 +3,8 @@
 English: Exercise actual snapshot functions, rejecting borrowed pointers and checking released versus retained resources.
 """
 from pathlib import Path
+import hashlib
+import json
 import os
 import subprocess
 import tempfile
@@ -164,7 +166,15 @@ def main():
             continue
         raise AssertionError('invalid resource record accepted')
     print('PASS: resource parser schemas, partial records, duplicates and separate exit ranges')
-    env=os.environ.copy();env['READER_MEMORY_TEST']='1' 
+    with tempfile.TemporaryDirectory(prefix='reader-memory-report-') as directory:
+        folder=Path(directory);log=folder/'serial.log';report=folder/'report.json'
+        log.write_text('boot\nI (42) readerperf: '+record+'\n')
+        subprocess.run(['python3',str(ROOT/'tools/summarize_reader_memory.py'),str(log),'--output',str(report)],check=True)
+        result=json.loads(report.read_text())
+        assert result['log_sha256']==hashlib.sha256(log.read_bytes()).hexdigest()
+        assert result['events']['reader_exit']['samples']==1 and result['log']==str(log.resolve())
+    print('PASS: resource summary CLI ties output to the exact serial log hash')
+    env=os.environ.copy();env['READER_MEMORY_TEST']='1'
     subprocess.run(['python3',str(ROOT / 'tools/title_font_host_test.py')],env=env,check=True)
 
 
