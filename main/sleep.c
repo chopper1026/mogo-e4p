@@ -27,9 +27,8 @@
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
-#include "ui_avatar.h"
+#include "storage_jobs.h"
 #include "ui_builtin_image.h"
-#include "book_cover_jobs.h"
 
 #include "sleep.h"
 #include "boot_state.h"
@@ -232,7 +231,7 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 }
 
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
-    if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_KEY;
+    if (!storage_jobs_quiesce(2000)) return APP_WAKE_KEY;
     // 蓝牙控制器不能带着活动状态进浅睡：醒来后的第一条 HCI 命令会踩到 BTDM 控制器内部的
     // 链表断言（ble_hw.c）。锁屏不是用户关蓝牙，停栈时保留重连目标，解锁后主循环重新起栈
     // 并自动连回；停不下来就不进浅睡，保持唤醒轮询，绝不把活动控制器送进浅睡。
@@ -417,7 +416,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     // Quiesce background time sync and cover/avatar jobs first: pause snapshots sessions and the
     // light-sleep wake revives them, which a sync never wants.
     app_time_service_cancel();
-    if (pico_online_busy() || !(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000)) || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
+    if (pico_online_busy() || !storage_jobs_quiesce(2000) || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
     (void)ble_pt_stop(2000);
     (void)app_sync_time_to_pmu();
     // 必须先断面板轨，再拉低 MODE，避免常开逻辑仍耗电。/ Drop panel rails before parking MODE on the always-on supply.

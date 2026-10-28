@@ -72,6 +72,7 @@ idf_component_register(
         "display_reader_waveform.c"
         "display_normalize.c"
         "cache_wake_restore.c"
+        "storage_jobs.c"
         "sleep.c"
         "time_service.c"
         "lock_pin.c"

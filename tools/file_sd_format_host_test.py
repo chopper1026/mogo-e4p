@@ -21,9 +21,10 @@ typedef struct {int x0,y0;} ui_gesture_event_t;
 typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_ERR_NOT_FINISHED 3
-static bool avatar_ok=true;
-static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
-static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return avatar_ok;}
+static bool cover_ok=true,avatar_ok=true;
+static int cover_calls,avatar_calls,remounts;
+static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);++cover_calls;return cover_ok;}
+static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);++avatar_calls;return avatar_ok;}
 #define APP_REDRAW_NONE 0
 #define APP_REDRAW_PAGE 1
 static read_pico_sd_info_t s_sd;
@@ -32,15 +33,17 @@ static char s_sd_notice[64];
 static int formats,format_error;
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static esp_err_t read_pico_sd_format(void){++formats;if(!format_error)s_sd=(read_pico_sd_info_t){true,true,false};return format_error;}
+static esp_err_t read_pico_sd_remount(void){++remounts;return ESP_OK;}
 static void read_pico_sd_get_info(read_pico_sd_info_t *out){*out=s_sd;}
 static const char *esp_err_to_name(esp_err_t err){(void)err;return "ERROR";}
 '''
+unit+=function('storage_jobs_quiesce',ROOT/'main/storage_jobs.c')+'\n'
 unit+=function('storage_card_rect',source)+'\n'+function('sd_needs_format',source)+'\n'
 unit+='static int tap(int x,int y,bool long_press){ui_gesture_event_t event={x,y};const ui_gesture_event_t *ev=&event;\n'+s[a:b]+'return format_cancelled ? APP_REDRAW_PAGE : APP_REDRAW_NONE;\n}\n'
 unit+=r'''
 int main(void){
- s_sd=(read_pico_sd_info_t){false,false,false};assert(!tap(100,200,false)&&!formats);
- s_sd=(read_pico_sd_info_t){true,false,false};assert(!tap(100,200,false)&&!formats);
+ s_sd=(read_pico_sd_info_t){false,false,false};assert(tap(100,200,false)==1&&!formats&&remounts==1);s_scan_pending=false;
+ s_sd=(read_pico_sd_info_t){true,false,false};assert(tap(100,200,false)==1&&!formats&&remounts==2);s_scan_pending=false;
  s_sd.needs_format=true;assert(tap(100,200,false)==1&&s_sd_format_confirm&&!formats);
  assert(tap(20,300,false)==1&&!s_sd_format_confirm&&!formats);
  assert(!tap(100,200,true)&&!formats);
@@ -50,6 +53,13 @@ int main(void){
  tap(100,200,false);assert(!s_sd_notice[0]);tap(100,200,false);
  assert(formats==2&&!s_sd_format_confirm&&!s_scan_pending&&strstr(s_sd_notice,"ERROR"));
  avatar_ok=false;format_error=0;tap(100,200,false);tap(100,200,false);assert(formats==2&&!s_sd_format_confirm&&!s_scan_pending);
+ avatar_ok=true;cover_ok=false;int before=avatar_calls;
+ tap(100,200,false);tap(100,200,false);assert(formats==2&&avatar_calls==before&&!s_scan_pending);
+ s_sd=(read_pico_sd_info_t){true,false,false};assert(!tap(100,200,false)&&remounts==2&&avatar_calls==before);
+ cover_ok=true;avatar_ok=false;assert(!tap(100,200,false)&&remounts==2&&!s_scan_pending);
+ avatar_ok=true;assert(tap(100,200,false)==1&&remounts==3&&s_scan_pending);
+ assert(!tap(100,200,false)&&remounts==3);s_scan_pending=false;
+ assert(!tap(100,200,true)&&remounts==3);
  puts("PASS: absent/contact/timeout cards cannot format; confirmation/cancel/hold guards, error and success rescan");
 }
 '''

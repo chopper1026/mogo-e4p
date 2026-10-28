@@ -13,8 +13,7 @@
  * 用户修订：存储卡未挂载时点卡片手动重挂；深睡唤醒后的挂载失败不再无路可走。
  * User revision: tapping the storage card remounts it while unmounted; a mount failure after deep-sleep wake is no longer a dead end.
  */
-#include "ui_avatar.h"
-#include "book_cover_jobs.h"
+#include "storage_jobs.h"
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -1009,7 +1008,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         } else {
             s_sd_format_confirm = false;
             snprintf(s_sd_notice, sizeof(s_sd_notice), "正在格式化…");
-            esp_err_t err = (book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000)) ? read_pico_sd_format() : ESP_ERR_NOT_FINISHED;
+            esp_err_t err = storage_jobs_quiesce(2000) ? read_pico_sd_format() : ESP_ERR_NOT_FINISHED;
             read_pico_sd_get_info(&s_sd);
             if (err == ESP_OK) {
                 s_sd_notice[0] = 0;
@@ -1028,7 +1027,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         // 后台封面/头像任务可能占着卡，静默成功才动手；忙时保留原提示，用户可再点。
         // Cover/avatar jobs may hold the card; remount only after a clean quiesce and let the
         // user tap again when busy.
-        if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_REDRAW_NONE;
+        if (!storage_jobs_quiesce(2000)) return APP_REDRAW_NONE;
         (void)read_pico_sd_remount();
         s_scan_pending = true;
         return APP_REDRAW_PAGE;

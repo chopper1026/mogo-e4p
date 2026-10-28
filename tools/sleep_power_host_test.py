@@ -54,8 +54,8 @@ static uint8_t config[2], output[2];
 static int step, fault, clears;
 static int pins[49], pin_direction[49], pin_pull[49];
 static bool buzzer, acc_on, transfer_ok = true, ota;
-static bool avatar_ok=true;
-static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
+static bool cover_ok=true,avatar_ok=true;
+static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return cover_ok;}
 static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return avatar_ok;}
 static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
@@ -108,6 +108,7 @@ for i in range(49):
 unit += defines + '\n'
 for name in ('sleep_pulldown_pins', 'read_pico_ioe_sleep', 'read_pico_ioe_wake'):
     unit += function(name, board) + '\n'
+unit += function('storage_jobs_quiesce', ROOT/'main/storage_jobs.c') + '\n'
 for name in ('app_sleep_bind', 'periph_suspend', 'periph_resume', 'app_enter_host_sleep'):
     unit += function(name, sleep) + '\n'
 unit += r'''
@@ -155,6 +156,7 @@ int main(void) {
     }
     reset(); transfer_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !prepared && !step);
     reset(); ota = true; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared);
+    reset(); cover_ok=false;assert(app_enter_host_sleep(APP_SLEEP_OFF)==ESP_ERR_INVALID_STATE&&!pauses&&!prepared);cover_ok=true;
     reset(); avatar_ok=false;assert(app_enter_host_sleep(APP_SLEEP_OFF)==ESP_ERR_INVALID_STATE&&!pauses&&!prepared);avatar_ok=true;
     reset(); assert(app_enter_host_sleep(APP_SLEEP_LIGHT) == ESP_ERR_INVALID_ARG && !pauses && !prepared);
     puts("PASS: exact BSP 22 sleep pull-downs, CW_INT key wake retained, host-off masks, MODE and Port1 parking, touch/accelerometer restore, absent IOE and I2C faults; rails-before-park; bounded PMU fail/stuck EN and upload/OTA guards");

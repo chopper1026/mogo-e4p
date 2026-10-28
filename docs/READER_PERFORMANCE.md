@@ -36,6 +36,9 @@ Layout retains its singleton engine, built and released by the source-owning ses
 `prefetch` 编译完整的预绘模块，使用真实线程和受控行边界验证推屏期间借用、停止交还、部分页续画、代次失效、内存/任务创建失败及重复释放。页面负责输入优先级和插图排除；预绘模块在 `end` 返回前借用稳定的字体、章节与布局，调用方随后才能替换资源。
 `prefetch` compiles the complete prefetch module with real threads and controlled row boundaries, checking presentation-time borrowing, stop/handoff, partial-page continuation, generation invalidation, allocation/task failures and repeated release. The page owns input priority and illustration exclusions; fonts, chapter and layout remain stable until `end` returns, before callers replace resources.
 
+`storage` 编译真实的 `storage_jobs_quiesce`，覆盖封面先于头像、失败短路和每项独立超时；同时运行 S31 USB 四线总线/模拟开关、退出失败重试、文件页格式化/重挂门控、主机下电恢复，以及真实封面与头像工作队列测试。USB、文件页与睡眠共用这一交还入口；阅读预绘、传输、OTA 和介质状态仍由原调用边界负责。
+`storage` compiles the real `storage_jobs_quiesce`, checking cover-before-avatar ordering, failure short-circuiting and independent per-job timeouts. It also runs S31 USB four-bit bus/switch and teardown-retry checks, file-page format/remount guards, host power-down recovery, and real cover/avatar worker tests. USB, files and sleep share this handoff; reader prefetch, transfers, OTA and media state remain owned by their existing caller boundaries.
+
 macOS 默认使用可用的 Command Line Tools 编译器及其 SDK；可以显式设置 `CC` 和 `SDKROOT`。入口先验证 sanitizer 编译与运行，失败即停止；不会静默取消 sanitizer。各组日志与 `results.json` 保留实际退出码。
 On macOS the runner defaults to an available Command Line Tools compiler and SDK; explicit `CC` and `SDKROOT` overrides are supported. A sanitizer compile/run probe must succeed; sanitizers are never silently removed. Suite logs and `results.json` retain actual exit codes.
 
