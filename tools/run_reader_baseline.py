@@ -22,6 +22,7 @@ SUITES = {
     "shelf": [sys.executable, "tools/shelf_categories_host_test.py"],
     "management": [sys.executable, "tools/book_ui_host_test.py"],
     "session": [sys.executable, "tools/reader_session_host_test.py"],
+    "present": [sys.executable, "tools/reader_present_host_test.py"],
     "images": [sys.executable, "tools/reader_images_host_test.py"],
     "controls": ["bash", "tools/run_reader_controls_host_tests.sh"],
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],

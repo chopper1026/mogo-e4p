@@ -165,6 +165,7 @@
 #include "reader_session.h"
 #include "reader_session_layout.h"
 #include "reader_prefetch.h"
+#include "reader_present.h"
 #include "book_store.h"
 #include "book_shelf_categories.h"
 #include "book_shelf_model.h"
@@ -4069,115 +4070,39 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     enum EpdDrawError err;
     bool image_gray_refresh = s_reader_image_refresh_pending && s_view == READING &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm;
-    // 含插图的一帧不用背景派生表：那张表把深色对的前导擦白剥掉了，旧字（from=0）落到图片灰
-    // 时从黑轨直接进灰尾，落点和纸灰起点不一致，差分会把上一页的字形留在图上。纯文字帧仍走
-    // 背景派生表。插图表还保留相等对保持，脏区膨胀带上的未变化像素不会被黑白往返推出一圈细线。
-    // Frames holding an illustration skip the background derivative: it strips the dark pairs'
-    // leading erase, so old glyphs (from=0) settle on an image gray from the black rail instead
-    // of the white rail, land differently from paper-origin pixels and keep their shape. Text
-    // frames keep the derivative. The illustration table also holds equal pairs, so the
-    // unchanged pixels that dilation brings along are not pushed through a white-black trip
-    // that draws a thin outline.
-    const EpdWaveform* frame_waveform = reader_image_slots(s_reader_session.position.page)
-        ? display_reader_image_waveform() : display_reader_page_waveform();
-    if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
-        // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
-        // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
-        err = app_settings_reader_turn_effect() == 1
-            ? update_display_area_diff_with(ctx->hl, frame_waveform, MODE_GL16, reader_area())
-            : update_display_area_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, reader_area());
-        if (err == EPD_DRAW_SUCCESS && s_reader_footer_pending)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect());
-        if (err == EPD_DRAW_SUCCESS && s_reader_fullscreen)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
-                                                reader_fullscreen_progress_area());
+    const reader_present_request_t output_request = {
+        .refresh = redraw == APP_REDRAW_AREA ? READER_PRESENT_AREA :
+                   redraw == APP_REDRAW_FULL ? READER_PRESENT_FULL : READER_PRESENT_PAGE,
+        .mode = s_mode, .page_mode = APP_PAGE_REFRESH_MODE,
+        .area = s_area, .body_area = reader_area(), .footer_area = progress_rect(),
+        .progress_area = reader_fullscreen_progress_area(), .tools_area = reader_tools_area(),
+        .screen_area = {0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT},
+        .water_dir = s_water_turn_dir,
+        .reading = s_view == READING, .reader_body = s_view == READING && s_text,
+        .prior_reader = s_presented_view == (int)READING,
+        .image_page = reader_image_slots(s_reader_session.position.page) > 0,
+        .image_gray_refresh = image_gray_refresh,
+        .water_effect = app_settings_reader_turn_effect() == 1,
+        .cleanup = s_reader_cleanup, .tools_toggle = tools_toggle,
+        .closing_tools_to_text = s_presented_panel == READER_PANEL_TOOLS &&
+            s_reader_panel == READER_PANEL_NONE && reader_text_body(),
+        .closing_panel_to_text = s_presented_panel != READER_PANEL_NONE &&
+            s_reader_panel == READER_PANEL_NONE && reader_text_body(),
+        .feedback = s_view == SHELF && s_shelf_feedback_pending,
+        .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
+        .water_turn_pending = s_water_turn_pending,
+        .footer_pending = s_reader_footer_pending, .footer_strong = s_reader_footer_strong,
+        .hold_gray = normalize_hold_gray(ctx),
+    };
+    reader_present_result_t output = reader_present_output(ctx->hl, &output_request);
+    err = output.error;
+    tools_band = output.tools_band;
+    if (output.footer_updated) {
+        if (s_reader_footer_strong)
+            ESP_LOGI(TAG, "reader footer gl16 pct=%u", percent(s_reader_session.position.page));
+        else
+            ESP_LOGI(TAG, "reader regions body_h=%d footer=diff pct=%u", s_area.height, percent(s_reader_session.position.page));
     }
-    else if (image_gray_refresh) err = app_settings_reader_turn_effect() == 1 &&
-        redraw != APP_REDRAW_FULL && !s_reader_cleanup
-        // 换章那一帧走整屏差分，表的选择与正文带差分一致。
-        // The chapter-change frame diffs the whole screen and takes the same table.
-        ? update_display_mode_diff_with(ctx->hl, frame_waveform, MODE_GL16)
-        : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
-    else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)
-        // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
-        // Periodic cleanup retains the complete vendor settling/saturation phases in one output, without erase or text replay.
-        err = update_display_area_full_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
-    else if (redraw == APP_REDRAW_FULL) err = update_display_full(ctx->hl);
-    // 工具栏开关只改底部一条带：GL16 差分只驱动带内变化像素，脏区膨胀补推进度条边缘的
-    // 白色邻行/邻列，实心进度条擦除后不再留轮廓。收起帧例外：被工具栏盖过的字多走了
-    // 一轮擦白推黑，带内差分追不平驱动历史，纯文字页放行到下方的整屏归一分支。
-    // A tools toggle changes only the bottom band: a GL16 differential drives the changed
-    // pixels inside it, and dirty-mask dilation re-drives the white neighbours around the
-    // solid progress bar so erasing it leaves no outline. The closing frame is the
-    // exception: the covered glyphs ran one extra erase-then-black cycle that a band
-    // differential cannot match, so pure-text pages fall through to the whole-screen
-    // normalize branch below.
-    else if (tools_toggle && redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
-             s_presented_view == (int)READING &&
-             !(s_presented_panel == READER_PANEL_TOOLS && s_reader_panel == READER_PANEL_NONE &&
-               reader_text_body())) {
-        tools_band = true;
-        err = update_display_area_diff_with(ctx->hl, display_reader_page_waveform(), MODE_GL16,
-                                            reader_tools_area());
-    }
-    else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
-        // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。
-        // Lift and restore only changed pixels, avoiding a dark pulse over the whole cover.
-        err = update_display_area_diff_with(ctx->hl,
-            s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : &E0470_WAVEFORM, s_mode, s_area);
-    }
-    else if (redraw == APP_REDRAW_AREA) {
-        // 快档每次显式设置并在推屏后恢复，不能把阅读节拍带入主页水波纹。
-        // Explicitly select fast pacing per turn and restore afterward, without leaking reader timing into main-page ripple.
-        const int prior_tick = s_water_turn_pending ? e0470_page_turn_tick_us() : 0;
-        if (s_water_turn_pending) e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
-        // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
-        // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
-        err = s_water_turn_pending
-            ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
-            // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
-            // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
-            : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
-                ? update_display_area_diff_with(ctx->hl,
-                    s_reader_turn_pending ? display_reader_text_waveform() : display_reader_page_waveform(),
-                    s_mode, s_area)
-                : update_display_area_with(ctx->hl, display_reader_page_waveform(), s_mode, s_area);
-        if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
-        if (s_reader_fullscreen && err == EPD_DRAW_SUCCESS) {
-            // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
-            // Skip unchanged percentages; otherwise update only the small bottom strip.
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
-                                                reader_fullscreen_progress_area());
-        }
-        if (s_reader_footer_pending) {
-            // 普通翻页页脚只驱动变化像素；换章这一次改用 37 相 GL16 擦净标题和页码。
-            // Ordinary turns drive only changed footer pixels; a chapter change uses the
-            // 37-phase GL16 differential to erase the old title and page number.
-            err = (enum EpdDrawError)(err | (s_reader_footer_strong
-                ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect())
-                : update_display_area_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, progress_rect())));
-            if (s_reader_footer_strong)
-                ESP_LOGI(TAG, "reader footer gl16 pct=%u", percent(s_reader_session.position.page));
-            else
-                ESP_LOGI(TAG, "reader regions body_h=%d footer=diff pct=%u", s_area.height, percent(s_reader_session.position.page));
-        }
-    }
-    // 关闭阅读设置等面板时，被白底盖过的字已经多走了一轮「擦白 → 推黑」，比没被盖过的
-    // 字更黑；单次还原追不平。这里整屏再走一遍归一表，全页字芯落在同一墨度。
-    // Closing a sheet leaves the text it covered one erase-then-black cycle ahead of the rest,
-    // which no single restore can match. One whole-screen normalize pass puts every glyph core
-    // on the same ink.
-    else if (redraw == APP_REDRAW_PAGE && s_view == READING && s_text &&
-             s_presented_panel != READER_PANEL_NONE && s_reader_panel == READER_PANEL_NONE &&
-             reader_text_body()) {
-        err = update_display_area_full_with(ctx->hl, display_normalize_waveform(normalize_hold_gray(ctx)),
-                                            MODE_GL16,
-                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
-    }
-    else err = s_view == READING
-        ? update_display_mode_diff_with(ctx->hl, frame_waveform, APP_PAGE_REFRESH_MODE)
-        : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
 #if CONFIG_READER_PERF
     reader_perf_scope_end(&display_scope);

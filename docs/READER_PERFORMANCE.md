@@ -12,6 +12,7 @@ python3 tools/run_reader_baseline.py perf prefetch background
 python3 tools/run_reader_baseline.py shelf management
 python3 tools/run_reader_baseline.py session images book
 python3 tools/run_reader_baseline.py controls
+python3 tools/run_reader_baseline.py present
 ```
 
 `shelf` 与 `management` 编译真实的书架数据模块，分别覆盖目录/分页记忆及搜索、排序、选择和管理失败重试；保留页面适配层的回归断言。
@@ -19,6 +20,9 @@ python3 tools/run_reader_baseline.py controls
 
 `session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
 `session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
+
+`reader_present` 同步借用已画好的真实前后帧，接收区域、模式、效果及当前画面状态，调用现有显示出口。页面仍负责绘制、预绘启动与交还、欠载恢复和状态提交；显示服务继续负责波形执行及 OTA 擦写互斥。`present` 宿主组验证区域与波形选择、插图失败短路、正文与页脚错误合并、工具栏归一，以及水波纹成功/失败后的节拍恢复。
+`reader_present` synchronously borrows completed real front/back frames and routes regions, modes, effects and frame state through existing display exits. The page retains painting, prefetch launch/handoff, underrun recovery and state commits; display services retain waveform execution and OTA flash exclusion. The `present` host suite verifies region/waveform selection, image failure short-circuits, body/footer error combination, tools normalization and restored ripple pacing after success or failure.
 
 布局仍使用单实例引擎，由拥有书源的会话统一构建和释放。构建入口绑定同一章节的文本、块、字体段和内链；失败候选由页面释放并恢复旧布局，成功候选再转交会话。关闭或释放章节时，先解除布局和尺寸回调的借用，再回收章节。调用方必须先等预绘交还，并串行化字体与布局访问。`book` 使用真实排版引擎重复 100 次，比较原入口与会话入口的分页偏移和绘制文本，并覆盖跨会话拒绝、排版失败回滚、成功换章和重复退出。
 Layout retains its singleton engine, built and released by the source-owning session. Builds bind text, blocks, runs and links from one chapter; the page frees failed candidates and restores the previous layout, then transfers successful candidates to the session. Closing or releasing a chapter first detaches layout and dimension-callback borrows. Callers must await prefetch handoff and serialize font/layout access. `book` repeats 100 cycles with the real layout engine, comparing legacy/session page offsets and rendered text, rejecting other sessions and checking failed-build rollback, successful chapter replacement and repeated exit.
