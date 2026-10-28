@@ -59,6 +59,9 @@ python3 tools/summarize_reader_perf.py build/reader-baseline/ordinary-warm.log \
 采集器不发送串口数据，并在打开前禁用 DTR/RTS；但 S31 的 USB 串口打开或重连仍可能触发主机复位。必须检查日志中的启动原因，把重启后的开书与稳定翻页分组；USB 共享退出后的日志不能直接当作纯存储交接记录。
 The collector sends no serial data and disables DTR/RTS before opening, but opening or reconnecting the S31 USB console can still reset the host. Inspect boot reasons and separate post-reset opens from stable turns; logs after USB sharing cannot by themselves isolate storage teardown behavior.
 
+采集器默认在断线时停止并返回非零状态，保留已写日志，不自动重新打开串口。USB 共享切换测试应先结束采集，退出共享后再手动开始新的采集文件。只有明确需要跨断线采集时才使用 `--reconnect`；该选项保留重开串口可能干扰设备的限制。`capture` 宿主组使用串口替身覆盖断线停止、显式重连、超时、手动中断与原始字节保存。
+By default the collector stops with a nonzero status on disconnect, preserving recorded data without reopening the port. End capture before USB-sharing transition tests and manually start a new log after leaving sharing. Use `--reconnect` only when capture across disconnects is required; reopening can still disturb the device. The `capture` host suite uses serial doubles to cover stop-on-disconnect, explicit reconnection, timeout, interruption and raw-byte preservation.
+
 `manifest.json` 必须记录 `book_sha256`、`font_sha256`、`firmware_sha256` 和 `settings`；设置应包含字号、字重、行段距、边距、背景、全屏/状态栏、阅读刷新模式及周期全刷页数。另记录提交、配置校验值、书籍章节与起始位置、电量/充电和温度条件。不要混合普通/跨章、冷/热缓存、图片、背景、水波纹或重排场景。每个场景每种操作默认至少 20 个成功样本；不足时汇总退出码为 2。固定测试文件仅保留在本地，不加入仓库。
 The manifest must contain `book_sha256`, `font_sha256`, `firmware_sha256` and `settings`; settings should include font size/weight, spacing, margins, background, full-screen/status-bar state, reader refresh mode and cleanup interval. Also record commit, config checksum, chapter/start location, battery/charging and temperature conditions. Keep ordinary/cross-chapter, cold/warm, image, background, ripple and reflow scenarios separate. Each operation needs at least 20 successful samples per scenario by default; insufficient samples return exit code 2. Keep test books/fonts local.
 
