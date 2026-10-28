@@ -8,9 +8,11 @@ import hashlib
 import json
 import posixpath
 from pathlib import Path
+import struct
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 import zipfile
+import zlib
 
 
 TITLES = ["第一章 河边清晨", "第二章 雨后小路", "第三章 山间书屋", "第四章 灯下归途"]
@@ -46,10 +48,25 @@ def zip_entry(archive, name, content, compression=zipfile.ZIP_DEFLATED):
     info.compress_type = compression
     info.create_system = 3
     info.external_attr = 0o100644 << 16
-    archive.writestr(info, content.encode("utf-8"))
+    archive.writestr(info, content.encode("utf-8") if isinstance(content, str) else content)
 
 
-def make_epub(path, navigation, div_heavy=False):
+def grayscale_png(width=384, height=128):
+    # 无滤波的16阶灰阶带与棋盘格，全部由整数生成。/ Generate unfiltered 16-level bands and checkerboards using integers only.
+    rows = b"".join(b"\0" + bytes(
+        (x * 16 // width) * 17 if y < height // 2 else
+        (0 if (x // 16 + y // 16) % 2 else 255)
+        for x in range(width)) for y in range(height))
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    return (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
+def make_epub(path, navigation, div_heavy=False, mixed_images=False):
     version = "2.0" if navigation == "ncx" else "3.0"
     toc_item = (
         '<item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
@@ -60,6 +77,8 @@ def make_epub(path, navigation, div_heavy=False):
         f'<item id="c{i}" href="text/ch{i}.xhtml" media-type="application/xhtml+xml"/>'
         for i in range(1, 5)
     )
+    if mixed_images:
+        items += '<item id="gray" href="images/gray.png" media-type="image/png"/>'
     spine = "".join(f'<itemref idref="c{i}"/>' for i in range(1, 5))
     toc_attr = ' toc="toc"' if navigation == "ncx" else ""
     modified = '<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>' if version == "3.0" else ""
@@ -77,12 +96,20 @@ def make_epub(path, navigation, div_heavy=False):
         zip_entry(archive, "mimetype", "application/epub+zip", zipfile.ZIP_STORED)
         zip_entry(archive, "META-INF/container.xml", container)
         zip_entry(archive, "OEBPS/content.opf", package)
+        if mixed_images:
+            zip_entry(archive, "OEBPS/images/gray.png", grayscale_png())
         for index, title in enumerate(TITLES, 1):
             body = "".join(
                 f'<div class="paragraph"><div><span>{escape(p)}</span></div></div>'
                 if div_heavy else f"<p>{escape(p)}</p>"
                 for p in paragraphs(index - 1, 60)
             )
+            if mixed_images:
+                body = "".join(
+                    f'<p>图文记录 {index}-{i:03d}：清晨的河水映着天光。</p>'
+                    '<p><img src="../images/gray.png" alt="十六阶灰阶与棋盘格"/></p>'
+                    for i in range(1, 61)
+                )
             chapter = f'''<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="{NS['x']}" xml:lang="zh-CN"><head><title>{title}</title></head>
 <body><h1 id="start">{title}</h1>{body}<p>实体检查：&amp; &lt; &gt; &#160;，段落终点。</p></body></html>'''
@@ -117,7 +144,7 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def check_epub(path, navigation, div_heavy):
+def check_epub(path, navigation, div_heavy, mixed_images=False):
     with zipfile.ZipFile(path) as archive:
         require(archive.testzip() is None, "ZIP CRC failure")
         first = archive.infolist()[0]
@@ -125,7 +152,10 @@ def check_epub(path, navigation, div_heavy):
         require(archive.read("mimetype") == b"application/epub+zip", "mimetype content")
         require(all(i.compress_type == zipfile.ZIP_DEFLATED for i in archive.infolist()[1:]), "deflated fixture entries")
         for name in archive.namelist()[1:]:
-            ET.fromstring(archive.read(name))
+            if not name.endswith(".png"):
+                ET.fromstring(archive.read(name))
+        if mixed_images:
+            require(archive.read("OEBPS/images/gray.png") == grayscale_png(), "image bytes")
         container = ET.fromstring(archive.read("META-INF/container.xml"))
         opf_path = container.find("ocf:rootfiles/ocf:rootfile", NS).attrib["full-path"]
         package = ET.fromstring(archive.read(opf_path))
@@ -152,6 +182,12 @@ def check_epub(path, navigation, div_heavy):
             require(any(node.attrib.get("id") == anchor for node in chapter.iter()), "TOC anchor missing")
             if div_heavy:
                 require(len(chapter.findall(".//x:div", NS)) == 120, "nested div coverage")
+            if mixed_images:
+                images = chapter.findall(".//x:img", NS)
+                require(len(images) == 60, "mixed image coverage")
+                for image in images:
+                    name = posixpath.normpath(posixpath.join("OEBPS", posixpath.dirname(href), image.attrib["src"]))
+                    require(name == "OEBPS/images/gray.png" and name in archive.namelist(), "image reference")
 
 
 def main():
@@ -198,6 +234,11 @@ def main():
         manifest.append(dict(file=f"books/{name}", encoding="utf-8", chapters=TITLES, navigation=navigation,
                              purpose="Trailing CRLF after ZIP directory" if "尾部空白" in name else
                              "Nested div paragraph boundaries" if div_heavy else f"{navigation} TOC and spine order"))
+    name = "河边记事_图文.epub"
+    make_epub(books / name, "nav", mixed_images=True)
+    check_epub(books / name, "nav", False, mixed_images=True)
+    manifest.append(dict(file=f"books/{name}", encoding="utf-8", chapters=TITLES, navigation="nav",
+                         purpose="60 inline grayscale PNGs per chapter; mixed text/image page-turn baseline"))
     for item in manifest:
         data = (args.output / item["file"]).read_bytes()
         item.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())

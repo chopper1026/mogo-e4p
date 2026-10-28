@@ -14,6 +14,9 @@ python3 tools/run_reader_baseline.py perf prefetch background
 macOS 默认使用可用的 Command Line Tools 编译器及其 SDK；可以显式设置 `CC` 和 `SDKROOT`。入口先验证 sanitizer 编译与运行，失败即停止；不会静默取消 sanitizer。各组日志与 `results.json` 保留实际退出码。
 On macOS the runner defaults to an available Command Line Tools compiler and SDK; explicit `CC` and `SDKROOT` overrides are supported. A sanitizer compile/run probe must succeed; sanitizers are never silently removed. Suite logs and `results.json` retain actual exit codes.
 
+`python3 tools/gen_book_fixtures.py` 在 `build/book-fixtures/books/` 生成原创测试书。`河边记事_图文.epub` 每章交替包含 60 段短文和 60 张灰阶 PNG（384×128，十六阶灰阶带及黑白棋盘格），用于补充正文图片混排场景。生成器固定 ZIP 元数据并在 manifest 记录校验值；书源宿主回归验证实际解析后的图片数量、尺寸和资源读取。传入设备后，仍须独立采集并确认显示效果。
+`python3 tools/gen_book_fixtures.py` generates original books in `build/book-fixtures/books/`. `河边记事_图文.epub` alternates 60 short paragraphs with 60 grayscale PNGs per chapter (384×128, sixteen gray bands and a black/white checkerboard). Fixed ZIP metadata and manifest checksums support repeatable mixed-page measurements. Source host tests verify parsed image counts, dimensions and resource reads. Device capture and visual acceptance remain separate checks.
+
 测量配置应复制现有 S31 `sdkconfig` 到独立构建目录，只在诊断副本启用 `CONFIG_READER_PERF=y`，使用 ESP-IDF 6.1 的 `idf.py --preview` 构建。保留当前版本号，不覆盖正式下载文件。设备写入使用已核对的当前分区与恢复方案；默认 `flash` 命令还包含启动器、分区表及 OTA 数据，不能当作仅更新应用的命令。
 Copy the existing S31 `sdkconfig` into an isolated build directory, enabling `CONFIG_READER_PERF=y` only in the diagnostic copy, and build with ESP-IDF 6.1 `idf.py --preview`. Keep the current version and published downloads. Device writes require a verified partition/recovery procedure; the default `flash` command also writes the bootloader, partition table and OTA data.
 

@@ -89,6 +89,23 @@ int main(int argc, char **argv) {
             html_text_t blocks = {0}; assert(book_chapter_load_blocks(i, &blocks) == ESP_OK);
             assert(blocks.len == len && !memcmp(blocks.utf8, out, len));
             assert(epub ? blocks.blocks != NULL && blocks.count > 0 : blocks.blocks == NULL && blocks.count == 0);
+            if (strstr(argv[a], "河边记事_图文.epub")) {
+                assert(blocks.image_count == 60);
+                size_t images = 0;
+                for (size_t b = 0; b < blocks.count; ++b) if (blocks.blocks[b].image >= 0) {
+                    int image = blocks.blocks[b].image;
+                    assert(image < (int)blocks.image_count);
+                    unsigned width = 0, height = 0;
+                    assert(book_chapter_image_dimensions(i, blocks.images[image], &width, &height) == ESP_OK);
+                    assert(width == 384 && height == 128);
+                    ++images;
+                }
+                assert(images == 60);
+                uint8_t *data = NULL; size_t bytes = 0; bool png = false;
+                assert(book_chapter_image(i, blocks.images[0], &data, &bytes, &png) == ESP_OK);
+                assert(png && bytes > 32 && !memcmp(data, "\x89PNG\r\n\x1a\n", 8));
+                free(data);
+            }
             html_text_free(&blocks);
             assert(book_chapter_title(i, title, sizeof(title)) == ESP_OK);
             sum += len; free(out);
