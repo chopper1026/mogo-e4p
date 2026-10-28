@@ -5,6 +5,7 @@
  * 冻结：TXT 保留源字节偏移，EPUB 采用累计 spine HTML 字节；兼容纯文本加载，不写文件。
  * Frozen: TXT retains source offsets; EPUB uses cumulative spine HTML bytes; retain plain-text loading and never write files.
  */
+#include "../reader_perf.h"
 #include "book_source_internal.h"
 #include "book_epub.h"
 #include <stdlib.h>
@@ -83,6 +84,9 @@ esp_err_t book_chapter_load_blocks_anchor(size_t i, const char *anchor,
 esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
                                            size_t source_offset, size_t *text_offset,
                                            html_text_t *out) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_SOURCE);
+#endif
     if (text_offset) *text_offset = 0;
     if (s_epub) return book_epub_load_target(s_epub, i, anchor, source_offset, text_offset, out);
     return book_chapter_load_blocks(i, out);

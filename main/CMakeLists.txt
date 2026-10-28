@@ -67,6 +67,7 @@ idf_component_register(
         "ota_online.c"
         "ota_release.c"
         "display.c"
+        "reader_perf.c"
         "display_main_waveform.c"
         "display_reader_waveform.c"
         "display_normalize.c"

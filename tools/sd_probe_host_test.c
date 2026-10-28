@@ -21,6 +21,7 @@ static uint64_t test_total=1024*512,test_free=768*512;
 static esp_err_t test_info_error=ESP_OK;
 static unsigned space_calls, invalidations;
 static bool fat_locked;
+bool test_dma_internal = true;
 static int64_t mock_us;
 
 int64_t esp_timer_get_time(void) { return mock_us; }
@@ -43,6 +44,10 @@ esp_err_t test_host_init(void){return ESP_OK;}
 esp_err_t test_host_deinit(void){return ESP_OK;}
 esp_err_t sdmmc_host_init(void){return ESP_OK;}
 esp_err_t sdmmc_host_deinit(void){return ESP_OK;}
+bool sdmmc_host_check_buffer_alignment(int slot,const void *buffer,size_t size){
+    (void)slot;
+    return ((uintptr_t)buffer % 64) == 0 && size % 4 == 0;
+}
 esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
 esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
@@ -69,7 +74,15 @@ esp_err_t esp_vfs_fat_sdmmc_mount(const char* path, const sdmmc_host_t* host,
                                   const sdmmc_slot_config_t* slot,
                                   const esp_vfs_fat_sdmmc_mount_config_t* config,
                                   sdmmc_card_t** out) {
-    (void)path; (void)host; (void)slot; (void)config;
+    (void)path; (void)slot; (void)config;
+    assert(host->dma_aligned_buffer && (uintptr_t)host->dma_aligned_buffer % 64 == 0);
+    assert(host->unaligned_multi_block_rw_max_chunk_size == 8);
+    assert(host->check_buffer_alignment(host->slot,host->dma_aligned_buffer,512));
+    assert(!host->check_buffer_alignment(host->slot,(char *)host->dma_aligned_buffer+1,512));
+    assert(!host->check_buffer_alignment(host->slot,host->dma_aligned_buffer,511));
+    test_dma_internal=false;
+    assert(!host->check_buffer_alignment(host->slot,host->dma_aligned_buffer,512));
+    test_dma_internal=true;
     assert(mount_calls < 64);
     clock_history[mount_calls++] = host->max_freq_khz;
     assert(test_present);

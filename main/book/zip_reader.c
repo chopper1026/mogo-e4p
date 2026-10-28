@@ -8,6 +8,7 @@
  * 冻结：只读文件，PSRAM 有界；拒绝加密、ZIP64、多磁盘及重复路径。
  * Frozen: read-only files and bounded PSRAM; reject encryption, ZIP64, multiple disks and duplicate paths.
  */
+#include "../reader_perf.h"
 #include "zip_reader.h"
 #include <limits.h>
 #include <stdbool.h>
@@ -233,6 +234,9 @@ size_t zip_entry_size(const zip_reader_t* z, int index) {
 }
 
 static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap, bool prefix) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_READ);
+#endif
     if (!z || index < 0 || index >= z->count) return ESP_ERR_INVALID_ARG;
     const zip_entry_t* entry = &z->entries[index];
     if ((!prefix && (entry->unpacked > ZIP_OUTPUT_MAX || entry->packed > ZIP_INPUT_MAX)) ||

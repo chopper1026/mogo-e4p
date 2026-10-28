@@ -44,7 +44,7 @@ void ui_text(uint8_t *p,int x,int y,int px,const char *s,enum EpdFontFlags align
 '''
 for name in ('epd_draw_circle','epd_fill_circle_helper','epd_fill_circle'):
     code+=function('components/epdiy/src/epdiy.c',name)
-for name in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_draw_round_rect','ui_inset_rect','ui_draw_control_frame','ui_fill_round_rect'):
+for name in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_inset_rect','ui_draw_control_frame','ui_fill_round_rect_raw','ui_fill_round_rect'):
     code+=function('main/ui/ui_kit.c',name)
 code+=re.sub(r'^#include[^\n]*\n','',power,flags=re.M)
 code+=r'''

@@ -26,6 +26,14 @@ endmenu
 # Panel self-test for bring-up; keep disabled in production images.
 menu "Bring-up diagnostics"
 
+    config READER_PERF
+        bool "Measure reader operation latency and memory"
+        default n
+        help
+            输出阅读操作、阶段耗时、字体缓存及操作内存低水位，供固定场景对比。
+            Emit reader operation/stage timing, font cache counters and local
+            heap lows for comparisons under fixed conditions.
+
     config MOGO_EPD_TEST_PATTERN
         bool "Run EPD test pattern at boot"
         default n

@@ -126,7 +126,9 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  old=work;reader_prefetch_idle(&ctx);assert(work>old&&work<=old+8&&s_next_page==-1);
  ++generation;assert(!reader_prefetch_resume(s_prep_page));invalidate_prep();
  fail_task=true;assert(!kick_prep());fail_task=false;fail_draw=true;reader_prefetch_idle(&ctx);assert(s_prep_page==-1&&s_next_page==-1);fail_draw=false;
- invalidate_prep();images=true;assert(!kick_prep());images=false;wallpaper=true;assert(!kick_prep());wallpaper=false;
+ invalidate_prep();images=true;assert(!kick_prep());images=false;
+ // 阅读背景沿用逐行预绘，仍在推屏结束前交还资源。/ Backgrounds retain row prefetch and return resources before output completes.
+ wallpaper=true;assert(app_settings_book_background_path()[0]&&kick_prep());reader_prefetch_end(true);wallpaper=false;
  s_toolbar=true;assert(!kick_prep());s_toolbar=false;s_reader_panel=READER_PANEL_FONT;assert(!kick_prep());s_reader_panel=READER_PANEL_NONE;
  s_page=499;assert(!kick_prep());
  destroy_worker();free(s_next_fb);

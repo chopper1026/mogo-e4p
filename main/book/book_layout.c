@@ -8,6 +8,7 @@
  * 冻结：原文由调用方持有；字体测量和绘制必须由调用方串行化。
  * Frozen: Caller owns source text and serializes all font measurement and drawing.
  */
+#include "../reader_perf.h"
 #include "book_layout.h"
 #include <limits.h>
 #include <stdlib.h>
@@ -856,6 +857,9 @@ bool book_layout_build(const char* utf8, size_t len, EpdRect rect, int px) {
     return book_layout_build_blocks(utf8, len, NULL, 0, rect, px);
 }
 bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks, size_t count, EpdRect rect, int px) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_LAYOUT);
+#endif
     book_layout_free();
     if ((!utf8 && len) || len == SIZE_MAX || s_lead_skip > len || s_lead_height >= (unsigned)rect.height ||
         px <= 0 || px > INT_MAX / 3 ||

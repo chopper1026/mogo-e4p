@@ -129,6 +129,7 @@
  * needed while erasing the solid progress bar left an outline; dirty-mask dilation now re-drives
  * the neighbouring rows/columns, so the full-pixel pass is no longer required.
  */
+#include "../reader_perf.h"
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
@@ -567,7 +568,12 @@ static void draw_control(uint8_t* fb, EpdRect rect, const char* label, int id) {
     if (s_pressed_control == id) ui_draw_pressed_round_rect(fb, rect, UI_BTN_RADIUS);
     ui_draw_button(fb, rect, label, false);
 }
-static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_DELAY); }
+static void lock_draw(void) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_LOCK);
+#endif
+    if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_DELAY);
+}
 static void unlock_draw(void) { if (s_draw_lock) xSemaphoreGive(s_draw_lock); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
@@ -3950,6 +3956,9 @@ static size_t current_toc_position(void) {
     return selected;
 }
 static void render(app_ctx_t* ctx, uint8_t* fb) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_PAINT);
+#endif
     lock_draw();
     ui_text_set_system_scale(s_view != READING);
     if (s_view == EDIT) { draw_editor(fb); unlock_draw(); return; }
@@ -4132,6 +4141,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) render(ctx, ctx->fb);
     bool prep = kick_prep();
     int64_t drawn = esp_timer_get_time();
+#if CONFIG_READER_PERF
+    reader_perf_scope_t display_scope = reader_perf_scope_begin(READER_PERF_DISPLAY);
+#endif
     // 本地细点阵挡板已是黑白目标，不注册灰区，省去暂存和第二轮GL16。
     // Local fine-dot guards are already BW targets; omit gray bands to skip staging and the second GL16 pass.
     if (s_view == SHELF && s_shelf_page_pending) display_main_transition_shelf_page();
@@ -4249,7 +4261,14 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         ? update_display_mode_diff_with(ctx->hl, frame_waveform, APP_PAGE_REFRESH_MODE)
         : update_display_fast_page(ctx->hl);
     int64_t displayed = esp_timer_get_time();
+#if CONFIG_READER_PERF
+    reader_perf_scope_end(&display_scope);
+    reader_perf_scope_t join_scope = reader_perf_scope_begin(READER_PERF_JOIN);
+#endif
     reader_prefetch_end(prep);
+#if CONFIG_READER_PERF
+    reader_perf_scope_end(&join_scope);
+#endif
     if (redraw == APP_REDRAW_AREA && s_mode == MODE_DU &&
         !s_reader_cleanup && !image_gray_refresh && !s_shelf_feedback_pending) {
         s_du_area = s_du_count ? ui_rect_union(s_du_area, s_area) : s_area;
@@ -4259,6 +4278,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     ESP_LOGI(TAG, "present draw=%lld display=%lld join=%lld ms", (drawn - start) / 1000,
              (displayed - drawn) / 1000, (esp_timer_get_time() - displayed) / 1000);
     guard_draw_result(ctx->hl, err);
+#if CONFIG_READER_PERF
+    reader_perf_finish(err == EPD_DRAW_SUCCESS);
+#endif
     if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {
         if ((redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL) && shelf_cover_frame_ready()) s_cover_dirty_mask=0;
         else if (s_cover_batch_present_pending) s_cover_dirty_mask &= ~s_cover_present_mask;
@@ -4286,6 +4308,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     return true;
 }
 static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_PAINT);
+#endif
     s_water_turn_pending = false;
     s_reader_turn_pending = false;
     int64_t started = esp_timer_get_time();
@@ -4720,6 +4745,10 @@ static void skip_hidden_image_pages(app_ctx_t *ctx, int direction) {
     }
 }
 static bool open_book_impl(app_ctx_t* ctx, const char* path) {
+#if CONFIG_READER_PERF
+    reader_perf_begin("open");
+    READER_PERF_SCOPE(READER_PERF_ACTION);
+#endif
     if (!book_file_path_supported(path)) {
         copy_text(s_message, sizeof(s_message), "此版本仅支持 TXT 和 EPUB 书籍");
         return false;
@@ -5455,6 +5484,10 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     return changed;
 }
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
+#if CONFIG_READER_PERF
+    reader_perf_begin("turn");
+    READER_PERF_SCOPE(READER_PERF_ACTION);
+#endif
     // 翻页就是用户操作：音量键、上键和蓝牙翻页器都不经过触摸帧，只有在这里登记才能重置自动休眠计时。
     // A turn is user activity: the side keys, the up key and the page turner never pass a touch frame,
     // so only noting it here restarts the idle-lock clock.
@@ -5515,6 +5548,10 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
 static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,
                                         const int next_margin[MARGIN_COUNT],
                                         uint8_t next_line, uint8_t next_para) {
+#if CONFIG_READER_PERF
+    reader_perf_begin("reflow");
+    READER_PERF_SCOPE(READER_PERF_ACTION);
+#endif
     (void)ctx;
     if (next_px < BOOK_PX_MIN || next_px > BOOK_PX_MAX ||
         next_line < 110 || next_line > 150 ||

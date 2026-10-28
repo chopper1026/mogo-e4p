@@ -38,6 +38,7 @@
  * User revision: acknowledge accepted manual collage locks before saves/reader joins; omit the badge for automatic sleep and direct shutdown/restart.
  */
 
+#include "../reader_perf.h"
 #include "app_loop.h"
 #include "auto_lock.h"
 #include "crash_note.h"
@@ -1113,6 +1114,9 @@ void app_loop_run(const app_loop_config_t* config) {
     // Whether the previous iteration changed screens; only such stale navigation is dropped.
     bool just_transitioned = false;
     while (true) {
+#if CONFIG_READER_PERF
+        reader_perf_input_begin();
+#endif
         unsigned requested_cover_policy = (unsigned)app_settings_main_refresh_mode() | ((unsigned)app_settings_system_contrast() << 8);
         if (requested_cover_policy != cover_policy) {
             app_home_cover_mode_changed(); app_book_cover_mode_changed();
@@ -1828,6 +1832,9 @@ void app_loop_run(const app_loop_config_t* config) {
 #endif
         // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
         // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
+#if CONFIG_READER_PERF
+        reader_perf_finish(false);
+#endif
         vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
     }
 }

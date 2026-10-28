@@ -6,6 +6,7 @@
  * 冻结：原始偏移用于进度；目录上限 2048；不加载整本书。
  * Frozen: Progress uses source offsets; at most 2048 entries; never load the whole book.
  */
+#include "../reader_perf.h"
 #include "book_source_internal.h"
 #include "book_index_cache.h"
 #include "gbk.h"
@@ -53,6 +54,9 @@ static size_t encode(uint32_t cp, char out[4]) {
 }
 static bool next(reader_t *r, uint32_t *cp) {
     if (r->used - r->pos < 4) {
+#if CONFIG_READER_PERF
+        READER_PERF_SCOPE(READER_PERF_READ);
+#endif
         size_t tail = r->used - r->pos;
         memmove(r->bytes, r->bytes + r->pos, tail);
         r->used = tail + fread(r->bytes + tail, 1, READ_BLOCK, r->file); r->pos = 0;

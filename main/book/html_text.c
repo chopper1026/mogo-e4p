@@ -8,6 +8,7 @@
  * 冻结：不执行脚本、不加载资源；输出有界，失败释放全部临时分配。
  * Frozen: Never execute scripts or load resources; bound output and release temporary allocations on failure.
  */
+#include "../reader_perf.h"
 #include "html_text.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -747,6 +748,9 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                                           const html_font_map_t* fonts,
                                           const char* anchor, size_t source_offset,
                                           size_t* anchor_offset, html_text_t* out) {
+#if CONFIG_READER_PERF
+    READER_PERF_SCOPE(READER_PERF_PARSE);
+#endif
     if (!out) return ESP_ERR_INVALID_ARG;
     *out = (html_text_t){0};
     if (anchor_offset) *anchor_offset = 0;
