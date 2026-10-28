@@ -41,6 +41,7 @@
 #include "../reader_perf.h"
 #include "app_loop.h"
 #include "app_input.h"
+#include "app_media.h"
 #include "app_navigation.h"
 #include "auto_lock.h"
 #include "crash_note.h"
@@ -65,17 +66,11 @@
 #include "read_pico_crashlog.h"
 #include "read_pico_pmu.h"
 #include "read_pico_transfer.h"
-#include "read_pico_sd.h"
 #include "settings.h"
 #include "haptics.h"
 #include "sleep.h"
 #include "frontlight.h"
 #include "time_service.h"
-#include "ui_avatar.h"
-#include "book/book_cover_jobs.h"
-#include "book/book_lock_collage.h"
-#include "ttf_font.h"
-#include "app_font_context.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
 #include "ui_nav.h"
@@ -126,9 +121,6 @@ void touch_diag_block(const char* src, int64_t t0_us) {
 // SD 卡插上或者刚挂好时，隔一会儿再试一次存在设置里的字体。
 // Retry the saved SD font shortly after a card appears or mounts.
 #define FONT_RETRY_INTERVAL_MS 750
-// 失效锁存后卡回位的自动重挂间隔；重挂本身失败时下次再试。
-// Auto-remount interval once a latched card is back; a failed remount retries next time.
-#define MEDIA_REMOUNT_INTERVAL_MS 2000
 #define MEDIA_POLL_INTERVAL_MS 500
 
 static int64_t s_lock_ignore_until_ms;
@@ -316,56 +308,6 @@ static void navigation_present_menu(app_ctx_t *ctx, const app_desc_t *current,
 // The loop retains the latest sampled frame, synchronizes it during replay and clears it at lock boundaries.
 static touch_frame_t s_last_frame;
 
-static bool try_load_saved_sd_font(bool allow_probe) {
-    read_pico_sd_info_t info;
-    esp_err_t err = read_pico_sd_get_info(&info);
-    if (err == ESP_ERR_NOT_FINISHED) return false;
-    if (!info.mounted) {
-        if (allow_probe && err == ESP_ERR_INVALID_STATE) read_pico_sd_start_probe();
-        return false;
-    }
-    return app_font_retry_active();
-}
-
-// 先停文件使用者，再换字体；重挂只发生在失效后卡已回位、句柄都已放开时。
-// Stop file consumers before font fallback; remount only after a latched card is back and
-// every consumer has released its handles.
-static int64_t s_media_remount_ms;
-
-static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
-                       bool* mounted, bool* invalidated) {
-    if (usb_storage_active()) { *mounted = false; *invalidated = false; return false; }
-    read_pico_sd_info_t info = {0};
-    esp_err_t err = read_pico_sd_get_info(&info);
-    // 判失效后卡又回到位：消费者已在 lost 里关掉句柄，重挂一次让字体和目录自己回来。
-    // After the latch, a card back in place can be remounted: consumers closed their handles
-    // during the lost notification, so the face and the listings recover by themselves.
-    if (*invalidated && info.present && !info.mounted && err != ESP_ERR_NOT_FINISHED &&
-        ctx->now_ms - s_media_remount_ms >= MEDIA_REMOUNT_INTERVAL_MS) {
-        s_media_remount_ms = ctx->now_ms;
-        (void)read_pico_sd_remount();
-        return false;
-    }
-    if (err == ESP_ERR_INVALID_STATE && info.present && !*invalidated) {
-        (void)read_pico_sd_start_probe();
-        return false;
-    }
-    if (err == ESP_ERR_NOT_FINISHED) return false;
-    bool ready = err == ESP_OK && info.mounted;
-    bool lost = *mounted && !ready;
-    bool gained = !*mounted && ready;
-    *mounted = ready;
-    if (ready) *invalidated = false;
-    if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
-    if (gained && current->on_media_ready) current->on_media_ready(ctx);
-    if (!lost) return false;
-    *invalidated = true;
-    if (current->on_media_lost) current->on_media_lost(ctx);
-    if (ttf_font_ready() && !ttf_font_is_builtin()) ttf_font_open_builtin();
-    ui_text_set_system_font(false);
-    return true;
-}
-
 // 电源动作先保存当前页面，再定稿一张不带时钟的静态画面；避免关机后留下会误读的冻结时间。
 // Save the current page first, then settle a clock-free static frame so shutdown never leaves a misleading frozen time.
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
@@ -526,19 +468,17 @@ void app_loop_run(const app_loop_config_t* config) {
     uint32_t last_ble_input = ble_pt_input_serial();
     unsigned idle_minutes = app_settings_auto_lock_minutes();
     unsigned cover_policy = (unsigned)app_settings_main_refresh_mode() | ((unsigned)app_settings_system_contrast() << 8);
-    read_pico_sd_info_t initial_media = {0};
-    (void)read_pico_sd_get_info(&initial_media);
-    bool media_mounted = initial_media.mounted || (ttf_font_ready() && !ttf_font_is_builtin());
+    bool media_mounted = app_media_initial_mounted();
     bool media_invalidated = false;
     app_lock_ignore_for(APP_LOCK_IGNORE_BOOT_MS);
 
     // The SD probe starts during board setup and is usually ready by the first product frame.
     // Retry here so the very first bookshelf paint already has a full CJK system face.
-    try_load_saved_sd_font(false);
+    app_media_retry_font(false);
     rp_boot_mark("sdfont");
     if (current->on_enter != NULL) current->on_enter(&ctx);
     rp_boot_mark("enter");
-    poll_media(&ctx, current, &media_mounted, &media_invalidated);
+    app_media_poll(&ctx, current, &media_mounted, &media_invalidated);
     // 首帧必须整屏 GC16：fb 里还是 app_main 画的开机图，DU 盖不掉。
     // First frame must be full GC16: fb still holds the splash; DU cannot cover it.
     app_present(&ctx, current, APP_REDRAW_FULL);
@@ -726,9 +666,9 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", read_pico_transfer_service_poll());
-            // 后台对时是系统服务（同 poll_media / 字体重试），守卫在 time_service 内部；
+            // 后台对时是系统服务（同 app_media_poll / 字体重试），守卫在 time_service 内部；
             // 空闲门控沿用上游：触压、近期输入、独占 PMU 的页面、USB 与联网升级期间不动。
-            // Background sync is a system service like poll_media or the font retry, with its
+            // Background sync is a system service like app_media_poll or the font retry, with its
             // guards inside time_service; idle gating stays upstream: no touch, no recent input,
             // pages holding the PMU, USB or an online update.
             app_time_service_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
@@ -750,7 +690,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
             bool media_changed;
-            TD_TIME("media_poll", media_changed = poll_media(&ctx, current, &media_mounted, &media_invalidated));
+            TD_TIME("media_poll", media_changed = app_media_poll(&ctx, current, &media_mounted, &media_invalidated));
             if (media_changed) {
                 power_dialog_open = false;
                 ui_power_dialog_end();
@@ -1002,7 +942,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
-                        poll_media(&ctx, current, &media_mounted, &media_invalidated);
+                        app_media_poll(&ctx, current, &media_mounted, &media_invalidated);
                         last_media_poll_ms = ctx.now_ms;
                         ctx.consumed = true;
                         ctx.pressed = false;
@@ -1046,7 +986,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
-                        poll_media(&ctx, current, &media_mounted, &media_invalidated);
+                        app_media_poll(&ctx, current, &media_mounted, &media_invalidated);
                         last_media_poll_ms = ctx.now_ms;
                         ctx.consumed = true;
                         ctx.pressed = false;
@@ -1067,7 +1007,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.now_ms - last_font_retry_ms >= FONT_RETRY_INTERVAL_MS) {
             last_font_retry_ms = ctx.now_ms;
             bool font_ready;
-            TD_TIME("font_retry", font_ready = try_load_saved_sd_font(!media_invalidated));
+            TD_TIME("font_retry", font_ready = app_media_retry_font(!media_invalidated));
             if (font_ready) {
                 held_key = -1;
                 app_input_cancel_gesture(&ctx, current, &gesture);
@@ -1167,7 +1107,7 @@ void app_loop_run(const app_loop_config_t* config) {
             display_request_full_refresh();
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;
-            poll_media(&ctx, current, &media_mounted, &media_invalidated);
+            app_media_poll(&ctx, current, &media_mounted, &media_invalidated);
             last_media_poll_ms = ctx.now_ms;
             ctx.pressed = ctx.released = false;
             just_transitioned = true;

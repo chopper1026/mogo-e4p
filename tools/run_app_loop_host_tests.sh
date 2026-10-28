@@ -12,8 +12,16 @@ rm "$out/sdkconfig.h"
 python3 tools/power_dialog_host_test.py --input-c "$out/power.c"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -Itools/app_loop_stubs -Imain -Icomponents/ble_page_turner/include -Icomponents/read_pico/include -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
-  "$out/power.c" tools/app_loop_host_test.c main/app/app_loop.c main/app/app_input.c main/app/app_navigation.c main/app/app_quick_layer.c tools/app_loop_stubs/touch_sampler_stub.c main/ui/ui_gesture.c main/ui/ui_quick_menu_input.c -o "$out/test"
+  "$out/power.c" tools/app_loop_host_test.c main/app/app_loop.c main/app/app_input.c main/app/app_media.c main/app/app_navigation.c main/app/app_quick_layer.c tools/app_loop_stubs/touch_sampler_stub.c main/ui/ui_gesture.c main/ui/ui_quick_menu_input.c -o "$out/test"
 "$out/test"
+# 保留字体回退调用及可切换 USB 所有权，避免主循环的内联桩屏蔽这些分支。
+# Preserve font-fallback calls and configurable USB ownership instead of the loop's fixed inline stubs.
+printf '%s\n' '#pragma once' '#include <stdbool.h>' 'void ui_text_set_system_font(bool);' > "$out/ui_kit.h"
+printf '%s\n' '#pragma once' '#include <stdbool.h>' 'bool usb_storage_active(void);' > "$out/usb_storage.h"
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  -I"$out" -Itools/app_loop_stubs -Imain -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
+  tools/app_media_host_test.c main/app/app_media.c -o "$out/media"
+"$out/media"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -Itools/app_loop_stubs -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
   tools/ui_quick_input_host_test.c main/ui/ui_quick_menu_input.c -o "$out/quick"

@@ -81,6 +81,7 @@ idf_component_register(
         "haptics.c"
         "app/app_loop.c"
         "app/app_input.c"
+        "app/app_media.c"
         "app/app_navigation.c"
         "app/app_quick_layer.c"
         "app/touch_sampler.c"
