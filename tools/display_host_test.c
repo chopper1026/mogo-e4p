@@ -70,6 +70,7 @@ static unsigned draw_errors_remaining;
 static unsigned blind_pushes, repair_delays, poweroffs;
 static bool checking_repair;
 static bool drive_active, no_change;
+static bool power_failure;
 static unsigned drive_releases, release_failures;
 static int64_t now_us = 1000000;
 static const EpdWaveform *waveform_at_draw;
@@ -93,7 +94,8 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,
 void read_pico_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
 void read_pico_epd_use_scan(read_pico_epd_scan_t scan) { last_scan = scan; }
 void epd_lcd_set_prefill_lines(int lines) { prefill = lines; }
-void epd_poweron(void) { ++powerons; drive_active = true; }
+void epd_poweron(void) { ++powerons; drive_active = !power_failure; }
+bool read_pico_rails_on(void) { return !power_failure; }
 bool read_pico_epd_release_drive(void) {
     assert(ota_display_depth);
     ++drive_releases;
@@ -173,6 +175,29 @@ enum EpdDrawError epd_hl_update_screen_padded(EpdiyHighlevelState* hl, enum EpdD
 enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState* hl, enum EpdDrawMode mode, int temperature) {
     memset(hl->back_fb, 255, FB_BYTES);
     return epd_hl_update_screen_full(hl, mode, temperature);
+}
+
+static enum EpdDrawError power_fault_present(EpdiyHighlevelState *hl, unsigned path) {
+    EpdRect area = {0, 160, 16, 16};
+    switch (path) {
+        case 0: return update_display_mode(hl, MODE_GL16);
+        case 1: return update_display_mode_diff(hl, MODE_GL16);
+        case 2: return update_display_mode_diff_with(hl, &E0470_WAVEFORM, MODE_GL16);
+        case 3: return update_display_fast_page(hl);
+        case 4: return update_display_from_white_with(hl, &E0470_WAVEFORM, MODE_GC16);
+        case 5: return update_display_from_white(hl);
+        case 6: return update_display_white(hl);
+        case 7: return update_display_full(hl);
+        case 8: return update_display_image_gray(hl);
+        case 9: return update_display_with(hl, &E0470_WAVEFORM, MODE_GL16);
+        case 10: return update_display_area_with(hl, &E0470_WAVEFORM, MODE_GL16, area);
+        case 11: return update_display_area_diff_with(hl, &E0470_WAVEFORM, MODE_GL16, area);
+        case 12: return update_display_area_diff_padded(hl, &E0470_WAVEFORM, MODE_DU, area, 1, 1);
+        case 13: return update_display_area_full_with(hl, &E0470_WAVEFORM, MODE_GL16, area);
+        case 14: return update_display_click_feedback(hl, area);
+        case 15: return update_display_water_turn(hl, area, E0470_TURN_RTL);
+        default: return display_panel_repair(hl);
+    }
 }
 
 int main(void) {
@@ -347,6 +372,44 @@ int main(void) {
     assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES));
     puts("idle drive release: no-change output, bounded I2C retry, no extra scans and unchanged 100 ms HV timeout passed");
     puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
+    // 每个输出出口都必须拒绝未就绪的供电；连续输入不重复等待，恢复失败继续要求整屏重建。
+    // Every output must reject unready power; queued input cannot repeat the wait, and failed recovery retains the full-screen rebuild request.
+    no_change = false;
+    for (unsigned path = 0; path <= 16; ++path) {
+        now_us += 2000000;
+        for (unsigned i = 0; i < FB_BYTES; ++i) target[i] = (uint8_t)(i + path * 13);
+        memcpy(front, target, FB_BYTES); memset(back, 0x5a, FB_BYTES);
+        power_failure = true;
+        checking_repair = path == 16;
+        if (checking_repair) repair_delays = 0;
+        int before_draws = draws, before_clears = clears, before_water = water_calls;
+        unsigned before_blind = blind_pushes;
+        assert(power_fault_present(&hl, path) == DISPLAY_DRAW_POWER_NOT_READY);
+        checking_repair = false;
+        assert(draws == before_draws && clears == before_clears && water_calls == before_water);
+        assert(blind_pushes == before_blind && !drive_active && !ota_display_depth);
+        for (unsigned i = 0; i < FB_BYTES; ++i) assert(back[i] == 0x5a);
+        // white 出口的目标本来就是白；其他出口必须保留调用方的完整目标。
+        // White output intentionally requests white; every other output preserves the caller's complete target.
+        if (path == 6) memset(target, 0xff, FB_BYTES);
+        assert(!memcmp(front, target, FB_BYTES));
+        int attempts = powerons;
+        for (unsigned n = 0; n < 20; ++n)
+            assert(update_display_mode_diff(&hl, MODE_GL16) == DISPLAY_DRAW_POWER_NOT_READY);
+        guard_draw_result(&hl, DISPLAY_DRAW_POWER_NOT_READY);
+        guard_draw_result(&hl, EPD_DRAW_EMPTY_LINE_QUEUE);
+        assert(powerons == attempts && draws == before_draws && clears == before_clears);
+        now_us += 1001000; power_failure = false;
+        next_draw_error = EPD_DRAW_OTHER_ERROR;
+        assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_OTHER_ERROR);
+        assert(clears == before_clears + 1 && draws == before_draws + 1 && white_baseline);
+        assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
+        assert(clears == before_clears + 2 && draws == before_draws + 2 && correct_target_at_draw);
+        assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES) && !ota_display_depth);
+        assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
+        assert(clears == before_clears + 2);
+    }
+    puts("power recovery: all 17 outputs reject missing rails without committing back; queued retries are bounded and recovery preserves the target until full output succeeds");
 }
 
 // Continuous state is exercised separately with native-size buffers.

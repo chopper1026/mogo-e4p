@@ -255,6 +255,34 @@ void display_main_transition_shelf_page(void) {
     s_main_shelf_page = s_main_armed != NULL;
 }
 
+// 供电失败后先撤掉请求，至少静置一秒；积压输入不能反复进入板级就绪等待。
+// Drop power requests after failure and wait at least one second; queued input must not repeatedly enter the board's ready wait.
+#define POWER_RETRY_INTERVAL_MS 1000
+static int64_t s_power_retry_ms;
+static bool s_power_fault;
+
+static bool display_power_ready(void) {
+    if (s_power_retry_ms && esp_timer_get_time() / 1000 < s_power_retry_ms) return false;
+    epd_poweron();
+    if (read_pico_rails_on()) {
+        s_power_retry_ms = 0;
+        return true;
+    }
+    epd_poweroff();
+    rails_deadline_ms = drive_release_retry_ms = 0;
+    s_power_retry_ms = esp_timer_get_time() / 1000 + POWER_RETRY_INTERVAL_MS;
+    s_power_fault = s_main_fault = s_full_refresh_requested = true;
+    return false;
+}
+
+// 只在整屏目标确实落屏后解除供电故障；失败时继续保留重建要求。
+// Clear a power fault only after the full target reaches the screen; failed recovery retains the rebuild request.
+static void display_power_recovered(enum EpdDrawError result) {
+    if (s_power_fault && result == EPD_DRAW_SUCCESS) {
+        s_power_fault = s_main_fault = s_full_refresh_requested = false;
+    }
+}
+
 static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError error) {
     // 扫描失败后光学状态未知，必须从白底重建，不能复用半途图的 back。
     // A failed scan leaves unknown optical state; rebuild from white instead of reusing an intermediate back.
@@ -264,7 +292,7 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
         read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     }
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_clear();
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     enum EpdDrawError result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
@@ -328,7 +356,15 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
     if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
     use_scan_for(body_wave, body_mode);
-    epd_poweron();
+    if (!display_power_ready()) {
+        if (cache) {
+            main_band_copy(hl, cache, true);
+            heap_caps_free(cache);
+        }
+        display_main_transition_cancel();
+        *result = DISPLAY_DRAW_POWER_NOT_READY;
+        return true;
+    }
     epd_hl_waveform(hl, body_wave);
     int64_t start = esp_timer_get_time();
     // 快刷/水波纹不攒强刷次数；普通的周期整理也不能进入底栏。
@@ -508,7 +544,7 @@ static enum EpdDrawError hl_update(
 static enum EpdDrawError update_display_mode_unlocked(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     enum EpdDrawError result = hl_update(hl, &E0470_WAVEFORM, mode, false, NULL, false);
     rails_keepalive();
     return result;
@@ -517,7 +553,7 @@ static enum EpdDrawError update_display_mode_unlocked(
 static enum EpdDrawError update_display_mode_diff_unlocked(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     enum EpdDrawError result = hl_update(hl, &E0470_WAVEFORM, mode, false, NULL, true);
     rails_keepalive();
     return result;
@@ -529,7 +565,7 @@ static enum EpdDrawError update_display_mode_diff_unlocked(
 static enum EpdDrawError update_display_mode_diff_with_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, NULL, true);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -545,7 +581,7 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
     if (APP_UI_FAST_GC16_EVERY > 0 && ++s_page_refreshes >= APP_UI_FAST_GC16_EVERY) {
         s_page_refreshes = 0;
         use_scan_for(&E0470_WAVEFORM, MODE_GC16);
-        epd_poweron();
+        if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
         epd_hl_waveform(hl, &E0470_WAVEFORM);
         enum EpdDrawError result = epd_hl_update_screen_full(hl, MODE_GC16, 25);
 
@@ -556,7 +592,7 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
     const bool ordinary = app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL;
     const EpdWaveform* waveform = ordinary ? display_main_normal_waveform() : &E0470_WAVEFORM;
     use_scan_for(waveform, MODE_GL16);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     // 普通子页面与四主页使用同一柔和灰阶，不另加黑白预刷或延迟补刷；其他模式保留原周期。
     // Ordinary subpages share the roots' soft grayscale in one pass, without BW prepasses or delayed output; other modes retain their cadence.
@@ -575,7 +611,7 @@ static enum EpdDrawError update_display_from_white_with_unlocked(
     enum EpdDrawError intercepted;
     if (main_before_update(hl, &intercepted)) return intercepted;
     use_scan_for(waveform, mode);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = epd_hl_update_screen_from_white(hl, mode, 25);
 
@@ -610,8 +646,17 @@ static enum EpdDrawError update_display_full_unlocked(EpdiyHighlevelState* hl) {
     s_full_refresh_requested = false;
     display_main_transition_cancel();
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    epd_poweron();
-    enum EpdDrawError result = hl_update(hl, &E0470_WAVEFORM, MODE_GC16, true, NULL, false);
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
+    enum EpdDrawError result;
+    if (s_power_fault) {
+        // 供电失败后的物理画面未知，先清物理屏，再从真实白底提交当前目标。
+        // Power failure leaves the optical frame unknown: clear the panel, then commit the current target from a real white baseline.
+        use_scan_for(&E0470_WAVEFORM, MODE_GC16);
+        epd_clear();
+        result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
+        s_page_refreshes = 0;
+        display_power_recovered(result);
+    } else result = hl_update(hl, &E0470_WAVEFORM, MODE_GC16, true, NULL, false);
     rails_keepalive();
     return result;
 }
@@ -625,11 +670,12 @@ static enum EpdDrawError update_display_image_gray_unlocked(EpdiyHighlevelState*
     // 图片保留十六级原始灰阶；白底和完整 48 相波形稳定呈现层次。
     // Images keep sixteen source grays; a white baseline and the full 48-phase table preserve tones.
     use_scan_for(&E0470_FULL_WAVEFORM, MODE_GC16);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_clear();
     epd_hl_waveform(hl, &E0470_FULL_WAVEFORM);
     enum EpdDrawError result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
 
+    display_power_recovered(result);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     s_page_refreshes = 0;
     rails_keepalive();
@@ -641,7 +687,7 @@ static enum EpdDrawError update_display_image_gray_unlocked(EpdiyHighlevelState*
 static enum EpdDrawError update_display_with_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, NULL, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -653,7 +699,7 @@ static enum EpdDrawError update_display_area_with_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -672,7 +718,7 @@ static enum EpdDrawError update_display_area_diff_with_unlocked(
     // between 11 ms and 6.9 ms per frame. Other waveforms leave the profile untouched.
     if ((mode & 0xF) == MODE_DU && waveform == &E0470_FOLLOW_WAVEFORM)
         use_scan_for(waveform, mode);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, true);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -684,7 +730,7 @@ static enum EpdDrawError update_display_area_diff_padded_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area, int pad_lines, int pad_col_bytes
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update_padded(hl, waveform, mode, false, &area, true,
                                                 pad_lines, pad_col_bytes);
@@ -697,7 +743,7 @@ static enum EpdDrawError update_display_area_full_with_unlocked(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, true, &area, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -713,7 +759,7 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     // Explicit reader effect; main-tab water has its own bounded path, and ordinary mode is unaffected.
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
-    epd_poweron();
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     // 水波纹使用面板原厂GL16表：每种灰阶转换保留前导擦除，灰阶由原厂脉冲校准；
     // 纯白目标仍是原厂的 18 次擦白，只把裁表砍掉的 to=0 推黑补回原厂 18 次。
     // Ripple uses the vendor GL16 table: every gray transition keeps its leading erase
@@ -754,7 +800,7 @@ static void guard_draw_result_unlocked(EpdiyHighlevelState* hl, enum EpdDrawErro
     s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
     read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
-    epd_poweron();
+    if (!display_power_ready()) return;
     epd_clear();
     // 清物理屏后仅重置旧帧基准，保留目标页；否则局部刷新会留下整页白屏。
     // Reset only the old-frame baseline after clearing; preserving the target prevents blank pages after partial updates.
@@ -779,7 +825,7 @@ int64_t local_display_elapsed_us;
 
 // 连续相位全部完成后，back已是真实黑白画面；不因尚未补灰阶而多做一次整屏GC16。
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
-static bool display_needs_full(void) { return s_full_refresh_requested; }
+static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
 
 // 统一硬件出口，递归调用也必须覆盖整个扫描过程。/ Guard complete scans, including recursive fallback paths.
 enum EpdDrawError update_display_mode(
@@ -897,7 +943,11 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     epd_poweroff();
     vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
-    epd_poweron();
+    if (!display_power_ready()) {
+        pico_online_display_end(held);
+        LATENCY_DISPLAY_END();
+        return DISPLAY_DRAW_POWER_NOT_READY;
+    }
     // 盲刷黑/白：与 framebuffer 无关；每轮之间让出 CPU，整段要几秒。
     // Blind black/white drive, independent of the framebuffer; the CPU is released between rounds
     // because the whole pass takes seconds.
@@ -922,6 +972,7 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
     s_main_fault = result != EPD_DRAW_SUCCESS;
     if (s_main_fault) s_full_refresh_requested = true;
+    display_power_recovered(result);
     rails_keepalive();
     pico_online_display_end(held);
     LATENCY_DISPLAY_END();

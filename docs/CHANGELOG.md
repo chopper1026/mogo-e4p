@@ -8,6 +8,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 屏幕电源扩展器初始化遇到暂时通信错误时，最多恢复总线并重试两次；检查最终输出写入结果，避免一次失败后屏幕一直无法更新。
   Screen power-expander initialization recovers the bus and retries up to twice after transient communication failures, checking the final output write so one failure does not permanently disable presentation.
 
+- 屏幕供电未就绪时停止推屏，连续输入最多每秒重试一次；供电恢复后的下一次输出从白底重建整屏，避免将失败画面当作已显示内容继续差分刷新。
+  Stop presentation when panel power is not ready and retry at most once per second under queued input. The next output after power recovers rebuilds the whole screen from white instead of treating failed output as an actual differential baseline.
+
 ## v1.0.0 · 本地测试 / Local testing · 2026-10-27
 
 - 联网升级改为使用 Mogo 平台的 E4P 固件清单和下载地址，继续验证设备型号、分区、镜像大小与 SHA-256。

@@ -46,6 +46,7 @@ static enum EpdDrawError fail_error;
 static int allocations, frees, complete_bw_calls;
 static size_t allocated_bytes;
 static bool alloc_fail;
+static bool power_failure;
 static const EpdRect acrylic[] = {{0,360,H,90},{0,642,H,90},{0,924,H,90}};
 static EpdRect last_area;
 static enum EpdDrawMode last_mode;
@@ -81,6 +82,7 @@ void read_pico_epd_set_pclk(int mhz) {assert(mhz == DISPLAY_PCLK_SAFE_MHZ);}
 void read_pico_epd_use_scan(read_pico_epd_scan_t mode) {scan = mode;}
 void epd_lcd_set_prefill_lines(int lines) {prefill = lines;}
 void epd_poweron(void) {}
+bool read_pico_rails_on(void) { return !power_failure; }
 bool read_pico_epd_release_drive(void) {return true;}
 void epd_poweroff(void) {}
 void epd_clear(void) { assert(ota_display_depth);++clears; memset(panel, 255, BYTES);}
@@ -220,6 +222,7 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* state, EpdRect area,
     return result;
 }
 static void reset(void) {
+    power_failure = false;
     display_main_transition_cancel(); main_mode=APP_MAIN_REFRESH_FAST; exit_calls=water_calls=water_fails=0; failures = fail_after = 0;
     allocations = frees = complete_bw_calls = 0; alloc_fail = false; now_us = 1000000;
     region_calls=region_unavailable=0;
@@ -733,6 +736,33 @@ int main(void) {
         else assert(gray_calls>=1);
         assert(!clears);
     }
+    // 供电失败必须归还暂存灰阶，保留整张目标；包括分配失败以及普通/水波纹路径。
+    // Power failure must restore cached grays and the complete target, including allocation failure and ordinary/ripple paths.
+    for (int path = 0; path < 4; ++path) {
+        reset(); gray_target(7);
+        main_mode = path < 2 ? APP_MAIN_REFRESH_FAST
+                  : path == 2 ? APP_MAIN_REFRESH_NORMAL : APP_MAIN_REFRESH_WATER;
+        alloc_fail = path == 1;
+        display_main_transition_arm(&owner_a, false, true);
+        display_main_transition_gray_bands(acrylic, 3);
+        power_failure = true;
+        assert(update_display_fast_page(&hl) == DISPLAY_DRAW_POWER_NOT_READY);
+        assert(!calls && !clears && !water_calls && !ota_display_depth);
+        assert(!memcmp(front, final, BYTES) && !memcmp(panel, back, BYTES));
+        assert(allocations == (path < 2) && frees == (path == 0));
+        // 恢复的首次扫描再失败时，下一次仍需重建，不能回放临时黑白/灰阶缓存。
+        // If the first recovery scan also fails, the next output must rebuild instead of replaying temporary BW/gray cache.
+        now_us += 1001000; power_failure = false;
+        failures = 1; fail_error = EPD_DRAW_OTHER_ERROR;
+        assert(update_display_fast_page(&hl) == EPD_DRAW_OTHER_ERROR);
+        assert(!memcmp(front, final, BYTES) && !ota_display_depth);
+        assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
+        assert_final();
+        assert(clears == 2 && !water_calls && !ota_display_depth);
+        assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
+        assert(clears == 2); assert_final();
+    }
+    puts("PASS: native-size gray targets survive power failure, cached-band restoration, OOM, ordinary/ripple modes and repeated recovery failure under OTA exclusion");
     puts("PASS: loading-time control feedback preserves pending main transitions in all three modes");
     puts("PASS: protected Cat/Kehai short motion retains FOLLOW/DU/FAST in normal, fast and ripple; unchanged targets skip scans and failures rebuild the exact frame");
     assert(!ota_display_depth);
