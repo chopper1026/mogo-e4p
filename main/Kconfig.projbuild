@@ -44,6 +44,17 @@ menu "Bring-up diagnostics"
             Emit reader operation/stage timing, font cache counters and local
             heap lows for comparisons under fixed conditions.
 
+    config READER_MEMORY
+        bool "Record reader resource ownership snapshots"
+        depends on READER_PERF
+        default n
+        help
+            在计时结束后遍历各拥有者的存活资源，并记录关闭和退出快照。
+            仅用于资源诊断；固定页序的性能对照应关闭，避免遍历影响后续缓存。
+            Walk live owner allocations after timing and record close/exit snapshots.
+            Enable only for resource diagnostics; disable for fixed-page timing
+            comparisons so resource walks do not affect subsequent caches.
+
     config MOGO_EPD_TEST_PATTERN
         bool "Run EPD test pattern at boot"
         default n

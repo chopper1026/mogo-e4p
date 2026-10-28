@@ -4,7 +4,7 @@
  */
 #pragma once
 #include "reader_perf.h"
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 #include <stddef.h>
 #include "esp_heap_caps.h"
 

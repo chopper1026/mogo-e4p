@@ -1295,7 +1295,7 @@ int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layo
 }
 
 
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void book_layout_memory_stats(reader_memory_stats_t *stats) {
     stats->layout = reader_memory_owned(s_pages) + reader_memory_owned(s_line) +
         reader_memory_owned(s_images) + reader_memory_owned(s_page_img_start);

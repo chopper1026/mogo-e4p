@@ -3998,7 +3998,7 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
 static bool reader_text_body(void) {
     return book_layout_page_image_count(s_reader_session.position.page) == 0;
 }
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 static void reader_memory_snapshot(const char *event) {
     if (!reader_perf_memory_ready()) return;
     reader_memory_stats_t stats = {0};
@@ -4150,6 +4150,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     guard_draw_result(ctx->hl, err);
 #if CONFIG_READER_PERF
     reader_perf_finish(err == EPD_DRAW_SUCCESS);
+#endif
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
     reader_memory_snapshot("present");
 #endif
     if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {
@@ -4298,7 +4300,7 @@ static void free_book(void) {
     s_jump_offset = SIZE_MAX;
     reader_session_close(&s_reader_session);
     app_font_activate_system();
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
     reader_memory_snapshot("book_closed");
 #endif
 }
@@ -6638,7 +6640,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     ui_reader_background_release();
     free_book();
     reader_prefetch_release();
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
     reader_memory_snapshot("reader_exit");
 #endif
 }

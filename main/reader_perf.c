@@ -107,6 +107,7 @@ void reader_perf_finish(bool presented) {
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }
 
+#if CONFIG_READER_MEMORY
 bool reader_perf_memory_ready(void) { return !s_sample.active; }
 
 void reader_perf_memory(const char *event, const reader_memory_stats_t *stats) {
@@ -130,4 +131,5 @@ void reader_perf_memory(const char *event, const reader_memory_stats_t *stats) {
              (unsigned)heap_caps_get_largest_free_block(psram),
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }
+#endif
 #endif

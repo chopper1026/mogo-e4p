@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 font = (ROOT / 'main/assets/builtin.ttf').read_bytes()
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     work = Path(folder)
-    (work / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF ' + ('1' if os.environ.get('READER_MEMORY_TEST') else '0') + '\n')
+    (work / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF ' + ('1' if os.environ.get('READER_MEMORY_TEST') else '0') + '\n#define CONFIG_READER_MEMORY ' + ('1' if os.environ.get('READER_MEMORY_TEST') else '0') + '\n')
     (work / 'system.ttf').write_bytes(font)
     # 同一轮廓、不同字宽的字体可验证切页后确实采用新字体，而不是缓存上一份。
     # Equal outlines with distinct advances verify the new face is used after switching, not stale cached metrics.
@@ -79,7 +79,7 @@ void *heap_caps_calloc(size_t n,size_t s,int caps){void *p=heap_caps_malloc(n*s,
 void heap_caps_free(void *p){if(!p)return;allocation_t *a=(allocation_t *)p-1;live-=a->bytes;free(a);}
 size_t heap_caps_get_allocated_size(void *p){assert(p);return ((allocation_t*)p-1)->bytes;}
 static void check_font_memory(void){
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
  reader_memory_stats_t stats={0};ttf_font_memory_stats(&stats);
  assert(stats.font_source+stats.font_tables+stats.font_blocks+stats.font_glyphs+stats.font_work+stats.font_catalog==live);
  reader_memory_stats_t again={0};ttf_font_memory_stats(&again);assert(!memcmp(&stats,&again,sizeof(stats)));

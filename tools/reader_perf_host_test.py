@@ -10,7 +10,7 @@ import summarize_reader_perf as summary
 
 ROOT = Path(__file__).resolve().parents[1]
 STUBS = {
-    "sdkconfig.h": "#define CONFIG_READER_PERF 1\n",
+    "sdkconfig.h": "#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 1\n",
     "esp_timer.h": "#include <stdint.h>\nint64_t esp_timer_get_time(void);\n",
     "esp_log.h": '#include <stdio.h>\n#define ESP_LOGI(tag, ...) ((void)(tag), printf(__VA_ARGS__), puts(""))\n',
     "esp_heap_caps.h": """
@@ -43,6 +43,11 @@ void ttf_bench_end(ttf_bench_stats_t *out);
 CODE = r'''
 #include <assert.h>
 #include "reader_perf.c"
+#if CONFIG_READER_MEMORY
+#define EXPECT_MEMORY_READY(value) assert(reader_perf_memory_ready()==(value))
+#else
+#define EXPECT_MEMORY_READY(value) ((void)0)
+#endif
 static int64_t now;
 static int starts,stops,benches,ends;
 static bool monitor_owned;
@@ -57,8 +62,8 @@ void ttf_bench_begin(void){++benches;}
 void ttf_bench_end(ttf_bench_stats_t *out){++ends;*out=(ttf_bench_stats_t){.read_us=7,.raster_us=8,.hits=9,.misses=10};}
 static void early_return(void){READER_PERF_SCOPE(READER_PERF_PARSE);now+=5;return;}
 int main(void){
- reader_perf_finish(false);assert(!starts&&!stops&&reader_perf_memory_ready());
- now=10;reader_perf_input_begin();now=20;reader_perf_begin("turn");assert(!reader_perf_memory_ready());
+ reader_perf_finish(false);assert(!starts&&!stops);EXPECT_MEMORY_READY(true);
+ now=10;reader_perf_input_begin();now=20;reader_perf_begin("turn");EXPECT_MEMORY_READY(false);
  reader_perf_scope_t old=reader_perf_scope_begin(READER_PERF_SOURCE);
  {READER_PERF_SCOPE(READER_PERF_ACTION);now+=20;early_return();}
  now=50;reader_perf_scope_t display=reader_perf_scope_begin(READER_PERF_DISPLAY);
@@ -66,8 +71,11 @@ int main(void){
  reader_perf_scope_t invalid=reader_perf_scope_begin((reader_perf_stage_t)-1);
  reader_perf_scope_end(&invalid);
  reader_perf_finish(true);
- assert(reader_perf_memory_ready());reader_memory_stats_t memory={.font_source=123,.chapter=456,.prefetch_worker=1,.prefetch_stack_free=789};
+ EXPECT_MEMORY_READY(true);
+#if CONFIG_READER_MEMORY
+ reader_memory_stats_t memory={.font_source=123,.chapter=456,.prefetch_worker=1,.prefetch_stack_free=789};
  reader_perf_memory("present",&memory);
+#endif
  reader_perf_finish(true);assert(stops==1&&ends==1);
  now=90;reader_perf_begin("cancel");old=reader_perf_scope_begin(READER_PERF_LAYOUT);
  now=100;reader_perf_begin("replace");
@@ -133,6 +141,15 @@ def main():
         assert subprocess.run(command, check=False).returncode == 2
         assert json.loads(result.read_text())["operations"]["turn"]["complete"] == 1
         print("PASS: nearest-rank P50/P95, incomplete counts, invalid records, unavailable heap lows and sample gate")
+        # 纯计时构建保持原始计时记录，且没有资源遍历符号。/ Timing-only builds retain identical timing records without resource walks.
+        (folder / "sdkconfig.h").write_text("#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 0\n")
+        subprocess.run(flags + [str(source), "-o", str(binary)], check=True)
+        timing_only = subprocess.check_output([str(binary)], text=True)
+        assert summary.parse_samples(timing_only) == parsed
+        assert "READER_MEMORY " not in timing_only
+        symbols = subprocess.check_output(["nm", str(binary)], text=True)
+        assert "reader_perf_memory" not in symbols
+        print("PASS: timing-only output equals resource-enabled timing and has no resource symbols")
         # 禁用构建不得产生测量符号。/ Disabled builds must emit no profiler symbols.
         (folder / "sdkconfig.h").write_text("#define CONFIG_READER_PERF 0\n")
         obj = folder / "disabled.o"

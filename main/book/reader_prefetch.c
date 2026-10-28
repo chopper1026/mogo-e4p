@@ -136,7 +136,7 @@ void reader_prefetch_release(void) {
 }
 
 
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void reader_prefetch_memory_stats(reader_memory_stats_t *stats) {
     stats->prefetch = reader_memory_owned(s_next_fb);
     stats->prefetch_worker = s_prep_task != NULL;

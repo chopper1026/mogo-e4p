@@ -182,7 +182,7 @@ void ui_reader_background_paint(uint8_t *fb, EpdRect area, bool blend) {
 }
 
 
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void ui_reader_background_memory_stats(reader_memory_stats_t *stats) {
     stats->background = reader_memory_owned(s_gray);
 }

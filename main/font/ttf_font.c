@@ -2783,7 +2783,7 @@ void ttf_draw_text_px_bw(
 }
 
 
-#if CONFIG_READER_PERF
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void ttf_font_memory_stats(reader_memory_stats_t *stats) {
     stats->font_source = stats->font_tables = stats->font_blocks = stats->font_glyphs = 0;
     stats->font_slots = 0;

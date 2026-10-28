@@ -136,7 +136,7 @@ int main(void){
 def main():
     with tempfile.TemporaryDirectory(prefix='reader-memory-') as directory:
         folder = Path(directory)
-        (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 1\n')
+        (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 1\n')
         (folder / 'esp_heap_caps.h').write_text('#pragma once\n#include <stddef.h>\nsize_t heap_caps_get_allocated_size(void *p);\n')
         (folder / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n')
         source, binary = folder / 'test.c', folder / 'test'
@@ -146,11 +146,13 @@ def main():
         subprocess.run(command + [str(source), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
         # 关闭诊断时不暴露堆接口或资源结构。/ Disabled diagnostics expose neither heap APIs nor resource structures.
-        (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 0\n')
+        (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 0\n#define CONFIG_READER_MEMORY 1\n')
         (folder / 'esp_heap_caps.h').write_text('#error disabled diagnostics included heap API\n')
         source.write_text('#include "reader_memory.h"\nint main(void){return 0;}\n')
         subprocess.run(command + [str(source), '-o', str(binary)], check=True)
-        print('PASS: disabled resource header needs no heap API')
+        (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 0\n')
+        subprocess.run(command + [str(source), '-o', str(binary)], check=True)
+        print('PASS: resource-disabled and profiler-disabled headers need no heap API')
     row={key:0 for key in summary.FIELDS};row.update(v='1',event='reader_exit',psram_free=1000)
     record='READER_MEMORY '+' '.join(f'{key}={value}' for key,value in row.items())
     samples=summary.parse_samples('boot\nI (42) readerperf: '+record+'\nREADER_PERF v=1')
