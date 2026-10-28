@@ -20,6 +20,10 @@ typedef struct {int64_t now_ms;int leaf;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE} app_redraw_t;
 enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define BOOK_TOC_ROWS 7
+#define BOOK_MARGIN_MIN 0
+#define BOOK_MARGIN_MAX 96
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
+static int s_margin[MARGIN_COUNT], s_line_spacing;
 #define MODE_GL16 1
 #define E0470_TURN_RTL 1
 #define E0470_TURN_LTR -1
@@ -93,6 +97,8 @@ static void book_layout_set_first_line_indent_adjust(int px){assert(draw_locked)
 unit += f'\n#include "{ROOT / "main/book/reader_turn.c"}"\n'
 unit += function('reader_turn_save', BOOK) + '\n'
 unit += function('reader_turn_load', BOOK) + '\n'
+from reader_reflow_test_code import reflow_code
+unit += reflow_code("indent")
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
              'toggle_reader_fullscreen', 'reader_turn_chrome', 'turn_page'):

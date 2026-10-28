@@ -21,6 +21,10 @@ unit = r'''
 #include "book/book_font_size.h"
 #define BOOK_PX_MIN BOOK_READER_PX_MIN
 #define BOOK_PX_MAX BOOK_READER_PX_MAX
+#define BOOK_MARGIN_MIN 0
+#define BOOK_MARGIN_MAX 96
+enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
+static int s_line_spacing;
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int unused;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
@@ -58,6 +62,7 @@ static size_t book_layout_page_for_offset(size_t off){return off/100;}
 static void lock_draw(void){}
 static void unlock_draw(void){}
 static void invalidate_prep(void){++invalidations;}
+static void refresh_chapter_lead(void){}
 static void book_layout_set_typography(int pixels){typography=pixels;}
 static bool book_layout_build_blocks(const char *text,size_t length,const void *blocks,size_t count,EpdRect rect,int px){
  assert(text==s_text&&length==s_text_len&&blocks==s_blocks&&count==s_block_count);
@@ -79,6 +84,8 @@ static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,const int margin[4
  app_settings_set_book_paragraph_spacing(para);save_progress();return APP_REDRAW_PAGE;
 }
 '''
+from reader_reflow_test_code import reflow_code
+unit += reflow_code("typography")
 for name in ('apply_reader_typography', 'slider_index', 'reader_slider_rect',
              'reader_slider_map', 'reader_slider_begin', 'reader_slider_move', 'reader_slider_commit'):
     unit += function(name, reader) + '\n'

@@ -164,6 +164,7 @@
 #include "book_source.h"
 #include "reader_session.h"
 #include "reader_turn.h"
+#include "reader_reflow.h"
 #include "reader_session_layout.h"
 #include "reader_prefetch.h"
 #include "reader_present.h"
@@ -5360,6 +5361,29 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_reader_footer_strong = effects.footer_strong;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
+static void reader_reflow_begin(void) {
+    lock_draw();
+    invalidate_prep();
+}
+
+static bool reader_reflow_build(void) {
+    return reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
+}
+
+static const reader_reflow_t *reader_reflow_context(void) {
+    _Static_assert((int)MARGIN_LEFT == READER_REFLOW_LEFT && (int)MARGIN_RIGHT == READER_REFLOW_RIGHT &&
+                   (int)MARGIN_TOP == READER_REFLOW_TOP && (int)MARGIN_BOTTOM == READER_REFLOW_BOTTOM &&
+                   (int)MARGIN_COUNT == READER_REFLOW_MARGINS && BOOK_MARGIN_MIN == READER_REFLOW_MARGIN_MIN &&
+                   BOOK_MARGIN_MAX == READER_REFLOW_MARGIN_MAX, "reader margin contract");
+    static const reader_reflow_t reflow = {
+        .position = &s_reader_session.position, .px = &s_px,
+        .margins = s_margin, .line_spacing = &s_line_spacing,
+        .begin = reader_reflow_begin, .end = unlock_draw,
+        .refresh_lead = refresh_chapter_lead, .build = reader_reflow_build, .save = save_progress,
+    };
+    return &reflow;
+}
+
 static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,
                                         const int next_margin[MARGIN_COUNT],
                                         uint8_t next_line, uint8_t next_para) {
@@ -5368,105 +5392,22 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,
     READER_PERF_SCOPE(READER_PERF_ACTION);
 #endif
     (void)ctx;
-    if (next_px < BOOK_PX_MIN || next_px > BOOK_PX_MAX ||
-        next_line < 110 || next_line > 150 ||
-        app_settings_book_paragraph_value(app_settings_book_paragraph_level(next_para)) != next_para) return APP_REDRAW_NONE;
-    bool margins_changed = false;
-    for (int i = 0; i < MARGIN_COUNT; ++i) {
-        if (next_margin[i] < BOOK_MARGIN_MIN || next_margin[i] > BOOK_MARGIN_MAX)
-            return APP_REDRAW_NONE;
-        if (next_margin[i] != s_margin[i]) margins_changed = true;
-    }
-    if (next_px == s_px && !margins_changed && next_line == app_settings_book_line_spacing() &&
-        next_para == app_settings_book_paragraph_spacing()) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_reader_session.position.page);
-    int old_px = s_px, old_margin[MARGIN_COUNT];
-    memcpy(old_margin, s_margin, sizeof(old_margin));
-    uint8_t old_line = app_settings_book_line_spacing();
-    uint8_t old_para = app_settings_book_paragraph_spacing();
-    lock_draw();
-    invalidate_prep();
-    s_px = next_px;
-    memcpy(s_margin, next_margin, sizeof(s_margin));
-    s_line_spacing = next_line;
-    book_layout_set_spacing(next_line, next_para);
-    // 正文带随字号与边距变了，题头的预留和悬挂标点的右侧余量跟着重算。
-    // The body band moved with the size and margins, so the heading reservation and the hanging
-    // punctuation's right slack follow.
-    book_layout_set_right_slack(s_margin[MARGIN_RIGHT]);
-    refresh_chapter_lead();
-    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
-    else {
-        s_px = old_px;
-        memcpy(s_margin, old_margin, sizeof(s_margin));
-        s_line_spacing = old_line;
-        book_layout_set_spacing(old_line, old_para);
-        book_layout_set_right_slack(s_margin[MARGIN_RIGHT]);
-        refresh_chapter_lead();
-        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) return APP_REDRAW_NONE;
-    app_settings_set_book_px((uint8_t)s_px);
-    app_settings_set_book_margin_left((uint8_t)s_margin[MARGIN_LEFT]);
-    app_settings_set_book_margin_right((uint8_t)s_margin[MARGIN_RIGHT]);
-    app_settings_set_book_margin_top((uint8_t)s_margin[MARGIN_TOP]);
-    app_settings_set_book_margin_bottom((uint8_t)s_margin[MARGIN_BOTTOM]);
-    app_settings_set_book_line_spacing(next_line);
-    app_settings_set_book_paragraph_spacing(next_para);
-    save_progress();
-    return APP_REDRAW_PAGE;
+    return reader_reflow_layout(reader_reflow_context(), next_px, next_margin, next_line, next_para)
+        ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 
 static app_redraw_t apply_reader_typography(app_ctx_t* ctx, int tracking_index) {
     (void)ctx;
-    if (!s_text || tracking_index < 0 || tracking_index >= APP_BOOK_TRACK_COUNT)
-        return APP_REDRAW_NONE;
-    int old_index = app_settings_book_tracking();
-    if (tracking_index == old_index) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_reader_session.position.page);
-    lock_draw();
-    invalidate_prep();
-    book_layout_set_typography((tracking_index + APP_BOOK_TRACK_MIN));
-    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
-    else {
-        book_layout_set_typography(old_index + APP_BOOK_TRACK_MIN);
-        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) return APP_REDRAW_NONE;
-    app_settings_set_book_tracking((uint8_t)tracking_index);
-    save_progress();
-    return APP_REDRAW_PAGE;
+    if (!s_text) return APP_REDRAW_NONE;
+    return reader_reflow_typography(reader_reflow_context(), tracking_index)
+        ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 
 static app_redraw_t apply_reader_indent(app_ctx_t* ctx, int em, int adjustment) {
     (void)ctx;
-    if (!s_text || em < 0 || em > 3 || adjustment < -100 || adjustment > 100 ||
-        (em == app_settings_book_indent() && adjustment == app_settings_book_indent_adjust()))
-        return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_reader_session.position.page);
-    uint8_t old_em = app_settings_book_indent();
-    int old_adjustment = app_settings_book_indent_adjust();
-    lock_draw();
-    invalidate_prep();
-    book_layout_set_first_line_indent((unsigned)em);
-    book_layout_set_first_line_indent_adjust(adjustment);
-    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
-    else {
-        book_layout_set_first_line_indent(old_em);
-        book_layout_set_first_line_indent_adjust(old_adjustment);
-        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) return APP_REDRAW_NONE;
-    app_settings_set_book_indent((uint8_t)em);
-    app_settings_set_book_indent_adjust((int8_t)adjustment);
-    save_progress();
-    return APP_REDRAW_PAGE;
+    if (!s_text) return APP_REDRAW_NONE;
+    return reader_reflow_indent(reader_reflow_context(), em, adjustment)
+        ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 
 static app_redraw_t reader_indent_finish(app_ctx_t *ctx,bool commit) {
