@@ -81,7 +81,7 @@
 #include "ui_nav.h"
 #include "ui_gesture.h"
 #include "ui_power_dialog.h"
-#include "ui_quick_menu.h"
+#include "app_quick_layer.h"
 #include "ui_click_feedback.h"
 #include "usb_storage.h"
 #include "touch_diag.h"
@@ -137,337 +137,13 @@ extern const app_desc_t app_device_settings;
 extern const app_desc_t app_book;
 
 static const app_desc_t* s_presented_main;
-static ui_quick_menu_t s_quick;
-static unsigned s_quick_status;
-static int s_quick_pressed=-1;
-// 上一次推上屏的快捷层高度；收起前光卡片后按旧高度擦除，避免 224..480 残留。
-// Height last presented; closing the frontlight card erases by the old height so 224..480 cannot remain.
-static int s_quick_height;
-// 回放期间只更新硬件，整批结束后再按最终值刷一行；否则一次拖动会被每个积压帧各刷一遍。
-// During replay only hardware follows; one row is flushed at the end, or a single drag would present every queued frame.
-static bool s_fl_pending;
-static bool s_fl_pending_commit;
-static ui_quick_control_t s_fl_pending_control;
-// 屏幕上第四枚圆钮当前画出的开灯状态；点按翻转后据此决定是否重画。
-// The frontlight state currently painted on the fourth circle; a tap uses it to decide the repaint.
-static bool s_fl_shown_on;
-static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current);
-// 快捷层只持有预览值；落盘只发生在松手、点选或关闭/读错时，一次拖动只写一遍 NVS。
-// The layer holds preview values; NVS writes happen on release, tap, close or a read error, once per drag.
-static void quick_frontlight_persist(void) {
-    if (!s_quick.frontlight) return;
-    app_settings_set_frontlight_on(s_quick.fl_on);
-    app_settings_set_frontlight_brightness(s_quick.fl_bri);
-    app_settings_set_frontlight_cct(s_quick.fl_cct);
-}
-static void quick_reset(void) {
-    quick_frontlight_persist();
-    ui_quick_menu_reset(&s_quick);
-    ui_quick_menu_end();
-    s_quick_pressed=-1;
-    s_quick_height=0;
-    s_fl_pending=false;
-    s_fl_pending_commit=false;
-    s_fl_pending_control=UI_QUICK_CTL_NONE;
-    s_fl_shown_on=s_quick.fl_on;
-}
 // 锁屏占用整屏后旧主页面底栏不再是物理基准；解锁第一帧必须完整绘制。
 // A lock screen replaces the old navigation baseline; the first unlocked frame must render complete navigation.
 static void main_lock_boundary(void) {
     ui_click_feedback_reset();
-    quick_reset();
+    app_quick_layer_reset();
     s_presented_main = NULL;
     display_main_transition_cancel();
-}
-
-static unsigned quick_status(void) {
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    bool wifi = status.mode == READ_PICO_TRANSFER_MODE_STA && status.state != READ_PICO_TRANSFER_STOPPED;
-    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (status.network_ready ? 4u : 0u);
-}
-
-// 同步输出完再接收下一条触摸，不安排旧层回放；错误时关闭层并可靠全刷当前页。
-// Complete presentation before accepting another contact, with no stale replay; close and full-refresh the current page on error.
-static void quick_present(app_ctx_t *ctx, const app_desc_t *current, bool full) {
-    ui_click_feedback_begin(ctx->fb);
-    display_main_transition_cancel();
-    // 整层重绘会带上最新前光状态，积压的局部行刷新作废。
-    // A whole-layer repaint already carries the latest frontlight state, so queued row refreshes are dropped.
-    s_fl_pending = false;
-    s_fl_pending_commit = false;
-    s_fl_pending_control = UI_QUICK_CTL_NONE;
-    unsigned status=quick_status();
-    if(full&&s_quick.open){
-        // 已合成的页面直接全刷，只还原圆键按压，不重排底页或重算玻璃。
-        // Refresh the composed framebuffer directly, restoring only the pressed tile without underlay layout or glass regeneration.
-        for(int i=0;i<4;++i){
-            bool active=i<2?(status&(1u<<i))!=0
-                :i==3&&s_quick.frontlight&&s_quick.fl_on;
-            bool was_active=i<2?(s_quick_status&(1u<<i))!=0
-                :i==3&&s_quick.frontlight&&s_fl_shown_on;
-            if(i==s_quick_pressed||active!=was_active){
-                EpdRect dirty;(void)ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,false,&dirty);
-            }
-        }
-        if((status^s_quick_status)&6u)ui_quick_menu_draw_status(ctx->fb);
-    }else{
-        if (current->render) current->render(ctx, ctx->fb);
-        if(!s_quick.open)ui_quick_menu_end();
-        else ui_quick_menu_draw(ctx->fb,&s_quick,status&1u,status&2u);
-    }
-    s_fl_shown_on = s_quick.fl_on;
-    s_quick_status=status;
-    s_quick_pressed=-1;
-    const int quick_height = ui_quick_menu_rect(&s_quick).height;
-    const int area_height = quick_height > s_quick_height ? quick_height : s_quick_height;
-    s_quick_height = quick_height;
-    // 收起快捷层时，被半透明遮罩盖过的字多走了一轮推黑，比没被盖过的字更黑；单次还原
-    // 追不平。整屏用归一表再走一遍，全页字芯落在同一墨度。展开仍只画遮罩与圆键。
-    // 是否保护图片灰阶由当前页面决定：只有阅读背景正文需要，其他页面完整归一。
-    // Closing leaves the text under the translucent shade one black cycle ahead of the rest,
-    // which a single restore cannot match. One whole-screen normalize pass puts every glyph
-    // core on the same ink. Whether picture grays need protecting is the current page's call:
-    // only a background reading body does, and every other page takes the full pass.
-    const void *wave = &E0470_WAVEFORM;
-    EpdRect area = {0, 0, UI_LOCK_WIDTH, area_height};
-    if (!s_quick.open) {
-        wave = display_normalize_waveform(current->normalize_hold_gray &&
-                                          current->normalize_hold_gray(ctx));
-        area.height = UI_LOCK_HEIGHT;
-    }
-    enum EpdDrawError error = full ? update_display_full(ctx->hl)
-        : update_display_area_full_with(ctx->hl, wave, MODE_GL16, area);
-    guard_draw_result(ctx->hl, error);
-    if (error != EPD_DRAW_SUCCESS) {
-        quick_reset();
-        app_present(ctx, current, APP_REDRAW_FULL);
-    }
-}
-
-// 菜单打开期间只改圆键和必要的状态栏；按下不排字、不重画页面或重算玻璃。
-// While open, update only keys and the necessary status strip; pressing never shapes text, renders a page or regenerates glass.
-static void quick_buttons_present(app_ctx_t *ctx,const app_desc_t *current) {
-    if(!s_quick.open)return;
-    unsigned status=quick_status();
-    int pressed=ui_quick_menu_pressed(&s_quick);
-    enum EpdDrawError error=EPD_DRAW_SUCCESS;
-    for(int i=0;i<4;++i){
-        bool active=i<2?(status&(1u<<i))!=0
-            :i==3&&s_quick.frontlight&&s_quick.fl_on;
-        bool was_active=i<2?(s_quick_status&(1u<<i))!=0
-            :i==3&&s_quick.frontlight&&s_fl_shown_on;
-        if(active==was_active&&(pressed==i)==(s_quick_pressed==i))continue;
-        EpdRect dirty;
-        if(ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,pressed==i,&dirty)){
-            error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,dirty);
-            guard_draw_result(ctx->hl,error);
-            if(error!=EPD_DRAW_SUCCESS)break;
-        }
-    }
-    bool network_changed=(status&5u)==5u,was_network=(s_quick_status&5u)==5u;
-    if(error==EPD_DRAW_SUCCESS&&(((status^s_quick_status)&2u)||network_changed!=was_network)){
-        ui_quick_menu_draw_status(ctx->fb);
-        error=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){0,0,UI_LOCK_WIDTH,76});
-        guard_draw_result(ctx->hl,error);
-    }
-    if(error!=EPD_DRAW_SUCCESS){
-        quick_reset();app_present(ctx,current,APP_REDRAW_FULL);return;
-    }
-    s_quick_status=status;s_fl_shown_on=s_quick.fl_on;s_quick_pressed=pressed;
-}
-
-static void quick_toggle_wifi(void) {
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    if (status.state != READ_PICO_TRANSFER_STOPPED) {
-        // 上传期间拒绝断开，复用存储任务已有的原子准入保护。
-        // Refuse disconnecting during upload using the storage owner's atomic admission guard.
-        (void)read_pico_transfer_try_stop_if_idle();
-    } else {
-        char ssid[33] = {0}; bool configured = false;
-        if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
-            // 先释放蓝牙占用，再用既有异步连接/重试流程；不新开上传服务器或改写凭据。
-            // Release Bluetooth resources first, then reuse connection/retry handling without starting uploads or rewriting credentials.
-            ble_pt_sync(false);
-            const read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
-            (void)read_pico_transfer_start(&cfg);
-        }
-    }
-}
-
-// 前光事件只动它自己的控件：开关点按同时展开或收起胶囊滑杆，层高变化，走整层
-// 重排并按新旧高度并集推 GL16；拖动帧与松手提交都走胶囊拖动表 DU，松手不做
-// 两段式定稿（用户 2026-10-25 决定：左滑暴露带终态为灰，洗白段白闪约 200ms，
-// 拖动近似可接受），随后才写 NVS。
-// A frontlight event touches only its own control: a switch tap also expands or
-// collapses the capsule sliders, so the layer height changes and the whole layer
-// is re-composited and pushed with GL16 over the height union; drag frames and
-// the release commit both drive the capsule drag table's DU, and the release no
-// longer settles in two stages (user decision 2026-10-25: the left-swipe band
-// ends gray, so the wash flashed white for ~200 ms, and the drag approximation
-// is acceptable) — before NVS is written.
-static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
-                                     const ui_quick_event_t *event) {
-    EpdRect dirty;
-    enum EpdDrawError error = EPD_DRAW_SUCCESS;
-    if (event->control == UI_QUICK_CTL_ON) {
-        quick_present(ctx, current, false);
-        return;
-    }
-    if (event->commit) {
-        // 松手不再洗白定稿：白表会把终态为灰的左滑暴露带打成 18 相饱和白再落
-        // 回底灰，肉眼可见地白闪一次。拖动帧本来就是真实差分，普通松手时 fb
-        // 与阴影一致，这里按拖动表补推一次终态即可——差分为空、一相都不驱动；
-        // 合并回放的积压批次则由这次推送把终态落上屏。拖动近似的落灰误差留在
-        // 面板上，由下次开层的整层 GL16 与周期 GC16 归一。
-        // The release no longer whitens and settles: the white table drove the
-        // left-swipe band (whose final state is gray) through 18 phases of
-        // saturated white before landing the body gray again — a visible flash.
-        // Drag frames are already real differentials and an ordinary release
-        // leaves fb and shadow agreeing, so one final drag-table push suffices
-        // — the diff is empty and drives nothing; a coalesced replay batch
-        // lands its final row through this push. The drag's approximate landing
-        // stays on the panel until the next layer-open GL16 or periodic GC16
-        // normalizes it.
-        if (ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) {
-            error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
-                                                    MODE_DU, dirty, 1, 1);
-            guard_draw_result(ctx->hl, error);
-        }
-        // 提交完成，脏范围收回当前档位；跟踪保留，便于恢复定稿时直接使用。
-        // Committed: the dirty extent shrinks back to the current level; the
-        // tracking stays so a restored settle can use it directly.
-        if (error == EPD_DRAW_SUCCESS) {
-            if (event->control == UI_QUICK_CTL_BRIGHTNESS) s_quick.fl_bri_dirty = s_quick.fl_bri;
-            else if (event->control == UI_QUICK_CTL_CCT) s_quick.fl_cct_dirty = s_quick.fl_cct;
-        }
-    } else {
-        if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
-        // 拖动帧是 DU 差分，必须显式扩脏行/脏列：胶囊上下边缘每次只变一两像素，
-        // 不扩边会留下浅残影；中途与松手都接受拖动表的近似结果。
-        // Drag frames are DU differentials and must dilate dirty rows/columns:
-        // the capsule's top and bottom edges change by a pixel or two per frame.
-        // Mid-drag and release both accept the drag table's approximation.
-        error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
-                                                MODE_DU, dirty, 1, 1);
-        guard_draw_result(ctx->hl, error);
-    }
-    if (error != EPD_DRAW_SUCCESS) {
-        quick_reset();
-        app_present(ctx, current, APP_REDRAW_FULL);
-    }
-}
-
-// coalesce：回放积压帧时只更新硬件，等整批结束由 quick_frontlight_flush 刷一次。
-// coalesce: while replaying queued frames only hardware follows; one flush paints the final row.
-static void quick_frontlight_event(app_ctx_t *ctx, const app_desc_t *current,
-                                   const ui_quick_event_t *event, bool coalesce) {
-    if (!s_quick.frontlight) return;
-    (void)frontlight_apply(s_quick.fl_on, s_quick.fl_bri, s_quick.fl_cct);
-    if (event->commit) quick_frontlight_persist();
-    if (!coalesce) {
-        quick_frontlight_present(ctx, current, event);
-        return;
-    }
-    s_fl_pending = true;
-    s_fl_pending_control = event->control;
-    s_fl_pending_commit = s_fl_pending_commit || event->commit;
-}
-
-static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current) {
-    if (!s_fl_pending) return;
-    const ui_quick_event_t event = {
-        .control = s_fl_pending_control,
-        .commit = s_fl_pending_commit,
-    };
-    s_fl_pending = false;
-    s_fl_pending_commit = false;
-    s_fl_pending_control = UI_QUICK_CTL_NONE;
-    quick_frontlight_present(ctx, current, &event);
-}
-
-// 目标页就是当前页：重进一次让 on_enter 消费待定子视图，再整页重绘。快捷层已在
-// 输入层收起，这里只负责把页面画回来；通用切页分支保持「同页请求不动作」。
-// The target page is already current: re-enter so on_enter consumes the pending
-// sub-view, then repaint the page. The quick layer already closed in the input
-// layer, and the generic transition branch keeps treating a same-page request as
-// a no-op (tapping the active tab must drop a pending switch).
-static void quick_reenter_page(app_ctx_t *ctx, const app_desc_t *current) {
-    if (current->on_exit) current->on_exit(ctx);
-    if (current->on_enter) current->on_enter(ctx);
-    app_present(ctx, current, APP_REDRAW_PAGE);
-}
-
-
-// 快捷层单帧输入：识别并执行动作；本帧由快捷层持有输入时返回 true。
-// 正常 tick 与采样回放共用同一入口，回放不能只看最后一帧，否则按下沿会丢。
-// One quick-layer input frame: recognize and run the action; true when the layer owns
-// the frame. The normal tick and sampler replay share it so replay never drops a press edge.
-static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lock_requested,
-                             bool coalesce) {
-    ui_quick_event_t event;
-    bool owned = ui_quick_menu_feed(&s_quick, ctx,
-        current->render && !current->holds_pmu && !usb_storage_active() && !pico_online_busy(),
-        &event);
-    if (owned) ctx->consumed = true;
-    if (event.action == UI_QUICK_OPEN || event.action == UI_QUICK_CLOSE) {
-        if (event.action == UI_QUICK_OPEN) {
-            // 阅读键可以直接开关前光；开层前读回设置，预览和关层落盘都不会写成旧状态。
-            // A reading key can toggle the frontlight directly; reload the settings before opening
-            // so neither the preview nor the close-time write resurrects a stale state.
-            ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),
-                                         app_settings_frontlight_brightness(), app_settings_frontlight_cct());
-            s_fl_shown_on = s_quick.fl_on;
-        } else {
-            // 收起前把预览值落盘：权限变化或 USB 抢占导致的关闭也走这里。
-            // Persist previews before closing, including permission changes or USB preemption.
-            quick_frontlight_persist();
-        }
-        quick_present(ctx, current, false);
-    }
-    // 灯灭时继续下拉临时展开胶囊：不碰设置与前光硬件，只按新层高整层重排；
-    // 重排出口已按新旧高度并集推 GL16，展开 264→480 由同一机制覆盖。
-    // Pulling the open layer further down with the light off expands the
-    // capsules for this opening: no settings or frontlight hardware change, just
-    // a whole-layer re-composite; its push already covers the new/old height
-    // union with GL16, which carries the 264→480 growth.
-    else if (event.action == UI_QUICK_EXPAND) quick_present(ctx, current, false);
-    else if (event.action == UI_QUICK_WIFI) quick_toggle_wifi();
-    else if (event.action == UI_QUICK_BLUETOOTH) {
-        bool enable = !app_settings_ble_turner();
-        app_settings_set_ble_turner(enable);
-        if (enable) ble_pt_reconnect_recent();
-        else { ble_pt_cancel_recent(); ble_pt_sync(false); }
-    } else if (event.action == UI_QUICK_WIFI_SETTINGS) {
-        // 长按 WiFi 圆键：与设置页「WiFi」行同一入口，直接进入配网设置页。已在
-        // 该页时重进一次，让 on_enter 重新消费配网请求。
-        // WiFi hold: the same entry as the settings page's WiFi row, straight into
-        // provisioning. When already there, re-enter so on_enter consumes the request again.
-        app_transfer_request_wifi_setup();
-        if (current == &app_transfer) quick_reenter_page(ctx, current);
-        else {
-            app_navigation_capture_reader_return(current);
-            ctx->request_app = &app_transfer;
-        }
-    } else if (event.action == UI_QUICK_BLUETOOTH_SETTINGS) {
-        // 长按蓝牙圆键：直接进入设置页的蓝牙翻页器子页；已在设置页时同上。从其他
-        // 页面进入时，子页左上角返回回到来源页。
-        // Bluetooth hold: straight into the settings page's Bluetooth turner sub-page;
-        // when already in settings, re-enter the same way. Entering from another page
-        // makes the sub-page's top-left back return to the origin.
-        if (current == &app_device_settings) {
-            app_device_settings_request_bluetooth(false);
-            quick_reenter_page(ctx, current);
-        } else {
-            app_navigation_capture_reader_return(current);
-            app_device_settings_request_bluetooth(true);
-            ctx->request_app = &app_device_settings;
-        }
-    } else if (event.action == UI_QUICK_FULL) quick_present(ctx, current, true);
-    else if (event.action == UI_QUICK_LOCK) *lock_requested = true;
-    if (event.control != UI_QUICK_CTL_NONE) quick_frontlight_event(ctx, current, &event, coalesce);
-    return owned;
 }
 
 static void main_present_finished(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
@@ -830,12 +506,7 @@ void app_loop_run(const app_loop_config_t* config) {
     };
 
     bool was_touched = false;
-    quick_reset();
-    // 本板有没有前光决定层高和卡片；预览值来自已加载的设置，开机恢复由 app_main 写入硬件。
-    // Board capability decides layer height and card presence; previews come from settings and app_main restored the hardware at boot.
-    ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),
-                                 app_settings_frontlight_brightness(), app_settings_frontlight_cct());
-    s_fl_shown_on = s_quick.fl_on;
+    app_quick_layer_init();
     bool menu_open = false;
     ui_gesture_t gesture = {0};
     ui_power_dialog_t power_dialog = {0};
@@ -957,7 +628,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         }
                         ctx.consumed = true;
                     } else if (!menu_open) {
-                        quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, true);
+                        quick_input_owned = app_quick_layer_feed_frame(&ctx, current, &quick_lock_requested, true);
                         if (quick_input_owned) {
                             held_key = -1;
                             app_input_cancel_gesture(&ctx, current, &gesture);
@@ -976,11 +647,9 @@ void app_loop_run(const app_loop_config_t* config) {
                 // 回放期间只写硬件；这里按最终值刷新一次前光行，页面切换请求则丢弃这一行。
                 // Replay only drove hardware; paint the final frontlight row once, or drop it when a page switch is queued.
                 if (!ctx.request_app && !ctx.request_menu && !ctx.request_return) {
-                    quick_frontlight_flush(&ctx, current);
+                    app_quick_layer_flush_frontlight(&ctx, current);
                 } else {
-                    s_fl_pending = false;
-                    s_fl_pending_commit = false;
-                    s_fl_pending_control = UI_QUICK_CTL_NONE;
+                    app_quick_layer_discard_frontlight();
                 }
                 // 排空后统一推一次电源弹窗滑块；动作仍延迟到本 tick 的弹窗分支执行。
                 // Push the power-dialog slider once after the drain; actions still defer to this tick's dialog branch.
@@ -1086,7 +755,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 power_dialog_open = false;
                 ui_power_dialog_end();
                 ui_power_dialog_reset(&power_dialog, touch.touched);
-                quick_reset();
+                app_quick_layer_reset();
                 held_key = -1;
                 app_input_cancel_gesture(&ctx, current, &gesture);
                 menu_pressed = UI_MENU_HIT_NONE;
@@ -1105,20 +774,16 @@ void app_loop_run(const app_loop_config_t* config) {
 
         if (!power_input_owned && !menu_open) {
             if (err != ESP_OK) {
-                ui_quick_menu_cancel_input(&s_quick);
-                // 读点错误取消拖动时把当前档位落盘，避免硬件与 NVS 长期不一致。
-                // Persist the current step when a read error cancels a drag so hardware and NVS do not diverge.
-                quick_frontlight_persist();
-                quick_input_owned=s_quick.open;
+                quick_input_owned = app_quick_layer_cancel_input();
             }
             else {
-                quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, false);
+                quick_input_owned = app_quick_layer_feed_frame(&ctx, current, &quick_lock_requested, false);
                 if (quick_input_owned) {
                     held_key = -1;
                     app_input_cancel_gesture(&ctx, current, &gesture);
                 }
             }
-            quick_buttons_present(&ctx,current);
+            app_quick_layer_present_buttons(&ctx,current);
         }
 
         if (power_input_owned && err == ESP_OK) {
@@ -1314,10 +979,10 @@ void app_loop_run(const app_loop_config_t* config) {
             }
             if (key_action != READ_PICO_PMU_KEY_NONE) {
                 last_input_ms = ctx.now_ms;
-                bool quick_was_open = s_quick.open;
+                bool quick_was_open = app_quick_layer_is_open();
                 if (quick_was_open && !quick_lock_requested) {
-                    quick_reset();
-                    quick_present(&ctx, current, false);
+                    app_quick_layer_reset();
+                    app_quick_layer_present(&ctx, current, false);
                 }
                 if (!quick_lock_requested && ctx.now_ms < s_lock_ignore_until_ms) {
                     ESP_LOGI(TAG, "ignore boot power-key action %d", (int)key_action);
@@ -1398,7 +1063,7 @@ void app_loop_run(const app_loop_config_t* config) {
         // 设置里存的字体在 SD 卡上，开机时卡可能还没挂好，这里定期重试。
         // The saved font lives on the card; retry until the mount is ready.
         // The saved font lives on the card; retry until the mount is ready.
-        if (!power_dialog_open && !s_quick.open && !usb_storage_active() && current != &app_transfer &&
+        if (!power_dialog_open && !app_quick_layer_is_open() && !usb_storage_active() && current != &app_transfer &&
             ctx.now_ms - last_font_retry_ms >= FONT_RETRY_INTERVAL_MS) {
             last_font_retry_ms = ctx.now_ms;
             bool font_ready;
@@ -1459,21 +1124,21 @@ void app_loop_run(const app_loop_config_t* config) {
             pico_online_busy();
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
         TD_TIME("ble_poll", ble_pt_poll());
-        if (s_quick.open || quick_input_owned) {
+        if (app_quick_layer_is_open() || quick_input_owned) {
             // 覆盖层期间丢弃页内蓝牙输入，关闭后不重放翻页或学习事件。
             // Discard page BLE input while covered, without replaying turns or learning edges after closing.
             ble_pt_event_t key_event; ble_pt_raw_t raw_event;
             while (ble_pt_pop_key(&key_event)) {}
             while (ble_pt_pop_raw(&raw_event)) {}
         }
-        if (s_quick.open && quick_status() != s_quick_status) quick_buttons_present(&ctx,current);
+        app_quick_layer_sync_status(&ctx, current);
         // 上键全局兜底与 on_tick 同门控：弹窗、快捷层、菜单持有输入时不响应。
         // / Global up-key fallback gated like on_tick: silent while the dialog,
         // quick layer or menu owns input.
-        if (!power_dialog_open && !s_quick.open && !quick_input_owned && !menu_open &&
+        if (!power_dialog_open && !app_quick_layer_is_open() && !quick_input_owned && !menu_open &&
             !ctx.request_app && !ctx.request_menu && !ctx.request_return)
             up_key_global_tick(&ctx, current);
-        if (!power_dialog_open && !s_quick.open && !quick_input_owned && !ui_click_feedback_active() && !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return && current->on_tick != NULL) {
+        if (!power_dialog_open && !app_quick_layer_is_open() && !quick_input_owned && !ui_click_feedback_active() && !menu_open && !ctx.request_app && !ctx.request_menu && !ctx.request_return && current->on_tick != NULL) {
             app_redraw_t redraw = current->on_tick(&ctx);
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) held_key = -1;
             present_page(&ctx, current, &gesture, redraw);
@@ -1536,7 +1201,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!power_dialog_open && (ctx.request_return || ctx.request_app || ctx.request_menu)) {
             if (ui_click_feedback_release(ctx.fb, &click_area))
                 click_present(&ctx, current, click_area);
-            quick_reset();
+            app_quick_layer_reset();
             held_key = -1;
             const app_desc_t* next = ctx.request_app;
             const bool go_back = ctx.request_return;
