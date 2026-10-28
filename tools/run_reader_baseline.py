@@ -30,6 +30,8 @@ SUITES = {
     "present": [sys.executable, "tools/reader_present_host_test.py"],
     "turn": [sys.executable, "tools/reader_turn_host_test.py"],
     "reflow": [sys.executable, "tools/reader_reflow_host_test.py"],
+    "font_source": [sys.executable, "tools/ttf_font_source_host_test.py"],
+    "font_faces": [sys.executable, "tools/title_font_host_test.py"],
     "font_cache": [sys.executable, "tools/ttf_block_cache_host_test.py"],
     "glyph_cache": [sys.executable, "tools/ttf_glyph_cache_host_test.py"],
     "images": [sys.executable, "tools/reader_images_host_test.py"],

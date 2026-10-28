@@ -18,6 +18,7 @@
 #include "ttf_stroke_filter.h"
 #include "ttf_block_cache.h"
 #include "ttf_glyph_cache.h"
+#include "ttf_font_source.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -73,10 +74,6 @@ static void ttf_free(void* ptr, void* userdata) {
 #define TTF_WGHT_MAX 800
 #define TTF_WGHT_DEF 300
 #define TTF_GATHER_MAX 96
-// glyf+gvar 整表映射的预留与硬顶。/ Reserve and hard cap for whole-table glyf+gvar maps.
-#define TTF_MAP_RESERVE (2560u * 1024u)
-#define TTF_MAP_MAX (5u * 1024u * 1024u)
-
 static const char* TAG = "ttf_font";
 
 static const char* const k_font_dirs[] = {
@@ -132,11 +129,7 @@ typedef struct {
 // globals onto the current slot, so a same-named field would be macro-expanded both in
 // `s->name` accesses and inside this struct body.
 typedef struct {
-    int f_fd;
-    const uint8_t* f_mem;
-    uint32_t f_mem_len;
-    bool f_mem_owned;      ///< f_mem 在堆上、关闭槽位时释放 / f_mem is heap, freed on close
-    uint32_t f_file_pos;
+    ttf_font_source_t f_source; ///< 字体字节与整表映射 / Font bytes and complete table maps
     char f_path[TTF_FONT_PATH_MAX];
     int f_packed_root;
     int f_packed_weight;
@@ -146,12 +139,6 @@ typedef struct {
     uint32_t f_file_loca_len;
     bool f_loca_long;
     int f_num_glyphs;
-    uint8_t* f_glyf_ram;
-    uint32_t f_glyf_ram_off;
-    uint32_t f_glyf_ram_len;
-    uint8_t* f_gvar_ram;
-    uint32_t f_gvar_ram_off;
-    uint32_t f_gvar_ram_len;
     ttf_block_cache_t f_blocks;
     uint8_t* f_font_data;
     uint32_t f_work_loca_off;
@@ -191,11 +178,11 @@ static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 // `s_cur->f_xxx`，不要用宏名，免得以后再加字段时又撞上。
 // These macros keep the existing function bodies acting on the current slot with no
 // source change. New code should use `s_cur->f_xxx` directly, not the macro names.
-#define font_fd (s_cur->f_fd)
-#define font_mem (s_cur->f_mem)
-#define font_mem_len (s_cur->f_mem_len)
-#define font_mem_owned (s_cur->f_mem_owned)
-#define font_file_pos (s_cur->f_file_pos)
+#define font_fd (s_cur->f_source.f_fd)
+#define font_mem (s_cur->f_source.f_mem)
+#define font_mem_len (s_cur->f_source.f_mem_len)
+#define font_mem_owned (s_cur->f_source.f_mem_owned)
+#define font_file_pos (s_cur->f_source.f_file_pos)
 #define font_path (s_cur->f_path)
 #define packed_root (s_cur->f_packed_root)
 #define packed_weight (s_cur->f_packed_weight)
@@ -205,12 +192,12 @@ static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 #define file_loca_len (s_cur->f_file_loca_len)
 #define loca_long (s_cur->f_loca_long)
 #define num_glyphs (s_cur->f_num_glyphs)
-#define glyf_ram (s_cur->f_glyf_ram)
-#define glyf_ram_off (s_cur->f_glyf_ram_off)
-#define glyf_ram_len (s_cur->f_glyf_ram_len)
-#define gvar_ram (s_cur->f_gvar_ram)
-#define gvar_ram_off (s_cur->f_gvar_ram_off)
-#define gvar_ram_len (s_cur->f_gvar_ram_len)
+#define glyf_ram (s_cur->f_source.f_glyf_ram)
+#define glyf_ram_off (s_cur->f_source.f_glyf_ram_off)
+#define glyf_ram_len (s_cur->f_source.f_glyf_ram_len)
+#define gvar_ram (s_cur->f_source.f_gvar_ram)
+#define gvar_ram_off (s_cur->f_source.f_gvar_ram_off)
+#define gvar_ram_len (s_cur->f_source.f_gvar_ram_len)
 #define touch_n (s_cur->f_blocks.f_touch_n)
 #define font_data (s_cur->f_font_data)
 #define work_loca_off (s_cur->f_work_loca_off)
@@ -264,40 +251,8 @@ static void put_be32(uint8_t* p, uint32_t v) {
     p[3] = (uint8_t)v;
 }
 
-static bool io_read_raw(uint32_t offset, void* dst, size_t n) {
-    if (font_mem != NULL) {
-        if ((uint64_t)offset + n > font_mem_len) return false;
-        memcpy(dst, font_mem + offset, n);
-        return true;
-    }
-    if (font_fd < 0) return false;
-    int64_t t0 = bench_on ? esp_timer_get_time() : 0;
-    bool ok = false;
-    do {
-        if (font_file_pos != offset) {
-            if (lseek(font_fd, (off_t)offset, SEEK_SET) < 0) {
-                font_file_pos = UINT32_MAX;
-                break;
-            }
-            font_file_pos = offset;
-        }
-        uint8_t* out = dst;
-        size_t done = 0;
-        while (done < n) {
-            size_t chunk = n - done;
-            if (chunk > 16384) chunk = 16384;
-            ssize_t got = read(font_fd, out + done, chunk);
-            if (got <= 0) {
-                font_file_pos = UINT32_MAX;
-                break;
-            }
-            done += (size_t)got;
-            font_file_pos = offset + (uint32_t)done;
-        }
-        ok = done == n;
-    } while (0);
-    if (bench_on) bench.read_us += esp_timer_get_time() - t0;
-    return ok;
+static bool io_read_raw(uint32_t offset, void *dst, size_t n) {
+    return ttf_font_source_read(&s_cur->f_source, offset, dst, n, bench_on ? &bench.read_us : NULL);
 }
 
 static void io_reset(void) {
@@ -305,45 +260,19 @@ static void io_reset(void) {
 }
 
 static void io_unmap(void) {
-    heap_caps_free(glyf_ram);
-    glyf_ram = NULL;
-    glyf_ram_off = 0;
-    glyf_ram_len = 0;
-    heap_caps_free(gvar_ram);
-    gvar_ram = NULL;
-    gvar_ram_off = 0;
-    gvar_ram_len = 0;
+    ttf_font_source_unmap(&s_cur->f_source);
 }
 
 static bool io_ensure(void) {
     return ttf_block_cache_ensure(&s_cur->f_blocks);
 }
 
-static bool io_from_map(uint32_t off, size_t n, void* dst) {
-    if (glyf_ram != NULL && off >= glyf_ram_off
-        && off + n <= glyf_ram_off + glyf_ram_len) {
-        memcpy(dst, glyf_ram + (off - glyf_ram_off), n);
-        return true;
-    }
-    if (gvar_ram != NULL && off >= gvar_ram_off
-        && off + n <= gvar_ram_off + gvar_ram_len) {
-        memcpy(dst, gvar_ram + (off - gvar_ram_off), n);
-        return true;
-    }
-    return false;
+static bool io_from_map(uint32_t off, size_t n, void *dst) {
+    return ttf_font_source_read_map(&s_cur->f_source, off, n, dst);
 }
 
 static bool io_mapped_covers(uint32_t off, uint32_t len) {
-    if (len == 0) return true;
-    if (glyf_ram != NULL && off >= glyf_ram_off
-        && off + len <= glyf_ram_off + glyf_ram_len) {
-        return true;
-    }
-    if (gvar_ram != NULL && off >= gvar_ram_off
-        && off + len <= gvar_ram_off + gvar_ram_len) {
-        return true;
-    }
-    return false;
+    return ttf_font_source_covers(&s_cur->f_source, off, len);
 }
 
 
@@ -377,36 +306,11 @@ static void io_flush_touches(void) {
 }
 
 static bool try_map_table(
-    uint32_t off, uint32_t len, uint8_t** ram, uint32_t* ram_off,
-    uint32_t* ram_len, const char* name
+    uint32_t off, uint32_t len, uint8_t **ram, uint32_t *ram_off,
+    uint32_t *ram_len, const char *name
 ) {
-    if (*ram != NULL || len < 4096 || len > TTF_MAP_MAX) return false;
-    size_t largest = heap_caps_get_largest_free_block(
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-    );
-    if (largest < (size_t)len + TTF_MAP_RESERVE) {
-        ESP_LOGI(
-            TAG, "%s %u KB, skip map (largest %u KB)",
-            name, (unsigned)(len / 1024), (unsigned)(largest / 1024)
-        );
-        return false;
-    }
-    uint8_t* p = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL) return false;
-    int64_t t0 = esp_timer_get_time();
-    if (!io_read_raw(off, p, len)) {
-        heap_caps_free(p);
-        return false;
-    }
-    *ram = p;
-    *ram_off = off;
-    *ram_len = len;
-    ESP_LOGI(
-        TAG, "mapped %s %u KB in %dms",
-        name, (unsigned)(len / 1024),
-        (int)((esp_timer_get_time() - t0) / 1000)
-    );
-    return true;
+    return ttf_font_source_map_table(&s_cur->f_source, off, len, ram, ram_off,
+                                     ram_len, name, bench_on ? &bench.read_us : NULL);
 }
 
 static const char* font_basename(const char* path) {
@@ -543,7 +447,7 @@ bool ttf_font_path_is_builtin(const char* path) {
 
 bool ttf_font_is_builtin(void) {
     const ttf_slot_t* sys = &s_slots[TTF_FONT_SLOT_SYSTEM];
-    return sys->f_ready && sys->f_mem != NULL;
+    return sys->f_ready && sys->f_source.f_mem != NULL;
 }
 
 const char* ttf_font_display_name(void) {
@@ -1958,18 +1862,7 @@ void ttf_bench_end(ttf_bench_stats_t* out) {
 }
 
 static void abandon_font_source(void) {
-    if (font_fd >= 0) {
-        close(font_fd);
-        font_fd = -1;
-    }
-    // 内嵌字体的字节由槽位自己分配，关槽时要连它一起还回去。
-    // An embedded face owns heap bytes; closing the slot must hand them back too.
-    if (font_mem_owned && font_mem != NULL) {
-        heap_caps_free((void*)font_mem);
-    }
-    font_mem_owned = false;
-    font_mem = NULL;
-    font_mem_len = 0;
+    ttf_font_source_abandon(&s_cur->f_source);
 }
 
 // 只清“当前槽”。对外入口 ttf_font_unload() 永远作用于 0 号槽，见文件后半的字体槽一节。
@@ -2084,8 +1977,8 @@ static esp_err_t load_opened_font(void) {
 // and the weight that only get their initial values at load time.
 static void slot_init(ttf_slot_t* s) {
     memset(s, 0, sizeof(*s));
-    s->f_fd = -1;
-    s->f_file_pos = UINT32_MAX;
+    s->f_source.f_fd = -1;
+    s->f_source.f_file_pos = UINT32_MAX;
     s->f_packed_root = -1;
     s->f_packed_weight = -1;
     s->f_weight = TTF_WGHT_DEF;

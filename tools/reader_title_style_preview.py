@@ -134,7 +134,8 @@ def kit_slices():
     # The bold step count comes from the real source so the preview cannot tune a different value.
     unit = re.search(r'#define UI_TITLE_BOLD_STEPS \d+', KIT.read_text()).group(0) + '\n'
     return unit + ''.join(function(n, KIT) + '\n' for n in (
-        'clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
+        'clamp_radius', 'draw_arc', 'ui_draw_round_rect_raw', 'ui_draw_round_rect',
+        'ui_fill_round_rect_raw', 'ui_fill_round_rect', 'ui_inset_rect',
         'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width',
         'title_face_px', 'ui_text_title_fit_sized', 'ui_text_title_fit',
         'ui_text_title_background_vc', 'ui_text_title_vc', 'ui_text_title_bold_vc',
@@ -171,7 +172,7 @@ def compile_unit(work, unit):
              '-I' + str(work), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
              '-I' + str(ROOT / 'main')]
     subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
+    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             '-Wl,-dead_strip', '-lm', '-o', str(work / 'test')], check=True)
 
 

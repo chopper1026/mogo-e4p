@@ -15,6 +15,9 @@ python3 tools/run_reader_baseline.py controls
 python3 tools/run_reader_baseline.py present
 ```
 
+`font_source` 编译真实字体字节源，验证文件游标、短读/读错/EOF、内存边界、整表映射预算与回收。每个字体槽持有自己的文件或内存镜像、glyf/gvar 映射；上层仍在预绘交还后按原顺序清字形、映射、块缓存及字节源。`font_faces` 同时检查真实字体的像素、字宽、文件句柄及重复嵌入字体槽进出；块工作区沿用原有保留策略，不把其常驻占用计作泄漏。
+`font_source` compiles the real byte-source module to check cursors, short/error/EOF reads, memory bounds, map budgets and reclamation. Each slot owns its file or memory image and glyf/gvar maps; after prefetch handoff, callers retain the original glyph/map/block/source cleanup order. `font_faces` also checks real-font pixels, advances, descriptors and repeated embedded-slot cycles; retained block workspaces keep their existing policy and are counted as resident resources.
+
 `platform_input` 编译真实 S31 输入适配器与驱动类型，检查完整双点载荷、原始字节、读错及早退快照，并检查页面契约不引入触摸/加速度计驱动头。页面只借用 `app_touch_t` 快照；慢速加载导航通过同步读取回调轮询，设备句柄由主循环和 S31 适配器持有。采样队列、去抖及锁屏顺序不变。`pinpad` 与 `lock` 分别验证密码键盘和包含真实适配器的密码锁循环。
 `platform_input` compiles the real S31 adapter and driver types to check complete two-contact payloads, raw bytes, error/early-return snapshots, and a page contract free of touch/accelerometer driver headers. Pages borrow `app_touch_t` snapshots; navigation during long loads polls through a synchronous callback while the loop and S31 adapter retain device handles. Sampler queues, debounce and lock ordering are unchanged. `pinpad` and `lock` cover the PIN pad and authentication loop with the real adapter.
 

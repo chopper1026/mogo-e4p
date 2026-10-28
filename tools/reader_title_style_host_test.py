@@ -126,7 +126,8 @@ void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
               'epd_fill_rect', 'epd_draw_circle', 'epd_fill_circle_helper', 'epd_fill_circle',
               'epd_write_line', 'epd_draw_line'):
         unit += function(n, ROOT / 'components/epdiy/src/epdiy.c') + '\n'
-    for n in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
+    for n in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect_raw', 'ui_draw_round_rect',
+        'ui_fill_round_rect_raw', 'ui_fill_round_rect', 'ui_inset_rect',
               'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width'):
         unit += function(n, kit) + '\n'
     unit += f'#define UI_TITLE_BOLD_STEPS {bold_steps}\n'
@@ -353,6 +354,6 @@ int main(int argc,char **argv){
              '-I' + str(p), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
              '-I' + str(ROOT / 'main')]
     subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(p / 'ttf.o')], check=True)
-    subprocess.run(flags + [str(p / 'test.c'), str(p / 'assets.c'), str(p / 'ttf.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
+    subprocess.run(flags + [str(p / 'test.c'), str(p / 'assets.c'), str(p / 'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             '-Wl,-dead_strip', '-lm', '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test'), str((ROOT / 'main/assets/builtin.ttf').resolve())], check=True)

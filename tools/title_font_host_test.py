@@ -88,6 +88,10 @@ void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum Epd
 static uint8_t pixels[400*200];
 static bool record_coverage;
 void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=0&&x<400&&y>=0&&y<200);if(record_coverage)fb[y*400+x]=c>>4;else{assert(c==0);fb[y*400+x]=1;}++painted;}
+static uint8_t *owned_font_copy(const char *path,size_t *bytes){
+ FILE *file=fopen(path,"rb");assert(file);assert(!fseek(file,0,SEEK_END));long size=ftell(file);assert(size>0);rewind(file);
+ uint8_t *data=heap_caps_malloc((size_t)size,3);assert(fread(data,1,(size_t)size,file)==(size_t)size&&!fclose(file));*bytes=(size_t)size;return data;
+}
 int main(int argc,char **argv){
  assert(argc==3&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){
@@ -184,6 +188,30 @@ int main(int argc,char **argv){
  }
  assert(widths[1]>widths[0]&&max_fd==1);
  ttf_font_unload();assert(!active_fd&&!ttf_font_ready()&&!ttf_font_has_text(text));
+ // 每次失败/换槽都交还镜像；首次块工作区保留后，重复退出的常驻占用不增长。
+ // Failed/replaced slots release images; after initial block workspaces persist, repeated exits retain constant resident bytes.
+ size_t warm_live=0;
+ for(unsigned round=0;round<20;++round){
+  assert(ttf_font_open_builtin()==ESP_OK&&ttf_font_is_builtin()&&ttf_font_selected()==0);
+  int slots[TTF_FONT_SLOTS-1];
+  for(unsigned i=0;i<TTF_FONT_SLOTS-1;++i){
+   size_t bytes;uint8_t *data=owned_font_copy(argv[1],&bytes);slots[i]=ttf_font_open_mem(data,bytes,"embedded");
+   assert(slots[i]>0&&ttf_font_slot_ready(slots[i])&&ttf_font_selected()==0&&ttf_font_slot_has_text(slots[i],text));
+  }
+  size_t before=live,bytes;uint8_t *overflow=owned_font_copy(argv[1],&bytes);
+  assert(ttf_font_open_mem(overflow,bytes,"overflow")==-1&&live==before);
+  ttf_font_select(slots[1]);ttf_font_unload();
+  assert(ttf_font_selected()==slots[1]&&ttf_font_slot_ready(slots[1])&&!ttf_font_slot_ready(0));
+  assert(ttf_font_open_builtin()==ESP_OK&&ttf_font_selected()==slots[1]);
+  ttf_font_close_embedded();ttf_font_close_embedded();assert(ttf_font_selected()==0&&ttf_font_ready());
+  for(unsigned i=0;i<TTF_FONT_SLOTS-1;++i)assert(!ttf_font_slot_ready(slots[i]));
+  before=live;uint8_t *bad=heap_caps_calloc(64,1,3);
+  assert(ttf_font_open_mem(bad,64,"invalid")==-1&&live==before);
+  assert(ttf_font_slot_ready(0)&&ttf_font_selected()==0&&!active_fd);
+  if(round)assert(live==warm_live);else warm_live=live;
+ }
+ ttf_font_unload();
+ puts("PASS: 20 real font-slot cycles preserve system selection, reject full/invalid slots, reclaim owned images and retain constant warm workspace bytes");
  puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, single file/face, bounded warm cache and no duplicate font load");
 }
 '''
@@ -198,7 +226,9 @@ int main(int argc,char **argv){
              '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
     subprocess.run(flags + ['-Dopen=title_test_open', '-Dclose=title_test_close', '-c',
                             str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
+    subprocess.run(flags + ['-Dclose=title_test_close', '-c',
+                            str(ROOT / 'main/font/ttf_font_source.c'), '-o', str(work / 'source.o')], check=True)
     gc = '-Wl,-dead_strip' if os.uname().sysname == 'Darwin' else '-Wl,--gc-sections'
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
+    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(work / 'source.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             str(ROOT / 'main/ui/ui_kit.c'), '-lm', gc, '-o', str(work / 'test')], check=True)
     subprocess.run([str(work / 'test'), str(work / 'system.ttf'), str(work / 'reader.ttf')], check=True)
