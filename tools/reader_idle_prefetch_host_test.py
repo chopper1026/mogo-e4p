@@ -23,8 +23,6 @@ typedef struct{uint32_t generation;size_t page,offset;bool started;}book_layout_
 enum{READING,SHELF,READER_PANEL_NONE,READER_PANEL_FONT};
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
-#define BOOK_PREP_RESERVE (1024u*1024u)
-#define BOOK_PREP_IDLE_US 4000
 #define portMAX_DELAY 999999
 #define pdTRUE 1
 #define pdPASS 1
@@ -49,13 +47,7 @@ static void vTaskDelete(task_t *task){pthread_mutex_lock(&task->notify.lock);tas
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;static const char *s_text="text";
 static bool s_toolbar,s_clear_confirm;
 static size_t s_page;
-static int s_next_page=-1,s_prep_page=-1;
-static uint32_t s_next_generation,generation=1;
-static uint8_t *s_next_fb;
-static book_layout_draw_cursor_t s_prep_cursor;
-static SemaphoreHandle_t s_draw_lock,s_prep_done;
-static TaskHandle_t s_prep_task;
-static atomic_bool s_prep_stop;
+static uint32_t generation=1;
 static unsigned work,allocs;static bool fail_alloc,fail_draw,wallpaper,images;
 static size_t free_space=4u*1024u*1024u;
 static size_t fb_bytes(void){return 128;}
@@ -86,7 +78,8 @@ static int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect area,int px,bo
 }
 static int s_px=48;
 '''
-for name in ['lock_draw','unlock_draw','invalidate_prep','reader_prefetch_step','reader_prefetch_buffer','prep_task','kick_prep','reader_prefetch_end','reader_prefetch_resume','reader_prefetch_idle']:
+unit += (root/'main/book/reader_prefetch.c').read_text() + '\n'
+for name in ['lock_draw','unlock_draw','invalidate_prep','kick_prep','reader_prefetch_idle']:
  unit+=function(name,book)+'\n'
 assert 'reader_prefetch_end(prep);' in function('present',book)
 assert 'reader_prefetch_resume(s_page)' in function('paint_reading',book)
@@ -97,6 +90,7 @@ static void *end_presentation(void *unused){(void)unused;reader_prefetch_end(tru
 int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  free_space=BOOK_PREP_RESERVE;assert(!kick_prep()&&!s_next_fb&&!s_prep_task);
  free_space=4u*1024u*1024u;fail_alloc=true;assert(!kick_prep()&&!s_next_fb);fail_alloc=false;
+ fail_sem=true;assert(!kick_prep()&&!s_prep_done&&!s_draw_lock&&!s_prep_task);fail_sem=false;
  fail_task=true;assert(!kick_prep()&&s_next_fb&&!s_prep_task);fail_task=false;
  // 确定性地阻塞第二行，推屏结束只交还该行，不能等待整页。
  // Gate the second row: output completion hands back that row, never the rest of the page.
@@ -109,7 +103,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  pthread_mutex_lock(&row_lock);gate_rows=false;pthread_mutex_unlock(&row_lock);
  // 连按命中部分预绘时只画余下34行，不能丢弃已有两行。
  // A rapid turn completes only 34 remaining rows, preserving the two rows already prepared.
- ++s_page;assert(reader_prefetch_resume(s_page));assert(work==36&&s_next_page==1);
+ ++s_page;lock_draw();assert(reader_prefetch_resume(s_page));unlock_draw();assert(work==36&&s_next_page==1);
  for(unsigned row=0;row<36;++row)assert(s_next_fb[row]==(uint8_t)(1+row));
  // 40次连续翻页：模拟每次同步推屏时让预绘完成，下一次无需绘制任何正文行。
  // Forty rapid turns: work overlaps each synchronous scan; the next turn draws no body rows.
@@ -131,11 +125,18 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  wallpaper=true;assert(app_settings_book_background_path()[0]&&kick_prep());reader_prefetch_end(true);wallpaper=false;
  s_toolbar=true;assert(!kick_prep());s_toolbar=false;s_reader_panel=READER_PANEL_FONT;assert(!kick_prep());s_reader_panel=READER_PANEL_NONE;
  s_page=499;assert(!kick_prep());
- destroy_worker();free(s_next_fb);
+ reader_prefetch_release();reader_prefetch_release();
+ assert(!s_next_fb&&!s_prep_task&&!s_prep_done&&!s_draw_lock&&!reader_prefetch_frame(s_page));
+ s_page=0;assert(kick_prep());reader_prefetch_end(true);reader_prefetch_release();
+ assert(!s_next_fb&&!s_prep_task&&!s_prep_done&&!s_draw_lock);
  puts("PASS: real-thread scan overlap, row-boundary stop instead of whole-page join, partial-page continuation, 40 rapid cache hits, input/navigation priority and generation/OOM/image/background/panel guards");
 }
 '''
 with tempfile.TemporaryDirectory(dir='/private/tmp') as d:
- c=Path(d)/'test.c';exe=Path(d)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-pthread',str(c),'-o',str(exe)],check=True)
+ folder=Path(d)
+ for header in ['epdiy.h','book_layout.h','reader_perf.h','esp_heap_caps.h','esp_timer.h',
+                'freertos/FreeRTOS.h','freertos/semphr.h','freertos/task.h']:
+  path=folder/header;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#pragma once\n')
+ c=folder/'test.c';exe=folder/'test';c.write_text(unit)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-pthread','-I'+str(folder),'-I'+str(root/'main/book'),str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True,timeout=30)

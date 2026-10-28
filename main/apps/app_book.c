@@ -139,7 +139,6 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <stdatomic.h>
 #include <unistd.h>
 
 #include "app.h"
@@ -164,6 +163,7 @@
 #include "app_font_context.h"
 #include "book_source.h"
 #include "reader_session.h"
+#include "reader_prefetch.h"
 #include "book_store.h"
 #include "book_shelf_categories.h"
 #include "book_shelf_model.h"
@@ -487,13 +487,6 @@ static void middle_pending_clear(void) { s_middle_pending = false; }
 static int64_t s_du_ms;
 static unsigned s_du_count;
 static EpdRect s_du_area;
-static SemaphoreHandle_t s_draw_lock, s_prep_done;
-static TaskHandle_t s_prep_task;
-static atomic_bool s_prep_stop;
-static book_layout_draw_cursor_t s_prep_cursor;
-static uint32_t s_next_generation;
-static uint8_t* s_next_fb;
-static int s_next_page = -1, s_prep_page = -1;
 
 #define s_toolbar (s_reader_panel != READER_PANEL_NONE)
 
@@ -562,12 +555,9 @@ static void draw_control(uint8_t* fb, EpdRect rect, const char* label, int id) {
     ui_draw_button(fb, rect, label, false);
 }
 static void lock_draw(void) {
-#if CONFIG_READER_PERF
-    READER_PERF_SCOPE(READER_PERF_LOCK);
-#endif
-    if (s_draw_lock) xSemaphoreTake(s_draw_lock, portMAX_DELAY);
+    reader_prefetch_lock();
 }
-static void unlock_draw(void) { if (s_draw_lock) xSemaphoreGive(s_draw_lock); }
+static void unlock_draw(void) { reader_prefetch_unlock(); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
 // 正文上方留出一致的呼吸空间，下沿与页脚带同步贴底；两种模式共用排版与刷新边界。
@@ -1657,7 +1647,7 @@ static void save_progress(void) {
     else { if (!s_unsaved) s_unsaved = 1; s_save_failed = true; }
     if (was_failed != s_save_failed) invalidate_prep();
 }
-static void invalidate_prep(void) { s_next_page = s_prep_page = -1; s_next_generation=0; memset(&s_prep_cursor,0,sizeof(s_prep_cursor)); }
+static void invalidate_prep(void) { reader_prefetch_invalidate(); }
 
 // 目录使用系统字体；切换前等待预渲染结束，回正文时恢复阅读字体与字形缓存。
 // The directory uses the system face; join painting before switching and restore the reader face on return.
@@ -3855,83 +3845,21 @@ static void draw_reader(uint8_t *fb,size_t page) {
     book_layout_draw_page(fb,page,body_rect(),s_px);
     draw_reader_outer(fb,page);
 }
-// 预绘只在同步推屏期间借用字体；结束前逐行停止并交还，输入回调不等待整页预绘。
-// Prefetch borrows fonts only during synchronous output; stop between rows before returning, never joining a whole page for input.
-#define BOOK_PREP_RESERVE (1024u * 1024u)
-#define BOOK_PREP_IDLE_US 4000
-static int reader_prefetch_step(void) {
-    if(!s_next_fb||s_prep_page<0)return -1;
-    if(!s_prep_cursor.generation)memset(s_next_fb,0xff,fb_bytes());
-    int result=book_layout_draw_slice(s_next_fb,(size_t)s_prep_page,body_rect(),s_px,&s_prep_cursor);
-    if(result<0)invalidate_prep();
-    else if(result>0){s_next_page=s_prep_page;s_next_generation=book_layout_generation();}
-    return result;
-}
-static bool reader_prefetch_buffer(void) {
-    size_t need=fb_bytes();
-    if(!s_next_fb&&heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>need+BOOK_PREP_RESERVE)
-        s_next_fb=heap_caps_aligned_alloc(16,need,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    return s_next_fb!=NULL;
-}
-static void prep_task(void *arg) {
-    (void)arg;
-    for(;;){
-        ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
-        lock_draw();
-        while(!atomic_load_explicit(&s_prep_stop,memory_order_acquire)){
-            if(reader_prefetch_step()!=0)break;
-        }
-        unlock_draw();
-        xSemaphoreGive(s_prep_done);
-    }
-}
+// 页面决定是否允许预绘；任务只借用本次推屏的稳定几何和布局。
+// The page authorizes prefetch; the worker borrows stable geometry and layout for this presentation.
 static bool kick_prep(void) {
-    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
-       s_page+1>=book_layout_page_count()||book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1))return false;
-    int target=(int)s_page+1;
-    if(s_next_page==target&&s_next_generation==book_layout_generation())return false;
-    if(s_prep_page!=target||s_prep_cursor.generation!=book_layout_generation()){
-        s_next_page=-1;s_next_generation=0;s_prep_page=target;memset(&s_prep_cursor,0,sizeof(s_prep_cursor));
-    }
-    if(!reader_prefetch_buffer())return false;
-    if(!s_draw_lock)s_draw_lock=xSemaphoreCreateMutex();
-    if(!s_prep_done)s_prep_done=xSemaphoreCreateBinary();
-    if(!s_prep_task&&s_draw_lock&&s_prep_done&&
-       xTaskCreatePinnedToCore(prep_task,"book_prep",12*1024,NULL,3,&s_prep_task,1)!=pdPASS)s_prep_task=NULL;
-    if(!s_prep_task)return false;
-    xSemaphoreTake(s_prep_done,0);
-    atomic_store_explicit(&s_prep_stop,false,memory_order_release);
-    xTaskNotifyGive(s_prep_task);
-    return true;
-}
-static void reader_prefetch_end(bool started) {
-    if(!started)return;
-    atomic_store_explicit(&s_prep_stop,true,memory_order_release);
-    // 最多交还当前一行，之后主循环才可改字体、章节或离页，避免竞态。
-    // Hand back at the current row boundary before the loop may change fonts, chapters or pages.
-    xSemaphoreTake(s_prep_done,portMAX_DELAY);
-}
-static bool reader_prefetch_resume(size_t page) {
-    if(!s_next_fb||s_prep_page!=(int)page||!s_prep_cursor.started||
-       s_prep_cursor.generation!=book_layout_generation())return false;
-    // 连按到尚未完成的目标时接着画，保留已画文字，不清空重画整页。
-    // A rapid turn completes the remaining rows of its target, retaining work already drawn.
-    while(reader_prefetch_step()==0){}
-    return s_next_page==(int)page&&s_next_generation==book_layout_generation();
+    if (s_view != READING || !s_text || s_toolbar || s_clear_confirm ||
+        s_reader_panel != READER_PANEL_NONE || s_page + 1 >= book_layout_page_count() ||
+        book_layout_page_image_count(s_page) || book_layout_page_image_count(s_page + 1)) return false;
+    return reader_prefetch_start(s_page + 1, body_rect(), s_px, fb_bytes());
 }
 static void reader_prefetch_idle(app_ctx_t *ctx) {
-    if(s_view!=READING||!s_text||s_toolbar||s_clear_confirm||s_reader_panel!=READER_PANEL_NONE||
-       ctx->consumed||ctx->request_app||ctx->request_menu||ctx->request_return||
-       (ctx->touch&&ctx->touch->touched)||s_prep_page!=(int)s_page+1)return;
-    if(book_layout_page_image_count(s_page)||
-       book_layout_page_image_count(s_page+1)||s_page+1>=book_layout_page_count())return;
-    if(s_next_page==s_prep_page&&s_next_generation==book_layout_generation())return;
-    if(!reader_prefetch_buffer())return;
-    const int64_t deadline=esp_timer_get_time()+BOOK_PREP_IDLE_US;
-    for(unsigned row=0;row<8;++row){
-        if(reader_prefetch_step()!=0||esp_timer_get_time()>=deadline)break;
-    }
+    if (s_view != READING || !s_text || s_toolbar || s_clear_confirm ||
+        s_reader_panel != READER_PANEL_NONE || ctx->consumed || ctx->request_app ||
+        ctx->request_menu || ctx->request_return || (ctx->touch && ctx->touch->touched)) return;
+    if (book_layout_page_image_count(s_page) || book_layout_page_image_count(s_page + 1) ||
+        s_page + 1 >= book_layout_page_count()) return;
+    reader_prefetch_work_idle(s_page + 1);
 }
 static size_t current_toc_position(void) {
     size_t count = book_navigation_count();
@@ -4310,11 +4238,14 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
         book_layout_page_image_count(s_page) > 0 && s_page_images;
     lock_draw();
-    bool cached = !s_toolbar && !s_clear_confirm && s_next_fb &&
-                  ((s_next_page == (int)s_page && s_next_generation == book_layout_generation()) ||
-                   reader_prefetch_resume(s_page));
+    const uint8_t *prepared = NULL;
+    if (!s_toolbar && !s_clear_confirm) {
+        prepared = reader_prefetch_frame(s_page);
+        if (!prepared && reader_prefetch_resume(s_page)) prepared = reader_prefetch_frame(s_page);
+    }
+    bool cached = prepared != NULL;
     if (cached) {
-        memcpy(ctx->fb, s_next_fb, fb_bytes());
+        memcpy(ctx->fb, prepared, fb_bytes());
         // 这一页没有经过同步绘制，接管预绘时记下的内链命中表。
         // This page skipped the synchronous draw, so take over the hit table recorded during
         // its prefetch.
@@ -4756,9 +4687,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     invalidate_covers();
     app_home_release_clock_cache();
     lock_draw();
-    invalidate_prep();
-    free(s_next_fb);
-    s_next_fb = NULL;
+    reader_prefetch_discard();
     unlock_draw();
     if (network.network_ready) ttf_font_cache_clear();
     // 开书前把字形缓存全还回去并量一下能腾多少：书内字体要的正是这块 PSRAM，而系统字体
@@ -6852,11 +6781,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     s_reader_return_home = false;
     ui_reader_background_release();
     free_book();
-    free(s_next_fb);
-    s_next_fb = NULL;
-    if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}
-    if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}
-    if (s_draw_lock) { vSemaphoreDelete(s_draw_lock); s_draw_lock = NULL; }
+    reader_prefetch_release();
 }
 // 先停止使用旧卡句柄与字体预渲染，主循环随后切换内置字体。
 // Stop old-card handles and font preparation before the loop switches to the builtin font.

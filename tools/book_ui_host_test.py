@@ -316,7 +316,7 @@ static uint32_t s_bookmark_selected;
 static int64_t s_stats_activity_ms;
 static int s_du_count;
 static int64_t s_size_settle_ms,s_poll_ms;
-static void* s_prep_task,*s_prep_done,*s_draw_lock,*s_next_fb;
+static void reader_prefetch_release(void){}
 static void ensure_prep(void){}
 static int app_settings_book_px(void){return 48;}
 static int test_saved_margin[MARGIN_COUNT]={36,36,0,0};

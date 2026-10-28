@@ -67,6 +67,7 @@ static const char *app_settings_book_background_path(void){return wallpaper?"/sd
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
 static void epd_fill_rect(EpdRect r,int color,uint8_t *frame){assert(r.x==0&&r.y==0&&r.width==684&&r.height==expected_band());memset(frame,color,684*expected_band());}
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *frame){epd_fill_rect(r,color,frame);}
 static void ui_nav_status(uint8_t *frame){assert(statusbar);++status_paints;frame[20*684+36]=(uint8_t)minute;}
 static void draw_reader_header(uint8_t *frame){(void)frame;++header_paints;}
 static void ui_reader_background_paint(uint8_t *frame,EpdRect r,bool blend){assert(r.height==expected_band()&&blend);++background_paints;frame[0]=29;}
@@ -84,8 +85,12 @@ unit+='static bool clock_present(app_ctx_t *ctx,app_redraw_t redraw){\n'+branch+
 # Actual prefetched-page path; freshness is checked after copying, before any push.
 unit+=r'''
 static bool s_water_turn_pending,s_reader_turn_pending,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm,s_reader_footer_pending;
-static uint8_t *s_next_fb=next_fb,*s_page_images;
-static int s_next_page=2,s_page=2,s_mode;
+static uint8_t *s_page_images;
+static const uint8_t *reader_prefetch_frame(size_t page){assert(page==2);return next_fb;}
+static bool reader_prefetch_resume(size_t page){(void)page;return false;}
+static void book_layout_adopt_page(size_t page){assert(locked&&page==2);}
+static void draw_reader_outer(uint8_t *frame,size_t page){assert(locked&&frame==fb&&page==2);}
+static int s_page=2,s_mode;
 static EpdRect s_area;
 static int64_t esp_timer_get_time(void){return 1000;}
 static bool ui_reader_background_prepare(const char *p){(void)p;return true;}
@@ -168,5 +173,5 @@ assert 'ui_wallpaper_draw_rounded' not in s and 'read_pico_transfer_get_saved_wi
 assert 'prepare_inline_image' not in branch and 'kick_prep' not in branch
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
  d=Path(folder);c=d/'test.c';exe=d/'test';c.write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined',str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)

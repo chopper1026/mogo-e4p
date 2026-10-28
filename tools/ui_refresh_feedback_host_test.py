@@ -135,8 +135,8 @@ static uint8_t test_full_pages;
 static unsigned s_turns,s_unsaved,s_stats_pending_turns,s_session_turns;
 static size_t s_jump_offset;
 static int64_t s_last_turn_ms,s_stats_activity_ms;
-static uint8_t *s_next_fb;
-static int s_next_page=-1;
+static const uint8_t *reader_prefetch_frame(size_t page){(void)page;return NULL;}
+
 static struct {uint8_t *gray;} test_image={.gray=(uint8_t*)"gray"},*s_page_images=&test_image;
 #define BOOK_TOC_ROWS 12
 #define E0470_TURN_RTL 1
