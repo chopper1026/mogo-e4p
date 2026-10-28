@@ -32,6 +32,7 @@ SUITES = {
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],
     "background": [sys.executable, "tools/reader_stability_host_test.py"],
     "loop": ["bash", "tools/run_app_loop_host_tests.sh"],
+    "input": [sys.executable, "tools/app_input_host_test.py"],
     "book": ["bash", "tools/run_book_host_tests.sh"],
     "display": ["bash", "tools/run_display_host_test.sh"],
     "navigation": ["bash", "tools/run_display_navigation_tests.sh"],

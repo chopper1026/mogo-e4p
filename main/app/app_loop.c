@@ -40,6 +40,7 @@
 
 #include "../reader_perf.h"
 #include "app_loop.h"
+#include "app_input.h"
 #include "auto_lock.h"
 #include "crash_note.h"
 
@@ -97,25 +98,9 @@ static int64_t td_last_read_us;      // 上次读触摸时刻 / previous cst836u
 static int64_t td_stats_ms;          // 上次统计输出时刻 / previous stats line
 static int64_t td_err_last_ms;       // READ_ERR 限流 / READ_ERR rate limit
 static unsigned td_err_burst;        // 限流窗口内堆积次数 / bursts hidden by the limit
-static unsigned td_press, td_tap, td_swipe, td_longp, td_cancel;
-static unsigned td_read_err, td_kill_err, td_multi, td_stall, td_present_over;
+static unsigned td_read_err, td_kill_err, td_stall, td_present_over;
 static unsigned td_replays, td_replay_frames;  // F4 回放事件与帧数 / replay events and frames
 static int32_t td_max_stall_ms, td_max_present_ms;
-static bool td_multi_active;         // 多点去抖 / multitouch transition latch
-static const char* td_gest_name(ui_gesture_type_t t) {
-    switch (t) {
-        case UI_GESTURE_PRESS: return "PRESS";
-        case UI_GESTURE_MOVE: return "MOVE";
-        case UI_GESTURE_LONG_PRESS: return "LONG";
-        case UI_GESTURE_TAP: return "TAP";
-        case UI_GESTURE_SWIPE_L: return "SWIPE_L";
-        case UI_GESTURE_SWIPE_R: return "SWIPE_R";
-        case UI_GESTURE_SWIPE_U: return "SWIPE_U";
-        case UI_GESTURE_SWIPE_D: return "SWIPE_D";
-        case UI_GESTURE_CANCEL: return "CANCEL";
-        default: return "?";
-    }
-}
 #if CONFIG_TOUCH_DIAG_BEEP
 static void td_beep_task(void* arg) {
     (void)arg;
@@ -608,28 +593,10 @@ static void click_present(app_ctx_t *ctx, const app_desc_t *current, EpdRect are
     if (error != EPD_DRAW_SUCCESS) app_present(ctx, current, APP_REDRAW_FULL);
 }
 
-// 中断边界先清页面装饰再清识别器。/ Clear decoration before resetting recognition.
-static void cancel_gesture(app_ctx_t* ctx, const app_desc_t* app, ui_gesture_t* gesture) {
-    if (gesture->active && app->on_gesture) {
-        ui_gesture_event_t event = { .type = UI_GESTURE_CANCEL,
-            .x0 = gesture->x0, .y0 = gesture->y0, .x = gesture->x, .y = gesture->y };
-        const app_desc_t* requested = ctx->request_app;
-        bool menu_requested = ctx->request_menu;
-        bool return_requested = ctx->request_return;
-        app_redraw_t redraw = app->on_gesture(ctx, &event);
-        ctx->request_app = requested;
-        ctx->request_menu = menu_requested;
-        ctx->request_return = return_requested;
-        ui_gesture_reset(gesture);
-        app_present(ctx, app, redraw);
-    }
-    ui_gesture_reset(gesture);
-}
-
 static void present_page(app_ctx_t* ctx, const app_desc_t* app,
                          ui_gesture_t* gesture, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)
-        cancel_gesture(ctx, app, gesture);
+        app_input_cancel_gesture(ctx, app, gesture);
     app_present(ctx, app, redraw);
 }
 
@@ -734,116 +701,9 @@ static void present_menu(app_ctx_t* ctx, const app_desc_t* current, int leaf, me
     guard_draw_result(ctx->hl, update_display_fast_page(ctx->hl));
 }
 
-// 空槽常带着抬起事件或残留坐标，不能进页面看到的快照；抬手后保留最后一次位置。
-// Empty slots often carry lift events or stale coords; keep last position on lift.
-static void debounce_touch(
-    cst836u_touch_t* latest, const cst836u_touch_t* raw, bool released
-) {
-    if (raw->touched) {
-        *latest = *raw;
-        for (int i = 0; i < CST836U_MAX_POINTS; i++) {
-            if (!latest->points[i].active) {
-                memset(&latest->points[i], 0, sizeof(latest->points[i]));
-            }
-        }
-    } else if (released) {
-        latest->touched = false;
-        latest->count = 0;
-        for (int i = 0; i < CST836U_MAX_POINTS; i++) {
-            latest->points[i].active = false;
-        }
-    }
-    memcpy(latest->raw, raw->raw, sizeof(raw->raw));
-}
-
-// ---- F4 逐帧触摸管线（正常 tick 与回放共用；docs/local/2026-10-14-f4-touch-sampler-plan.md §3.2）----
-
-// 采样器未跑时的降级直读也复用的最近帧。/ Last popped frame for reuse when idle.
+// 最近采样帧仍由主循环持有，回放逐帧同步，锁屏边界清零。
+// The loop retains the latest sampled frame, synchronizes it during replay and clears it at lock boundaries.
 static touch_frame_t s_last_frame;
-
-// 由采样帧重建触摸快照：多点 points 与原始寄存器不回放——多点帧只承担 count>1
-// 的拒绝语义，raw 仅诊断 RAW_INVALID 消费而该事件在驱动内（采样侧）打出。
-// / Rebuild a touch snapshot from a frame; multi-point payloads and raw regs
-// are not replayed (count>1 rejection semantics only).
-static void frame_to_touch(const touch_frame_t* f, cst836u_touch_t* t) {
-    memset(t, 0, sizeof(*t));
-    t->touched = f->touched != 0;
-    t->count = f->count;
-    t->x = f->x;
-    t->y = f->y;
-}
-
-// 单帧摄取：边沿判定（相对 *was_touched）→ 诊断计数 → 去抖入 latest → ctx 字段。
-// 正常 tick 在原直读位置调用一次；回放每帧调用一次。frame_ms：回放传帧时间戳
-// （队列内单调，手势机倒退保护不触发），正常传真实时间。
-// / Ingest one frame: edges vs *was_touched → diag counters → debounce into
-// latest → ctx fields. Called once per normal tick, once per replayed frame.
-static void ingest_touch_frame(app_ctx_t* ctx, cst836u_touch_t* latest,
-                               const cst836u_touch_t* touch, esp_err_t err,
-                               bool* was_touched, int64_t frame_ms,
-                               int64_t* last_input_ms,
-                               bool* out_pressed, bool* out_released) {
-    const bool pressed = touch->touched && !*was_touched;
-    const bool released = !touch->touched && *was_touched;
-#if CONFIG_TOUCH_DIAG
-    if (pressed) {
-        td_press++;
-        TD_LOGI("PRESS x=%u y=%u n=%u", touch->x, touch->y, touch->count);
-    }
-    if (err == ESP_OK && touch->touched && touch->count > 1) {
-        if (!td_multi_active) {
-            td_multi_active = true;
-            td_multi++;
-            TD_LOGI("MULTI n=%u x=%u y=%u", touch->count, touch->x, touch->y);
-        }
-    } else if (td_multi_active) td_multi_active = false;
-#endif
-    debounce_touch(latest, touch, released);
-    ctx->now_ms = frame_ms;
-    if (err == ESP_OK && (touch->touched || released)) *last_input_ms = frame_ms;
-    ctx->pressed = pressed;
-    ctx->released = released;
-    ctx->consumed = false;
-    *out_pressed = pressed;
-    *out_released = released;
-}
-
-// 手势分发：原主循环 829-857 行整块原样抽取，正常 tick 与回放共用，语义与抽取前
-// 一致。owned_by_other = 电源弹窗 / 快捷层 / 菜单任一持有输入时为真。
-// / Gesture dispatch extracted verbatim from the main loop; shared by the
-// normal tick and replay. owned_by_other covers power dialog / quick layer / menu.
-static void dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
-                                   ui_gesture_t* gesture, esp_err_t err,
-                                   bool owned_by_other) {
-    if (owned_by_other || !current->on_gesture || err != ESP_OK) return;
-    ui_gesture_event_t event;
-    if (ui_gesture_feed(gesture, ctx, &event)) {
-#if CONFIG_TOUCH_DIAG
-        // MOVE 逐帧太多不记；按下与终态全记。MOVE frames are too noisy; log press + terminal.
-        if (event.type != UI_GESTURE_MOVE) {
-            switch (event.type) {
-                case UI_GESTURE_TAP: td_tap++; break;
-                case UI_GESTURE_LONG_PRESS: td_longp++; break;
-                case UI_GESTURE_CANCEL:
-                    td_cancel++;
-                    touch_diag_beep();
-                    break;
-                case UI_GESTURE_SWIPE_L: case UI_GESTURE_SWIPE_R:
-                case UI_GESTURE_SWIPE_U: case UI_GESTURE_SWIPE_D:
-                    td_swipe++;
-                    break;
-                default: break;
-            }
-            TD_LOGI("GEND t=%s x0=%u y0=%u x=%u y=%u ms=%d",
-                    td_gest_name(event.type), event.x0, event.y0, event.x, event.y,
-                    (int)event.hold_ms);
-        }
-#endif
-        app_redraw_t redraw = current->on_gesture(ctx, &event);
-        present_page(ctx, current, gesture, redraw);
-        if (redraw != APP_REDRAW_NONE) ctx->consumed = true;
-    }
-}
 
 static bool try_load_saved_sd_font(bool allow_probe) {
     read_pico_sd_info_t info;
@@ -1155,8 +1015,8 @@ void app_loop_run(const app_loop_config_t* config) {
                     // path assumes edges are unchanged, which breaks if the cache
                     // still holds a stale press frame (measured toolbar chain).
                     s_last_frame = f;
-                    frame_to_touch(&f, &touch);
-                    ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
+                    app_input_frame_to_touch(&f, &touch);
+                    app_input_ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
                     // 快捷层与电源弹窗都按帧回放：只在排空后喂最后一帧会丢掉按下沿，
                     // 快速点按需要再点一次才生效。弹窗动作留到本 tick 的弹窗分支执行。
@@ -1183,11 +1043,11 @@ void app_loop_run(const app_loop_config_t* config) {
                         quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, true);
                         if (quick_input_owned) {
                             held_key = -1;
-                            cancel_gesture(&ctx, current, &gesture);
+                            app_input_cancel_gesture(&ctx, current, &gesture);
                         }
                     }
-                    dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK,
-                                           power_dialog_open || quick_input_owned || menu_open);
+                    app_input_dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK,
+                                           power_dialog_open || quick_input_owned || menu_open, present_page);
                     was_touched = touch.touched;
 #if CONFIG_TOUCH_DIAG
                     n++;
@@ -1229,11 +1089,11 @@ void app_loop_run(const app_loop_config_t* config) {
 #endif
             } else if (touch_sampler_pop(&f)) {
                 s_last_frame = f;
-                frame_to_touch(&s_last_frame, &touch);
+                app_input_frame_to_touch(&s_last_frame, &touch);
             } else {
                 // 无新帧：复用最近帧（采样节拍 5ms 与循环节拍不完全同相），边沿天然无变化。
                 // / No new frame: reuse the last one; edges are unchanged by construction.
-                frame_to_touch(&s_last_frame, &touch);
+                app_input_frame_to_touch(&s_last_frame, &touch);
             }
         } else {
             err = cst836u_read(config->tp, &touch);
@@ -1268,14 +1128,14 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 #endif
         if (!replayed) {
-            ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
+            app_input_ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
                                frame_ms, &last_input_ms, &pressed, &released);
             // 单指按下沿给一记短震；回放帧不重复，多点、读错与读卡模式不震。
             // / One short pulse per single-finger press edge; replayed frames never repeat and multitouch, read errors and USB storage stay silent.
             if (err == ESP_OK && pressed && touch.count == 1 && !usb_storage_active()) haptics_pulse();
         }
-        // 触摸已由 ingest_touch_frame 去抖并更新 ctx；这里只复位上游新增的导航按压状态。
-        // Touch is debounced in ingest_touch_frame; only the upstream nav-press state resets here.
+        // 触摸已由 app_input_ingest_touch_frame 去抖并更新 ctx；这里只复位上游新增的导航按压状态。
+        // Touch is debounced in app_input_ingest_touch_frame; only the upstream nav-press state resets here.
         if(err!=ESP_OK||!touch.touched)s_nav_contact_down=s_nav_polled=false;
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
@@ -1311,7 +1171,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 ui_power_dialog_reset(&power_dialog, touch.touched);
                 quick_reset();
                 held_key = -1;
-                cancel_gesture(&ctx, current, &gesture);
+                app_input_cancel_gesture(&ctx, current, &gesture);
                 menu_pressed = UI_MENU_HIT_NONE;
                 ctx.consumed = true;
                 ctx.pressed = ctx.released = false;
@@ -1338,7 +1198,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 quick_input_owned = quick_feed_frame(&ctx, current, &quick_lock_requested, false);
                 if (quick_input_owned) {
                     held_key = -1;
-                    cancel_gesture(&ctx, current, &gesture);
+                    app_input_cancel_gesture(&ctx, current, &gesture);
                 }
             }
             quick_buttons_present(&ctx,current);
@@ -1394,7 +1254,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 touch_diag_beep();
             }
 #endif
-            cancel_gesture(&ctx, current, &gesture);
+            app_input_cancel_gesture(&ctx, current, &gesture);
             EpdRect dirty;
             ui_power_dialog_cancel_input(&power_dialog, &dirty);
             if (power_dialog_open && dirty.height > 0) {
@@ -1423,7 +1283,7 @@ void app_loop_run(const app_loop_config_t* config) {
             const int tab = ui_nav_hit(touch.x, touch.y);
             if (tab >= 0) {
                 held_key = -1;
-                cancel_gesture(&ctx, current, &gesture);
+                app_input_cancel_gesture(&ctx, current, &gesture);
                 ctx.consumed = true;
                 ctx.user_activity = true;
                 nav_press_owned = true;
@@ -1442,7 +1302,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 (!current->menu_handle_enabled || current->menu_handle_enabled(&ctx));
             ctx.consumed = true;
             if (key >= 0 || handle_hit) {
-                cancel_gesture(&ctx, current, &gesture);
+                app_input_cancel_gesture(&ctx, current, &gesture);
                 if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
                 menu_pressed = UI_MENU_HIT_NONE;
             }
@@ -1518,8 +1378,8 @@ void app_loop_run(const app_loop_config_t* config) {
                 }
             }
         }
-        dispatch_gesture_frame(&ctx, current, &gesture, err,
-                               power_input_owned || quick_input_owned || menu_open);
+        app_input_dispatch_gesture_frame(&ctx, current, &gesture, err,
+                               power_input_owned || quick_input_owned || menu_open, present_page);
 
         ctx.now_ms = esp_timer_get_time() / 1000;
         rails_idle_check(ctx.now_ms);
@@ -1546,7 +1406,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     ESP_LOGI(TAG, "ignore boot power-key action %d", (int)key_action);
                 } else if (key_action == READ_PICO_PMU_KEY_LONG) {
                     held_key = -1;
-                    cancel_gesture(&ctx, current, &gesture);
+                    app_input_cancel_gesture(&ctx, current, &gesture);
                     if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
                     menu_pressed = UI_MENU_HIT_NONE;
                     extern const app_desc_t app_book;
@@ -1586,7 +1446,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     }
                 } else if (!power_dialog_open) {
                     held_key = -1;
-                    cancel_gesture(&ctx, current, &gesture);
+                    app_input_cancel_gesture(&ctx, current, &gesture);
                     if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
                     menu_pressed = UI_MENU_HIT_NONE;
                     app_redraw_t power_redraw = !quick_lock_requested && !quick_was_open && !menu_open && current->on_power_short
@@ -1628,7 +1488,7 @@ void app_loop_run(const app_loop_config_t* config) {
             TD_TIME("font_retry", font_ready = try_load_saved_sd_font(!media_invalidated));
             if (font_ready) {
                 held_key = -1;
-                cancel_gesture(&ctx, current, &gesture);
+                app_input_cancel_gesture(&ctx, current, &gesture);
                 ctx.consumed = true;
                 menu_pressed = UI_MENU_HIT_NONE;
                 if (menu_open) {
@@ -1713,7 +1573,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!idle_blocked && ctx.now_ms >= s_lock_ignore_until_ms &&
             auto_lock_due(ctx.now_ms, last_input_ms, idle_minutes)) {
             held_key = -1;
-            cancel_gesture(&ctx, current, &gesture);
+            app_input_cancel_gesture(&ctx, current, &gesture);
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
             prepare_lock(&ctx, current, false);
@@ -1763,7 +1623,7 @@ void app_loop_run(const app_loop_config_t* config) {
             held_key = -1;
             const app_desc_t* next = ctx.request_app;
             const bool go_back = ctx.request_return;
-            cancel_gesture(&ctx, current, &gesture);
+            app_input_cancel_gesture(&ctx, current, &gesture);
             menu_pressed = UI_MENU_HIT_NONE;
             ctx.request_app = NULL;
             ctx.request_menu = false;
@@ -1824,9 +1684,10 @@ void app_loop_run(const app_loop_config_t* config) {
 #if CONFIG_TOUCH_DIAG
         if (ctx.now_ms - td_stats_ms >= 60000) {
             td_stats_ms = ctx.now_ms;
+            const app_input_diag_counts_t input_counts = app_input_diag_counts();
             TD_LOGI("STATS press=%u tap=%u swipe=%u long=%u cancel=%u err=%u kill=%u multi=%u stall=%u maxstall=%dms present>100ms=%u maxpresent=%dms replay_evt=%u replay_frames=%u",
-                    td_press, td_tap, td_swipe, td_longp, td_cancel, td_read_err, td_kill_err,
-                    td_multi, td_stall, td_max_stall_ms, td_present_over, td_max_present_ms,
+                    input_counts.press, input_counts.tap, input_counts.swipe, input_counts.longp, input_counts.cancel, td_read_err, td_kill_err,
+                    input_counts.multi, td_stall, td_max_stall_ms, td_present_over, td_max_present_ms,
                     td_replays, td_replay_frames);
         }
 #endif
