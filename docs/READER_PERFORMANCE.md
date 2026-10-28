@@ -20,6 +20,9 @@ python3 tools/run_reader_baseline.py controls
 `session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
 `session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
 
+布局仍使用单实例引擎，由拥有书源的会话统一构建和释放。构建入口绑定同一章节的文本、块、字体段和内链；失败候选由页面释放并恢复旧布局，成功候选再转交会话。关闭或释放章节时，先解除布局和尺寸回调的借用，再回收章节。调用方必须先等预绘交还，并串行化字体与布局访问。`book` 使用真实排版引擎重复 100 次，比较原入口与会话入口的分页偏移和绘制文本，并覆盖跨会话拒绝、排版失败回滚、成功换章和重复退出。
+Layout retains its singleton engine, built and released by the source-owning session. Builds bind text, blocks, runs and links from one chapter; the page frees failed candidates and restores the previous layout, then transfers successful candidates to the session. Closing or releasing a chapter first detaches layout and dimension-callback borrows. Callers must await prefetch handoff and serialize font/layout access. `book` repeats 100 cycles with the real layout engine, comparing legacy/session page offsets and rendered text, rejecting other sessions and checking failed-build rollback, successful chapter replacement and repeated exit.
+
 `controls` 覆盖全屏/窗口化翻页、跨章边界、字号与间距重排、正文点击、缓存接管后的时钟及缩进长按。当前章和当前页属于 `reader_session.position`；解析候选失败不会替换位置，成功加载与重排仍由 UI 按原顺序提交。进度文件继续使用章节和字节偏移，布局页码不作为持久位置。
 `controls` covers full-screen/windowed turns, chapter boundaries, size/spacing reflow, body taps, cached-page clocks and indent holds. The current chapter and page belong to `reader_session.position`; failed parse candidates never replace position, and the UI commits successful loads and reflows in the existing order. Progress files retain chapter and byte offsets rather than layout page numbers.
 

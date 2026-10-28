@@ -163,6 +163,7 @@
 #include "app_font_context.h"
 #include "book_source.h"
 #include "reader_session.h"
+#include "reader_session_layout.h"
 #include "reader_prefetch.h"
 #include "book_store.h"
 #include "book_shelf_categories.h"
@@ -400,8 +401,6 @@ static blk_t* s_blocks;
 // 书内字体的 run 表与块表同生共死：都来自同一次 html_text 解析，排版直接借用。
 // The face run table lives and dies with the block table: both come from the same html_text
 // parse, and the layout borrows them.
-static html_run_t* s_runs;
-static size_t s_run_count;
 // 内链与锚点和 run 表同源，随章节一起换。点按脚注只查这两张表，不再解析章节。
 // Body links and anchors come from the same parse as the run table and change with the
 // chapter. A footnote tap only reads these tables; it never re-parses the chapter.
@@ -4314,8 +4313,6 @@ static void reader_bind_chapter(void) {
     s_text_len = content->len;
     s_blocks = content->blocks;
     s_block_count = content->count;
-    s_runs = content->runs;
-    s_run_count = content->run_count;
     s_links = content->links;
     s_link_count = content->link_count;
     s_anchors = content->anchors;
@@ -4334,7 +4331,7 @@ static void free_book(void) {
     invalidate_prep();
     book_layout_set_image_dims(NULL, NULL);
     s_reader_dims_ctx = (reader_dims_ctx_t){0};
-    book_layout_free();
+    reader_session_release_layout(&s_reader_session);
     book_layout_set_chapter_lead(0, 0);
     book_layout_set_chapter_lead_width(0);
     s_chapter_lead_skip = s_chapter_lead_height = 0;
@@ -4344,8 +4341,6 @@ static void free_book(void) {
     reader_bind_chapter();
     release_page_images();
     s_reader_image_refresh_pending = false;
-    book_layout_set_runs(NULL, 0);
-    book_layout_set_links(NULL, 0);
     s_selected_toc = SIZE_MAX;
     s_jump_offset = SIZE_MAX;
     reader_session_close(&s_reader_session);
@@ -4570,9 +4565,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
     apply_chapter_lead(heading, label, lead_skip, lead_height);
     s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
-    book_layout_set_runs(loaded.runs, loaded.run_count);
-    book_layout_set_links(loaded.links, loaded.link_count);
-    bool ok = book_layout_build_blocks(loaded.utf8, loaded.len, loaded.blocks, loaded.count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, &loaded, body_rect(), s_px);
     if (!ok) {
         // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
         s_reader_dims_ctx = old_dims_ctx;
@@ -4580,8 +4573,6 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
         // The run table dies with `loaded`, so put the previous chapter's back before the
         // rollback layout reads freed memory.
-        book_layout_set_runs(s_runs, s_run_count);
-        book_layout_set_links(s_links, s_link_count);
         // 题头几何也跟着回滚，否则这一章的题头参数会留在失败的那次上。
         // Roll the heading geometry back too, or the failed chapter's parameters would stick.
         s_chapter_lead_skip = old_lead_skip;
@@ -4589,7 +4580,7 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         s_chapter_lead_width = old_lead_width;
         book_layout_set_chapter_lead(old_lead_skip, old_lead_height);
         book_layout_set_chapter_lead_width(old_lead_width);
-        bool restored = s_text && book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        bool restored = s_text && reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
         unlock_draw();
         if (!restored) {
             free_book();
@@ -5467,7 +5458,7 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,
     // punctuation's right slack follow.
     book_layout_set_right_slack(s_margin[MARGIN_RIGHT]);
     refresh_chapter_lead();
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else {
         s_px = old_px;
@@ -5476,7 +5467,7 @@ static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,
         book_layout_set_spacing(old_line, old_para);
         book_layout_set_right_slack(s_margin[MARGIN_RIGHT]);
         refresh_chapter_lead();
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
@@ -5501,12 +5492,11 @@ static app_redraw_t apply_reader_typography(app_ctx_t* ctx, int tracking_index) 
     lock_draw();
     invalidate_prep();
     book_layout_set_typography((tracking_index + APP_BOOK_TRACK_MIN));
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count,
-                                       body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else {
         book_layout_set_typography(old_index + APP_BOOK_TRACK_MIN);
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
@@ -5527,12 +5517,12 @@ static app_redraw_t apply_reader_indent(app_ctx_t* ctx, int em, int adjustment) 
     invalidate_prep();
     book_layout_set_first_line_indent((unsigned)em);
     book_layout_set_first_line_indent_adjust(adjustment);
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else {
         book_layout_set_first_line_indent(old_em);
         book_layout_set_first_line_indent_adjust(old_adjustment);
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
@@ -5654,7 +5644,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     // vertically, rows at the top horizontally.
     apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
                        s_chapter_lead_row_height);
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else {
         if (kind == 0) app_settings_set_reader_statusbar(previous);
@@ -5667,7 +5657,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
         }
         apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
                        s_chapter_lead_row_height);
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
         copy_text(s_reader_notice, sizeof(s_reader_notice), "排版失败，请重试");
         s_reader_notice_until = esp_timer_get_time() / 1000 + 1800;
     }
@@ -5709,13 +5699,13 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     // 全屏切换会换掉整个正文带，题头的预留必须跟着换。
     // Toggling full screen swaps the whole body band, so the heading's reservation must follow.
     refresh_chapter_lead();
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     bool restored = true;
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else {
         s_reader_fullscreen = !s_reader_fullscreen;
         refresh_chapter_lead();
-        restored = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        restored = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     }
     unlock_draw();
     if (!ok) {
@@ -5750,11 +5740,11 @@ static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item
     size_t off = book_layout_page_start_offset(s_reader_session.position.page);
     lock_draw();
     invalidate_prep();
-    bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
     else if (previous[0]) {
         (void)ttf_font_open(previous);
-        (void)book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
     }
     unlock_draw();
     if (!ok) return APP_REDRAW_NONE;
@@ -7589,7 +7579,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         save_progress();
         lock_draw();
         invalidate_prep();
-        bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
+        bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
         if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
         copy_text(s_font_path, sizeof(s_font_path), ttf_font_path());
         unlock_draw();

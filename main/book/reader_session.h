@@ -1,6 +1,6 @@
 /*
- * 中文：单 UI 会话的书源、章节内容与当前位置；页面暂时保留布局和预绘控制。
- * English: Source, chapter content and current position for one UI session; layout and prefetch control remain in the page for now.
+ * 中文：单 UI 会话的书源、章节内容、布局归属与当前位置；页面决定排版参数和预绘许可。
+ * English: Source, chapter, layout ownership and position for one UI session; the page selects layout parameters and prefetch eligibility.
  */
 #pragma once
 #include <stdbool.h>
@@ -10,6 +10,7 @@
 typedef struct {
     html_text_t content; ///< 会话独占的章节；仅通过下面的接口替换。/ Session-owned chapter; replace only through this API.
     reader_position_t position; ///< UI 在加载或重排成功后提交；章节交接不隐式修改。/ Committed by the UI after load or reflow succeeds; chapter transfer never changes it implicitly.
+    bool layout_owned; ///< 仅布局接口修改；包括失败构建后需要解除的借用。/ Only layout APIs modify this, including borrows left by a failed build.
 } reader_session_t;
 
 /// 静态或栈上会话用零初始化；单实例书源同时只允许一个会话拥有。
@@ -27,8 +28,11 @@ const html_text_t *reader_session_content(const reader_session_t *session);
 /// 不执行解析、排版、加锁或推屏；失败候选章仍由调用方释放，不能传入这里。
 /// No parsing, layout, locking or presentation; callers free failed candidates instead of adopting them.
 void reader_session_adopt_chapter(reader_session_t *session, html_text_t *next);
-/// 预绘交还且布局解除借用后释放章节；不关闭书源，可重复调用。
-/// Release a chapter after prefetch returns and layout detaches; keep the source open and allow repeated calls.
+/// 预绘已交还且无其他绘制者时，解除本会话的布局借用；不会释放其他会话的布局。
+/// After prefetch returns with no other drawing borrower, detach this session's layout, never another session's layout.
+void reader_session_release_layout(reader_session_t *session);
+/// 预绘已交还且无其他绘制者时，先解除布局借用再释放章节；不关闭书源，可重复调用。
+/// After prefetch returns with no other drawing borrower, detach layout before freeing the chapter; retain the source and allow repeated calls.
 void reader_session_release_chapter(reader_session_t *session);
 /// 以同样的交还前提释放章节并关闭本会话的书源；不会关闭其他会话的书源。
 /// With the same handoff preconditions, release the chapter and this session's source, never another session's source.

@@ -38,13 +38,13 @@ unit = r'''
 #include <string.h>
 #include "html_text.h"
 #include "reader_session.h"
+#include "reader_session_layout.h"
 static reader_session_t s_reader_session = {.position = {.chapter = 3}};
 #define s_chapter s_reader_session.position.chapter
 #define s_page s_reader_session.position.page
 esp_err_t book_open(const char *path){(void)path;return ESP_OK;}
 void book_close(void){}
 static void reader_bind_chapter(void);
-typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int leaf;} app_ctx_t;
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
@@ -112,7 +112,8 @@ static bool app_settings_book_vertical(void){return false;}
 static uint32_t book_layout_generation(void){return generation;}
 static int book_layout_page_image_count(size_t page){return page==s_page?slot_count:0;}
 static int book_layout_page_image(size_t page){return page==s_page?whole_image:-1;}
-static void book_layout_set_image_dims(bool (*fn)(void*,int,int*,int*),void *ctx){dims_fn=fn;dims_ctx=ctx;}
+void book_layout_set_image_dims(bool (*fn)(void*,int,int*,int*),void *ctx){dims_fn=fn;dims_ctx=ctx;}
+void book_layout_free(void) { ++generation; }
 static bool book_layout_page_image_at(size_t page,int i,int *image,int *y,int *w,int *h){
  if(page!=s_page||i<0||i>=slot_count)return false;
  if(image)*image=slots[i].image;
@@ -161,7 +162,7 @@ static char *s_text;
 static blk_t *s_blocks;
 static html_run_t *s_runs;
 static size_t s_run_count;
-static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
+void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
 // 内链/锚点表由解析器分配，本套用例只验证插图路径，桩保持为空表。
 // Links and anchors are parser-owned; this suite only exercises the image paths, so the stubs
 // stay empty.
@@ -170,7 +171,7 @@ static size_t s_link_count;
 static html_anchor_t *s_anchors;
 static size_t s_anchor_count;
 static char *s_link_strings;
-static void book_layout_set_links(const html_link_t *links,size_t count){(void)links;(void)count;}
+void book_layout_set_links(const html_link_t *links,size_t count){(void)links;(void)count;}
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height,s_chapter_lead_row_height;
@@ -199,7 +200,7 @@ static void apply_chapter_lead(const char *title,const char *label,size_t skip,u
  (void)title;(void)label;s_chapter_lead_skip=skip;s_chapter_lead_height=0;s_chapter_lead_width=0;
  book_layout_set_chapter_lead(skip,0);
 }
-static bool book_layout_build_blocks(const char *text,size_t len,const blk_t *blocks,size_t count,EpdRect r,int px){
+bool book_layout_build_blocks(const char *text,size_t len,const blk_t *blocks,size_t count,EpdRect r,int px){
  (void)text;(void)len;(void)blocks;(void)count;(void)r;(void)px;assert(locked);++reflows;++generation;
  if(dims_fn){int w=0,h=0;assert(dims_fn(dims_ctx,0,&w,&h)&&w==60&&h==20);}
  if(reflow_failures){--reflow_failures;return false;}return true;
@@ -222,6 +223,7 @@ static void setup_images(int count){
  ++generation;alloc_fail_after=-1;hidden=false;read_failure=decode_failure=-1;reads=decodes=pixels=notices=0;whole_image=-1;
 }
 int main(void){
+ assert(reader_session_open(&s_reader_session,"image.epub")==ESP_OK);
  uint8_t fb=0;
  // Text-to-text within one layout keeps prefetch; image pages and reflows still invalidate it.
  setup_images(0);prepare_inline_image();unsigned prior_invalidations=invalidations;
@@ -326,5 +328,6 @@ with tempfile.TemporaryDirectory() as folder:
     c.write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', '-I'+str(root/'main/book'),
+                    '-I'+str(root/'tools/book_layout_stubs'),
                     '-I'+str(root/'tools/book_source_host_stubs'), str(root/'main/book/reader_session.c'), str(c), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

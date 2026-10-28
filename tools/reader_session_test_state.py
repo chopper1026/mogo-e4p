@@ -14,4 +14,6 @@ static struct {{ reader_position_t position; }} s_reader_session = {{
 }};
 #define s_chapter s_reader_session.position.chapter
 #define s_page s_reader_session.position.page
+#define reader_session_build_layout(session, chapter, rect, px) \\
+    book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, rect, px)
 '''

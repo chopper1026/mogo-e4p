@@ -15,6 +15,17 @@ UNIT = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "reader_session.h"
+#include "book_layout.h"
+
+bool book_layout_build_blocks(const char *text, size_t len, const blk_t *table,
+                              size_t count, EpdRect rect, int px) {
+    (void)text; (void)len; (void)table; (void)count; (void)rect; (void)px;
+    abort();
+}
+void book_layout_free(void) { abort(); }
+void book_layout_set_runs(const html_run_t *runs, size_t count) { (void)runs; (void)count; abort(); }
+void book_layout_set_links(const html_link_t *links, size_t count) { (void)links; (void)count; abort(); }
+void book_layout_set_image_dims(book_layout_image_dims_fn fn, void *ctx) { (void)fn; (void)ctx; abort(); }
 
 int html_test_fail_after = -1;
 static struct {void *pointer; size_t bytes;} allocations[512];
@@ -122,7 +133,8 @@ with tempfile.TemporaryDirectory() as directory:
     flags = ["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
              "-fsanitize=address,undefined", "-I" + str(ROOT / "main/book"),
              "-I" + str(folder),
-             "-I" + str(ROOT / "tools/html_text_stubs")]
+             "-I" + str(ROOT / "tools/html_text_stubs"),
+             "-I" + str(ROOT / "tools/book_layout_stubs")]
     objects = []
     for name in ("html_text", "reader_session"):
         obj = folder / (name + ".o")

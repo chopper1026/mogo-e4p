@@ -10,7 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "book_layout.h"
+#include "reader_session_layout.h"
 #include "ttf_font.h"
+esp_err_t book_open(const char *path) { assert(path && path[0]); return ESP_OK; }
+void book_close(void) {}
 int test_heap_fail_after = -1;
 size_t test_heap_largest;
 static bool test_zero_width;
@@ -154,7 +157,72 @@ int ttf_vertical_text_height_px(int px, const char* text, int tracking_px) {
     }
     return total;
 }
+static void session_layout_lifecycle(void) {
+    const char *html = "<p id='a'>甲乙<a href='#a'>丙丁</a>戊己庚辛壬癸</p>";
+    EpdRect rect = {0, 0, 80, 40};
+    reader_session_t session = {0}, other = {0};
+    for (unsigned cycle = 0; cycle < 100; ++cycle) {
+        assert(reader_session_open(&session, "fixture.epub") == ESP_OK);
+        html_text_t next = {0};
+        assert(html_to_blocks(html, strlen(html), &next) == ESP_OK);
+        book_layout_set_runs(next.runs, next.run_count);
+        book_layout_set_links(next.links, next.link_count);
+        assert(book_layout_build_blocks(next.utf8, next.len, next.blocks, next.count, rect, 10));
+        size_t count = book_layout_page_count(), offsets[16];
+        assert(count && count <= 16);
+        for (size_t page = 0; page < count; ++page) offsets[page] = book_layout_page_start_offset(page);
+        uint8_t fb = 0;
+        drawn[0] = 0;
+        book_layout_draw_page(&fb, 0, rect, 10);
+        char expected[sizeof(drawn)]; strcpy(expected, drawn);
+        assert(reader_session_build_layout(&session, &next, rect, 10));
+        reader_session_adopt_chapter(&session, &next);
+        assert(!next.utf8 && session.layout_owned && count == book_layout_page_count());
+        for (size_t page = 0; page < count; ++page) assert(offsets[page] == book_layout_page_start_offset(page));
+        drawn[0] = 0;
+        book_layout_draw_page(&fb, 0, rect, 10);
+        assert(!strcmp(expected, drawn));
+        uint32_t generation = book_layout_generation();
+        assert(!reader_session_build_layout(&other, &session.content, rect, 10));
+        reader_session_close(&other);
+        assert(generation == book_layout_generation() && count == book_layout_page_count());
+        html_text_t failed = {0};
+        assert(html_to_blocks("<p>candidate</p>", 16, &failed) == ESP_OK);
+        test_heap_fail_after = 0;
+        assert(!reader_session_build_layout(&session, &failed, rect, 10));
+        assert(session.layout_owned && !book_layout_page_count());
+        html_text_free(&failed);
+        test_heap_fail_after = -1;
+        assert(reader_session_build_layout(&session, &session.content, rect, 10));
+        assert(count == book_layout_page_count());
+        html_text_t replacement = {0};
+        assert(html_to_blocks(html, strlen(html), &replacement) == ESP_OK);
+        char *replacement_text = replacement.utf8;
+        assert(reader_session_build_layout(&session, &replacement, rect, 10));
+        reader_session_adopt_chapter(&session, &replacement);
+        assert(!replacement.utf8 && session.content.utf8 == replacement_text);
+        drawn[0] = 0;
+        book_layout_draw_page(&fb, 0, rect, 10);
+        assert(!strcmp(expected, drawn));
+        if (cycle & 1) {
+            reader_session_release_chapter(&session);
+            assert(reader_session_has_source(&session) && !book_layout_page_count());
+            uint32_t detached = book_layout_generation();
+            reader_session_release_chapter(&session);
+            assert(detached == book_layout_generation());
+        }
+        reader_session_close(&session);
+        assert(!session.layout_owned && !session.content.utf8 && !book_layout_page_count());
+        assert(book_layout_link_at(0, 25, 5) == -1);
+        generation = book_layout_generation();
+        reader_session_close(&session);
+        assert(generation == book_layout_generation());
+    }
+    drawn[0] = 0;
+    puts("session layout: 100 cycles retain page offsets/text, reject other sessions, restore failed candidates and detach before chapter cleanup");
+}
 int main(void) {
+    session_layout_lifecycle();
     const char *size_text="甲乙丙丁戊己庚辛壬癸。天地玄黄宇宙洪荒。";
     for(int px=18;px<=90;++px){
         assert(book_layout_build(size_text,strlen(size_text),(EpdRect){12,180,660,900},px));
