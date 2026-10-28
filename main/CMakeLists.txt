@@ -120,6 +120,7 @@ idf_component_register(
         "book/reader_session.c"
         "book/reader_prefetch.c"
         "book/reader_present.c"
+        "book/reader_turn.c"
         "book/book_progress.c"
         "book/book_history_backup.c"
         "book/book_title.c"

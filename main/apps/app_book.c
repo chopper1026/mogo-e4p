@@ -163,6 +163,7 @@
 #include "app_font_context.h"
 #include "book_source.h"
 #include "reader_session.h"
+#include "reader_turn.h"
 #include "reader_session_layout.h"
 #include "reader_prefetch.h"
 #include "reader_present.h"
@@ -5282,6 +5283,15 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     if (changed) { invalidate_prep(); s_reader_text_frame = false; }
     return changed;
 }
+static void reader_turn_save(void *context) {
+    (void)context;
+    save_progress();
+}
+
+static bool reader_turn_load(void *context, size_t chapter, bool last) {
+    return load_chapter(context, chapter, 0, last);
+}
+
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
 #if CONFIG_READER_PERF
     reader_perf_begin("turn");
@@ -5299,13 +5309,13 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
     bool from_text_frame = s_reader_text_frame;
     bool from_stable_frame = s_reader_stable_frame;
-    bool changed = true;
-    if (dir > 0 && s_reader_session.position.page + 1 < book_layout_page_count()) ++s_reader_session.position.page;
-    else if (dir < 0 && s_reader_session.position.page) --s_reader_session.position.page;
-    else if (dir > 0 && s_reader_session.position.chapter + 1 < book_chapter_count()) { save_progress(); changed = load_chapter(ctx, s_reader_session.position.chapter + 1, 0, false); }
-    else if (dir < 0 && s_reader_session.position.chapter) { save_progress(); changed = load_chapter(ctx, s_reader_session.position.chapter - 1, 0, true); }
-    else return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
-    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_reader_session.position.chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
+    const reader_turn_ops_t turn_ops = {
+        .context = ctx, .save = reader_turn_save, .load = reader_turn_load,
+    };
+    reader_turn_result_t moved = reader_turn_move(&s_reader_session.position, dir,
+        book_layout_page_count(), book_chapter_count(), &turn_ops);
+    if (moved == READER_TURN_EDGE) return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
+    if (moved == READER_TURN_LOAD_FAILED) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_reader_session.position.chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
     if (!s_text) { s_view = SHELF; return APP_REDRAW_PAGE; }
     // 先选择旧布局的目标页，再切全屏，保留目标位置而不是跨过未读段落。
@@ -5327,21 +5337,27 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // 预渲染未命中时也使用 GL16；到达设定页数后在本次翻页整屏全刷。
     // A cache miss still uses GL16; the selected turn count triggers a full-screen refresh on this turn.
     app_redraw_t redraw = paint_reading(ctx, MODE_GL16);
-    s_reader_turn_pending = !chrome_changed && redraw == APP_REDRAW_AREA && from_text_frame &&
-        book_layout_page_image_count(s_reader_session.position.page) == 0 && !app_settings_book_background_path()[0];
+    const reader_turn_frame_t frame = {
+        .chrome_changed = chrome_changed, .area_redraw = redraw == APP_REDRAW_AREA,
+        .from_text = from_text_frame, .from_stable = from_stable_frame,
+        .images = book_layout_page_image_count(s_reader_session.position.page) != 0,
+        .background = app_settings_book_background_path()[0] != 0,
+        .cleanup = s_reader_cleanup, .water_effect = app_settings_reader_turn_effect() == 1,
+        .chapter_changed = s_reader_session.position.chapter != prior_chapter,
+    };
+    reader_turn_effects_t effects = reader_turn_effects(&frame);
+    s_reader_turn_pending = effects.text;
     // 水波纹走原厂 GL16 表，灰阶转换逐对校准，阅读背景页同样适用；插图页仍排除。
     // The ripple rides the vendor GL16 table with per-pair calibrated transitions, so
     // reading backgrounds qualify; image pages stay excluded.
-    s_water_turn_pending = !chrome_changed && redraw == APP_REDRAW_AREA && !s_reader_cleanup &&
-                           app_settings_reader_turn_effect() == 1 && from_stable_frame &&
-                           book_layout_page_image_count(s_reader_session.position.page) == 0;
+    s_water_turn_pending = effects.water;
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
     // 换章时页脚标题整行变化，8 相 DU 擦不干净；这一次单独用 37 相 GL16 差分。
     // 整屏全刷已覆盖页脚，周期清理那一次不重复升级。
     // A chapter change replaces the whole footer title and the 8-phase DU cannot erase it,
     // so that turn presents the footer with the 37-phase GL16 differential. A whole-screen
     // refresh already covers the footer, so cleanup turns do not upgrade it again.
-    s_reader_footer_strong = !chrome_changed && !s_reader_cleanup && s_reader_session.position.chapter != prior_chapter;
+    s_reader_footer_strong = effects.footer_strong;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
 static app_redraw_t apply_reader_layout(app_ctx_t* ctx, int next_px,

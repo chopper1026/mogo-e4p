@@ -90,6 +90,9 @@ static void app_settings_set_book_indent_adjust(int8_t px){adjustment=px;}
 static void book_layout_set_first_line_indent(unsigned em){assert(draw_locked);layout_indent=em;}
 static void book_layout_set_first_line_indent_adjust(int px){assert(draw_locked);layout_adjustment=px;}
 """
+unit += f'\n#include "{ROOT / "main/book/reader_turn.c"}"\n'
+unit += function('reader_turn_save', BOOK) + '\n'
+unit += function('reader_turn_load', BOOK) + '\n'
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
              'toggle_reader_fullscreen', 'reader_turn_chrome', 'turn_page'):
