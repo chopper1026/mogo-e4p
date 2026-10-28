@@ -14,7 +14,7 @@ BOARD = ROOT / "components/read_pico/board_metalio_e4p.c"
 source = BOARD.read_text()
 # 保留实际引脚和寄存器定义，合并多行宏后提取。/ Keep real pins/registers and join continued macros before extraction.
 defines = "\n".join(line for line in source.replace("\\\n", "").splitlines()
-                    if re.match(r"#define (?:IOE_|IO_|P0_|P1_|TPS_REG_|EPD_PIN_XOE\b|EPD_PIN_MODE\b)", line))
+                    if re.match(r"#define (?:IOE_|IO_|P0_|P1_|TPS_REG_|BOARD_TCA_ADDR\b|BOARD_IOE_INT\b|EPD_PIN_XOE\b|EPD_PIN_MODE\b)", line))
 unit = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -24,6 +24,8 @@ unit = r'''
 #include <string.h>
 typedef int esp_err_t;
 typedef struct { bool ep_mode, ep_output_enable, ep_stv; } epd_ctrl_state_t;
+typedef struct { int i2c_addr, scl_speed_hz, int_gpio; } fca9555_config_t;
+#define FCA9555_CONFIG_DEFAULT() ((fca9555_config_t){0})
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_STATE -2
@@ -31,32 +33,50 @@ typedef struct { bool ep_mode, ep_output_enable, ep_stv; } epd_ctrl_state_t;
 #define TAG "test"
 #define GPIO_NUM_18 18
 #define GPIO_NUM_19 19
+#define GPIO_NUM_2 2
 #define pdMS_TO_TICKS(n) (n)
 #define ESP_LOGW(...) ((void)0)
 #define ESP_LOGE(...) ((void)0)
 #define ESP_LOGI(...) ((void)0)
 static void *s_ioe = (void *)1, *s_tps = (void *)2;
+static void *s_i2c_bus = (void *)3;
 static bool s_ioe_ok, s_tps_ok, s_rails_on, s_pwrup, s_vcom_ctrl, s_wakeup;
 static uint8_t s_p0_extra, s_p1_out, output[2], config[2], inversion[2];
 static int s_vcom_mv = 1200;
 static unsigned writes, reads, clears, waits, probes, tps_writes;
 static int fail_config = -1;
 static bool failed_output, pgood, failed_probe;
+static int init_fault_reg = -1, init_failures;
+static unsigned init_allocations, bus_resets;
+static bool allocation_failure;
+static bool init_write_fails(int reg) {
+    if (reg != init_fault_reg || !init_failures) return false;
+    --init_failures; return true;
+}
+static int fca9555_init(void *bus, const fca9555_config_t *cfg, void **out) {
+    assert(bus == s_i2c_bus && !*out && cfg->i2c_addr == 0x20 && cfg->scl_speed_hz == 100000 && cfg->int_gpio == 2);
+    ++init_allocations; if (allocation_failure) return ESP_FAIL;
+    *out = (void *)1; return ESP_OK;
+}
+static int i2c_master_bus_reset(void *bus) {
+    assert(bus == s_i2c_bus && !s_ioe_ok); ++bus_resets; return ESP_OK;
+}
 static int pins[64];
 static epd_ctrl_state_t state;
 static epd_ctrl_state_t *epd_ctrl_state(void) { return &state; }
 static int fca9555_set_output(void *h, int port, uint8_t value) {
     assert(h == s_ioe && port >= 0 && port < 2); ++writes;
-    if (failed_output) return ESP_FAIL;
+    if (failed_output || init_write_fails(2 + port)) return ESP_FAIL;
     output[port] = value; return ESP_OK;
 }
 static int fca9555_set_config(void *h, int port, uint8_t value) {
     assert(h == s_ioe && port >= 0 && port < 2);
-    if (port == fail_config) return ESP_FAIL;
+    if (port == fail_config || init_write_fails(6 + port)) return ESP_FAIL;
     config[port] = value; return ESP_OK;
 }
 static int fca9555_set_inversion(void *h, int port, uint8_t value) {
     assert(h == s_ioe && port >= 0 && port < 2);
+    if (init_write_fails(4 + port)) return ESP_FAIL;
     inversion[port] = value; return ESP_OK;
 }
 static int fca9555_read_reg(void *h, uint8_t reg, uint8_t *value) {
@@ -72,7 +92,7 @@ static int tps_write(uint8_t reg, uint8_t value) { (void)reg; (void)value; ++tps
 static void tps_set_vcom_mv(int mv) { assert(mv == s_vcom_mv); }
 '''
 unit += defines + "\n"
-for name in ("ioe_write", "ioe_read", "p0_value", "p0_write", "p1_write",
+for name in ("ioe_write", "ioe_read", "p0_value", "p0_write", "p1_write", "ioe_init",
              "board_set_ctrl", "board_poweron", "board_poweroff",
              "read_pico_epd_release_drive", "read_pico_sd_detect",
              "read_pico_sd_present", "read_pico_sd_has_cd", "read_pico_ioe_sleep",
@@ -89,9 +109,36 @@ static void reset(void) {
     memset(inversion, 0, sizeof(inversion)); memset(pins, 0, sizeof(pins));
     writes = reads = clears = waits = probes = tps_writes = 0;
     fail_config = -1; failed_output = failed_probe = false; pgood = true;
+    init_fault_reg = -1; init_failures = 0;
+    init_allocations = bus_resets = 0; allocation_failure = false;
+    s_ioe = (void *)1;
     state = (epd_ctrl_state_t){0};
 }
 int main(void) {
+    (void)i2c_master_bus_reset;
+    // 每个配置寄存器及最后的 OUT0 都必须成功；暂时故障重试但只分配一个句柄。
+    // Every configuration register and final OUT0 must succeed; transient retries allocate one handle only.
+    for (int reg = 2; reg <= 7; ++reg) for (int failures = 0; failures <= 3; ++failures) {
+        reset(); s_ioe = NULL; s_ioe_ok = false;
+        init_fault_reg = reg; init_failures = failures;
+        int result = ioe_init();
+        assert(init_allocations == 1 && bus_resets == (unsigned)(failures < 3 ? failures : 2));
+        assert(waits == bus_resets * 10);
+        if (failures < 3) {
+            assert(result == ESP_OK && s_ioe_ok && clears == 1);
+            assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
+            assert(!inversion[0] && !inversion[1]);
+            assert(output[0] == IOE_BIT(IO_CAM_SCR) && output[1] == P1_RAIL_MASK);
+            assert(!s_pwrup && !s_vcom_ctrl && !s_wakeup);
+        } else {
+            assert(result == ESP_FAIL && !s_ioe_ok && !clears);
+            // 持续故障后仍保留单一所有权，下次初始化可恢复且不重复分配。
+            // Retain one owned handle after persistent failure; a later initialization recovers without reallocating.
+            assert(ioe_init() == ESP_OK && s_ioe_ok && init_allocations == 1);
+        }
+    }
+    reset(); s_ioe = NULL; s_ioe_ok = false; allocation_failure = true;
+    assert(ioe_init() == ESP_FAIL && !s_ioe_ok && !s_ioe && init_allocations == 1 && !bus_resets);
     reset(); assert(read_pico_epd_release_drive() && !writes && !tps_writes);
     board_poweron(&state);
     assert(s_rails_on && s_tps_ok && s_pwrup && s_vcom_ctrl && s_wakeup);

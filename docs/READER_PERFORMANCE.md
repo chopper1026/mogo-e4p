@@ -31,6 +31,9 @@ python3 tools/summarize_reader_perf.py build/reader-baseline/ordinary-warm.log \
   --output build/reader-baseline/ordinary-warm.json
 ```
 
+采集器不发送串口数据，并在打开前禁用 DTR/RTS；但 S31 的 USB 串口打开或重连仍可能触发主机复位。必须检查日志中的启动原因，把重启后的开书与稳定翻页分组；USB 共享退出后的日志不能直接当作纯存储交接记录。
+The collector sends no serial data and disables DTR/RTS before opening, but opening or reconnecting the S31 USB console can still reset the host. Inspect boot reasons and separate post-reset opens from stable turns; logs after USB sharing cannot by themselves isolate storage teardown behavior.
+
 `manifest.json` 必须记录 `book_sha256`、`font_sha256`、`firmware_sha256` 和 `settings`；设置应包含字号、字重、行段距、边距、背景、全屏/状态栏、阅读刷新模式及周期全刷页数。另记录提交、配置校验值、书籍章节与起始位置、电量/充电和温度条件。不要混合普通/跨章、冷/热缓存、图片、背景、水波纹或重排场景。每个场景每种操作默认至少 20 个成功样本；不足时汇总退出码为 2。固定测试文件仅保留在本地，不加入仓库。
 The manifest must contain `book_sha256`, `font_sha256`, `firmware_sha256` and `settings`; settings should include font size/weight, spacing, margins, background, full-screen/status-bar state, reader refresh mode and cleanup interval. Also record commit, config checksum, chapter/start location, battery/charging and temperature conditions. Keep ordinary/cross-chapter, cold/warm, image, background, ripple and reflow scenarios separate. Each operation needs at least 20 successful samples per scenario by default; insufficient samples return exit code 2. Keep test books/fonts local.
 

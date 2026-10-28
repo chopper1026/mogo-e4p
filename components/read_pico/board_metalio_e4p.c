@@ -184,20 +184,31 @@ static esp_err_t ioe_init(void) {
     cfg.i2c_addr = BOARD_TCA_ADDR;
     cfg.scl_speed_hz = 100000;
     cfg.int_gpio = BOARD_IOE_INT;
-    if (fca9555_init(s_i2c_bus, &cfg, &s_ioe) != ESP_OK) return ESP_FAIL;
+    if (s_ioe == NULL && fca9555_init(s_i2c_bus, &cfg, &s_ioe) != ESP_OK) return ESP_FAIL;
 
-    s_ioe_ok = true;
     s_p0_extra = IOE_BIT(IO_CAM_SCR);
     s_pwrup = false;
     s_vcom_ctrl = false;
     s_wakeup = false;
 
-    esp_err_t err = ioe_write(6, P0_INPUT_MASK); // CFG0
-    if (err == ESP_OK) err = ioe_write(7, P1_INPUT_MASK); // CFG1
-    if (err == ESP_OK) err = ioe_write(4, 0x00); // POL0
-    if (err == ESP_OK) err = ioe_write(5, 0x00); // POL1
-    if (err == ESP_OK) err = ioe_write(3, s_p1_out); // OUT1
-    if (err == ESP_OK) p0_write();
+    esp_err_t err = ESP_FAIL;
+    // USB/主机复位可能截断 I2C 事务；在其他消费者启动前有界重置总线并重试。
+    // USB/host reset may interrupt an I2C transaction; reset/retry boundedly before starting other consumers.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        s_ioe_ok = true;
+        err = ioe_write(6, P0_INPUT_MASK); // CFG0
+        if (err == ESP_OK) err = ioe_write(7, P1_INPUT_MASK); // CFG1
+        if (err == ESP_OK) err = ioe_write(4, 0x00); // POL0
+        if (err == ESP_OK) err = ioe_write(5, 0x00); // POL1
+        if (err == ESP_OK) err = ioe_write(3, s_p1_out); // OUT1
+        if (err == ESP_OK) err = p0_write();
+        if (err == ESP_OK) break;
+        s_ioe_ok = false;
+        if (attempt < 2) {
+            (void)i2c_master_bus_reset(s_i2c_bus);
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "TCA9555 init: %s", esp_err_to_name(err));
         s_ioe_ok = false;
