@@ -16,6 +16,7 @@
 
 #include "ttf_font.h"
 #include "ttf_stroke_filter.h"
+#include "ttf_block_cache.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -83,12 +84,6 @@ static void ttf_free(void* ptr, void* userdata) {
 #define TTF_WGHT_MIN 300
 #define TTF_WGHT_MAX 800
 #define TTF_WGHT_DEF 300
-// FatFs 扇区是 4KB；32 槽把最近扇区留在 PSRAM。/ FatFs sector is 4KB; 32 PSRAM slots keep recent sectors.
-#define TTF_IO_BLOCK 4096
-#define TTF_IO_SLOTS 32
-// 预取时合并的连续块上限。/ Max contiguous blocks merged in one prefetch read.
-#define TTF_IO_RUN_MAX 8
-#define TTF_PREFETCH_MAX 96
 #define TTF_GATHER_MAX 96
 // glyf+gvar 整表映射的预留与硬顶。/ Reserve and hard cap for whole-table glyf+gvar maps.
 #define TTF_MAP_RESERVE (2560u * 1024u)
@@ -186,14 +181,7 @@ typedef struct {
     uint8_t* f_gvar_ram;
     uint32_t f_gvar_ram_off;
     uint32_t f_gvar_ram_len;
-    uint8_t* f_io_data;
-    uint8_t* f_io_run_buf;
-    uint32_t f_io_base[TTF_IO_SLOTS];
-    uint16_t f_io_fill[TTF_IO_SLOTS];
-    uint16_t f_io_age[TTF_IO_SLOTS];
-    uint16_t f_io_clock;
-    uint32_t f_touch_blocks[TTF_PREFETCH_MAX];
-    int f_touch_n;
+    ttf_block_cache_t f_blocks;
     uint8_t* f_font_data;
     uint32_t f_work_loca_off;
     uint32_t f_work_glyf_off;
@@ -255,14 +243,7 @@ static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 #define gvar_ram (s_cur->f_gvar_ram)
 #define gvar_ram_off (s_cur->f_gvar_ram_off)
 #define gvar_ram_len (s_cur->f_gvar_ram_len)
-#define io_data (s_cur->f_io_data)
-#define io_run_buf (s_cur->f_io_run_buf)
-#define io_base (s_cur->f_io_base)
-#define io_fill (s_cur->f_io_fill)
-#define io_age (s_cur->f_io_age)
-#define io_clock (s_cur->f_io_clock)
-#define touch_blocks (s_cur->f_touch_blocks)
-#define touch_n (s_cur->f_touch_n)
+#define touch_n (s_cur->f_blocks.f_touch_n)
 #define font_data (s_cur->f_font_data)
 #define work_loca_off (s_cur->f_work_loca_off)
 #define work_glyf_off (s_cur->f_work_glyf_off)
@@ -356,13 +337,7 @@ static bool io_read_raw(uint32_t offset, void* dst, size_t n) {
 }
 
 static void io_reset(void) {
-    for (int i = 0; i < TTF_IO_SLOTS; i++) {
-        io_base[i] = UINT32_MAX;
-        io_fill[i] = 0;
-        io_age[i] = 0;
-    }
-    io_clock = 0;
-    touch_n = 0;
+    ttf_block_cache_reset(&s_cur->f_blocks);
 }
 
 static void io_unmap(void) {
@@ -377,21 +352,7 @@ static void io_unmap(void) {
 }
 
 static bool io_ensure(void) {
-    if (io_data == NULL) {
-        io_data = heap_caps_malloc(
-            (size_t)TTF_IO_SLOTS * TTF_IO_BLOCK,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-        );
-        if (io_data == NULL) return false;
-        io_reset();
-    }
-    if (io_run_buf == NULL) {
-        io_run_buf = heap_caps_malloc(
-            (size_t)TTF_IO_RUN_MAX * TTF_IO_BLOCK,
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-        );
-    }
-    return true;
+    return ttf_block_cache_ensure(&s_cur->f_blocks);
 }
 
 static bool io_from_map(uint32_t off, size_t n, void* dst) {
@@ -421,51 +382,12 @@ static bool io_mapped_covers(uint32_t off, uint32_t len) {
     return false;
 }
 
-static int io_find(uint32_t base) {
-    for (int i = 0; i < TTF_IO_SLOTS; i++) {
-        if (io_base[i] == base) {
-            io_age[i] = ++io_clock;
-            return i;
-        }
-    }
-    return -1;
-}
 
-static int io_victim(void) {
-    int empty = -1;
-    int best = 0;
-    for (int i = 0; i < TTF_IO_SLOTS; i++) {
-        if (io_base[i] == UINT32_MAX) {
-            empty = i;
-            break;
-        }
-        if (io_age[i] < io_age[best]) best = i;
-    }
-    return empty >= 0 ? empty : best;
-}
-
-static bool io_load_block(uint32_t base) {
-    if (io_find(base) >= 0) return true;
-    if (io_data == NULL && !io_ensure()) return false;
-    int slot = io_victim();
-    uint8_t* dst = io_data + (size_t)slot * TTF_IO_BLOCK;
-    int64_t t0 = bench_on ? esp_timer_get_time() : 0;
-    if (lseek(font_fd, (off_t)base, SEEK_SET) < 0) {
-        font_file_pos = UINT32_MAX;
-        if (bench_on) bench.read_us += esp_timer_get_time() - t0;
-        return false;
-    }
-    ssize_t got = read(font_fd, dst, TTF_IO_BLOCK);
-    if (bench_on) bench.read_us += esp_timer_get_time() - t0;
-    if (got <= 0) {
-        font_file_pos = UINT32_MAX;
-        return false;
-    }
-    font_file_pos = base + (uint32_t)got;
-    io_base[slot] = base;
-    io_fill[slot] = (uint16_t)got;
-    io_age[slot] = ++io_clock;
-    return true;
+static ttf_block_source_t block_source(void) {
+    return (ttf_block_source_t){
+        .fd = font_fd, .file_pos = &font_file_pos,
+        .read_us = bench_on ? &bench.read_us : NULL, .read_raw = io_read_raw,
+    };
 }
 
 static bool file_read_at(uint32_t offset, void* dst, size_t n) {
@@ -476,96 +398,18 @@ static bool file_read_at(uint32_t offset, void* dst, size_t n) {
     }
     if (font_fd < 0) return false;
     if (io_from_map(offset, n, dst)) return true;
-    if (io_data == NULL && !io_ensure()) return io_read_raw(offset, dst, n);
-
-    uint8_t* out = dst;
-    uint32_t pos = offset;
-    size_t left = n;
-    while (left > 0) {
-        uint32_t base = pos & ~(uint32_t)(TTF_IO_BLOCK - 1);
-        uint32_t skip = pos - base;
-        if (!io_load_block(base)) return false;
-        int slot = io_find(base);
-        if (slot < 0 || skip >= io_fill[slot]) return false;
-        size_t take = (size_t)io_fill[slot] - skip;
-        if (take > left) take = left;
-        memcpy(out, io_data + (size_t)slot * TTF_IO_BLOCK + skip, take);
-        out += take;
-        pos += (uint32_t)take;
-        left -= take;
-    }
-    return true;
+    const ttf_block_source_t source = block_source();
+    return ttf_block_cache_read(&s_cur->f_blocks, &source, offset, dst, n);
 }
 
 static void io_touch(uint32_t off, uint32_t len) {
     if (len == 0 || io_mapped_covers(off, len)) return;
-    uint32_t a = off & ~(uint32_t)(TTF_IO_BLOCK - 1);
-    uint32_t end = off + len;
-    while (a < end && touch_n < TTF_PREFETCH_MAX) {
-        touch_blocks[touch_n++] = a;
-        a += TTF_IO_BLOCK;
-    }
-}
-
-static int u32_cmp(const void* a, const void* b) {
-    uint32_t x = *(const uint32_t*)a;
-    uint32_t y = *(const uint32_t*)b;
-    if (x < y) return -1;
-    if (x > y) return 1;
-    return 0;
-}
-
-static bool io_load_run(uint32_t base, int blocks) {
-    if (blocks <= 1) return io_load_block(base);
-    if (blocks > TTF_IO_RUN_MAX) blocks = TTF_IO_RUN_MAX;
-    if (io_run_buf == NULL
-        || !io_read_raw(base, io_run_buf, (size_t)blocks * TTF_IO_BLOCK)) {
-        bool ok = true;
-        for (int i = 0; i < blocks; i++) {
-            if (!io_load_block(base + (uint32_t)i * TTF_IO_BLOCK)) ok = false;
-        }
-        return ok;
-    }
-    for (int i = 0; i < blocks; i++) {
-        uint32_t b = base + (uint32_t)i * TTF_IO_BLOCK;
-        if (io_find(b) >= 0) continue;
-        int slot = io_victim();
-        memcpy(
-            io_data + (size_t)slot * TTF_IO_BLOCK,
-            io_run_buf + (size_t)i * TTF_IO_BLOCK,
-            TTF_IO_BLOCK
-        );
-        io_base[slot] = b;
-        io_fill[slot] = TTF_IO_BLOCK;
-        io_age[slot] = ++io_clock;
-    }
-    return true;
+    ttf_block_cache_touch(&s_cur->f_blocks, off, len);
 }
 
 static void io_flush_touches(void) {
-    if (touch_n <= 0) return;
-    if (io_data == NULL && !io_ensure()) {
-        touch_n = 0;
-        return;
-    }
-    qsort(touch_blocks, (size_t)touch_n, sizeof(touch_blocks[0]), u32_cmp);
-    int w = 1;
-    for (int i = 1; i < touch_n; i++) {
-        if (touch_blocks[i] != touch_blocks[w - 1]) {
-            touch_blocks[w++] = touch_blocks[i];
-        }
-    }
-    int i = 0;
-    while (i < w) {
-        int j = i + 1;
-        while (j < w && j - i < TTF_IO_RUN_MAX
-               && touch_blocks[j] == touch_blocks[j - 1] + TTF_IO_BLOCK) {
-            j++;
-        }
-        io_load_run(touch_blocks[i], j - i);
-        i = j;
-    }
-    touch_n = 0;
+    const ttf_block_source_t source = block_source();
+    ttf_block_cache_flush(&s_cur->f_blocks, &source);
 }
 
 static bool try_map_table(
