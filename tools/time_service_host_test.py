@@ -21,6 +21,7 @@ common=r'''
 #define ESP_ERR_INVALID_ARG 3
 #define ESP_ERR_TIMEOUT 4
 #define ESP_ERR_INVALID_RESPONSE 5
+#define ESP_ERR_NOT_FOUND 6
 #define pdMS_TO_TICKS(ms) (ms)
 #define pdPASS 1
 #define NVS_READONLY 0
@@ -72,16 +73,30 @@ static uint32_t pending;
 static int jobs,task_ok=1,pmu_syncs,saves,worker_result,credential_reads;
 static bool creds=true;
 static void (*job)(void *);
-static int nvs_open(const char *ns,int mode,int *h){(void)mode;assert(!strcmp(ns,"kiiko_clock"));*h=1;return ESP_OK;}
+static bool manual_trace;
+static char manual_events[32];
+static unsigned manual_event_count;
+static void event(char c){if(manual_trace){assert(manual_event_count+1<sizeof(manual_events));manual_events[manual_event_count++]=c;manual_events[manual_event_count]=0;}}
+static int nvs_open(const char *ns,int mode,int *h){event('O');(void)mode;assert(!strcmp(ns,"kiiko_clock"));*h=1;return ESP_OK;}
 static int nvs_get_u64(int h,const char *k,uint64_t *v){(void)h;(void)k;*v=stored;return ESP_OK;}
-static int nvs_set_u64(int h,const char *k,uint64_t v){(void)h;(void)k;stored=v;++saves;return ESP_OK;}
-static int nvs_commit(int h){(void)h;return ESP_OK;}
-static void nvs_close(int h){(void)h;}
+static int nvs_set_u64(int h,const char *k,uint64_t v){(void)h;(void)k;event('V');stored=v;++saves;return ESP_OK;}
+static int nvs_commit(int h){event('C');(void)h;return ESP_OK;}
+static void nvs_close(int h){event('X');(void)h;}
 static bool read_pico_transfer_cancel_time_sync(void){return true;}
 static bool read_pico_transfer_take_time_sync(uint32_t *v){*v=pending;pending=0;return *v!=0;}
-static void read_pico_transfer_get_status(read_pico_transfer_status_t *s){*s=network;}
+static void read_pico_transfer_get_status(read_pico_transfer_status_t *s){event('S');*s=network;}
 static int read_pico_transfer_get_saved_wifi(char *s,bool *b){*s=0;++credential_reads;*b=creds;return ESP_OK;}
 static int read_pico_transfer_sync_time_auto(uint32_t *v){*v=wall;if(!worker_result)pending=wall;return worker_result;}
+static int manual_error,write_error,read_error,pmu_offset;
+static bool pmu_absent;
+static uint32_t written_utc;
+static int read_pico_transfer_sync_time(uint32_t *v){event('N');*v=(uint32_t)wall-13;wall+=3;return manual_error;}
+#define PMU_CMD_TIME_SYNC 8
+#define PMU_CMD_TIME_GET 7
+static int read_pico_pmu_cmd(int cmd,const uint8_t *data,size_t n){
+ if(cmd==PMU_CMD_TIME_SYNC){event('W');assert(data&&n==4);written_utc=(uint32_t)data[0]|(uint32_t)data[1]<<8|(uint32_t)data[2]<<16|(uint32_t)data[3]<<24;assert(written_utc==(uint32_t)wall);return write_error;}
+ assert(cmd==PMU_CMD_TIME_GET&&!data&&!n);event('R');return read_error;
+}
 static int app_sync_time_to_pmu(void){++pmu_syncs;return ESP_OK;}
 static int xTaskCreate(void (*fn)(void*),const char *n,int stack,void *arg,int pri,void *handle){
  (void)n;(void)arg;(void)handle;assert(stack==6144&&pri==1);job=fn;if(task_ok)++jobs;return task_ok;
@@ -92,16 +107,19 @@ static uint32_t s_last_record;static int record_saves;
 static bool app_settings_auto_time_sync(void){return s_auto;}
 static uint32_t app_settings_time_sync_attempt(void){return s_try;}
 static void app_settings_set_time_sync_attempt(uint32_t t){s_try=t;}
-static void app_settings_set_time_sync_last(uint32_t t){s_last_record=t;++record_saves;}
-typedef struct {int present;} pmu_snapshot_t;
+static void app_settings_set_time_sync_last(uint32_t t){event('L');s_last_record=t;++record_saves;}
+typedef struct {uint32_t unix_sec;bool time_synced;} pmu_snapshot_t;
 static pmu_snapshot_t the_pmu;
-static const pmu_snapshot_t *read_pico_pmu_get(void){return &the_pmu;}
+static const pmu_snapshot_t *read_pico_pmu_get(void){event('P');the_pmu.unix_sec=(uint32_t)(wall+pmu_offset);return pmu_absent?NULL:&the_pmu;}
 static int pmu_battery_percent(const pmu_snapshot_t *p){(void)p;return 80;}
 static bool pmu_battery_charging(const pmu_snapshot_t *p){(void)p;return false;}
 '''
+scheduler+='\n'.join(x for x in (root/'main/time_service.h').read_text().splitlines() if not x.startswith(('#include','#pragma once')))+'\n'
 scheduler+=__import__('pathlib').Path(root/'main/time_sync_policy.h').read_text().replace('#pragma once','')+'\n'+'\n'.join(x for x in (root/'main/time_service.c').read_text().splitlines() if not x.startswith('#include'))
 scheduler+=r'''
 static void reset(void){
+ manual_trace=false;manual_event_count=0;manual_events[0]=0;
+ manual_error=write_error=read_error=pmu_offset=0;pmu_absent=false;the_pmu.time_synced=true;written_utc=0;
  s_loaded=false;s_last_sync=0;s_next_attempt_us=15000000;atomic_store(&s_running,false);
  stored=pending=jobs=pmu_syncs=saves=credential_reads=worker_result=record_saves=0;s_last_record=0;task_ok=1;creds=true;mono=15000000;
  network=(read_pico_transfer_status_t){READ_PICO_TRANSFER_STOPPED,READ_PICO_TRANSFER_MODE_STA,false};
@@ -125,6 +143,26 @@ int main(void){
  pending=wall;app_time_service_poll(false);assert(pending);app_time_service_poll(true);assert(!pending&&pmu_syncs==1&&saves==1&&record_saves==1);
  reset();app_time_service_note_success(0);assert(!record_saves); // an invalid UTC cannot enter the record
  app_time_service_note_success(wall);assert(record_saves==1&&s_last_record==wall);
+ // 保留部分成功、写入/回读顺序、十秒容差和当前主机秒数，不回写网络旧秒数。
+ // Retain partial success, write/read ordering, ten-second tolerance and current host time rather than stale network seconds.
+ for(int error=ESP_FAIL;error<=ESP_ERR_NOT_FOUND;++error){
+  reset();manual_trace=true;manual_error=error;app_time_sync_result_t r=app_time_service_sync_manual();
+  assert(r.error==error&&!r.network_time_received&&!record_saves&&!saves&&!written_utc&&!strcmp(manual_events,"SN"));
+ }
+ reset();manual_trace=true;write_error=ESP_FAIL;app_time_sync_result_t r=app_time_service_sync_manual();
+ assert(r.error==ESP_FAIL&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNW"));
+ reset();manual_trace=true;read_error=ESP_ERR_TIMEOUT;r=app_time_service_sync_manual();
+ assert(r.error==ESP_ERR_TIMEOUT&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNWR"));
+ for(int fault=0;fault<4;++fault){
+  reset();manual_trace=true;pmu_absent=fault==0;the_pmu.time_synced=fault!=1;pmu_offset=fault==2?-1:fault==3?11:0;
+  r=app_time_service_sync_manual();assert(r.error==ESP_ERR_INVALID_RESPONSE&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNWRP"));
+ }
+ for(int offset=0;offset<=10;offset+=10){
+  reset();manual_trace=true;pmu_offset=offset;s_boot_attempts=3;r=app_time_service_sync_manual();
+  assert(r.error==ESP_OK&&r.network_time_received&&record_saves==1&&saves==1&&s_last_record==(uint32_t)wall&&stored==(uint32_t)wall);
+  assert(!s_boot_attempts&&s_next_attempt_us==mono+CLOCK_RETRY_US&&!strcmp(manual_events,"SNWRPLOVCX"));
+ }
+ puts("PASS: manual sync preserves partial network success, fresh host seconds, PMU write/read validation and success-only NVS bookkeeping");
  puts("PASS: actual scheduler on a flat six-hour cadence (online link reused, offline dialed), the settings last-sync record refreshed on every success, idle gating, single temporary worker, AP/upload exclusion, no-credential/OOM/error backoff and real-sync-only PMU/NVS handoff");
 }
 '''
@@ -175,5 +213,5 @@ int main(void){uint32_t utc=0;
 with tempfile.TemporaryDirectory(prefix='kiiko-clock-test-',dir='/private/tmp') as folder:
  for name,unit in [('restore',restore),('scheduler',scheduler),('lease',lease),('ntp',ntp)]:
   c=Path(folder)/(name+'.c');binary=Path(folder)/name;c.write_text(unit)
-  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g',str(c),'-o',str(binary)],check=True)
+  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g','-fsanitize=address,undefined',str(c),'-o',str(binary)],check=True)
   subprocess.run([str(binary)],check=True)

@@ -39,6 +39,9 @@ Layout retains its singleton engine, built and released by the source-owning ses
 `storage` 编译真实的 `storage_jobs_quiesce`，覆盖封面先于头像、失败短路和每项独立超时；同时运行 S31 USB 四线总线/模拟开关、退出失败重试、文件页格式化/重挂门控、主机下电恢复，以及真实封面与头像工作队列测试。USB、文件页与睡眠共用这一交还入口；阅读预绘、传输、OTA 和介质状态仍由原调用边界负责。
 `storage` compiles the real `storage_jobs_quiesce`, checking cover-before-avatar ordering, failure short-circuiting and independent per-job timeouts. It also runs S31 USB four-bit bus/switch and teardown-retry checks, file-page format/remount guards, host power-down recovery, and real cover/avatar worker tests. USB, files and sleep share this handoff; reader prefetch, transfers, OTA and media state remain owned by their existing caller boundaries.
 
+`clock` 编译真实时间服务，覆盖手动联网成功后的内部时钟写入与回读、部分成功错误和成功登记；PMU 与 NVS 操作仍只在 UI 调度任务执行，无线会话仍由传输组件持有。`time_policy` 保留六小时节奏和重试预算检查，`ota` 覆盖升级清单、下载、取消及显示互斥；这些宿主检查不代表联网或实机校准已通过。
+`clock` compiles the real time service, covering internal-clock write/readback after manual network success, partial-success errors and success bookkeeping. PMU and NVS operations remain on the UI scheduling task and radio sessions remain owned by the transfer component. `time_policy` retains six-hour cadence and retry-budget checks; `ota` covers manifests, downloads, cancellation and display exclusion. These host checks do not establish network or device calibration acceptance.
+
 macOS 默认使用可用的 Command Line Tools 编译器及其 SDK；可以显式设置 `CC` 和 `SDKROOT`。入口先验证 sanitizer 编译与运行，失败即停止；不会静默取消 sanitizer。各组日志与 `results.json` 保留实际退出码。
 On macOS the runner defaults to an available Command Line Tools compiler and SDK; explicit `CC` and `SDKROOT` overrides are supported. A sanitizer compile/run probe must succeed; sanitizers are never silently removed. Suite logs and `results.json` retain actual exit codes.
 

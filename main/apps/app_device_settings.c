@@ -1912,31 +1912,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     }
     if (!s_sync_pending) return APP_REDRAW_NONE;
     s_sync_pending = false;
-    uint32_t utc = 0;
-    read_pico_transfer_status_t network = {0};
-    read_pico_transfer_get_status(&network);
-    // 手动对时优先：组件内的准入会在同一次调用里自动抢占后台对时。
-    // A manual sync goes first: the component's admission preempts an automatic run for us.
-    esp_err_t err = read_pico_transfer_sync_time(&utc);
-    bool network_time_received = err == ESP_OK;
-    if (network_time_received) {
-        // 临时 WiFi 收尾可能耗时；写入 PMU 时取当前 S3 时间，避免回写旧秒数。
-        // Temporary WiFi teardown takes time; seed the PMU from the current S3 clock.
-        utc = (uint32_t)time(NULL);
-        uint8_t payload[4] = {(uint8_t)utc, (uint8_t)(utc >> 8), (uint8_t)(utc >> 16), (uint8_t)(utc >> 24)};
-        err = read_pico_pmu_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
-        if (err == ESP_OK) err = read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0);
-        if (err == ESP_OK) {
-            const pmu_snapshot_t *pmu = read_pico_pmu_get();
-            if (!pmu || !pmu->time_synced || pmu->unix_sec < utc || pmu->unix_sec - utc > 10)
-                err = ESP_ERR_INVALID_RESPONSE;
-        }
-        // 手动对时也算一次成功，后台对时不必再联网重复。
-        // A manual sync counts as a success, so background sync need not go online again.
-        if (err == ESP_OK) app_time_service_note_success(utc);
-    }
-    ESP_LOGI(TAG, "time sync network=%d ready=%d utc=%lu result=%s",
-             network.mode, network.network_ready, (unsigned long)utc, esp_err_to_name(err));
+    app_time_sync_result_t result = app_time_service_sync_manual();
+    esp_err_t err = result.error;
+    bool network_time_received = result.network_time_received;
     const char *notice = err == ESP_OK ? "WiFi 对时完成，内部时钟已接管" :
         network_time_received ? "已获取网络时间，内部时钟写入失败" :
         err == ESP_ERR_NOT_FOUND ? "请先在 WiFi 设置中配置网络" :

@@ -18,6 +18,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
     "perf": [sys.executable, "tools/reader_perf_host_test.py"],
+    "clock": [sys.executable, "tools/time_service_host_test.py"],
+    "time_policy": ["bash", "tools/run_time_sync_host_test.sh"],
+    "ota": ["bash", "tools/run_ota_host_tests.sh"],
     "storage": ["bash", "tools/run_storage_host_tests.sh"],
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "board": [sys.executable, "tools/s31_board_host_test.py"],

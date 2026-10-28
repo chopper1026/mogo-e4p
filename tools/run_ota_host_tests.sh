@@ -15,16 +15,20 @@ cjson=managed_components/espressif__cjson/cJSON
 flags="-std=gnu11 -Wall -Wextra -Werror -g -DCONFIG_IDF_TARGET_ESP32S31 \
   -Imain -Itools/ota_stubs -Itools/ota_stubs/freertos -I$cjson"
 
-cc $san $flags tools/ota_release_host_test.c main/ota_release.c "$cjson/cJSON.c" -o "$out/release"
+# 仅第三方 cJSON 使用系统已弃用的格式化 API；我方代码继续严格检查。
+# Only vendored cJSON uses the system's deprecated formatting API; keep our code under strict diagnostics.
+cc $san $flags -Wno-deprecated-declarations -c "$cjson/cJSON.c" -o "$out/cjson.o"
+
+cc $san $flags tools/ota_release_host_test.c main/ota_release.c "$out/cjson.o" -o "$out/release"
 "$out/release"
 # 再跑一次，验证 menuconfig 里的自建下载前缀只放开该前缀下的单文件名。
 # Run again with the self-hosted prefix to check only a filename below it is released.
 cc $san $flags -DOTA_TEST_EXTRA_ORIGIN \
   '-DPICO_OTA_EXTRA_ORIGIN="https://ota.example.com/files/"' \
-  tools/ota_release_host_test.c main/ota_release.c "$cjson/cJSON.c" -o "$out/release_extra"
+  tools/ota_release_host_test.c main/ota_release.c "$out/cjson.o" -o "$out/release_extra"
 "$out/release_extra"
 
-cc $san $flags tools/ota_online_host_test.c main/ota_release.c "$cjson/cJSON.c" \
+cc $san $flags tools/ota_online_host_test.c main/ota_release.c "$out/cjson.o" \
   -o "$out/online" -lpthread
 "$out/online"
 
