@@ -10,10 +10,14 @@ Host regression entry point (retains ASan/UBSan; writes to ignored directories):
 python3 tools/run_reader_baseline.py
 python3 tools/run_reader_baseline.py perf prefetch background
 python3 tools/run_reader_baseline.py shelf management
+python3 tools/run_reader_baseline.py session images book
 ```
 
 `shelf` 与 `management` 编译真实的书架数据模块，分别覆盖目录/分页记忆及搜索、排序、选择和管理失败重试；保留页面适配层的回归断言。
 `shelf` and `management` compile the actual shelf data module, covering folder/page memory and search, ordering, selection and management retries while retaining page-adapter regression assertions.
+
+`session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
+`session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
 
 macOS 默认使用可用的 Command Line Tools 编译器及其 SDK；可以显式设置 `CC` 和 `SDKROOT`。入口先验证 sanitizer 编译与运行，失败即停止；不会静默取消 sanitizer。各组日志与 `results.json` 保留实际退出码。
 On macOS the runner defaults to an available Command Line Tools compiler and SDK; explicit `CC` and `SDKROOT` overrides are supported. A sanitizer compile/run probe must succeed; sanitizers are never silently removed. Suite logs and `results.json` retain actual exit codes.

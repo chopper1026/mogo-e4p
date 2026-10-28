@@ -163,6 +163,7 @@
 #include "book_toc.h"
 #include "app_font_context.h"
 #include "book_source.h"
+#include "reader_session.h"
 #include "book_store.h"
 #include "book_shelf_categories.h"
 #include "book_shelf_model.h"
@@ -386,6 +387,9 @@ static unsigned s_chapter_lead_row_height;
 // 竖排首页为题头预留的列宽；横排为 0。/ Columns reserved for a vertical heading; 0 horizontally.
 static unsigned s_chapter_lead_width;
 static char s_font_path[192];
+static reader_session_t s_reader_session;
+// 迁移期间保留页面的借用视图；已接收章节只由会话释放，交接后统一重绑定。
+// Keep borrowed page views during migration; only the session frees adopted chapters and handoffs rebind together.
 static char* s_text;
 static bool reader_text_body(void);
 static bool normalize_hold_gray(app_ctx_t* ctx);
@@ -4373,6 +4377,22 @@ static void track_ticket_stats(app_ctx_t* ctx) {
     s_stats_last_ms = ctx->now_ms;
     if (s_stats_pending_ms >= 30000) flush_ticket_stats();
 }
+static void reader_bind_chapter(void) {
+    const html_text_t *content = reader_session_content(&s_reader_session);
+    s_text = content->utf8;
+    s_text_len = content->len;
+    s_blocks = content->blocks;
+    s_block_count = content->count;
+    s_runs = content->runs;
+    s_run_count = content->run_count;
+    s_links = content->links;
+    s_link_count = content->link_count;
+    s_anchors = content->anchors;
+    s_anchor_count = content->anchor_count;
+    s_link_strings = content->strings;
+    s_images = content->images;
+    s_image_count = content->image_count;
+}
 static void free_book(void) {
     flush_ticket_stats();
     e0470_page_turn_release();
@@ -4389,33 +4409,15 @@ static void free_book(void) {
     s_chapter_lead_skip = s_chapter_lead_height = 0;
     s_chapter_lead_width = 0;
     s_chapter_heading_title[0] = s_chapter_heading_label[0] = 0;
-    free(s_text);
-    free(s_blocks);
-    free(s_runs);
-    free(s_links);
-    free(s_anchors);
-    free(s_link_strings);
-    for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
-    free(s_images);
-    s_images = NULL; s_image_count = 0;
+    reader_session_release_chapter(&s_reader_session);
+    reader_bind_chapter();
     release_page_images();
     s_reader_image_refresh_pending = false;
-    s_blocks = NULL;
-    s_block_count = 0;
-    s_runs = NULL;
-    s_run_count = 0;
-    s_links = NULL;
-    s_link_count = 0;
-    s_anchors = NULL;
-    s_anchor_count = 0;
-    s_link_strings = NULL;
     book_layout_set_runs(NULL, 0);
     book_layout_set_links(NULL, 0);
-    s_text = NULL;
-    s_text_len = 0;
     s_selected_toc = SIZE_MAX;
     s_jump_offset = SIZE_MAX;
-    book_close();
+    reader_session_close(&s_reader_session);
     s_path[0] = 0;
     s_book_title[0] = 0;
     app_font_activate_system();
@@ -4667,26 +4669,8 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         return false;
     }
     book_excerpt_offer(s_path, &loaded);
-    free(s_text);
-    free(s_blocks);
-    free(s_runs);
-    free(s_links);
-    free(s_anchors);
-    free(s_link_strings);
-    s_text = loaded.utf8;
-    s_text_len = loaded.len;
-    s_blocks = loaded.blocks;
-    s_block_count = loaded.count;
-    s_runs = loaded.runs;
-    s_run_count = loaded.run_count;
-    s_links = loaded.links;
-    s_link_count = loaded.link_count;
-    s_anchors = loaded.anchors;
-    s_anchor_count = loaded.anchor_count;
-    s_link_strings = loaded.strings;
-    for (size_t i = 0; i < s_image_count; ++i) free(s_images[i]);
-    free(s_images);
-    s_images = loaded.images; s_image_count = loaded.image_count;
+    reader_session_adopt_chapter(&s_reader_session, &loaded);
+    reader_bind_chapter();
     release_page_images();
     s_chapter = chapter;
     if (clear_toc) s_selected_toc = SIZE_MAX;
@@ -4806,7 +4790,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
         app_font_activate_system();
         return false;
     }
-    esp_err_t err = book_open(path);
+    esp_err_t err = reader_session_open(&s_reader_session, path);
     // 书源打开后再把书内字体开关接上：EPUB 才有效，TXT 是空操作。
     // Wire the embedded-face switch only after the source is open: it only applies to EPUB,
     // and is a no-op for TXT.

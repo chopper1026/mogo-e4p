@@ -37,6 +37,11 @@ unit = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "html_text.h"
+#include "reader_session.h"
+static reader_session_t s_reader_session;
+esp_err_t book_open(const char *path){(void)path;return ESP_OK;}
+void book_close(void){}
+static void reader_bind_chapter(void);
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int leaf;} app_ctx_t;
 #define MALLOC_CAP_SPIRAM 1
@@ -201,12 +206,11 @@ static size_t book_layout_page_count(void){return 2;}
 static size_t book_layout_page_for_offset(size_t off){return off>=4?1:0;}
 static void release_page_images(void);
 static void free_book(void){
- release_page_images();free(s_text);free(s_blocks);free(s_runs);for(size_t i=0;i<s_image_count;++i)free(s_images[i]);free(s_images);
- s_text=NULL;s_blocks=NULL;s_runs=NULL;s_run_count=0;s_images=NULL;s_image_count=0;
+ release_page_images();reader_session_close(&s_reader_session);reader_bind_chapter();
  book_layout_set_image_dims(NULL,NULL);s_reader_dims_ctx=(reader_dims_ctx_t){0};
 }
 '''
-for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'load_chapter_at'):
+for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'reader_bind_chapter', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
 static void setup_images(int count){
@@ -254,6 +258,8 @@ int main(void){
  s_text=strdup("old\nIMG");s_text_len=7;s_blocks=calloc(2,sizeof(blk_t));s_block_count=2;
  s_blocks[0]=(blk_t){.offset=0,.len=3,.image=-1};s_blocks[1]=(blk_t){.offset=4,.len=3,.image=0};
  s_chapter=3;s_page=1;s_selected_toc=2;s_chapter_lead_skip=2;s_chapter_lead_height=12;
+ html_text_t initial={.utf8=s_text,.len=s_text_len,.blocks=s_blocks,.count=s_block_count,.runs=s_runs,.run_count=s_run_count,.images=s_images,.image_count=s_image_count};
+ reader_session_adopt_chapter(&s_reader_session,&initial);reader_bind_chapter();
  strcpy(s_chapter_heading_title,"old title");char *old_text=s_text;char **old_images=s_images;app_ctx_t ctx={0};
  s_reader_dims_ctx=(reader_dims_ctx_t){s_chapter,s_images,s_image_count};book_layout_set_image_dims(reader_image_dims,&s_reader_dims_ctx);
  load_error=1;assert(!load_chapter_at(&ctx,4,0,false,NULL,SIZE_MAX));
@@ -318,5 +324,5 @@ with tempfile.TemporaryDirectory() as folder:
     c.write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', '-I'+str(root/'main/book'),
-                    '-I'+str(root/'tools/html_text_stubs'), str(c), '-o', str(binary)], check=True)
+                    '-I'+str(root/'tools/book_source_host_stubs'), str(root/'main/book/reader_session.c'), str(c), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

@@ -5,6 +5,7 @@
  * 冻结：仅供主机验证。/ Frozen: Host validation only.
  */
 #include "book_source.h"
+#include "reader_session.h"
 #include "gbk.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -35,6 +36,35 @@ static void roundtrip(const char *s, size_t n) {
         assert(out[len] == 0); seen += len; free(out);
     }
     assert(seen == n); book_close();
+}
+static void session_roundtrip(const char *source) {
+    reader_session_t session = {0}, other = {0};
+    assert(reader_session_open(&session, "/tmp/missing.unknown") == ESP_ERR_NOT_SUPPORTED);
+    assert(!reader_session_has_source(&session));
+    assert(reader_session_open(&session, source) == ESP_OK);
+    size_t chapters = book_chapter_count();
+    assert(chapters && reader_session_has_source(&session));
+    assert(reader_session_open(&other, source) == ESP_ERR_INVALID_STATE);
+    assert(book_chapter_count() == chapters);
+    for (size_t i = 0; i < chapters; ++i) {
+        html_text_t next = {0};
+        assert(book_chapter_load_blocks(i, &next) == ESP_OK);
+        char *text = next.utf8; size_t bytes = next.len;
+        reader_session_adopt_chapter(&session, &next);
+        assert(next.utf8 == NULL && next.images == NULL);
+        assert(reader_session_content(&session)->utf8 == text);
+        assert(reader_session_content(&session)->len == bytes);
+    }
+    const char *held = reader_session_content(&session)->utf8;
+    html_text_t failed = {0};
+    assert(book_chapter_load_blocks(chapters, &failed) != ESP_OK);
+    html_text_free(&failed);
+    assert(reader_session_content(&session)->utf8 == held);
+    reader_session_close(&other);
+    assert(book_chapter_count() == chapters);
+    reader_session_close(&session); reader_session_close(&session);
+    assert(!reader_session_has_source(&session));
+    assert(book_kind() == BOOK_KIND_TXT && book_chapter_count() == 0);
 }
 int main(int argc, char **argv) {
     const char *s = "Chapter 1 Start\nhello\nChapter 2 End\nworld\n";
@@ -113,6 +143,7 @@ int main(int argc, char **argv) {
         printf("fixture %s: %zu chapters, %zu UTF-8 bytes\n", argv[a], book_chapter_count(), sum);
         book_close();
         assert(book_kind() == BOOK_KIND_TXT && book_chapter_count() == 0);
+        session_roundtrip(argv[a]);
     }
     puts("book source host tests passed"); return 0;
 }
