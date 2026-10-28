@@ -74,6 +74,11 @@ void rails_keepalive(void) {
     // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
     drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
     rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
+#if CONFIG_DISPLAY_POWER_DIAG
+    ESP_LOGI(TAG, "RAIL_DIAG event=release now_ms=%lld deadline_ms=%lld retry_ms=%lld on=%d",
+             (long long)now_ms, (long long)rails_deadline_ms,
+             (long long)drive_release_retry_ms, read_pico_rails_on());
+#endif
     pico_online_display_end(held);
 }
 
@@ -88,6 +93,13 @@ void rails_idle_check(int64_t now_ms) {
     if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
         drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
     if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
+#if CONFIG_DISPLAY_POWER_DIAG
+        // 同时记录真实时钟与循环快照，区分阻塞等待和采样回放的旧时间。
+        // Record the real clock and loop snapshot to distinguish blocking from stale replay time.
+        ESP_LOGI(TAG, "RAIL_DIAG event=idle_off loop_ms=%lld late_ms=%lld on=%d",
+                 (long long)now_ms,
+                 (long long)(esp_timer_get_time() / 1000 - rails_deadline_ms), read_pico_rails_on());
+#endif
         rails_deadline_ms = 0;
         drive_release_retry_ms = 0;
         epd_poweroff();

@@ -20,6 +20,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#if CONFIG_DISPLAY_POWER_DIAG
+#include "esp_timer.h"
+#endif
 
 #include "epd_display.h"
 #include "epdiy.h"
@@ -120,6 +123,11 @@ static bool s_rails_on;
 static bool s_pwrup;
 static bool s_vcom_ctrl;
 static bool s_wakeup;
+#if CONFIG_DISPLAY_POWER_DIAG
+// 仅记录请求时序；软件锁存不能替代实际轨电压测量。
+// Record request timing only; software latches do not measure rail voltages.
+static int64_t s_diag_power_on_us, s_diag_power_off_us;
+#endif
 static uint8_t s_p0_extra; // Motor / PA / CAM 锁存
 static uint8_t s_p1_out = (uint8_t)(IOE_BIT(IO_TP_RST) | IOE_BIT(IO_BT_PA_PWR));
 static int s_vcom_mv = EPD_VCOM_MV;
@@ -361,8 +369,28 @@ static void board_deinit(void) {
     }
 }
 
+#if CONFIG_DISPLAY_POWER_DIAG
+// 失败后才做额外读回，正常上电轮询与扫描不增加 I2C 访问。
+// Extra readback happens only after failure, adding no I2C access to normal power polling or scanning.
+static void power_diag_failed(void) {
+    uint8_t input = 0, output = 0, pg = 0, enable = 0;
+    esp_err_t input_err = ioe_read(0, &input);
+    esp_err_t output_err = ioe_read(2, &output);
+    esp_err_t pg_err = tps_read(TPS_REG_PG, &pg);
+    esp_err_t enable_err = tps_read(TPS_REG_ENABLE, &enable);
+    ESP_LOGW(TAG, "POWER_DIAG event=failed in=0x%02x in_err=%d out=0x%02x out_err=%d pg=0x%02x pg_err=%d enable=0x%02x enable_err=%d request=0x%02x",
+             input, input_err, output, output_err, pg, pg_err, enable, enable_err, p0_value());
+}
+#endif
+
 static void board_poweron(epd_ctrl_state_t* state) {
     if (s_rails_on) return;
+#if CONFIG_DISPLAY_POWER_DIAG
+    const int64_t started_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "POWER_DIAG event=on_start off_ms=%lld request=0x%02x oe=%d mode=%d",
+             (long long)(s_diag_power_off_us ? (started_us - s_diag_power_off_us) / 1000 : -1),
+             p0_value(), state->ep_output_enable, state->ep_mode);
+#endif
 
     state->ep_output_enable = false;
     state->ep_stv = true;
@@ -403,6 +431,9 @@ static void board_poweron(epd_ctrl_state_t* state) {
 
     if (!pgood) {
         ESP_LOGE(TAG, "TPS PWR_GOOD timeout");
+#if CONFIG_DISPLAY_POWER_DIAG
+        power_diag_failed();
+#endif
         s_tps_ok = false;
         return;
     }
@@ -423,9 +454,18 @@ static void board_poweron(epd_ctrl_state_t* state) {
     s_rails_on = true;
     s_tps_ok = true;
     ESP_LOGI(TAG, "EPD rails on, VCOM=-%d mV", s_vcom_mv);
+#if CONFIG_DISPLAY_POWER_DIAG
+    s_diag_power_on_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "POWER_DIAG event=ready elapsed_ms=%lld request=0x%02x oe=%d mode=%d",
+             (long long)((s_diag_power_on_us - started_us) / 1000),
+             p0_value(), state->ep_output_enable, state->ep_mode);
+#endif
 }
 
 static void board_poweroff(epd_ctrl_state_t* state) {
+#if CONFIG_DISPLAY_POWER_DIAG
+    const bool was_on = s_rails_on;
+#endif
     epd_ctrl_state_t mask = {
         .ep_stv = true,
         .ep_output_enable = true,
@@ -444,6 +484,13 @@ static void board_poweroff(epd_ctrl_state_t* state) {
     p0_write();
     s_rails_on = false;
     s_tps_ok = false;
+#if CONFIG_DISPLAY_POWER_DIAG
+    s_diag_power_off_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "POWER_DIAG event=off_request was_on=%d held_ms=%lld request=0x%02x oe=%d mode=%d",
+             was_on, (long long)(was_on && s_diag_power_on_us ?
+                 (s_diag_power_off_us - s_diag_power_on_us) / 1000 : -1),
+             p0_value(), state->ep_output_enable, state->ep_mode);
+#endif
 }
 
 static void board_measure_vcom(epd_ctrl_state_t* state) { (void)state; }

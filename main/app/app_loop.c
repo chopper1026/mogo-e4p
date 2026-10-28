@@ -160,6 +160,7 @@ void app_lock_ignore_for(int64_t ms) {
 static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
 #else
 void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+#endif
 #ifdef KIIKO_LOCAL_LATENCY
     const int64_t probe_start=esp_timer_get_time();
     extern int64_t local_display_elapsed_us;
@@ -171,7 +172,6 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
     (long long)(esp_timer_get_time()-probe_start-(local_display_elapsed_us-probe_display))); } while(0)
 #else
 #define LATENCY_PRESENT_DONE() do {} while(0)
-#endif
 #endif
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active()) {

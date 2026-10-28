@@ -26,6 +26,16 @@ endmenu
 # Panel self-test for bring-up; keep disabled in production images.
 menu "Bring-up diagnostics"
 
+    config DISPLAY_POWER_DIAG
+        bool "Log panel power requests and idle deadlines"
+        default n
+        help
+            排查供电就绪超时和前光下边缘变灰：记录开关电请求、保持时间、
+            主循环关电检查延迟，仅在供电失败后额外读取现有状态寄存器。
+            Investigate power-ready timeouts and lit edge graying: log power
+            requests, hold durations and idle-check lateness, reading extra
+            existing status registers only after a power failure.
+
     config READER_PERF
         bool "Measure reader operation latency and memory"
         default n

@@ -2,6 +2,13 @@
 set -eu
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
+# 开启触摸诊断时也编译真实主循环，覆盖诊断包装与公共函数体。
+# Compile the real loop with touch diagnostics enabled to cover its wrapper and shared body.
+sed 's/#define CONFIG_TOUCH_DIAG 0/#define CONFIG_TOUCH_DIAG 1/' tools/app_loop_stubs/sdkconfig.h > "$out/sdkconfig.h"
+cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
+  -I"$out" -Itools/app_loop_stubs -Imain -Icomponents/ble_page_turner/include -Icomponents/read_pico/include -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
+  main/app/app_loop.c
+rm "$out/sdkconfig.h"
 python3 tools/power_dialog_host_test.py --input-c "$out/power.c"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -Itools/app_loop_stubs -Imain -Icomponents/ble_page_turner/include -Icomponents/read_pico/include -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
