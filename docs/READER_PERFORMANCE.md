@@ -21,6 +21,9 @@ python3 tools/run_reader_baseline.py present
 `session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
 `session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
 
+当前书籍的路径、书名、章节标题和文件大小属于 `reader_session.book`，由 UI 在原有开书及章节提交位置更新。关闭书源后会话清空路径和书名；失败候选不覆盖旧章信息。进度和书签仍使用原有路径、文件大小、章节及字节偏移，持久结构与 NVS 键不变。
+The path, book/chapter titles and file size belong to `reader_session.book`, updated by the UI at the existing open/chapter commit points. After source close, the session clears path and book title; failed candidates preserve prior chapter metadata. Progress and bookmarks retain their path, file size, chapter and byte-offset fields, persisted layouts and NVS keys.
+
 `reader_present` 同步借用已画好的真实前后帧，接收区域、模式、效果及当前画面状态，调用现有显示出口。页面仍负责绘制、预绘启动与交还、欠载恢复和状态提交；显示服务继续负责波形执行及 OTA 擦写互斥。`present` 宿主组验证区域与波形选择、插图失败短路、正文与页脚错误合并、工具栏归一，以及水波纹成功/失败后的节拍恢复。
 `reader_present` synchronously borrows completed real front/back frames and routes regions, modes, effects and frame state through existing display exits. The page retains painting, prefetch launch/handoff, underrun recovery and state commits; display services retain waveform execution and OTA flash exclusion. The `present` host suite verifies region/waveform selection, image failure short-circuits, body/footer error combination, tools normalization and restored ripple pacing after success or failure.
 

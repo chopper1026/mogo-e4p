@@ -202,13 +202,12 @@ typedef struct delete_retry {shelf_entry_t entry;struct delete_retry* next;} del
 static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
-static char s_path[288],s_requested_open[288];
+static char s_requested_open[288];
 static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen;
 static int test_open_calls;
 static char* s_text;
 enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
 static int s_unsaved,s_px=48,s_margin[MARGIN_COUNT]={36,36,0,0},s_line_spacing=130;
-static uint32_t s_file_size=1000;
 static bool s_book_fonts_applied;
 static bool app_settings_book_fonts(void){return false;}
 static const char *app_settings_book_background_path(void){return "";}
@@ -916,7 +915,7 @@ int main(void) {
 }
 '''
 from reader_session_test_state import position_state
-unit = position_state(page=0) + unit
+unit = position_state(page=0, file_size=1000) + unit
 with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"

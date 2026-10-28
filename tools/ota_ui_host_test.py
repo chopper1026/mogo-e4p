@@ -79,7 +79,8 @@ static void assert_progress(int width){
   assert(pixels[y][x]==(x<61+width?UI_GRAY_BLACK:UI_GRAY_WHITE));
  assert(s_upgrade_bar_width==width&&!erased_completed);
 }
-static char s_book_title[128]="海边的信",s_title[128]="chapter";
+#include "book/reader_book.h"
+static struct {reader_book_t book;} s_reader_session = {.book = {.title = "海边的信", .chapter_title = "chapter"}};
 static int title_center,battery_center;
 static int title_left=-1,clock_right=-1;
 static bool app_settings_reader_statusbar(void){return true;}
@@ -116,7 +117,7 @@ void pico_online_get_status(pico_update_status_t *out){*out=backend_status;}
 #include "ui/ui_nav_layout.h"
 #include "app.h"
 static enum {SETTINGS_MAIN,SETTINGS_TEXT_EDIT,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SHELF_STYLE,
- SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY} s_page;
+ SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY,SETTINGS_READING_BG} s_page;
 static bool s_input_settle,s_input_layout,s_scroll_present_pending;
 static EpdRect s_input_area;
 typedef struct {int kind;} EpdWaveform;

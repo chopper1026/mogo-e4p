@@ -90,10 +90,16 @@ int main(void) {
     open_result = ESP_OK;
     assert(reader_session_open(&first, "book.epub") == ESP_OK);
     assert(reader_session_has_source(&first));
+    strcpy(first.book.path, "book.epub");
+    strcpy(first.book.title, "First book");
+    strcpy(second.book.path, "stale.txt");
+    strcpy(second.book.title, "Stale book");
     unsigned opened = opens;
     assert(reader_session_open(&second, "other.txt") == ESP_ERR_INVALID_STATE && opens == opened);
     assert(reader_session_open(&first, "other.txt") == ESP_ERR_INVALID_STATE && opens == opened);
     reader_session_close(&second); reader_session_close(NULL); assert(closes == 0);
+    assert(!second.book.path[0] && !second.book.title[0]);
+    assert(!strcmp(first.book.path, "book.epub") && !strcmp(first.book.title, "First book"));
     for (int i = 0; i < 100; ++i) {
         html_text_t next = chapter(); char *text = next.utf8;
         reader_session_adopt_chapter(&first, &next);
@@ -118,6 +124,7 @@ int main(void) {
     assert(live == one_size);
     reader_session_close(&first); reader_session_close(&first);
     assert(!live && !blocks && closes == 1 && !reader_session_has_source(&first));
+    assert(!first.book.path[0] && !first.book.title[0]);
     assert(reader_session_open(&second, "other.txt") == ESP_OK);
     reader_session_close(&first); assert(reader_session_has_source(&second) && closes == 1);
     reader_session_close(&second); assert(closes == 2 && !live);

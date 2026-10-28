@@ -64,4 +64,6 @@ void reader_session_close(reader_session_t *session) {
         book_close();
         s_source_owner = NULL;
     }
+    session->book.path[0] = 0;
+    session->book.title[0] = 0;
 }

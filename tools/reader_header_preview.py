@@ -99,7 +99,8 @@ static inline int pmu_battery_percent(const pmu_snapshot_t *p){if(!p||!p->presen
 static inline bool pmu_battery_charging(const pmu_snapshot_t *p){return p&&p->present&&p->quick_ok&&(p->qb_flags&4)!=0;}
 static bool s_reader_fullscreen;
 static int statusbar_on=1;
-static char s_book_title[128]="灵葫芦修仙记",s_title[128]="第一章";
+#include "reader_book.h"
+static struct {reader_book_t book;} s_reader_session = {.book = {.title = "灵葫芦修仙记", .chapter_title = "第一章"}};
 static bool app_settings_reader_statusbar(void){return statusbar_on;}
 static const char *app_settings_status_signature(void){return "";}
 static bool app_settings_ble_turner(void){return false;}

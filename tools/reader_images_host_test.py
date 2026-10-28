@@ -39,7 +39,7 @@ unit = r'''
 #include "html_text.h"
 #include "reader_session.h"
 #include "reader_session_layout.h"
-static reader_session_t s_reader_session = {.position = {.chapter = 3}};
+static reader_session_t s_reader_session = {.position = {.chapter = 3}, .book = {.path = "test"}};
 #define s_chapter s_reader_session.position.chapter
 #define s_page s_reader_session.position.page
 esp_err_t book_open(const char *path){(void)path;return ESP_OK;}
@@ -156,7 +156,6 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
 }
-static const char s_path[]="test";
 static void book_excerpt_offer(const char *path,const html_text_t *text){(void)path;(void)text;}
 static char *s_text;
 static blk_t *s_blocks;
@@ -177,7 +176,7 @@ static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height,s_chapter_lead_row_height;
 static unsigned s_chapter_lead_width;
 static int s_px=10,s_view=READING;
-static char s_message[128],s_chapter_heading_title[128],s_chapter_heading_label[32],s_title[128],s_font_path[128];
+static char s_message[128],s_chapter_heading_title[128],s_chapter_heading_label[32],s_font_path[128];
 static int load_error,reflow_failures,reflows;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
