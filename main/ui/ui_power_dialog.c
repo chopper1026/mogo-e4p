@@ -57,7 +57,7 @@ ui_power_action_t ui_power_dialog_feed(ui_power_dialog_t *dialog, const app_ctx_
         ui_power_dialog_cancel_input(dialog, dirty);
         return UI_POWER_ACTION_NONE;
     }
-    const cst836u_touch_t *touch = ctx->touch;
+    const app_touch_t *touch = ctx->touch;
     if (dialog->swallow) {
         if (!touch->touched) dialog->swallow = false;
         return UI_POWER_ACTION_NONE;

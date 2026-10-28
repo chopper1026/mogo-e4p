@@ -92,10 +92,10 @@ void app_navigation_capture_reader_return(const app_desc_t *current) {
 }
 
 bool app_poll_main_navigation(app_ctx_t *ctx) {
-    if(!ctx||!ctx->tp)return false;
+    if(!ctx||!ctx->read_touch)return false;
     if(ctx->request_app)return true;
-    cst836u_touch_t touch={0};
-    if(cst836u_read(ctx->tp,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
+    app_touch_t touch={0};
+    if(ctx->read_touch(ctx->touch_context,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
         s_nav_contact_down=s_nav_polled=false;return false;
     }
     int index=ui_nav_hit(touch.x,touch.y);

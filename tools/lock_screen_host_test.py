@@ -10,6 +10,9 @@ ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
  (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text())
+ (p/'app_touch.h').write_text((ROOT/'main/app/app_touch.h').read_text())
+ (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_ERR_INVALID_ARG 3\n')
+ (p/'cst836u.h').write_text('#pragma once\n#include <stdbool.h>\n#include <stdint.h>\n#define CST836U_MAX_POINTS 2\n#define CST836U_RAW_LEN 15\ntypedef struct {bool active;uint8_t id,event;uint16_t x,y;} cst836u_point_t;\ntypedef struct {bool touched;uint8_t count;uint16_t x,y;cst836u_point_t points[2];uint8_t raw[15];} cst836u_touch_t;\nint cst836u_read(void *,cst836u_touch_t *);\n')
  (p/'epdiy.h').write_text((ROOT/'tools/ui_gesture_stubs/epdiy.h').read_text())
  unit=r'''
 #include <assert.h>
@@ -21,6 +24,8 @@ with tempfile.TemporaryDirectory() as folder:
 #include <sys/stat.h>
 #include <setjmp.h>
 #include "ui_pinpad.h"
+#include "cst836u.h"
+#include "platform/s31_input.h"
 #define FRAME_BYTES (684u*1216u/2u)
 #define PAD_W 684
 #define PAD_H 1216
@@ -85,7 +90,7 @@ static bool ble_pt_pop_key(ble_pt_event_t *e){(void)e;return false;}
 static bool ble_pt_pop_raw(ble_pt_raw_t *e){(void)e;return false;}
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
-static int cst836u_read(void *tp,cst836u_touch_t *t){(void)tp;if(idx>=sample_count){*t=(cst836u_touch_t){0};return 0;}typeof(samples[0]) s=samples[idx++];*t=(cst836u_touch_t){.touched=s.count!=0,.count=s.count,.x=s.x,.y=s.y};if(s.error<-1){power_pending=-s.error;return ESP_OK;}return s.error;}
+int cst836u_read(void *tp,cst836u_touch_t *t){(void)tp;if(idx>=sample_count){*t=(cst836u_touch_t){0};return 0;}typeof(samples[0]) s=samples[idx++];*t=(cst836u_touch_t){.touched=s.count!=0,.count=s.count,.x=s.x,.y=s.y};if(s.error<-1){power_pending=-s.error;return ESP_OK;}return s.error;}
 static void vTaskDelay(int ms){now+=ms;assert(now<35000||!valid_storage);}
 static void ui_pinpad_begin(ui_pinpad_t *p,const uint8_t *fb,const char *title){(void)fb;ui_pinpad_end(p);ui_pinpad_reset(p,title,"");if(!low_memory)p->background=malloc(1);}
 static void ui_pinpad_paint_input(uint8_t *f,const ui_pinpad_t *p){(void)p;f[0]=0xaa;}
@@ -161,5 +166,5 @@ int main(void){
 }
 '''
  (p/'test.c').write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'),str(p/'test.c'),str(ROOT/'main/ui/ui_gesture.c'),'-o',str(p/'test')],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'),str(p/'test.c'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/platform/s31_input.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)

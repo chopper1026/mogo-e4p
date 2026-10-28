@@ -10,7 +10,7 @@ static ui_quick_menu_t menu;
 static int64_t time_ms;
 
 static ui_quick_event_t feed(int x,int y,int count,bool pressed,bool released,bool allowed,bool owned){
- cst836u_touch_t touch={.x=x,.y=y,.count=count,.touched=count!=0};
+ app_touch_t touch={.x=x,.y=y,.count=count,.touched=count!=0};
  app_ctx_t ctx={.touch=&touch,.now_ms=time_ms,.pressed=pressed,.released=released};
  ui_quick_event_t event;
  assert(ui_quick_menu_feed(&menu,&ctx,allowed,&event)==owned);return event;

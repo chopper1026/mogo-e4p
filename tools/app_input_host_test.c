@@ -7,7 +7,7 @@
 #include <string.h>
 
 static ui_gesture_t gesture;
-static cst836u_touch_t latest;
+static app_touch_t latest;
 static app_ctx_t ctx;
 static bool was_touched;
 static int64_t last_input;
@@ -70,7 +70,7 @@ static void reset(void) {
     redirect_cancel = reactivate_present = false;
 }
 
-static void ingest(cst836u_touch_t touch, int64_t time, esp_err_t err) {
+static void ingest(app_touch_t touch, int64_t time, esp_err_t err) {
     bool pressed, released;
     bool previous = was_touched;
     ctx.consumed = true;
@@ -80,14 +80,14 @@ static void ingest(cst836u_touch_t touch, int64_t time, esp_err_t err) {
     assert(pressed == ctx.pressed && released == ctx.released && !ctx.consumed);
     record(ctx.now_ms); record(last_input); record(ctx.pressed); record(ctx.released);
     record(latest.touched); record(latest.count); record(latest.x); record(latest.y);
-    for (unsigned i = 0; i < CST836U_MAX_POINTS; ++i) {
+    for (unsigned i = 0; i < APP_TOUCH_MAX_POINTS; ++i) {
         record(latest.points[i].active); record(latest.points[i].x); record(latest.points[i].y);
     }
     for (unsigned i = 0; i < sizeof(latest.raw); ++i) record(latest.raw[i]);
 }
 
 static void feed(bool down, unsigned x, unsigned y, unsigned count, int64_t time) {
-    ingest((cst836u_touch_t){.touched=down, .x=x, .y=y, .count=count}, time, ESP_OK);
+    ingest((app_touch_t){.touched=down, .x=x, .y=y, .count=count}, time, ESP_OK);
     app_input_dispatch_gesture_frame(&ctx, &page, &gesture, ESP_OK, false, present);
     was_touched = latest.touched;
 }
@@ -95,11 +95,11 @@ static void feed(bool down, unsigned x, unsigned y, unsigned count, int64_t time
 static void snapshots(void) {
     reset();
     touch_frame_t frame = {.t_ms=INT64_C(4294967310), .touched=1, .count=2, .x=37, .y=91};
-    cst836u_touch_t raw;
+    app_touch_t raw;
     memset(&raw, 0xff, sizeof(raw));
     app_input_frame_to_touch(&frame, &raw);
     assert(raw.touched && raw.count == 2 && raw.x == 37 && raw.y == 91);
-    cst836u_touch_t expected = {.touched=true, .count=2, .x=37, .y=91};
+    app_touch_t expected = {.touched=true, .count=2, .x=37, .y=91};
     assert(!memcmp(&raw, &expected, sizeof(raw)));
     raw.points[0].active = true; raw.points[0].x = 5; raw.points[0].y = 9;
     raw.points[1].x = 999; raw.points[1].y = 888;
@@ -109,16 +109,16 @@ static void snapshots(void) {
     assert(latest.points[0].x == 5 && latest.points[0].active);
     assert(!latest.points[1].active && !latest.points[1].x && !latest.points[1].y);
     was_touched = latest.touched;
-    raw = (cst836u_touch_t){.x=800, .y=900};
+    raw = (app_touch_t){.x=800, .y=900};
     memset(raw.raw, 0x42, sizeof(raw.raw));
     ingest(raw, frame.t_ms + 30, ESP_OK);
     assert(ctx.released && !latest.touched && !latest.count);
     assert(latest.x == 37 && latest.y == 91 && latest.points[0].x == 5);
     assert(!latest.points[0].active && latest.raw[14] == 0x42);
     was_touched = latest.touched;
-    ingest((cst836u_touch_t){.x=1, .y=2}, frame.t_ms + 40, ESP_OK);
+    ingest((app_touch_t){.x=1, .y=2}, frame.t_ms + 40, ESP_OK);
     assert(!ctx.pressed && !ctx.released && latest.x == 37 && last_input == frame.t_ms + 30);
-    ingest((cst836u_touch_t){.touched=true, .count=1, .x=3}, 200, ESP_ERR_INVALID_STATE);
+    ingest((app_touch_t){.touched=true, .count=1, .x=3}, 200, ESP_ERR_INVALID_STATE);
     assert(ctx.pressed && latest.x == 3 && ctx.now_ms == 200);
     assert(last_input == frame.t_ms + 30);
 }
@@ -193,7 +193,7 @@ static void event_trace(void) {
     for (unsigned i = 0; i < 100000; ++i) {
         unsigned choice = random_value();
         bool down = choice % 5 != 0;
-        cst836u_touch_t touch = {.touched=down, .count=down ? 1 + (choice % 23 == 0) : 0,
+        app_touch_t touch = {.touched=down, .count=down ? 1 + (choice % 23 == 0) : 0,
             .x=random_value()%540, .y=random_value()%960};
         time += choice % 1000;
         esp_err_t err = choice % 31 == 0 ? ESP_ERR_INVALID_STATE : ESP_OK;

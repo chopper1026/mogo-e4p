@@ -23,7 +23,7 @@ static bool configured = true, can_stop = true, expect_origin;
 static int error_once;
 static read_pico_transfer_status_t network;
 static app_ctx_t ctx;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static uint8_t fb[1];
 static EpdiyHighlevelState hl;
 int E0470_WAVEFORM, E0470_FOLLOW_WAVEFORM, E0470_CAPSULE_DRAG_WAVEFORM;

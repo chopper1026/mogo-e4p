@@ -5,6 +5,7 @@
  * User revision: return for read failure or confirmed disabled state; require digest verification for readable enabled PINs, retaining cached frost and local input.
  */
 #include "lock_screen.h"
+#include "platform/s31_input.h"
 #include "lock_pin.h"
 #include "settings.h"
 #include "ui_pinpad.h"
@@ -116,14 +117,14 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         // Waiting for a PIN is not a failed boot; hold one-shot resume without opening the book.
         if(boot){pico_boot_ready();pico_boot_hold_resume();boot=false;}
         ui_gesture_t gesture={0};bool was_down=false,draining=true;
-        cst836u_touch_t latest={0};int64_t active_at=esp_timer_get_time()/1000,last_poll=active_at;
+        app_touch_t latest={0};int64_t active_at=esp_timer_get_time()/1000,last_poll=active_at;
         bool cancel=false;
         while(!cancel){
             int64_t now=esp_timer_get_time()/1000;
             if(now-active_at>=30000){cancel=true;break;}
             if(now-last_poll>=40){last_poll=now;(void)read_pico_pmu_poll();if(read_pico_pmu_take_key_action()!=READ_PICO_PMU_KEY_NONE){cancel=true;break;}}
             if(pad.blocked&&lock_pin_available()&&now>=retry_at){ui_pinpad_reset(&pad,NULL,"请重新输入");ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());}
-            cst836u_touch_t sample={0};esp_err_t error=cst836u_read(touch,&sample);
+            app_touch_t sample={0};esp_err_t error=s31_input_read_touch(touch,&sample);
             bool down=error==ESP_OK&&sample.touched;
             if(draining){if(!down&&error==ESP_OK)draining=false;was_down=down;vTaskDelay(pdMS_TO_TICKS(5));continue;}
             if(down)latest=sample;else{latest.touched=false;latest.count=0;}

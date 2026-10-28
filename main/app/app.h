@@ -22,11 +22,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "cst836u.h"
+#include "app_touch.h"
+#include "esp_err.h"
 #include "epd_highlevel.h"
 #include "epdiy.h"
 #include "app_config.h"
-#include "sc7a20h_lab.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,17 +54,22 @@ typedef enum {
 typedef struct app_desc_s app_desc_t;
 typedef struct ui_gesture_event_s ui_gesture_event_t;
 
+/// 同步读取快照，保留读取错误与载荷；context 由装配方持有，不转移所有权。
+/// Read synchronously, retaining errors and payloads; the assembler owns context throughout the call.
+typedef esp_err_t (*app_touch_read_t)(void *context, app_touch_t *touch);
+
 typedef struct {
     EpdiyHighlevelState* hl;
     uint8_t* fb;
-    sc7a20h_handle_t acc;
-    cst836u_handle_t tp;
-    bool sensor_ready;
+    /// 慢速加载时同步轮询导航；缺省表示没有触摸设备。
+    /// Synchronous navigation polling during long loads; absent when no touch device is bound.
+    app_touch_read_t read_touch;
+    /// 输入适配器借用的设备上下文，页面不得释放。/ Borrowed input context; pages must not free it.
+    void *touch_context;
     int64_t now_ms;
     /// 去抖后的触摸快照：空槽已清零，抬手后保留最后一次坐标。
     /// / Debounced touch: empty slots cleared; last coords kept after lift.
-    const cst836u_touch_t* touch;
-    const cst836u_info_t* touch_info;
+    const app_touch_t* touch;
     /// 本轮是不是按下沿 / 抬起沿，触摸页的跟随节流要用。
     /// / Press/release edge this tick. Touch tracking uses this to throttle.
     bool pressed;
@@ -137,7 +142,7 @@ struct app_desc_s {
     bool (*present)(app_ctx_t* ctx, app_redraw_t redraw);
     /// 设置后独占触摸派发，替代 on_touch。/ Exclusive gesture dispatch replaces on_touch.
     app_redraw_t (*on_gesture)(app_ctx_t* ctx, const ui_gesture_event_t* event);
-    app_redraw_t (*on_touch)(app_ctx_t* ctx, const cst836u_touch_t* touch);
+    app_redraw_t (*on_touch)(app_ctx_t* ctx, const app_touch_t* touch);
     /// 默认只收 UI_KEY_1；owns_keys 页面在菜单外接收三键。
     /// / Only KEY1 normally; owns_keys pages receive all three keys outside the menu.
     app_redraw_t (*on_key)(app_ctx_t* ctx, int key);

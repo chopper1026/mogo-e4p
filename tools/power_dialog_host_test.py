@@ -49,10 +49,10 @@ for name in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_a
 code+=re.sub(r'^#include[^\n]*\n','',power,flags=re.M)
 code+=r'''
 static ui_power_dialog_t dialog;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static app_ctx_t ctx;
 static EpdRect dirty;
-static void sample(int x,int y,int count,bool pressed,bool released){touch=(cst836u_touch_t){.x=x,.y=y,.count=count,.touched=count>0};ctx=(app_ctx_t){.touch=&touch,.now_ms=ctx.now_ms+10,.pressed=pressed,.released=released};}
+static void sample(int x,int y,int count,bool pressed,bool released){touch=(app_touch_t){.x=x,.y=y,.count=count,.touched=count>0};ctx=(app_ctx_t){.touch=&touch,.now_ms=ctx.now_ms+10,.pressed=pressed,.released=released};}
 static ui_power_action_t feed(int x,int y,int count,bool pressed,bool released){sample(x,y,count,pressed,released);return ui_power_dialog_feed(&dialog,&ctx,&dirty);}
 static void press(void){assert(feed(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,true,false)==UI_POWER_ACTION_NONE&&!dirty.height);}
 static void raster_check(void){

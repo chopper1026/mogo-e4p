@@ -11,7 +11,9 @@ const char* esp_err_to_name(int err);
 typedef void* cst836u_handle_t;
 typedef void* sc7a20h_handle_t;
 #define CST836U_MAX_POINTS 2
-typedef struct { bool active; uint16_t x,y; } cst836u_point_t;
+#define CST836U_RAW_LEN 15
+#define ESP_ERR_INVALID_ARG 3
+typedef struct { bool active; uint8_t id,event; uint16_t x,y; } cst836u_point_t;
 typedef struct { bool touched; uint8_t count; uint16_t x,y; cst836u_point_t points[2]; uint8_t raw[15]; } cst836u_touch_t;
 typedef struct { int unused; } cst836u_info_t;
 int cst836u_read(void*, cst836u_touch_t*);

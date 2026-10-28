@@ -28,6 +28,7 @@ size_t heap_caps_get_free_size(int);
 size_t heap_caps_get_largest_free_block(int);
 ''')
     (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text())
+    (p/'app_touch.h').write_text((ROOT/'main/app/app_touch.h').read_text())
     (p/'epdiy.h').write_text((ROOT/'tools/ui_gesture_stubs/epdiy.h').read_text())
     builtin=(ROOT/'main/assets/builtin.ttf').read_bytes()
     assets='#include <stdint.h>\nconst uint8_t data[] asm("_binary_builtin_ttf_start")={'+','.join(map(str,builtin))+'};\n'

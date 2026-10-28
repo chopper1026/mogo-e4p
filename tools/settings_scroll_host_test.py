@@ -53,7 +53,7 @@ unit = r'''
 #include "ui_gesture.h"
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
-      SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
+      SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #define UI_NAV_TOP 1096
 #define UI_NAV_REFRESH_END 1088
@@ -89,10 +89,10 @@ static layout_t ble_scan_layout(void){return(layout_t){2000};}
 unit += '\nstatic app_redraw_t event(app_ctx_t *ctx,const ui_gesture_event_t *ev){(void)ctx;'+event_block+'if(ev->type==UI_GESTURE_TAP)++row_taps;return APP_REDRAW_NONE;}\n'
 unit += r'''
 static ui_gesture_t recognizer;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static app_ctx_t ctx;
 static app_redraw_t feed(int x,int y,bool down,bool press,int64_t now){
- touch=(cst836u_touch_t){.count=down?1:0,.touched=down,.x=x,.y=y};
+ touch=(app_touch_t){.count=down?1:0,.touched=down,.x=x,.y=y};
  ctx=(app_ctx_t){.touch=&touch,.pressed=press,.released=!down,.now_ms=now};
  ui_gesture_event_t gesture;
  if(!ui_gesture_feed(&recognizer,&ctx,&gesture))return APP_REDRAW_NONE;
@@ -136,7 +136,7 @@ int main(void){
    reset(page,0);feed(300,800,true,true,0);assert(feed(300,680,true,false,20)==APP_REDRAW_AREA&&s_ble_scroll==204);
    assert(pushed.y==190&&pushed.y+pushed.height==1088);feed(300,680,false,false,40);
   }
-  const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
+  const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
   for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
    s_page=pages[i];s_scroll_present_pending=true;assert(settings_present(&ctx,APP_REDRAW_AREA));
    assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==1088);

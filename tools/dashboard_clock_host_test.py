@@ -85,7 +85,7 @@ int main(void){
  app_ctx_t ctx={0};present(&ctx,APP_REDRAW_FULL);assert(s_clock_minute==100&&paints==1&&fulls==1);
  for(int i=0;i<100;++i)assert(on_tick(&ctx)==APP_REDRAW_NONE);
  minute=101;ctx.consumed=true;assert(on_tick(&ctx)==APP_REDRAW_NONE);ctx.consumed=false;
- cst836u_touch_t touch={.touched=true};ctx.touch=&touch;assert(on_tick(&ctx)==APP_REDRAW_NONE);touch.touched=false;
+ app_touch_t touch={.touched=true};ctx.touch=&touch;assert(on_tick(&ctx)==APP_REDRAW_NONE);touch.touched=false;
  assert(on_tick(&ctx)==APP_REDRAW_AREA);present(&ctx,APP_REDRAW_AREA);
  assert(paints==1&&clock_paints==1&&pushes==1&&pushed.x+pushed.width==180&&pushed.y+pushed.height==62&&s_clock_minute==101);
  minute=102;fail=true;on_tick(&ctx);present(&ctx,APP_REDRAW_AREA);

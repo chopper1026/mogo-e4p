@@ -24,7 +24,7 @@ static bool emit(const ui_gesture_t *g, ui_gesture_type_t type, int64_t now, ui_
 
 bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out) {
     if (!g || !ctx || !out) return false;
-    const cst836u_touch_t *touch = ctx->touch;
+    const app_touch_t *touch = ctx->touch;
     bool invalid = ctx->consumed || !touch || ctx->now_ms < 0;
     if (touch && touch->count > 1) invalid = true;
     if (g->active && ctx->now_ms < g->last_ms) invalid = true;

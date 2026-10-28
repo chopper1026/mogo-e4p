@@ -16,8 +16,8 @@ unit=r'''
 #include <stdlib.h>
 #include <string.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {bool touched;uint8_t count;uint16_t x,y;} cst836u_touch_t;
-typedef struct {uint8_t *fb;void *hl;const cst836u_touch_t *touch;int64_t now_ms;bool pressed,released,consumed,user_activity,request_menu,request_return;void *request_app;}app_ctx_t;
+#include "app/app_touch.h"
+typedef struct {uint8_t *fb;void *hl;const app_touch_t *touch;int64_t now_ms;bool pressed,released,consumed,user_activity,request_menu,request_return;void *request_app;}app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL}app_redraw_t;
 enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_FONT_SETTINGS,READER_PANEL_TITLE_STYLE};
 enum {EPD_DRAW_ALIGN_CENTER,MODE_DU};
@@ -89,15 +89,15 @@ b=action.index('    if (s_reader_panel == READER_PANEL_RULE_SETTINGS)',a)
 unit+='static app_redraw_t layout_tap(app_ctx_t *ctx,uint16_t x,uint16_t y){\n'+action[a:b]+'return APP_REDRAW_NONE;\n}\n'
 unit+=r'''
 static ui_gesture_t gesture;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static app_ctx_t ctx;
 static uint8_t fb[1];
 static void reset(int value){
  reader_indent_hold_cancel();ui_gesture_reset(&gesture);s_view=READING;s_reader_panel=READER_PANEL_LAYOUT_SETTINGS;s_clear_confirm=false;
- saved=value;reflows=draws=pushes=invalidated=0;touch=(cst836u_touch_t){0};ctx=(app_ctx_t){.fb=fb,.touch=&touch};
+ saved=value;reflows=draws=pushes=invalidated=0;touch=(app_touch_t){0};ctx=(app_ctx_t){.fb=fb,.touch=&touch};
 }
 static app_redraw_t feed(int64_t at,int x,int y,int contacts,bool press,bool release,bool consumed){
- touch=(cst836u_touch_t){.touched=contacts>0,.count=contacts,.x=x,.y=y};
+ touch=(app_touch_t){.touched=contacts>0,.count=contacts,.x=x,.y=y};
  ctx.now_ms=at;ctx.pressed=press;ctx.released=release;ctx.consumed=consumed;
  ui_gesture_event_t ev;app_redraw_t redraw=APP_REDRAW_NONE;
  if(ui_gesture_feed(&gesture,&ctx,&ev)){
@@ -156,5 +156,5 @@ assert 'reader_indent_gesture(ctx,ev,&indent_handled)' in function('gesture_even
 assert 'reader_indent_hold_tick(ctx)' in function('on_tick',book)
 with tempfile.TemporaryDirectory() as directory:
     p=Path(directory)/'test.c';p.write_text(unit);exe=p.with_suffix('')
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(p),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(root/'main'),str(p),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

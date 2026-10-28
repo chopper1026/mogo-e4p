@@ -35,11 +35,11 @@ app_input_diag_counts_t app_input_diag_counts(void) {
 // 空槽常带着抬起事件或残留坐标，不能进页面看到的快照；抬手后保留最后一次位置。
 // Empty slots often carry lift events or stale coords; keep last position on lift.
 static void debounce_touch(
-    cst836u_touch_t* latest, const cst836u_touch_t* raw, bool released
+    app_touch_t* latest, const app_touch_t* raw, bool released
 ) {
     if (raw->touched) {
         *latest = *raw;
-        for (int i = 0; i < CST836U_MAX_POINTS; i++) {
+        for (int i = 0; i < APP_TOUCH_MAX_POINTS; i++) {
             if (!latest->points[i].active) {
                 memset(&latest->points[i], 0, sizeof(latest->points[i]));
             }
@@ -47,14 +47,14 @@ static void debounce_touch(
     } else if (released) {
         latest->touched = false;
         latest->count = 0;
-        for (int i = 0; i < CST836U_MAX_POINTS; i++) {
+        for (int i = 0; i < APP_TOUCH_MAX_POINTS; i++) {
             latest->points[i].active = false;
         }
     }
     memcpy(latest->raw, raw->raw, sizeof(raw->raw));
 }
 
-void app_input_frame_to_touch(const touch_frame_t* f, cst836u_touch_t* t) {
+void app_input_frame_to_touch(const touch_frame_t* f, app_touch_t* t) {
     memset(t, 0, sizeof(*t));
     t->touched = f->touched != 0;
     t->count = f->count;
@@ -62,8 +62,8 @@ void app_input_frame_to_touch(const touch_frame_t* f, cst836u_touch_t* t) {
     t->y = f->y;
 }
 
-void app_input_ingest_touch_frame(app_ctx_t* ctx, cst836u_touch_t* latest,
-                               const cst836u_touch_t* touch, esp_err_t err,
+void app_input_ingest_touch_frame(app_ctx_t* ctx, app_touch_t* latest,
+                               const app_touch_t* touch, esp_err_t err,
                                bool* was_touched, int64_t frame_ms,
                                int64_t* last_input_ms,
                                bool* out_pressed, bool* out_released) {

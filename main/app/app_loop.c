@@ -40,6 +40,7 @@
 
 #include "../reader_perf.h"
 #include "app_loop.h"
+#include "platform/s31_input.h"
 #include "app_input.h"
 #include "app_media.h"
 #include "app_navigation.h"
@@ -362,7 +363,7 @@ static void run_power_action(app_ctx_t *ctx, const app_desc_t *current, bool res
 // the home screen). Discard the whole backlog on lock return and zero the last
 // frame and edge state so the reuse path cannot synthesize a stale press edge. A
 // postponed lock loses the taps inside its feedback window, which is acceptable.
-static void discard_lock_input(app_ctx_t* ctx, cst836u_touch_t* latest, bool* was_touched) {
+static void discard_lock_input(app_ctx_t* ctx, app_touch_t* latest, bool* was_touched) {
     touch_frame_t frame;
     while (touch_sampler_pop(&frame)) {}
     memset(&s_last_frame, 0, sizeof(s_last_frame));
@@ -435,16 +436,14 @@ void app_loop_run(const app_loop_config_t* config) {
 
     cst836u_info_t touch_info = { 0 };
     cst836u_get_info(config->tp, &touch_info);
-    cst836u_touch_t latest = { 0 };
+    app_touch_t latest = { 0 };
 
     app_ctx_t ctx = {
         .hl = config->hl,
         .fb = config->fb,
-        .acc = config->acc,
-        .tp = config->tp,
-        .sensor_ready = config->sensor_ready,
+        .read_touch = config->tp ? s31_input_read_touch : NULL,
+        .touch_context = config->tp,
         .touch = &latest,
-        .touch_info = &touch_info,
     };
 
     bool was_touched = false;
@@ -510,7 +509,7 @@ void app_loop_run(const app_loop_config_t* config) {
             app_home_cover_mode_changed(); app_book_cover_mode_changed();
             cover_policy = requested_cover_policy;
         }
-        cst836u_touch_t touch = { 0 };
+        app_touch_t touch = { 0 };
         esp_err_t err = ESP_OK;
         int64_t frame_ms = esp_timer_get_time() / 1000;
         bool replayed = false;
@@ -622,7 +621,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 app_input_frame_to_touch(&s_last_frame, &touch);
             }
         } else {
-            err = cst836u_read(config->tp, &touch);
+            err = s31_input_read_touch(config->tp, &touch);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "CST836U read failed: %s", esp_err_to_name(err));
 #if CONFIG_TOUCH_DIAG
@@ -937,7 +936,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     if (reader_power_lock) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();
-                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true, lock_light_only());
+                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, config->acc, config->tp, true, lock_light_only());
                         discard_lock_input(&ctx, &latest, &was_touched);
                         display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
@@ -980,7 +979,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         prepare_lock(&ctx, current, true);
                         extern const app_desc_t app_book;
                         main_lock_boundary();
-                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
+                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, config->acc, config->tp,
                                              !menu_open && current == &app_book && app_book_reader_body_visible(), lock_light_only());
                         discard_lock_input(&ctx, &latest, &was_touched);
                         display_request_full_refresh();
@@ -1101,7 +1100,7 @@ void app_loop_run(const app_loop_config_t* config) {
             prepare_lock(&ctx, current, false);
             extern const app_desc_t app_book;
             main_lock_boundary();
-            enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
+            enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, config->acc, config->tp,
                                  !menu_open && current == &app_book && app_book_reader_body_visible(), lock_light_only());
             discard_lock_input(&ctx, &latest, &was_touched);
             display_request_full_refresh();

@@ -3,6 +3,7 @@
  * English: Run the real loop with deterministic touch and task-delay exit.
  */
 #include "app_loop.h"
+#include "platform/s31_input.h"
 #include "ui_gesture.h"
 #include "ui_menu.h"
 #include "ui_power_dialog.h"
@@ -355,7 +356,7 @@ static void leave(app_ctx_t*c) {(void)c;exits++;}
 static void render(app_ctx_t*c,uint8_t*f) {(void)c;(void)f;++base_renders;}
 static void home_enter(app_ctx_t*c) {c->leaf=0;enters++;home_enters++;}
 static void home_render(app_ctx_t*c,uint8_t*f) {(void)f;rendered_leaf=c->leaf;home_renders++;}
-static app_redraw_t touch(app_ctx_t*c,const cst836u_touch_t*t) {
+static app_redraw_t touch(app_ctx_t*c,const app_touch_t*t) {
     (void)t;touch_calls++;assert(c->pressed&&c->consumed);
     if(request_on_touch)c->request_app=&second;
     if(menu_on_touch)c->request_menu=true;
@@ -466,7 +467,7 @@ int main(void) {
     }
     puts("PASS: root tabs act on first contact in all modes, enlarged top edge, one-shot holds, rapid taps, active-tab no-op, subview/multitouch/read-error guards");
     reset();add(10,1141,1,0);
-    app_ctx_t loading={.tp=(void*)1};
+    app_ctx_t loading={.read_touch=s31_input_read_touch,.touch_context=(void*)1};
     samples[0]=(sample_t){0};assert(!app_poll_main_navigation(&loading));
     samples[0]=(sample_t){.x=10,.y=1141,.count=1};
     assert(app_poll_main_navigation(&loading)&&loading.request_app==&first&&loading.user_activity);

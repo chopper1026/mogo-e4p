@@ -12,10 +12,10 @@
 #include <stdio.h>
 static ui_gesture_t g;
 static ui_gesture_event_t event;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static app_ctx_t ctx;
 static bool feed(int x, int y, int64_t time, bool down, bool press, bool release, bool consumed) {
-    touch = (cst836u_touch_t){ .x = x, .y = y, .touched = down, .count = down ? 1 : 0 };
+    touch = (app_touch_t){ .x = x, .y = y, .touched = down, .count = down ? 1 : 0 };
     ctx = (app_ctx_t){ .touch = &touch, .now_ms = time, .pressed = press, .released = release, .consumed = consumed };
     return ui_gesture_feed(&g, &ctx, &event);
 }

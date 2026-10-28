@@ -10,6 +10,8 @@
 #pragma once
 
 #include "app.h"
+#include "cst836u.h"
+#include "sc7a20h_lab.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -13,7 +13,7 @@ static app_navigation_history_t history;
 static bool menu_open, body_visible, snapshot_ok = true, snapshot_fullscreen = true;
 static bool captured_fullscreen;
 static int menu_leaf, enters, reads, restores;
-static cst836u_touch_t raw_touch;
+static app_touch_t raw_touch;
 static esp_err_t read_error;
 static char sequence[128];
 static unsigned sequence_size;
@@ -68,7 +68,7 @@ static void present_menu(app_ctx_t *context, const app_desc_t *app, int leaf, vo
     assert(menu_open); event('M');
 }
 int ui_menu_leaf_for_app(const app_desc_t *app) { return 10 + app_index_of(app); }
-int cst836u_read(void *handle, cst836u_touch_t *touch) {
+static esp_err_t read_touch(void *handle, app_touch_t *touch) {
     assert(handle == &ctx); ++reads; *touch = raw_touch; return read_error;
 }
 int ui_nav_hit(uint16_t x, uint16_t y) { return y == 1100 && x < 4 ? x : -1; }
@@ -142,11 +142,14 @@ static void reader_returns(void) {
 }
 
 static void contact_latches(void) {
-    ctx = (app_ctx_t){.tp=&ctx}; raw_touch = (cst836u_touch_t){0};
+    ctx = (app_ctx_t){.read_touch=read_touch, .touch_context=&ctx}; raw_touch = (app_touch_t){0};
     assert(!app_poll_main_navigation(NULL));
+    app_ctx_t unbound = {.request_app=&home};
+    int initial_reads = reads;
+    assert(!app_poll_main_navigation(&unbound) && reads == initial_reads);
     app_navigation_reset_contact();
     assert(!app_poll_main_navigation(&ctx) && !app_navigation_contact_polled());
-    raw_touch = (cst836u_touch_t){.touched=true, .count=1, .x=1, .y=1100};
+    raw_touch = (app_touch_t){.touched=true, .count=1, .x=1, .y=1100};
     assert(!app_poll_main_navigation(&ctx) && ctx.user_activity && app_navigation_contact_polled());
     raw_touch.x = 0;
     assert(!app_poll_main_navigation(&ctx));

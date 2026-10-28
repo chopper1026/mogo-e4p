@@ -18,13 +18,13 @@ typedef void (*app_input_present_t)(app_ctx_t *ctx, const app_desc_t *app,
 
 /// 重建采样帧的坐标、触点数和按下状态；不回放多点载荷或原始寄存器。
 /// Rebuild frame coordinates, contact count and contact state without replaying multipoint payloads or raw registers.
-void app_input_frame_to_touch(const touch_frame_t *frame, cst836u_touch_t *touch);
+void app_input_frame_to_touch(const touch_frame_t *frame, app_touch_t *touch);
 /// 先判边沿、记诊断，再去抖并更新 ctx；was_touched 仍由调用方在原分发位置提交。
 /// Detect edges and record diagnostics before debounce/context updates; caller still commits was_touched at its existing dispatch point.
 /// frame_ms 使用原采样或直读时间，last_input_ms 只在成功读取的接触或释放帧更新。
 /// frame_ms retains sampler/direct-read time; only successfully read contact/release frames update last_input_ms.
-void app_input_ingest_touch_frame(app_ctx_t *ctx, cst836u_touch_t *latest,
-                                  const cst836u_touch_t *touch, esp_err_t err,
+void app_input_ingest_touch_frame(app_ctx_t *ctx, app_touch_t *latest,
+                                  const app_touch_t *touch, esp_err_t err,
                                   bool *was_touched, int64_t frame_ms,
                                   int64_t *last_input_ms, bool *pressed, bool *released);
 /// 浮层、菜单或读错时不分发；回调、呈现、consumed 的先后顺序保持不变。

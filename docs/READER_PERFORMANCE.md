@@ -15,6 +15,9 @@ python3 tools/run_reader_baseline.py controls
 python3 tools/run_reader_baseline.py present
 ```
 
+`platform_input` 编译真实 S31 输入适配器与驱动类型，检查完整双点载荷、原始字节、读错及早退快照，并检查页面契约不引入触摸/加速度计驱动头。页面只借用 `app_touch_t` 快照；慢速加载导航通过同步读取回调轮询，设备句柄由主循环和 S31 适配器持有。采样队列、去抖及锁屏顺序不变。`pinpad` 与 `lock` 分别验证密码键盘和包含真实适配器的密码锁循环。
+`platform_input` compiles the real S31 adapter and driver types to check complete two-contact payloads, raw bytes, error/early-return snapshots, and a page contract free of touch/accelerometer driver headers. Pages borrow `app_touch_t` snapshots; navigation during long loads polls through a synchronous callback while the loop and S31 adapter retain device handles. Sampler queues, debounce and lock ordering are unchanged. `pinpad` and `lock` cover the PIN pad and authentication loop with the real adapter.
+
 `shelf` 与 `management` 编译真实的书架数据模块，分别覆盖目录/分页记忆及搜索、排序、选择和管理失败重试；保留页面适配层的回归断言。
 `shelf` and `management` compile the actual shelf data module, covering folder/page memory and search, ordering, selection and management retries while retaining page-adapter regression assertions.
 

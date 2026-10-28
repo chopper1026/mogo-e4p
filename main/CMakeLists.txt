@@ -84,6 +84,7 @@ idf_component_register(
         "app/app_input.c"
         "app/app_media.c"
         "app/app_navigation.c"
+        "platform/s31_input.c"
         "app/app_quick_layer.c"
         "app/touch_sampler.c"
         "app/crash_note.c"

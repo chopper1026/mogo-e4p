@@ -25,6 +25,7 @@ size_t heap_caps_get_free_size(int);
 size_t heap_caps_get_largest_free_block(int);
 ''')
  (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text())
+ (p/'app_touch.h').write_text((ROOT/'main/app/app_touch.h').read_text())
  epd=(ROOT/'tools/ui_gesture_stubs/epdiy.h').read_text()+'\nvoid epd_fill_circle(int,int,int,uint8_t,uint8_t*);\n'
  (p/'epdiy.h').write_text(epd)
  builtin=(ROOT/'main/assets/builtin.ttf').read_bytes()
@@ -63,7 +64,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
  # 提取真实绘制原语：键盘的锁图标和删除键下划线走 ui_draw_icon / ui_fill_rect_fast。
  # Extract the real drawing primitives: the pad's lock icon and delete underline use ui_draw_icon / ui_fill_rect_fast.
- for n in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
+ for n in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_draw_round_rect_raw','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=r'''
 int ui_font_title_px(int n,const char *v){(void)v;return n;}
 bool ui_font_title_uses_supplement(const char *v){(void)v;return false;}
@@ -108,7 +109,7 @@ int main(int argc,char **argv){
  capacity=live+1024*1024;ui_pinpad_begin(&pad,bg,"输入密码");assert(!pad.background);ui_pinpad_end(&pad);capacity=8*1024*1024;
  for(int rot=0;rot<4;++rot){display_rotation=rot;ui_pinpad_begin(&pad,bg,"输入密码");ui_pinpad_paint(fb,&pad,ui_pinpad_full());ui_pinpad_end(&pad);ttf_font_cache_clear();assert(live==base);}
  // 真实手势取消：多指、读错、长按不提交。/ Real recognizer cancellation: multitouch/read errors/holds never commit.
- ui_pinpad_begin(&pad,bg,"输入密码");ui_gesture_t gesture={0};cst836u_touch_t touch={.touched=true,.count=1,.x=158,.y=544};app_ctx_t ctx={.touch=&touch,.now_ms=100,.pressed=true};ui_gesture_event_t e;
+ ui_pinpad_begin(&pad,bg,"输入密码");ui_gesture_t gesture={0};app_touch_t touch={.touched=true,.count=1,.x=158,.y=544};app_ctx_t ctx={.touch=&touch,.now_ms=100,.pressed=true};ui_gesture_event_t e;
  assert(ui_gesture_feed(&gesture,&ctx,&e));assert(ui_pinpad_handle(&pad,&e,&dirty)==UI_PIN_CHANGED);
  ctx.pressed=false;ctx.now_ms=110;touch.count=2;assert(ui_gesture_feed(&gesture,&ctx,&e)&&e.type==UI_GESTURE_CANCEL);assert(ui_pinpad_handle(&pad,&e,&dirty)==UI_PIN_CHANGED&&!pad.count);
  touch.count=1;ctx.pressed=true;ctx.now_ms=120;assert(ui_gesture_feed(&gesture,&ctx,&e));ui_pinpad_handle(&pad,&e,&dirty);ctx.consumed=true;ctx.pressed=false;ctx.now_ms=130;assert(ui_gesture_feed(&gesture,&ctx,&e)&&e.type==UI_GESTURE_CANCEL);ui_pinpad_handle(&pad,&e,&dirty);assert(!pad.count);

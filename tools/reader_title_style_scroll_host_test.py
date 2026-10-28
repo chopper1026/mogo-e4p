@@ -82,10 +82,10 @@ unit += '\nstatic app_redraw_t event(app_ctx_t *ctx,const ui_gesture_event_t *ev
 
 unit += r'''
 static ui_gesture_t recognizer;
-static cst836u_touch_t touch;
+static app_touch_t touch;
 static app_ctx_t ctx;
 static app_redraw_t feed(int x,int y,bool down,bool press,int64_t now){
- touch=(cst836u_touch_t){.count=down?1:0,.touched=down,.x=x,.y=y};
+ touch=(app_touch_t){.count=down?1:0,.touched=down,.x=x,.y=y};
  ctx=(app_ctx_t){.touch=&touch,.pressed=press,.released=!down,.now_ms=now};
  ui_gesture_event_t gesture;
  if(!ui_gesture_feed(&recognizer,&ctx,&gesture))return APP_REDRAW_NONE;
