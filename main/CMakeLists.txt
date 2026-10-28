@@ -1,3 +1,9 @@
+# 产品只支持 S31；在组件依赖解析时拒绝其他目标，避免使用不匹配的板级配置。
+# The product supports S31 only; reject other targets during dependency discovery before selecting incompatible board settings.
+if(NOT IDF_TARGET STREQUAL "esp32s31")
+    message(FATAL_ERROR "kiikoread E-INK4 Plus requires IDF_TARGET=esp32s31")
+endif()
+
 set(main_requires
     read_pico
     frontlight
@@ -31,19 +37,13 @@ set(main_requires
     esp_rom
     esp_driver_gpio
     esp_driver_usb_serial_jtag
+    esp_driver_jpeg
     esp_app_format
     app_update
     esp_http_client
     mbedtls
     espressif__cjson
 )
-# S31/P4 的硬件 JPEG 解码；S3 CI 目标没有该外设，不能无条件依赖。
-# S31/P4 hardware JPEG decode; the S3 CI target has no such peripheral, so keep it conditional.
-# 用 IDF_TARGET 而不是 CONFIG_SOC_*：main 的 CMakeLists 在 sdkconfig 导入前会被先评估一次。
-# Use IDF_TARGET rather than CONFIG_SOC_*: main's CMakeLists is evaluated once before sdkconfig is imported.
-if(IDF_TARGET STREQUAL "esp32s31" OR IDF_TARGET STREQUAL "esp32p4")
-    list(APPEND main_requires esp_driver_jpeg)
-endif()
 # 原始位图保留在源码中，只把可复现的压缩资源嵌入 app。/ Retain source bitmaps and embed only reproducible compressed resources in the app.
 idf_build_get_property(image_python PYTHON)
 set(builtin_image_dir "${CMAKE_CURRENT_BINARY_DIR}/builtin_images")
