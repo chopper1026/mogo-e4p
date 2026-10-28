@@ -8,6 +8,7 @@
  * 冻结：原文由调用方持有；字体测量和绘制必须由调用方串行化。
  * Frozen: Caller owns source text and serializes all font measurement and drawing.
  */
+#include "../reader_memory.h"
 #include "../reader_perf.h"
 #include "book_layout.h"
 #include <limits.h>
@@ -1292,3 +1293,11 @@ int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layo
     ttf_draw_set_runs(NULL,0);ttf_font_select(TTF_FONT_SLOT_SYSTEM);
     return cursor->failed?-1:cursor->complete?1:0;
 }
+
+
+#if CONFIG_READER_PERF
+void book_layout_memory_stats(reader_memory_stats_t *stats) {
+    stats->layout = reader_memory_owned(s_pages) + reader_memory_owned(s_line) +
+        reader_memory_owned(s_images) + reader_memory_owned(s_page_img_start);
+}
+#endif

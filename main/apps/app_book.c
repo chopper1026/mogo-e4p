@@ -130,6 +130,7 @@
  * the neighbouring rows/columns, so the full-pixel pass is no longer required.
  */
 #include "../reader_perf.h"
+#include "../reader_memory.h"
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
@@ -3997,6 +3998,32 @@ static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
 static bool reader_text_body(void) {
     return book_layout_page_image_count(s_reader_session.position.page) == 0;
 }
+#if CONFIG_READER_PERF
+static void reader_memory_snapshot(const char *event) {
+    if (!reader_perf_memory_ready()) return;
+    reader_memory_stats_t stats = {0};
+    ttf_font_memory_stats(&stats);
+    book_layout_memory_stats(&stats);
+    reader_prefetch_memory_stats(&stats);
+    ui_reader_background_memory_stats(&stats);
+    const html_text_t *chapter = reader_session_content(&s_reader_session);
+    stats.chapter = reader_memory_owned(chapter->utf8) + reader_memory_owned(chapter->blocks) +
+        reader_memory_owned(chapter->images) + reader_memory_owned(chapter->runs) +
+        reader_memory_owned(chapter->links) + reader_memory_owned(chapter->anchors) +
+        reader_memory_owned(chapter->strings);
+    for (size_t i = 0; i < chapter->image_count; ++i)
+        stats.chapter += reader_memory_owned(chapter->images[i]);
+    stats.page_images = reader_memory_owned(s_page_images);
+    for (int i = 0; i < s_page_image_count; ++i)
+        stats.page_images += reader_memory_owned(s_page_images[i].gray);
+    stats.shelf_ui = reader_memory_owned(s_shelf) + reader_memory_owned(s_guard_cache) +
+        reader_memory_owned(s_editor_cover);
+    for (unsigned i = 0; i < sizeof(s_covers) / sizeof(s_covers[0]); ++i)
+        stats.shelf_ui += reader_memory_owned(s_covers[i].gray) + reader_memory_owned(s_covers[i].fast_bits);
+    reader_perf_memory(event, &stats);
+}
+#endif
+
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // 开关标记只对本次推屏有效：提前返回也不留给下一帧。
     // The toggle flag applies to this present only; consume it even on an early return.
@@ -4123,6 +4150,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     guard_draw_result(ctx->hl, err);
 #if CONFIG_READER_PERF
     reader_perf_finish(err == EPD_DRAW_SUCCESS);
+    reader_memory_snapshot("present");
 #endif
     if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {
         if ((redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL) && shelf_cover_frame_ready()) s_cover_dirty_mask=0;
@@ -4270,6 +4298,9 @@ static void free_book(void) {
     s_jump_offset = SIZE_MAX;
     reader_session_close(&s_reader_session);
     app_font_activate_system();
+#if CONFIG_READER_PERF
+    reader_memory_snapshot("book_closed");
+#endif
 }
 // 通栏之后一页位图更大：装不下就按最大空闲块等比缩一档——图小一圈也胜过整页消失。
 // A full-bleed page bitmap is larger: when it does not fit, step the aspect-preserving size down
@@ -6607,6 +6638,9 @@ static void book_on_exit(app_ctx_t* ctx) {
     ui_reader_background_release();
     free_book();
     reader_prefetch_release();
+#if CONFIG_READER_PERF
+    reader_memory_snapshot("reader_exit");
+#endif
 }
 // 先停止使用旧卡句柄与字体预渲染，主循环随后切换内置字体。
 // Stop old-card handles and font preparation before the loop switches to the builtin font.

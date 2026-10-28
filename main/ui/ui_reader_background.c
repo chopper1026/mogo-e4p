@@ -12,6 +12,7 @@
  * Frozen: one selected wallpaper, never two image caches; the blend formula
  * (bg*ink+7)/15 never changes.
  */
+#include "../reader_memory.h"
 #include "ui_reader_background.h"
 #include <stdlib.h>
 #include <string.h>
@@ -179,3 +180,10 @@ void ui_reader_background_paint(uint8_t *fb, EpdRect area, bool blend) {
         }
     }
 }
+
+
+#if CONFIG_READER_PERF
+void ui_reader_background_memory_stats(reader_memory_stats_t *stats) {
+    stats->background = reader_memory_owned(s_gray);
+}
+#endif

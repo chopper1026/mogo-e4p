@@ -95,3 +95,22 @@ The manifest must contain `book_sha256`, `font_sha256`, `firmware_sha256` and `s
 
 汇总按操作报告成功/未完成数量，以及成功样本的最近秩 P50/P95。日志缺字段、负值或版本不符会拒绝汇总。零值只代表该样本未进入相应已埋点路径；图片解码、其他重排入口、独立缓存占用与后台任务栈仍需专项测量。宿主测试、固件构建、设备启动与实际屏幕验收是不同证据，不能互相替代。
 Summaries report successful/incomplete counts per operation and nearest-rank P50/P95 for successful samples. Missing fields, negative values and incompatible versions are rejected. Zero means the sample did not enter that instrumented path; image decoding, other reflow entries, individual cache occupancy and worker stack headroom still require dedicated measurement. Host tests, firmware builds, device boot and screen acceptance are separate evidence.
+
+## 资源容量与退出回收 / Resource capacities and exit reclamation
+
+同一诊断开关还会输出独立的 `READER_MEMORY v=1`。`present` 在推屏、预绘交还及操作计时结束后采样；`book_closed` 在关闭书源并恢复系统字体后采样；`reader_exit` 在退出阅读应用并释放预绘任务后采样。仍有活跃操作计时时跳过资源遍历与输出。`id` 对应最近一次操作代次，多个生命周期记录可能共用同一个 `id`，不能把它当作唯一记录编号。
+The same diagnostic flag emits separate `READER_MEMORY v=1` records. `present` samples after output, prefetch handoff and operation timing finish; `book_closed` follows source close and system-font activation; `reader_exit` follows reader exit and prefetch-task release. Active timing skips resource walks and logging. The `id` refers to the latest operation generation; lifecycle records may share it, so it is not a unique record identifier.
+
+各容量字段读取未释放的自有分配基址，由分配器报告容量；不等于有效内容长度，不含静态数组、借用镜像或布局借用的章节。字形按条目和位图各计一次，共享预算不再累加。`font_blocks`、`font_work`、`font_catalog` 沿用原有常驻策略，关闭书籍后允许非零。`prefetch` 仅含帧，任务存在状态和历史最小剩余栈分别由 `prefetch_worker`、`prefetch_stack_free` 报告；任务控制块与同步对象未纳入容量。栈字段单位为 ESP-IDF 的字节，表示任务生命周期低水位，不是单次操作峰值。
+Capacity fields query live owned allocation bases and report allocator capacities rather than content lengths. Static arrays, borrowed images and chapter data borrowed by layout are excluded. Glyph entries and bitmaps count once; the shared budget is not added again. `font_blocks`, `font_work` and `font_catalog` retain their existing resident policy and may remain nonzero after closing a book. `prefetch` includes only its frame; `prefetch_worker` and `prefetch_stack_free` separately report task presence and historical minimum free stack. Task control blocks and synchronization objects are excluded. Stack values use ESP-IDF bytes and reflect task-lifetime lows rather than operation-local peaks.
+
+此视图覆盖字体、布局、当前会话章节、预绘帧、背景、页内灰阶以及页面已接管的书架数据和封面。尚未按拥有者分解 EPUB 书源内部目录/缓存、排队中的封面结果、系统服务与显示后端分配，不应把已列字段之和解释为整个堆。操作期间峰值仍看 `READER_PERF` 的本地内存低水位；快照只说明采样点的存活容量。
+This view covers fonts, layout, the current session chapter, prefetch frame, background, page grayscale, and shelf data/covers already owned by the page. EPUB source directories/caches, queued cover results, system services and display-backend allocations are not decomposed by owner. The listed fields do not total the whole heap. Operation-local heap lows in `READER_PERF` still measure peaks; snapshots show live capacity only at sample points.
+
+```sh
+python3 tools/run_reader_baseline.py memory perf font_faces prefetch
+python3 tools/summarize_reader_memory.py serial.log --output build/reader-memory.json
+```
+
+重复进出应比较相同书籍、字体、位置及背景下的 `reader_exit` 与常驻缓存范围，并结合完整堆空闲量、最大连续块、任务退出后的调度时机判断；汇总工具仅报告首末值和范围，不自动宣称泄漏或已回收全部资源。首次启动后开书与同一位置再次打开需分开采集，并记录重启、字体加载、设置与文件散列；重开书不会主动清除字体缓存，不能称为完全冷缓存。
+For repeated entry/exit, compare `reader_exit` and retained-cache ranges with the same book, font, position and background, alongside heap free/largest blocks and scheduling after task deletion. The summary reports first/last values and ranges without claiming leaks or complete reclamation. Capture first open after boot separately from reopening the same position, recording restart, font loading, settings and file hashes. Reopening does not forcibly clear font caches and is not a fully cold-cache run.

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 font = (ROOT / 'main/assets/builtin.ttf').read_bytes()
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     work = Path(folder)
+    (work / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF ' + ('1' if os.environ.get('READER_MEMORY_TEST') else '0') + '\n')
     (work / 'system.ttf').write_bytes(font)
     # 同一轮廓、不同字宽的字体可验证切页后确实采用新字体，而不是缓存上一份。
     # Equal outlines with distinct advances verify the new face is used after switching, not stale cached metrics.
@@ -50,6 +51,7 @@ static inline int64_t esp_timer_get_time(void){return 0;}
 void *heap_caps_malloc(size_t n,int caps);
 void *heap_caps_calloc(size_t n,size_t s,int caps);
 void heap_caps_free(void *p);
+size_t heap_caps_get_allocated_size(void *p);
 static inline size_t heap_caps_get_largest_free_block(int caps){(void)caps;return 0;}
 ''')
     assets = '#include <stdint.h>\nconst uint8_t data[] asm("_binary_builtin_ttf_start")={'
@@ -58,6 +60,7 @@ static inline size_t heap_caps_get_largest_free_block(int caps){(void)caps;retur
     (work / 'assets.c').write_text(assets)
     unit = r'''
 #include "ttf_font.h"
+#include "reader_memory.h"
 #include "ui_kit.h"
 #include <assert.h>
 #include <fcntl.h>
@@ -74,6 +77,14 @@ uint8_t app_settings_system_contrast(void){return 100;}
 void *heap_caps_malloc(size_t n,int caps){(void)caps;allocation_t *p=malloc(sizeof(*p)+n);assert(p);p->bytes=n;live+=n;if(live>peak)peak=live;return p+1;}
 void *heap_caps_calloc(size_t n,size_t s,int caps){void *p=heap_caps_malloc(n*s,caps);memset(p,0,n*s);return p;}
 void heap_caps_free(void *p){if(!p)return;allocation_t *a=(allocation_t *)p-1;live-=a->bytes;free(a);}
+size_t heap_caps_get_allocated_size(void *p){assert(p);return ((allocation_t*)p-1)->bytes;}
+static void check_font_memory(void){
+#if CONFIG_READER_PERF
+ reader_memory_stats_t stats={0};ttf_font_memory_stats(&stats);
+ assert(stats.font_source+stats.font_tables+stats.font_blocks+stats.font_glyphs+stats.font_work+stats.font_catalog==live);
+ reader_memory_stats_t again={0};ttf_font_memory_stats(&again);assert(!memcmp(&stats,&again,sizeof(stats)));
+#endif
+}
 int title_test_open(const char *path,int flags,...){int fd=open(path,flags,0600);if(fd>=0){++opens;++active_fd;if(active_fd>max_fd)max_fd=active_fd;}return fd;}
 int title_test_close(int fd){assert(active_fd);--active_fd;return close(fd);}
 const char *app_settings_fonts_dir(void){return "/absent";}
@@ -184,7 +195,7 @@ int main(int argc,char **argv){
   record_coverage=false;
   ttf_set_stroke_adjust(0);assert(opens==initial_opens);
   widths[face]=ttf_text_width_px(40,text);
-  assert(live-resident<128*1024&&peak<1024*1024);
+  check_font_memory();assert(live-resident<128*1024&&peak<1024*1024);
  }
  assert(widths[1]>widths[0]&&max_fd==1);
  ttf_font_unload();assert(!active_fd&&!ttf_font_ready()&&!ttf_font_has_text(text));
@@ -205,12 +216,12 @@ int main(int argc,char **argv){
   assert(ttf_font_open_builtin()==ESP_OK&&ttf_font_selected()==slots[1]);
   ttf_font_close_embedded();ttf_font_close_embedded();assert(ttf_font_selected()==0&&ttf_font_ready());
   for(unsigned i=0;i<TTF_FONT_SLOTS-1;++i)assert(!ttf_font_slot_ready(slots[i]));
-  before=live;uint8_t *bad=heap_caps_calloc(64,1,3);
+  check_font_memory();before=live;uint8_t *bad=heap_caps_calloc(64,1,3);
   assert(ttf_font_open_mem(bad,64,"invalid")==-1&&live==before);
   assert(ttf_font_slot_ready(0)&&ttf_font_selected()==0&&!active_fd);
   if(round)assert(live==warm_live);else warm_live=live;
  }
- ttf_font_unload();
+ ttf_font_unload();check_font_memory();
  puts("PASS: 20 real font-slot cycles preserve system selection, reject full/invalid slots, reclaim owned images and retain constant warm workspace bytes");
  puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, single file/face, bounded warm cache and no duplicate font load");
 }

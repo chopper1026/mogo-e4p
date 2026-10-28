@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 #if CONFIG_READER_PERF
 #include "reader_perf.h"
+#include "reader_memory.h"
 #include <inttypes.h>
 #include <string.h>
 #include "esp_heap_caps.h"
@@ -102,6 +103,30 @@ void reader_perf_finish(bool presented) {
              (unsigned)internal_free, (unsigned)internal_min,
              (unsigned)heap_caps_get_largest_free_block(internal),
              (unsigned)psram_free, (unsigned)psram_min,
+             (unsigned)heap_caps_get_largest_free_block(psram),
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
+}
+
+bool reader_perf_memory_ready(void) { return !s_sample.active; }
+
+void reader_perf_memory(const char *event, const reader_memory_stats_t *stats) {
+    const uint32_t internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const uint32_t psram = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    ESP_LOGI("readerperf", "READER_MEMORY v=1 id=%u event=%s "
+             "font_source=%u font_tables=%u font_blocks=%u font_glyphs=%u font_work=%u font_catalog=%u "
+             "layout=%u chapter=%u prefetch=%u background=%u page_images=%u shelf_ui=%u "
+             "font_slots=%u prefetch_worker=%u prefetch_stack_free=%u "
+             "internal_free=%u internal_largest=%u psram_free=%u psram_largest=%u ui_stack_free=%u",
+             s_sample.generation, event,
+             (unsigned)stats->font_source, (unsigned)stats->font_tables,
+             (unsigned)stats->font_blocks, (unsigned)stats->font_glyphs,
+             (unsigned)stats->font_work, (unsigned)stats->font_catalog,
+             (unsigned)stats->layout, (unsigned)stats->chapter, (unsigned)stats->prefetch,
+             (unsigned)stats->background, (unsigned)stats->page_images, (unsigned)stats->shelf_ui,
+             stats->font_slots, stats->prefetch_worker, stats->prefetch_stack_free,
+             (unsigned)heap_caps_get_free_size(internal),
+             (unsigned)heap_caps_get_largest_free_block(internal),
+             (unsigned)heap_caps_get_free_size(psram),
              (unsigned)heap_caps_get_largest_free_block(psram),
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
 }

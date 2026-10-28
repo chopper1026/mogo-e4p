@@ -17,6 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "memory": [sys.executable, "tools/reader_memory_host_test.py"],
     "perf": [sys.executable, "tools/reader_perf_host_test.py"],
     "clock": [sys.executable, "tools/time_service_host_test.py"],
     "time_policy": ["bash", "tools/run_time_sync_host_test.sh"],

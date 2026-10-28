@@ -5,6 +5,7 @@
  * 中文：从阅读页提取逐行预绘与资源回收；页面在推屏结束前交还字体和章节借用。
  * English: Row prefetch and resource cleanup extracted from the reader; the page returns font and chapter borrows before presentation ends.
  */
+#include "../reader_memory.h"
 #include "reader_prefetch.h"
 #include "book_layout.h"
 #include "reader_perf.h"
@@ -133,3 +134,12 @@ void reader_prefetch_release(void) {
     if (s_prep_done) { vSemaphoreDelete(s_prep_done); s_prep_done = NULL; }
     if (s_draw_lock) { vSemaphoreDelete(s_draw_lock); s_draw_lock = NULL; }
 }
+
+
+#if CONFIG_READER_PERF
+void reader_prefetch_memory_stats(reader_memory_stats_t *stats) {
+    stats->prefetch = reader_memory_owned(s_next_fb);
+    stats->prefetch_worker = s_prep_task != NULL;
+    stats->prefetch_stack_free = s_prep_task ? (unsigned)uxTaskGetStackHighWaterMark(s_prep_task) : 0;
+}
+#endif

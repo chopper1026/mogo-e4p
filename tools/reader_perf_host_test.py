@@ -21,6 +21,7 @@ STUBS = {
 #define MALLOC_CAP_8BIT 4
 int heap_caps_monitor_local_minimum_free_size_start(void);
 int heap_caps_monitor_local_minimum_free_size_stop(void);
+size_t heap_caps_get_allocated_size(void *pointer);
 size_t heap_caps_get_free_size(unsigned caps);
 size_t heap_caps_get_minimum_free_size(unsigned caps);
 size_t heap_caps_get_largest_free_block(unsigned caps);
@@ -56,15 +57,18 @@ void ttf_bench_begin(void){++benches;}
 void ttf_bench_end(ttf_bench_stats_t *out){++ends;*out=(ttf_bench_stats_t){.read_us=7,.raster_us=8,.hits=9,.misses=10};}
 static void early_return(void){READER_PERF_SCOPE(READER_PERF_PARSE);now+=5;return;}
 int main(void){
- reader_perf_finish(false);assert(!starts&&!stops);
- now=10;reader_perf_input_begin();now=20;reader_perf_begin("turn");
+ reader_perf_finish(false);assert(!starts&&!stops&&reader_perf_memory_ready());
+ now=10;reader_perf_input_begin();now=20;reader_perf_begin("turn");assert(!reader_perf_memory_ready());
  reader_perf_scope_t old=reader_perf_scope_begin(READER_PERF_SOURCE);
  {READER_PERF_SCOPE(READER_PERF_ACTION);now+=20;early_return();}
  now=50;reader_perf_scope_t display=reader_perf_scope_begin(READER_PERF_DISPLAY);
  now=80;reader_perf_scope_end(&display);reader_perf_scope_end(&old);
  reader_perf_scope_t invalid=reader_perf_scope_begin((reader_perf_stage_t)-1);
  reader_perf_scope_end(&invalid);
- reader_perf_finish(true);reader_perf_finish(true);assert(stops==1&&ends==1);
+ reader_perf_finish(true);
+ assert(reader_perf_memory_ready());reader_memory_stats_t memory={.font_source=123,.chapter=456,.prefetch_worker=1,.prefetch_stack_free=789};
+ reader_perf_memory("present",&memory);
+ reader_perf_finish(true);assert(stops==1&&ends==1);
  now=90;reader_perf_begin("cancel");old=reader_perf_scope_begin(READER_PERF_LAYOUT);
  now=100;reader_perf_begin("replace");
  now=110;reader_perf_scope_end(&old);reader_perf_finish(false);assert(stops==3&&ends==3);
@@ -100,6 +104,10 @@ def main():
         assert rows[1]["op"] == "cancel" and rows[1]["complete"] == "0"
         assert rows[2]["layout_us"] == "0" and rows[2]["id"] != rows[1]["id"]
         assert rows[3]["heap_local"] == "0" and rows[3]["internal_min"] == "0"
+        memory_rows=[line for line in output.splitlines() if line.startswith("READER_MEMORY ")]
+        assert len(memory_rows)==1 and "id=1 event=present" in memory_rows[0]
+        assert "font_source=123" in memory_rows[0] and "chapter=456" in memory_rows[0]
+        assert "prefetch_stack_free=789" in memory_rows[0] and "psram_free=2000" in memory_rows[0]
         print(output, end="")
         parsed = summary.parse_samples(output)
         assert summary.summarize(parsed, 20)["turn"]["enough_samples"] is False

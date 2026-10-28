@@ -14,6 +14,7 @@
  * User revision: titles reuse the active outlines/cache; coverage checks read the existing cmap without switching or loading another face.
  */
 
+#include "../reader_memory.h"
 #include "ttf_font.h"
 #include "ttf_stroke_filter.h"
 #include "ttf_block_cache.h"
@@ -2780,3 +2781,27 @@ void ttf_draw_text_px_bw(
         cursor_x += glyph->advance_x;
     }
 }
+
+
+#if CONFIG_READER_PERF
+void ttf_font_memory_stats(reader_memory_stats_t *stats) {
+    stats->font_source = stats->font_tables = stats->font_blocks = stats->font_glyphs = 0;
+    stats->font_slots = 0;
+    for (unsigned i = 0; i < TTF_FONT_SLOTS; ++i) {
+        const ttf_slot_t *slot = &s_slots[i];
+        const ttf_font_source_t *source = &slot->f_source;
+        stats->font_slots += slot->f_ready;
+        if (source->f_mem_owned) stats->font_source += reader_memory_owned(source->f_mem);
+        stats->font_tables += reader_memory_owned(source->f_glyf_ram) +
+            reader_memory_owned(source->f_gvar_ram) + reader_memory_owned(slot->f_file_loca) +
+            reader_memory_owned(slot->f_gvar_glyph_off);
+        if (!slot->f_data_borrowed) stats->font_tables += reader_memory_owned(slot->f_font_data);
+        stats->font_blocks += reader_memory_owned(slot->f_blocks.f_io_data) +
+            reader_memory_owned(slot->f_blocks.f_io_run_buf);
+        for (const glyph_entry_t *entry = slot->f_glyphs.head; entry; entry = entry->lru_next)
+            stats->font_glyphs += reader_memory_owned(entry) + reader_memory_owned(entry->bitmap);
+    }
+    stats->font_work = reader_memory_owned(work);
+    stats->font_catalog = reader_memory_owned(s_catalog);
+}
+#endif
