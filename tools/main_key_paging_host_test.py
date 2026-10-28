@@ -42,33 +42,33 @@ static int app_index_of(const app_desc_t *p){return p->tab;}
 static void ui_nav_request(app_ctx_t*c,int tab){(void)c;requests=tab;}
 '''
 for n in ('draw_shelf_pager','shelf_key_paint','shelf_main_key','shelf_key_tick'):u+=function(n,b)+'\n'
-u+=function('main_key_action',r/'main/app/app_loop.c')+'\n'
+u+=function('app_navigation_main_key_action',r/'main/app/app_navigation.c')+'\n'
 u+=r'''
 int main(void){app_ctx_t ctx={0};
  for(int tab=0;tab<4;++tab){app_desc_t p={tab,NULL};
-  requests=-1;assert(main_key_action(&ctx,&p,UI_KEY_1,false)==APP_REDRAW_NONE&&requests==(tab+3)%4);
-  assert(main_key_action(&ctx,&p,UI_KEY_3,false)==APP_REDRAW_NONE&&requests==(tab+1)%4);
-  requests=-1;assert(main_key_action(&ctx,&p,UI_KEY_2,true)==APP_REDRAW_FULL&&requests==-1);
+  requests=-1;assert(app_navigation_main_key_action(&ctx,&p,UI_KEY_1,false)==APP_REDRAW_NONE&&requests==(tab+3)%4);
+  assert(app_navigation_main_key_action(&ctx,&p,UI_KEY_3,false)==APP_REDRAW_NONE&&requests==(tab+1)%4);
+  requests=-1;assert(app_navigation_main_key_action(&ctx,&p,UI_KEY_2,true)==APP_REDRAW_FULL&&requests==-1);
  }
  app_desc_t shelf={1,shelf_main_key};requests=-1;
- assert(main_key_action(&ctx,&shelf,UI_KEY_2,false)==APP_REDRAW_AREA&&s_shelf_key_mode&&outlines==1);
- assert(main_key_action(&ctx,&shelf,UI_KEY_3,false)==APP_REDRAW_AREA&&s_shelf_key_delta==1&&presses==1);
+ assert(app_navigation_main_key_action(&ctx,&shelf,UI_KEY_2,false)==APP_REDRAW_AREA&&s_shelf_key_mode&&outlines==1);
+ assert(app_navigation_main_key_action(&ctx,&shelf,UI_KEY_3,false)==APP_REDRAW_AREA&&s_shelf_key_delta==1&&presses==1);
  assert(shelf_key_tick(&ctx)==APP_REDRAW_NONE&&!turns);ctx.now_ms=40;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_PAGE&&turns==1&&ctx.leaf==1&&!s_shelf_key_pressed);
- assert(main_key_action(&ctx,&shelf,UI_KEY_2,true)==APP_REDRAW_FULL&&s_shelf_key_mode);
+ assert(app_navigation_main_key_action(&ctx,&shelf,UI_KEY_2,true)==APP_REDRAW_FULL&&s_shelf_key_mode);
  // 连续快按不丢翻页，反向抵消不误翻，边界仍被模式消费。
  // Rapid presses retain turns, opposite requests cancel, and boundary presses stay consumed by paging mode.
- main_key_action(&ctx,&shelf,UI_KEY_3,false);main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=80;
+ app_navigation_main_key_action(&ctx,&shelf,UI_KEY_3,false);app_navigation_main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=80;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_PAGE&&ctx.leaf==2);ctx.now_ms=120;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_PAGE&&ctx.leaf==3);
- main_key_action(&ctx,&shelf,UI_KEY_1,false);main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=160;
+ app_navigation_main_key_action(&ctx,&shelf,UI_KEY_1,false);app_navigation_main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=160;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_AREA&&ctx.leaf==3);
- ctx.leaf=4;main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=200;requests=-1;
+ ctx.leaf=4;app_navigation_main_key_action(&ctx,&shelf,UI_KEY_3,false);ctx.now_ms=200;requests=-1;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_AREA&&ctx.leaf==4&&requests==-1);
- main_key_action(&ctx,&shelf,UI_KEY_1,false);ctx.request_app=&shelf;
+ app_navigation_main_key_action(&ctx,&shelf,UI_KEY_1,false);ctx.request_app=&shelf;
  assert(shelf_key_tick(&ctx)==APP_REDRAW_NONE&&!s_shelf_key_mode&&!s_shelf_key_delta);
- ctx.request_app=NULL;main_key_action(&ctx,&shelf,UI_KEY_2,false);main_key_action(&ctx,&shelf,UI_KEY_1,false);
- main_key_action(&ctx,&shelf,UI_KEY_2,false);assert(!s_shelf_key_mode&&!s_shelf_key_delta);
+ ctx.request_app=NULL;app_navigation_main_key_action(&ctx,&shelf,UI_KEY_2,false);app_navigation_main_key_action(&ctx,&shelf,UI_KEY_1,false);
+ app_navigation_main_key_action(&ctx,&shelf,UI_KEY_2,false);assert(!s_shelf_key_mode&&!s_shelf_key_delta);
  s_view=9;app_redraw_t redraw;assert(!shelf_main_key(&ctx,UI_KEY_2,&redraw));
  puts("PASS: four-root cycling/wrap, shared middle-hold full refresh, shelf mode chevron-only contours and local pressed arrows, queued rapid turns, opposite cancellation, boundary consumption and navigation/subpage interruption");
 }

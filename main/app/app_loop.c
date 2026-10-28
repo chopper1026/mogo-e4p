@@ -41,6 +41,7 @@
 #include "../reader_perf.h"
 #include "app_loop.h"
 #include "app_input.h"
+#include "app_navigation.h"
 #include "auto_lock.h"
 #include "crash_note.h"
 
@@ -150,12 +151,6 @@ static ui_quick_control_t s_fl_pending_control;
 // 屏幕上第四枚圆钮当前画出的开灯状态；点按翻转后据此决定是否重画。
 // The frontlight state currently painted on the fourth circle; a tap uses it to decide the repaint.
 static bool s_fl_shown_on;
-// 快捷栏从阅读正文离开时记下恢复点：设置页左上角返回直接回到正文，而不是书架。
-// A quick-bar hold that leaves the reading body keeps its resume point, so the
-// settings page's back returns to the body instead of the shelf.
-static bool s_quick_return_body;
-static char s_quick_return_path[256];
-static bool s_quick_return_fullscreen;
 static void quick_frontlight_flush(app_ctx_t *ctx, const app_desc_t *current);
 // 快捷层只持有预览值；落盘只发生在松手、点选或关闭/读错时，一次拖动只写一遍 NVS。
 // The layer holds preview values; NVS writes happen on release, tap, close or a read error, once per drag.
@@ -176,7 +171,6 @@ static void quick_reset(void) {
     s_fl_pending_control=UI_QUICK_CTL_NONE;
     s_fl_shown_on=s_quick.fl_on;
 }
-static bool s_nav_contact_down,s_nav_polled;
 // 锁屏占用整屏后旧主页面底栏不再是物理基准；解锁第一帧必须完整绘制。
 // A lock screen replaces the old navigation baseline; the first unlocked frame must render complete navigation.
 static void main_lock_boundary(void) {
@@ -301,7 +295,6 @@ static void quick_toggle_wifi(void) {
         }
     }
 }
-static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app);
 
 // 前光事件只动它自己的控件：开关点按同时展开或收起胶囊滑杆，层高变化，走整层
 // 重排并按新旧高度并集推 GL16；拖动帧与松手提交都走胶囊拖动表 DU，松手不做
@@ -406,14 +399,6 @@ static void quick_reenter_page(app_ctx_t *ctx, const app_desc_t *current) {
     app_present(ctx, current, APP_REDRAW_PAGE);
 }
 
-// 从阅读正文离开前记下书与全屏状态；其他页面或非正文视图不记，返回仍按原逻辑。
-// Record the book and full-screen state before leaving the reading body; other
-// pages and non-body views record nothing and keep the ordinary return path.
-static void quick_capture_return_body(const app_desc_t *current) {
-    s_quick_return_body = current == &app_book && app_book_reader_body_visible() &&
-        app_book_resume_context(s_quick_return_path, sizeof(s_quick_return_path),
-                                &s_quick_return_fullscreen);
-}
 
 // 快捷层单帧输入：识别并执行动作；本帧由快捷层持有输入时返回 true。
 // 正常 tick 与采样回放共用同一入口，回放不能只看最后一帧，否则按下沿会丢。
@@ -462,7 +447,7 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
         app_transfer_request_wifi_setup();
         if (current == &app_transfer) quick_reenter_page(ctx, current);
         else {
-            quick_capture_return_body(current);
+            app_navigation_capture_reader_return(current);
             ctx->request_app = &app_transfer;
         }
     } else if (event.action == UI_QUICK_BLUETOOTH_SETTINGS) {
@@ -475,7 +460,7 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
             app_device_settings_request_bluetooth(false);
             quick_reenter_page(ctx, current);
         } else {
-            quick_capture_return_body(current);
+            app_navigation_capture_reader_return(current);
             app_device_settings_request_bluetooth(true);
             ctx->request_app = &app_device_settings;
         }
@@ -486,7 +471,7 @@ static bool quick_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool *lo
 }
 
 static void main_present_finished(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
-    if (redraw == APP_REDRAW_DONE || !main_page_ready(ctx, app)) s_presented_main = NULL;
+    if (redraw == APP_REDRAW_DONE || !app_navigation_main_page_ready(ctx, app)) s_presented_main = NULL;
     else if (redraw != APP_REDRAW_NONE) s_presented_main = app;
     display_main_transition_disarm();
 }
@@ -524,14 +509,14 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
             if (result != EPD_DRAW_SUCCESS) redraw = APP_REDRAW_FULL;
         }
     }
-    if(redraw==APP_REDRAW_FULL || (redraw==APP_REDRAW_PAGE && !main_page_ready(ctx,app)))
+    if(redraw==APP_REDRAW_FULL || (redraw==APP_REDRAW_PAGE && !app_navigation_main_page_ready(ctx,app)))
         ui_click_feedback_reset();
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) ui_click_feedback_begin(ctx->fb);
     ui_text_set_system_scale(true);
     // 后台目录/封面完成及滚动仍属于当前主页面，不能借普通整页出口闪到底栏。
     // Background directory/cover completion and scrolling remain on this main page and must not flash navigation via ordinary page output.
     if ((redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_AREA) &&
-        s_presented_main == app && main_page_ready(ctx, app)) display_main_transition_arm(app, false, false);
+        s_presented_main == app && app_navigation_main_page_ready(ctx, app)) display_main_transition_arm(app, false, false);
     if (app->present != NULL && app->present(ctx, redraw)) {
         main_present_finished(ctx, app, redraw);
         LATENCY_PRESENT_DONE();
@@ -631,64 +616,7 @@ static void menu_feedback(app_ctx_t* ctx, const app_desc_t* current,
     }
 }
 
-// 切页：先让上一页收尾，再给新页一次 on_enter，最后整页画出来。
-// Leave the old page, enter the new one, then present a full page.
-static bool main_page_ready(app_ctx_t* ctx, const app_desc_t* app) {
-    int index = app_index_of(app);
-    return index >= 0 && index < 4 &&
-           app->main_page_visible && app->main_page_visible(ctx);
-}
 
-// 主页面左右键循环切页；中键短按交给页面，长按统一全刷。阅读及子页继续使用原映射。
-// Main roots cycle with side keys, delegate a middle tap, and share middle-hold full refresh. Reader/subpage mappings stay page-owned.
-static app_redraw_t main_key_action(app_ctx_t *ctx,const app_desc_t *current,int key,bool held) {
-    if(held)return key==UI_KEY_2?APP_REDRAW_FULL:APP_REDRAW_NONE;
-    app_redraw_t redraw=APP_REDRAW_NONE;
-    if(current->on_main_key && current->on_main_key(ctx,key,&redraw))return redraw;
-    int tab=app_index_of(current);
-    if(tab>=0 && tab<4 && (key==UI_KEY_1||key==UI_KEY_3))
-        ui_nav_request(ctx,(tab+(key==UI_KEY_1?3:1))%4);
-    return APP_REDRAW_NONE;
-}
-
-static void switch_to(
-    app_ctx_t* ctx, const app_desc_t** current, const app_desc_t* next
-) {
-    if (next == NULL || next == *current) return;
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_start=esp_timer_get_time();
-    const int probe_from=app_index_of(*current);
-#endif
-    bool main_source = main_page_ready(ctx, *current);
-    bool shelf_source = main_source && app_index_of(*current) == 1;
-    display_main_transition_cancel();
-    if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
-    // 传书页独占无线：进页前取消在途的后台对时，页面的会话才起得来。
-    // The transfer page owns the radio: an in-flight background sync cancels before entry, or the
-    // page's own session cannot start.
-    if (next == &app_transfer) app_time_service_cancel();
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_exit=esp_timer_get_time();
-#endif
-    *current = next;
-    app_font_activate_system();
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_font=esp_timer_get_time();
-#endif
-    if (next->on_enter != NULL) next->on_enter(ctx);
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_enter=esp_timer_get_time();
-#endif
-    if (main_source && main_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
-    app_present(ctx, next, next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
-    display_main_transition_disarm();
-#ifdef KIIKO_LOCAL_LATENCY
-    ESP_LOGI("latency","SWITCH from=%d to=%d mode=%d exit_us=%lld font_us=%lld enter_us=%lld present_us=%lld total_us=%lld",probe_from,app_index_of(next),app_settings_main_refresh_mode(),
-        (long long)(probe_exit-probe_start),(long long)(probe_font-probe_exit),(long long)(probe_enter-probe_font),
-        (long long)(esp_timer_get_time()-probe_enter),(long long)(esp_timer_get_time()-probe_start));
-#endif
-    ESP_LOGI(TAG, "page -> %s", next->title);
-}
 
 // 菜单页不是 app，单独画。/ The menu is not an app; present it here.
 static void present_menu(app_ctx_t* ctx, const app_desc_t* current, int leaf, menu_feedback_t* feedback) {
@@ -699,6 +627,13 @@ static void present_menu(app_ctx_t* ctx, const app_desc_t* current, int leaf, me
     }
     ui_draw_menu_page(ctx->fb, current, leaf);
     guard_draw_result(ctx->hl, update_display_fast_page(ctx->hl));
+}
+
+// 导航借用原菜单入口，反馈状态仍由主循环持有。
+// Navigation borrows the original menu presenter while the loop retains feedback state.
+static void navigation_present_menu(app_ctx_t *ctx, const app_desc_t *current,
+                                    int leaf, void *menu_context) {
+    present_menu(ctx, current, leaf, menu_context);
 }
 
 // 最近采样帧仍由主循环持有，回放逐帧同步，锁屏边界清零。
@@ -820,22 +755,6 @@ static void discard_lock_input(app_ctx_t* ctx, cst836u_touch_t* latest, bool* wa
     ctx->consumed = true;
 }
 
-bool app_poll_main_navigation(app_ctx_t *ctx) {
-    if(!ctx||!ctx->tp)return false;
-    if(ctx->request_app)return true;
-    cst836u_touch_t touch={0};
-    if(cst836u_read(ctx->tp,&touch)!=ESP_OK||!touch.touched||touch.count!=1) {
-        s_nav_contact_down=s_nav_polled=false;return false;
-    }
-    int index=ui_nav_hit(touch.x,touch.y);
-    if(index<0)return false;
-    if(!s_nav_contact_down) {
-        s_nav_contact_down=s_nav_polled=true;
-        if(index!=1)ui_nav_request(ctx,index);
-        ctx->user_activity=true;
-    }
-    return ctx->request_app!=NULL;
-}
 
 // 上键单击的全局兜底。阅读正文内由 app_book 的 tick 按阅读映射处理（含翻页等动作），
 // 这里不重复轮询；其余页面（主页、书架、子页）只兑现「前光开关」绑定，翻页等阅读
@@ -891,7 +810,7 @@ static void up_key_global_tick(app_ctx_t* ctx, const app_desc_t* current) {
 
 void app_loop_run(const app_loop_config_t* config) {
     s_presented_main = NULL;
-    s_nav_contact_down=s_nav_polled=false;
+    app_navigation_reset_contact();
     const app_desc_t* current = config->first_app != NULL
         ? config->first_app
         : app_home_page();
@@ -924,9 +843,7 @@ void app_loop_run(const app_loop_config_t* config) {
     int menu_pressed = UI_MENU_HIT_NONE;
     menu_feedback_t feedback = {0};
     int menu_leaf = 0;
-    const app_desc_t* return_app = NULL;
-    int return_leaf = 0, return_menu_leaf = 0;
-    bool return_to_menu = false;
+    app_navigation_history_t navigation = {0};
     int held_key = -1;
     bool held_main_key=false;
     int64_t held_since_ms = 0;
@@ -1136,7 +1053,7 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         // 触摸已由 app_input_ingest_touch_frame 去抖并更新 ctx；这里只复位上游新增的导航按压状态。
         // Touch is debounced in app_input_ingest_touch_frame; only the upstream nav-press state resets here.
-        if(err!=ESP_OK||!touch.touched)s_nav_contact_down=s_nav_polled=false;
+        app_navigation_observe_contact(err, touch.touched);
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", read_pico_transfer_service_poll());
@@ -1275,11 +1192,11 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         // 主页面底栏在首次单指报点就确认；抬手、轻滑和停留不再重复切页。
         // Commit root navigation on the first single contact; lift, small motion and holds never repeat it.
-        bool nav_press_owned=s_nav_polled&&touch.touched&&touch.count==1&&main_page_ready(&ctx,current)&&ui_nav_hit(touch.x,touch.y)>=0;
+        bool nav_press_owned=app_navigation_contact_polled()&&touch.touched&&touch.count==1&&app_navigation_main_page_ready(&ctx,current)&&ui_nav_hit(touch.x,touch.y)>=0;
         if(nav_press_owned)ctx.consumed=true;
         if (err == ESP_OK && pressed && !nav_press_owned && touch.count == 1 && !power_input_owned &&
             !quick_input_owned && !menu_open && !usb_storage_active() &&
-            main_page_ready(&ctx, current)) {
+            app_navigation_main_page_ready(&ctx, current)) {
             const int tab = ui_nav_hit(touch.x, touch.y);
             if (tab >= 0) {
                 held_key = -1;
@@ -1287,7 +1204,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 ctx.consumed = true;
                 ctx.user_activity = true;
                 nav_press_owned = true;
-                s_nav_contact_down=true;
+                app_navigation_claim_contact();
                 if(tab!=app_index_of(current)||ctx.request_app)ui_nav_request(&ctx,tab);
             }
         }
@@ -1307,9 +1224,9 @@ void app_loop_run(const app_loop_config_t* config) {
                 menu_pressed = UI_MENU_HIT_NONE;
             }
             if (key >= 0 && current->owns_keys && !menu_open) {
-                bool main_keys=main_page_ready(&ctx,current);
+                bool main_keys=app_navigation_main_page_ready(&ctx,current);
                 app_redraw_t redraw=main_keys
-                    ? (key==UI_KEY_2?APP_REDRAW_NONE:main_key_action(&ctx,current,key,false))
+                    ? (key==UI_KEY_2?APP_REDRAW_NONE:app_navigation_main_key_action(&ctx,current,key,false))
                     : current->on_key && !(key==UI_KEY_2 && current->defer_middle_short)
                         ? current->on_key(&ctx,key):APP_REDRAW_NONE;
                 present_page(&ctx,current,&gesture,redraw);
@@ -1500,17 +1417,17 @@ void app_loop_run(const app_loop_config_t* config) {
             }
         }
 
-        if(held_key>=0 && held_main_key && !main_page_ready(&ctx,current)) {
+        if(held_key>=0 && held_main_key && !app_navigation_main_page_ready(&ctx,current)) {
             held_key=-1;held_main_key=false;
         }
         if (!power_dialog_open && released && held_key == UI_KEY_2 && ui_key_hit_test(latest.x, latest.y) == UI_KEY_2 &&
-            (current->defer_middle_short || main_page_ready(&ctx,current)) && !menu_open &&
+            (current->defer_middle_short || app_navigation_main_page_ready(&ctx,current)) && !menu_open &&
             !ctx.request_app && !ctx.request_menu && !ctx.request_return) {
             int key = held_key;
             held_key = -1;
             ctx.consumed = true;
             bool held=ctx.now_ms-held_since_ms>=UI_LONG_PRESS_MS;
-            app_redraw_t redraw=main_page_ready(&ctx,current)?main_key_action(&ctx,current,key,held):
+            app_redraw_t redraw=app_navigation_main_page_ready(&ctx,current)?app_navigation_main_key_action(&ctx,current,key,held):
                 held?current->on_key_long(&ctx,key):current->on_key(&ctx,key);
             present_page(&ctx, current, &gesture, redraw);
         }
@@ -1523,8 +1440,8 @@ void app_loop_run(const app_loop_config_t* config) {
                 int key = held_key;
                 held_key = -1;
                 ctx.consumed = true;
-                present_page(&ctx,current,&gesture,main_page_ready(&ctx,current)?
-                    main_key_action(&ctx,current,key,true):current->on_key_long(&ctx,key));
+                present_page(&ctx,current,&gesture,app_navigation_main_page_ready(&ctx,current)?
+                    app_navigation_main_key_action(&ctx,current,key,true):current->on_key_long(&ctx,key));
             }
         }
         // 蓝牙翻页器：BLE 栈只在这里跟随设置启停。必须走 ble_pt_sync()——自己写
@@ -1630,56 +1547,9 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_return = false;
             ctx.consumed = true;
             just_transitioned = true;
-            if (go_back) {
-                bool main_source = main_page_ready(&ctx, current);
-                bool shelf_source = main_source && app_index_of(current) == 1;
-                display_main_transition_cancel();
-                menu_open = return_app ? return_to_menu : true;
-                menu_leaf = return_app ? return_menu_leaf : ui_menu_leaf_for_app(current);
-                if (return_app) {
-                    if (current->on_exit) current->on_exit(&ctx);
-                    current = return_app;
-                    return_app = NULL;
-                    app_font_activate_system();
-                    // 快捷栏长按离开阅读正文后的返回：按离开时的书与全屏状态重开正文。
-                    // Returning from a quick-bar hold that left the reading body reopens
-                    // that book and full-screen state instead of landing on the shelf.
-                    if (current == &app_book && s_quick_return_body)
-                        (void)app_book_request_return_to_body(s_quick_return_path,
-                                                             s_quick_return_fullscreen);
-                    if (current->on_enter) current->on_enter(&ctx);
-                    // 初始化后恢复通用页码，避免 on_enter 的默认页码覆盖来源。
-                    // Restore the shared leaf after initialization overrides its default.
-                    ctx.leaf = return_leaf;
-                }
-                // 一次返回就用掉恢复点；没有来源页时也不留到下次。
-                // One return consumes the resume point, even when there is no origin page.
-                s_quick_return_body = false;
-                if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
-                else {
-                    if (main_source && main_page_ready(&ctx, current)) display_main_transition_arm(current, shelf_source, true);
-                    app_present(&ctx, current, APP_REDRAW_PAGE);
-                    display_main_transition_disarm();
-                }
-            } else if (next) {
-                if (next != current) {
-                    // 快捷栏从正文离开的那次切页保留恢复点；之后从别的页面再切页就作废。
-                    // Keep the resume point for the switch that left the reading body; a
-                    // later switch from another page invalidates it.
-                    if (current != &app_book) s_quick_return_body = false;
-                    return_app = current;
-                    return_leaf = ctx.leaf;
-                    return_to_menu = selected_from_menu;
-                    return_menu_leaf = menu_leaf;
-                }
-                menu_open = false;
-                switch_to(&ctx, &current, next);
-
-            } else {
-                menu_open = true;
-                menu_leaf = ui_menu_leaf_for_app(current);
-                present_menu(&ctx, current, menu_leaf, &feedback);
-            }
+            app_navigation_apply_request(&ctx, &current, &menu_open, &menu_leaf,
+                &navigation, (app_navigation_request_t){next, go_back, selected_from_menu},
+                navigation_present_menu, &feedback);
         }
 #if CONFIG_TOUCH_DIAG
         if (ctx.now_ms - td_stats_ms >= 60000) {

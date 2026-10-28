@@ -33,8 +33,8 @@ static app_redraw_t transfer_return_tick(app_ctx_t*);
 const app_desc_t app_book = {.title="book",.render=render,.on_enter=enter,.on_exit=leave};
 const app_desc_t app_transfer = {.title="transfer",.on_tick=transfer_return_tick};
 const app_desc_t app_device_settings = {.title="settings"};
-// 快捷栏长按直达设置页只记录请求；页面本身的进入由 switch_to 计数。
-// Quick-bar holds only record their request; entering the page is counted by switch_to.
+// 快捷栏长按直达设置页只记录请求；页面本身的进入由 app_navigation_switch_to 计数。
+// Quick-bar holds only record their request; entering the page is counted by app_navigation_switch_to.
 static int wifi_setup_requests, bt_settings_requests;
 static bool bt_return_to_origin;
 void app_transfer_request_wifi_setup(void) {++wifi_setup_requests;}
