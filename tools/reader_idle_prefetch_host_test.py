@@ -46,7 +46,6 @@ static void xTaskNotifyGive(task_t *task){xSemaphoreGive(&task->notify);}
 static void vTaskDelete(task_t *task){pthread_mutex_lock(&task->notify.lock);task->quit=true;pthread_cond_signal(&task->notify.cond);pthread_mutex_unlock(&task->notify.lock);pthread_join(task->thread,NULL);pthread_mutex_destroy(&task->notify.lock);pthread_cond_destroy(&task->notify.cond);free(task);}
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;static const char *s_text="text";
 static bool s_toolbar,s_clear_confirm;
-static size_t s_page;
 static uint32_t generation=1;
 static unsigned work,allocs;static bool fail_alloc,fail_draw,wallpaper,images;
 static size_t free_space=4u*1024u*1024u;
@@ -82,7 +81,7 @@ unit += (root/'main/book/reader_prefetch.c').read_text() + '\n'
 for name in ['lock_draw','unlock_draw','invalidate_prep','kick_prep','reader_prefetch_idle']:
  unit+=function(name,book)+'\n'
 assert 'reader_prefetch_end(prep);' in function('present',book)
-assert 'reader_prefetch_resume(s_page)' in function('paint_reading',book)
+assert 'reader_prefetch_resume(s_reader_session.position.page)' in function('paint_reading',book)
 unit+=r'''
 static void destroy_worker(void){if(s_prep_task){vTaskDelete(s_prep_task);s_prep_task=NULL;}if(s_prep_done){vSemaphoreDelete(s_prep_done);s_prep_done=NULL;}if(s_draw_lock){vSemaphoreDelete(s_draw_lock);s_draw_lock=NULL;}}
 static void wait_row(unsigned count){pthread_mutex_lock(&row_lock);while(row_entries<count)pthread_cond_wait(&row_cond,&row_lock);pthread_mutex_unlock(&row_lock);}
@@ -132,6 +131,8 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  puts("PASS: real-thread scan overlap, row-boundary stop instead of whole-page join, partial-page continuation, 40 rapid cache hits, input/navigation priority and generation/OOM/image/background/panel guards");
 }
 '''
+from reader_session_test_state import position_state
+unit = position_state(page=0) + unit
 with tempfile.TemporaryDirectory(dir='/private/tmp') as d:
  folder=Path(d)
  for header in ['epdiy.h','book_layout.h','reader_perf.h','esp_heap_caps.h','esp_timer.h',

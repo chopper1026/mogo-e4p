@@ -31,7 +31,7 @@ static bool s_reader_slider_endpoint,fail_layout;
 static uint8_t s_book_tracking=15,s_book_para=25;
 static unsigned writes,saves,builds,invalidations;
 static char s_text_storage[1],*s_text=s_text_storage;
-static size_t s_text_len=1,s_page=2,s_block_count;
+static size_t s_text_len=1,s_block_count;
 static const void *s_blocks;
 static int typography;
 static uint8_t stored_tracking=207,stored_para=25;
@@ -145,6 +145,8 @@ int main(void){
  puts("PASS: actual press/drag/commit for all 31 tracking and 11 paragraph stops, endpoint bounds, NVS encoding, anchored reflow and unchanged saved spacing on reflow failure");
 }
 '''
+from reader_session_test_state import position_state
+unit = position_state(page=2) + unit
 with tempfile.TemporaryDirectory() as directory:
     source = Path(directory) / 'test.c'
     source.write_text(unit)

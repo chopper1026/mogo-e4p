@@ -67,6 +67,8 @@ static html_text_t chapter(void) {
 }
 int main(void) {
     reader_session_t first = {0}, second = {0};
+    first.position = (reader_position_t){.chapter=7,.page=3};
+    second.position = (reader_position_t){.chapter=2,.page=1};
     assert(!reader_session_has_source(NULL) && !reader_session_has_source(&first));
     assert(reader_session_open(NULL, "book.epub") == ESP_ERR_INVALID_ARG);
     assert(reader_session_open(&first, NULL) == ESP_ERR_INVALID_ARG);
@@ -91,6 +93,8 @@ int main(void) {
         assert(html_to_blocks("<p>failure</p>", 14, &failed) == ESP_ERR_NO_MEM);
         html_text_free(&failed); html_test_fail_after = -1;
         assert(reader_session_content(&first)->utf8 == text && live == held && blocks == held_blocks);
+        assert(first.position.chapter == 7 && first.position.page == 3);
+        assert(second.position.chapter == 2 && second.position.page == 1);
         html_text_t candidate = chapter();
         html_text_free(&candidate);
         assert(reader_session_content(&first)->utf8 == text && live == held && blocks == held_blocks);

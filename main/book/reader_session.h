@@ -1,13 +1,15 @@
 /*
- * 中文：单 UI 会话的书源与章节所有权；页面暂时保留布局、位置和预绘控制。
- * English: Source and chapter ownership for one UI session; layout, position and prefetch remain in the page for now.
+ * 中文：单 UI 会话的书源、章节内容与当前位置；页面暂时保留布局和预绘控制。
+ * English: Source, chapter content and current position for one UI session; layout and prefetch control remain in the page for now.
  */
 #pragma once
 #include <stdbool.h>
 #include "html_text.h"
+#include "reader_position.h"
 
 typedef struct {
     html_text_t content; ///< 会话独占的章节；仅通过下面的接口替换。/ Session-owned chapter; replace only through this API.
+    reader_position_t position; ///< UI 在加载或重排成功后提交；章节交接不隐式修改。/ Committed by the UI after load or reflow succeeds; chapter transfer never changes it implicitly.
 } reader_session_t;
 
 /// 静态或栈上会话用零初始化；单实例书源同时只允许一个会话拥有。

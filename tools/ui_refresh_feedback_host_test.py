@@ -128,7 +128,6 @@ static EpdRect reader_area(void){return (EpdRect){36,176,612,856};}
 static EpdRect progress_rect(void){return (EpdRect){36,1040,612,42};}
 static EpdRect reader_fullscreen_progress_area(void){return (EpdRect){0,1200,684,4};}
 static unsigned percent(unsigned page){return page;}
-static unsigned s_page,s_chapter;
 static bool test_hide_images,test_load_failed,s_save_failed,s_input_settle;
 static int test_types[2][2],test_push_error,test_effect;
 static uint8_t test_full_pages;
@@ -559,6 +558,8 @@ int main(void){
 }
 '''
 
+from reader_session_test_state import position_state
+unit = position_state(page=0) + unit
 with tempfile.TemporaryDirectory() as folder:
     for name, unit in (("shelf", shelf), ("status", status),
                        ("nav-modes", navigation), ("image-bw", image_bw)):

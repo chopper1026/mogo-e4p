@@ -16,7 +16,7 @@ unit = r'''
 #include <string.h>
 #include <stdio.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {int64_t now_ms;int leaf;} app_ctx_t;
+typedef struct {int64_t now_ms;int leaf;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE} app_redraw_t;
 enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define BOOK_TOC_ROWS 7
@@ -31,11 +31,12 @@ enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 static char s_requested_open[288];
 static bool s_requested_fullscreen=true,s_requested_open_home;
 static const char *s_text="text";
-static size_t s_text_len=900,s_block_count,s_chapter,s_page,s_jump_offset;
+static size_t s_text_len=900,s_block_count,s_jump_offset;
 static void *s_blocks;
 static int s_px=48,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_view=READING;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
 static bool s_reader_fullscreen,s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;
+static bool s_reader_stable_frame,s_reader_footer_strong;
 static bool s_water_turn_pending,s_reader_cleanup,draw_locked,load_failed;
 static int s_water_turn_dir;
 static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved;
@@ -98,7 +99,7 @@ static void reset(bool full,bool tools,size_t page,size_t chapter){
  s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=0;
- failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=true;
+ failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=s_reader_stable_frame=true;
  s_reader_turn_pending=s_water_turn_pending=s_reader_cleanup=false;s_jump_offset=0;
 }
 int main(void){
@@ -153,7 +154,7 @@ int main(void){
  test_images=0;effect=1;
  // Mixed/image targets and leaving an image never run the text ripple waveform.
  reset(true,false,2,0);test_images=2;s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
- reset(true,false,2,0);test_images=0;s_reader_text_frame=false;s_reader_slider=-1;
+ reset(true,false,2,0);test_images=0;s_reader_text_frame=s_reader_stable_frame=false;s_reader_slider=-1;
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
  test_images=0;
  reset(false,true,0,0);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE);
@@ -171,9 +172,11 @@ int main(void){
  puts("PASS: full-screen entry follows the remembered preference; toggles persist it; turns keep the current windowed mode; toolbar dismissal; chapter/boundary turns");
 }
 '''
+from reader_session_test_state import position_state
+unit = position_state(page=0) + unit
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
     c, exe = Path(folder) / 'test.c', Path(folder) / 'test'
     c.write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
-                    str(c), '-o', str(exe)], check=True)
+                    '-fsanitize=address,undefined',str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

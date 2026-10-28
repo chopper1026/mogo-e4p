@@ -11,6 +11,7 @@ python3 tools/run_reader_baseline.py
 python3 tools/run_reader_baseline.py perf prefetch background
 python3 tools/run_reader_baseline.py shelf management
 python3 tools/run_reader_baseline.py session images book
+python3 tools/run_reader_baseline.py controls
 ```
 
 `shelf` 与 `management` 编译真实的书架数据模块，分别覆盖目录/分页记忆及搜索、排序、选择和管理失败重试；保留页面适配层的回归断言。
@@ -18,6 +19,9 @@ python3 tools/run_reader_baseline.py session images book
 
 `session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
 `session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
+
+`controls` 覆盖全屏/窗口化翻页、跨章边界、字号与间距重排、正文点击、缓存接管后的时钟及缩进长按。当前章和当前页属于 `reader_session.position`；解析候选失败不会替换位置，成功加载与重排仍由 UI 按原顺序提交。进度文件继续使用章节和字节偏移，布局页码不作为持久位置。
+`controls` covers full-screen/windowed turns, chapter boundaries, size/spacing reflow, body taps, cached-page clocks and indent holds. The current chapter and page belong to `reader_session.position`; failed parse candidates never replace position, and the UI commits successful loads and reflows in the existing order. Progress files retain chapter and byte offsets rather than layout page numbers.
 
 `prefetch` 编译完整的预绘模块，使用真实线程和受控行边界验证推屏期间借用、停止交还、部分页续画、代次失效、内存/任务创建失败及重复释放。页面负责输入优先级和插图排除；预绘模块在 `end` 返回前借用稳定的字体、章节与布局，调用方随后才能替换资源。
 `prefetch` compiles the complete prefetch module with real threads and controlled row boundaries, checking presentation-time borrowing, stop/handoff, partial-page continuation, generation invalidation, allocation/task failures and repeated release. The page owns input priority and illustration exclusions; fonts, chapter and layout remain stable until `end` returns, before callers replace resources.

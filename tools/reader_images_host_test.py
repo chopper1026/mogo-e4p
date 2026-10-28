@@ -38,7 +38,9 @@ unit = r'''
 #include <string.h>
 #include "html_text.h"
 #include "reader_session.h"
-static reader_session_t s_reader_session;
+static reader_session_t s_reader_session = {.position = {.chapter = 3}};
+#define s_chapter s_reader_session.position.chapter
+#define s_page s_reader_session.position.page
 esp_err_t book_open(const char *path){(void)path;return ESP_OK;}
 void book_close(void){}
 static void reader_bind_chapter(void);
@@ -64,7 +66,7 @@ static reader_image_t *s_page_images;
 static int s_page_image_count;
 static size_t s_page_images_for=SIZE_MAX;
 static uint32_t s_page_images_generation;
-static size_t s_page,s_chapter=3,s_image_count;
+static size_t s_image_count;
 static char **s_images;
 static bool hidden,locked;
 static int alloc_fail_after=-1,read_failure=-1,decode_failure=-1;

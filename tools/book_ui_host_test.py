@@ -209,7 +209,6 @@ static char* s_text;
 enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
 static int s_unsaved,s_px=48,s_margin[MARGIN_COUNT]={36,36,0,0},s_line_spacing=130;
 static uint32_t s_file_size=1000;
-static size_t s_chapter,s_page;
 static bool s_book_fonts_applied;
 static bool app_settings_book_fonts(void){return false;}
 static const char *app_settings_book_background_path(void){return "";}
@@ -916,6 +915,8 @@ int main(void) {
     puts("book_ui_host_test: PASS");
 }
 '''
+from reader_session_test_state import position_state
+unit = position_state(page=0) + unit
 with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"
