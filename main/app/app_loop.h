@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 typedef struct {
-    EpdiyHighlevelState* hl;
+    display_state_t* hl;
     uint8_t* fb;
     sc7a20h_handle_t acc;
     cst836u_handle_t tp;

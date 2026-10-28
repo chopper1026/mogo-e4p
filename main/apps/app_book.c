@@ -7444,7 +7444,7 @@ static void before_lock(app_ctx_t* ctx) {
     flush_ticket_stats();
     s_stats_last_ms = 0;
 }
-static EpdRect area_hint(app_ctx_t* ctx) { (void)ctx; return s_area; }
+static display_rect_t area_hint(app_ctx_t* ctx) { (void)ctx; return display_rect_from_epd(s_area); }
 static bool main_page_visible(app_ctx_t* ctx) {
     (void)ctx;
     return s_view == SHELF && !s_clear_confirm && !s_batch_confirm;

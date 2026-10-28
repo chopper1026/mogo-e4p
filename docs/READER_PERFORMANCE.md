@@ -15,6 +15,9 @@ python3 tools/run_reader_baseline.py controls
 python3 tools/run_reader_baseline.py present
 ```
 
+`display_contract` 在禁止硬件头的条件下单独编译 C/C++ 页面契约，检查不透明显示状态与真实后端类型及布局兼容，并覆盖区域回调在零尺寸、负坐标和整数边界上的无损转换。显示状态仍由装配和显示服务持有；页面只借用，区域裁剪继续由原显示出口处理。
+`display_contract` compiles C/C++ page contracts with hardware headers forbidden, checks opaque/native state identity and layout, and verifies lossless callback rectangles at zero sizes, negative coordinates and integer boundaries. Assembly and display services retain state ownership; pages borrow it, and existing display exits retain clipping.
+
 `font_source` 编译真实字体字节源，验证文件游标、短读/读错/EOF、内存边界、整表映射预算与回收。每个字体槽持有自己的文件或内存镜像、glyf/gvar 映射；上层仍在预绘交还后按原顺序清字形、映射、块缓存及字节源。`font_faces` 同时检查真实字体的像素、字宽、文件句柄及重复嵌入字体槽进出；块工作区沿用原有保留策略，不把其常驻占用计作泄漏。
 `font_source` compiles the real byte-source module to check cursors, short/error/EOF reads, memory bounds, map budgets and reclamation. Each slot owns its file or memory image and glyf/gvar maps; after prefetch handoff, callers retain the original glyph/map/block/source cleanup order. `font_faces` also checks real-font pixels, advances, descriptors and repeated embedded-slot cycles; retained block workspaces keep their existing policy and are counted as resident resources.
 

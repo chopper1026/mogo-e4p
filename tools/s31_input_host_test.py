@@ -88,8 +88,8 @@ int main(void) {
     subprocess.run([str(work / "test")], check=True)
     (work / "cst836u.h").write_text('#error "page contract must not import touch driver"\n')
     (work / "sc7a20h_lab.h").write_text('#error "page contract must not import accelerometer driver"\n')
-    (work / "epdiy.h").write_text("#pragma once\ntypedef struct {int x,y,width,height;} EpdRect;\n")
-    (work / "epd_highlevel.h").write_text("#pragma once\ntypedef struct {int unused;} EpdiyHighlevelState;\n")
+    (work / "epdiy.h").write_text('#error "page contract must not import screen driver"\n')
+    (work / "epd_highlevel.h").write_text('#error "page contract must not import backend state"\n')
     (work / "contract.c").write_text('#include "app/app.h"\napp_ctx_t page;\n')
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
                     "-I" + str(work), "-Imain", str(work / "contract.c")], cwd=ROOT, check=True)

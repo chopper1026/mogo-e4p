@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "app.h"
+#include "epdiy.h"
 
 #ifdef __cplusplus
 extern "C" {

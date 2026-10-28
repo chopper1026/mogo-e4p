@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "display_geometry.h"
 #include "epd_highlevel.h"
 #include "epdiy.h"
 #include "e0470_page_turn.h"

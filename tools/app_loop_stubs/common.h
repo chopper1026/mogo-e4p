@@ -18,7 +18,7 @@ typedef struct { bool touched; uint8_t count; uint16_t x,y; cst836u_point_t poin
 typedef struct { int unused; } cst836u_info_t;
 int cst836u_read(void*, cst836u_touch_t*);
 int cst836u_get_info(void*, cst836u_info_t*);
-typedef struct { int unused; } EpdiyHighlevelState;
+typedef struct EpdiyHighlevelState { int unused; } EpdiyHighlevelState;
 typedef struct { int x,y,width,height; } EpdRect;
 enum EpdDrawError { EPD_DRAW_SUCCESS };
 enum EpdFontFlags { EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT };

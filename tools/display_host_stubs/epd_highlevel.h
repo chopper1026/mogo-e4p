@@ -3,7 +3,7 @@
  */
 #pragma once
 #include "epdiy.h"
-typedef struct { uint8_t* front_fb; uint8_t* back_fb; const EpdWaveform* waveform; } EpdiyHighlevelState;
+typedef struct EpdiyHighlevelState { uint8_t* front_fb; uint8_t* back_fb; const EpdWaveform* waveform; } EpdiyHighlevelState;
 void epd_hl_set_all_white(EpdiyHighlevelState*);
 void epd_hl_waveform(EpdiyHighlevelState*, const EpdWaveform*);
 enum EpdDrawError epd_hl_update_screen(EpdiyHighlevelState*, enum EpdDrawMode, int);

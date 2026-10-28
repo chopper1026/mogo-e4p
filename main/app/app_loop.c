@@ -200,7 +200,7 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
             // 回调已经画好了 fb，这里只负责把它那一块推上屏。
             // The callback already painted fb; push that rectangle only.
             EpdRect area = app->area_hint != NULL
-                ? app->area_hint(ctx)
+                ? display_rect_to_epd(app->area_hint(ctx))
                 : ui_content_refresh_area();
             result = update_display_area_with(
                 ctx->hl, &E0470_WAVEFORM, APP_DYNAMIC_REFRESH_MODE, area

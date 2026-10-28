@@ -70,7 +70,7 @@ extern "C" {
 #define EPD_BUILTIN_WAVEFORM NULL
 
 /// Holds the internal state of the high-level API.
-typedef struct {
+typedef struct EpdiyHighlevelState {
     /// The "front" framebuffer object.
     uint8_t* front_fb;
     /// The "back" framebuffer object.

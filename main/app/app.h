@@ -24,8 +24,7 @@
 
 #include "app_touch.h"
 #include "esp_err.h"
-#include "epd_highlevel.h"
-#include "epdiy.h"
+#include "../display_types.h"
 #include "app_config.h"
 
 #ifdef __cplusplus
@@ -59,7 +58,8 @@ typedef struct ui_gesture_event_s ui_gesture_event_t;
 typedef esp_err_t (*app_touch_read_t)(void *context, app_touch_t *touch);
 
 typedef struct {
-    EpdiyHighlevelState* hl;
+    /// 显示服务借用状态，生命周期由启动装配与显示层管理。/ Borrowed display state; boot assembly and display services manage its lifetime.
+    display_state_t* hl;
     uint8_t* fb;
     /// 慢速加载时同步轮询导航；缺省表示没有触摸设备。
     /// Synchronous navigation polling during long loads; absent when no touch device is bound.
@@ -156,7 +156,7 @@ struct app_desc_s {
     /// / Called every tick; the page decides if its interval has elapsed.
     app_redraw_t (*on_tick)(app_ctx_t* ctx);
     /// APP_REDRAW_AREA 要刷的区域。/ Area for APP_REDRAW_AREA.
-    EpdRect (*area_hint)(app_ctx_t* ctx);
+    display_rect_t (*area_hint)(app_ctx_t* ctx);
     /// 同一份实现挂多个 app 时用来区分（加速度计的读数页与诊断页共享绘制代码）。
     /// / Distinguishes views that share one implementation (IMU live vs lab).
     void* user;

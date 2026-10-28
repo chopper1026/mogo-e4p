@@ -31,6 +31,7 @@
  */
 #pragma once
 #include "app.h"
+#include "epdiy.h"
 
 #define UI_QUICK_EDGE_PX 32
 #define UI_QUICK_SWIPE_PX 72
