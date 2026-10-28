@@ -98,7 +98,7 @@ unit += f'\n#include "{ROOT / "main/book/reader_turn.c"}"\n'
 unit += function('reader_turn_save', BOOK) + '\n'
 unit += function('reader_turn_load', BOOK) + '\n'
 from reader_reflow_test_code import reflow_code
-unit += reflow_code("indent")
+unit += reflow_code("indent", "fullscreen")
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
              'toggle_reader_fullscreen', 'reader_turn_chrome', 'turn_page'):
@@ -141,6 +141,20 @@ int main(void){
  // A shelf tap skips the open request path and reads s_requested_fullscreen alone, so a toggle
  // has to move it too; otherwise reopening after closing the book restores the pre-toggle mode.
  assert(!s_requested_fullscreen);
+ // 重排恢复失败才退回书架；失败不落盘，也不清掉原面板和跳转锚点。
+ // Fall back to the shelf only when restoration fails; failed toggles neither persist nor clear the original panel/jump anchor.
+ for(int full=0;full<2;++full)for(unsigned fail=1;fail<=2;++fail){
+  reset(full,true,2,0);failed_reflows=fail;s_jump_offset=37;
+  test_open_full=!full;s_requested_fullscreen=!full;
+  app_redraw_t expected=fail==1?APP_REDRAW_NONE:APP_REDRAW_PAGE;
+  assert(toggle_reader_fullscreen(&ctx)==expected&&s_reader_fullscreen==!!full);
+  assert(reflows==2&&!draw_locked&&!saves&&s_page==2);
+  assert(test_open_full==!full&&s_requested_fullscreen==!full&&s_jump_offset==37);
+  assert(s_reader_panel==READER_PANEL_TOOLS);
+  assert(fail==1?(s_text&&s_view==READING):(!s_text&&s_view==SHELF));
+ }
+ reset(true,true,2,0);s_text=NULL;
+ assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_NONE&&!reflows&&!saves&&!draw_locked);
  // 12:55 a+b 之后翻页保持当前模式：非全屏不再自动切全屏；reset 留着 slider=2，
  // 翻页收滑块即返回 PAGE 且不跑水波；水波正路径由下方 slider=-1 的场景覆盖。
  // Since a+b a turn keeps the current mode. reset leaves slider=2, so every turn collapses

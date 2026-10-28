@@ -43,3 +43,21 @@ bool reader_reflow_typography(const reader_reflow_t *reflow, int tracking_index)
 /// 调用方先确认有正文；缩进失败不写设置，也不隐式修正阅读位置。
 /// Callers first confirm content exists; failed indentation writes no settings and never implicitly corrects position.
 bool reader_reflow_indent(const reader_reflow_t *reflow, int em, int adjustment);
+
+/// 调用方已校验正文和 kind（0状态栏、1隐藏图片、2竖排），并按原顺序获取锁、读取锚点、交还预绘。
+/// Caller validates content and kind (0 status bar, 1 hidden images, 2 vertical), then locks, captures the anchor and hands prefetch back in that order.
+/// 锁内写设置并重排；失败恢复旧设置和布局；调用方负责解锁、提示及成功后的图片与进度处理。
+/// Write settings and reflow under the held lock; restore old settings/layout on failure. Caller unlocks, reports failure and handles images/progress on success.
+bool reader_reflow_option_locked(const reader_reflow_t *reflow, int kind, bool previous, size_t offset);
+
+typedef enum {
+    READER_REFLOW_APPLIED, ///< 已提交新布局 / New layout committed
+    READER_REFLOW_RESTORED, ///< 新布局失败，旧布局已恢复 / New layout failed and old layout restored
+    READER_REFLOW_LOST_LAYOUT, ///< 新旧布局均失败 / Both new and old layout builds failed
+} reader_reflow_result_t;
+
+/// 调用方确认有正文；锁前读取锚点，锁内交还预绘并切换或恢复全屏布局。
+/// Caller confirms content exists; capture the anchor before locking, then hand prefetch back and toggle or restore the full-screen layout under the lock.
+/// 返回前已解锁；偏好、图片、进度和双失败后的退回书架由调用方处理。
+/// Unlock before returning; caller handles preferences, images, progress and shelf fallback after both builds fail.
+reader_reflow_result_t reader_reflow_fullscreen(const reader_reflow_t *reflow, bool *fullscreen);

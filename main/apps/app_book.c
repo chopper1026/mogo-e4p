@@ -5506,36 +5506,8 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     lock_draw();
     size_t off = book_layout_page_start_offset(s_reader_session.position.page);
     invalidate_prep();
-    if (kind == 0) app_settings_set_reader_statusbar(!previous);
-    else if (kind == 1) {
-        app_settings_set_reader_hide_images(!previous);
-        book_layout_set_images_visible(previous);
-    } else {
-        // 竖排要重排整章：列序自右向左，页界和插图分页都跟着变。
-        // Vertical setting re-typesets the chapter: column order runs right to left and both the
-        // page boundaries and illustration pagination follow it.
-        app_settings_set_book_vertical(!previous);
-        book_layout_set_vertical(!previous);
-    }
-    // 模式变了，题头预留也跟着换轴：竖排留右侧列宽、横排留顶部行高。
-    // The mode changed, so the heading's reservation changes axis too: columns to the right
-    // vertically, rows at the top horizontally.
-    apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
-                       s_chapter_lead_row_height);
-    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
-    else {
-        if (kind == 0) app_settings_set_reader_statusbar(previous);
-        else if (kind == 1) {
-            app_settings_set_reader_hide_images(previous);
-            book_layout_set_images_visible(!previous);
-        } else {
-            app_settings_set_book_vertical(previous);
-            book_layout_set_vertical(previous);
-        }
-        apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip,
-                       s_chapter_lead_row_height);
-        (void)reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
+    bool ok = reader_reflow_option_locked(reader_reflow_context(), kind, previous, off);
+    if (!ok) {
         copy_text(s_reader_notice, sizeof(s_reader_notice), "排版失败，请重试");
         s_reader_notice_until = esp_timer_get_time() / 1000 + 1800;
     }
@@ -5570,24 +5542,9 @@ static app_redraw_t reader_return(app_ctx_t *ctx) {
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     (void)ctx;
     if (!s_text) return APP_REDRAW_NONE;
-    size_t off = book_layout_page_start_offset(s_reader_session.position.page);
-    lock_draw();
-    invalidate_prep();
-    s_reader_fullscreen = !s_reader_fullscreen;
-    // 全屏切换会换掉整个正文带，题头的预留必须跟着换。
-    // Toggling full screen swaps the whole body band, so the heading's reservation must follow.
-    refresh_chapter_lead();
-    bool ok = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    bool restored = true;
-    if (ok) s_reader_session.position.page = book_layout_page_for_offset(off);
-    else {
-        s_reader_fullscreen = !s_reader_fullscreen;
-        refresh_chapter_lead();
-        restored = reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
-    }
-    unlock_draw();
-    if (!ok) {
-        if (!restored) {
+    reader_reflow_result_t result = reader_reflow_fullscreen(reader_reflow_context(), &s_reader_fullscreen);
+    if (result != READER_REFLOW_APPLIED) {
+        if (result == READER_REFLOW_LOST_LAYOUT) {
             free_book();
             s_view = SHELF;
             copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");

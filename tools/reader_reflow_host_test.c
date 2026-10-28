@@ -17,6 +17,7 @@ static int layout_line, layout_paragraph, layout_slack, layout_tracking, layout_
 static size_t span;
 static bool locked, handed_back;
 static unsigned begins, ends, leads, builds, maps, writes, saves, failures;
+static bool statusbar, hide_images, vertical, images_visible, layout_vertical, fullscreen, mode_test;
 
 static void require_layout_access(void) { assert(locked && handed_back); }
 static void begin(void) { assert(!locked && !handed_back); locked = handed_back = true; ++begins; }
@@ -28,6 +29,7 @@ static bool build(void) {
     require_layout_access(); ++builds;
     if (failures) { --failures; span = 0; return false; }
     span = (size_t)(px * 2 + layout_tracking + layout_indent * 10 + layout_adjustment);
+    if (mode_test) span += statusbar * 10 + hide_images * 20 + vertical * 30 + fullscreen * 40;
     return true;
 }
 static const reader_reflow_t reflow = {
@@ -63,6 +65,11 @@ void app_settings_set_book_paragraph_spacing(uint8_t value) { write_setting(); s
 void app_settings_set_book_tracking(uint8_t value) { write_setting(); stored_tracking = value; }
 void app_settings_set_book_indent(uint8_t value) { write_setting(); stored_indent = value; }
 void app_settings_set_book_indent_adjust(int8_t value) { write_setting(); stored_adjustment = value; }
+void app_settings_set_reader_statusbar(bool value) { require_layout_access(); ++writes; statusbar = value; }
+void app_settings_set_reader_hide_images(bool value) { require_layout_access(); ++writes; hide_images = value; }
+void app_settings_set_book_vertical(bool value) { require_layout_access(); ++writes; vertical = value; }
+void book_layout_set_images_visible(bool value) { require_layout_access(); assert(value == !hide_images); images_visible = value; }
+void book_layout_set_vertical(bool value) { require_layout_access(); assert(value == vertical); layout_vertical = value; }
 
 static void reset(void) {
     position = (reader_position_t){7, 2};
@@ -73,6 +80,8 @@ static void reset(void) {
     stored_adjustment = layout_tracking = layout_adjustment = 0;
     span = 100; locked = handed_back = false;
     begins = ends = leads = builds = maps = writes = saves = failures = 0;
+    statusbar = images_visible = true;
+    hide_images = vertical = layout_vertical = fullscreen = mode_test = false;
 }
 
 int main(void) {
@@ -131,5 +140,33 @@ int main(void) {
     assert(!reader_reflow_indent(&reflow, -1, 0) && !reader_reflow_indent(&reflow, 4, 0));
     assert(!reader_reflow_indent(&reflow, 2, -101) && !reader_reflow_indent(&reflow, 2, 101));
     assert(!reader_reflow_indent(&reflow, 2, 0) && !begins && !writes && !saves);
-    puts("PASS: real reflow handoff/lock boundaries, anchored commits, failed restore, unchanged persistence and no-op validation");
+    for (int kind = 0; kind < 3; ++kind) for (int previous = 0; previous < 2; ++previous)
+        for (unsigned fail = 0; fail <= 2; ++fail) {
+            reset(); mode_test = true; failures = fail;
+            statusbar = hide_images = vertical = layout_vertical = previous;
+            images_visible = !hide_images;
+            size_t offset = book_layout_page_start_offset(position.page);
+            begin();
+            assert(reader_reflow_option_locked(&reflow, kind, previous, offset) == (fail == 0));
+            assert(locked && handed_back && !ends && !saves);
+            assert(writes == (fail ? 2u : 1u) && builds == writes && leads == builds);
+            bool value = kind == 0 ? statusbar : kind == 1 ? hide_images : vertical;
+            assert(value == (fail ? previous : !previous));
+            assert(images_visible == !hide_images && layout_vertical == vertical);
+            assert(position.chapter == 7 && position.page == (fail ? 2 : offset / span));
+            assert(maps == (fail ? 0u : 1u) && (span == 0) == (fail == 2));
+            end();
+        }
+    for (int previous = 0; previous < 2; ++previous) for (unsigned fail = 0; fail <= 2; ++fail) {
+        reset(); mode_test = true; fullscreen = previous; failures = fail;
+        reader_reflow_result_t expected = fail == 0 ? READER_REFLOW_APPLIED :
+            fail == 1 ? READER_REFLOW_RESTORED : READER_REFLOW_LOST_LAYOUT;
+        assert(reader_reflow_fullscreen(&reflow, &fullscreen) == expected);
+        assert(fullscreen == (fail ? previous : !previous));
+        assert(position.chapter == 7 && position.page == (fail ? 2 : 200 / span));
+        assert(begins == 1 && ends == 1 && !locked && !handed_back && !saves && !writes);
+        assert(builds == (fail ? 2u : 1u) && leads == builds && maps == (fail ? 0u : 1u));
+        assert((span == 0) == (fail == 2));
+    }
+    puts("PASS: real setting/mode/fullscreen reflow, handoff/lock boundaries, anchored commits, failed restore and persistence");
 }
