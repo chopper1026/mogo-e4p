@@ -84,7 +84,7 @@ This document is for **first-time human developers and AI agents**. After readin
 
 ### 3.2 本机 Windows 安装
 
-1. 用 [ESP-IDF Windows Installer](https://dl.espressif.com/dl/esp-idf/) 或 VS Code 扩展 `espressif.esp-idf-extension` 安装 **v6.1**，目标 esp32s3。
+1. 用 [ESP-IDF Windows Installer](https://dl.espressif.com/dl/esp-idf/) 或 VS Code 扩展 `espressif.esp-idf-extension` 安装 **v6.1**，目标 esp32s31（preview）。
 2. 打开 "ESP-IDF 6.1 PowerShell" 或在 VS Code 里用扩展的终端（会自动 `export.ps1`）。
 3. 验证：`idf.py --version` 输出 `v6.1…`。
 
@@ -97,7 +97,7 @@ This document is for **first-time human developers and AI agents**. After readin
 ```powershell
 docker pull espressif/idf:v6.1
 docker run --rm -v ${PWD}:/workspaces/read_pico_firmware -w /workspaces/read_pico_firmware espressif/idf:v6.1 `
-  bash -lc '. /opt/esp/idf/export.sh >/dev/null 2>&1; idf.py --version; idf.py set-target esp32s3; idf.py build'
+  bash -lc '. /opt/esp/idf/export.sh >/dev/null 2>&1; idf.py --version; idf.py --preview set-target esp32s31; idf.py --preview build'
 ```
 
 - 第一次 pull 体积大；全量 build 约 786 个编译步骤，耐心等到 `Project build complete`。中途看进度：另开终端 `docker ps` 找容器名，`docker logs --tail 50 <name>`。
@@ -173,10 +173,10 @@ Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPDeviceID -match 'VID_303A
 ### 4.1 标准命令（本机有 idf.py）
 
 ```bash
-idf.py set-target esp32s3        # 首次或换目标；会生成 sdkconfig（已 gitignore）
-idf.py build
-idf.py -p COMx flash monitor     # Ctrl+] 退出 monitor
-idf.py size                       # CI 也跑这一步
+idf.py --preview set-target esp32s31        # 首次或换目标；会生成 sdkconfig（已 gitignore）
+idf.py --preview build
+idf.py --preview -p COMx flash monitor     # Ctrl+] 退出 monitor
+idf.py --preview size                       # CI 也跑这一步
 ```
 
 `idf.py flash` 内部就是 `esptool write_flash @flash_args`，三段镜像各归其位。没有 idf.py 的宿主走 §3.4。
@@ -186,19 +186,20 @@ idf.py size                       # CI 也跑这一步
 ### 4.2 CI 等价编译（只验证能不能编过）
 
 ```bash
-idf.py -DSDKCONFIG_DEFAULTS=sdkconfig.ci set-target esp32s3
-idf.py build
-idf.py size
+idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" set-target esp32s31
+idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" build
+idf.py --preview size
 ```
 
-### 4.3 两套 sdkconfig 的边界
+### 4.3 产品配置与 CI 叠加项 / Product defaults and CI overlay
 
-| 文件 | 用途 | 关键差异 |
+| 文件 / File | 用途 / Purpose | 配置 / Configuration |
 | --- | --- | --- |
-| [sdkconfig.defaults](../sdkconfig.defaults) | **产品默认**，真机用 | flash 120 MHz + HPM（HPM_DC 关）、Octal PSRAM 120 MHz、`SPIRAM_TIMING_TUNING` 类温度调优 **保持关闭**（板上 Zbit 0x5E 不在 IDF 验证表里，开了会在 `do_system_init_fn` abort）、64 KB 数据缓存 / 64 B 行、CPU 240 MHz、USB Serial/JTAG 控制台、FreeRTOS 1000 Hz、性能优化 |
-| [sdkconfig.ci](../sdkconfig.ci) | **仅编译检查** | PSRAM 80 MHz、无 120 MHz/HPM、`COMPILER_WARN_WRITE_STRINGS=y` |
+| [sdkconfig.defaults](../sdkconfig.defaults) | S31 产品与 OTA 默认 / S31 product and OTA defaults | flash 80 MHz、Octal PSRAM 200 MHz、CPU 320 MHz、UI 栈 16384 B、内部 RAM 保留 65536 B。/ 80 MHz flash, 200 MHz octal PSRAM, 320 MHz CPU, 16384 B UI stack, 65536 B internal reserve. |
+| [sdkconfig.ci](../sdkconfig.ci) | 在产品默认后加载 / Load after product defaults | 仅 `COMPILER_WARN_WRITE_STRINGS=y`。/ Only enables compile warnings. |
 
-规则：不要把 CI 时序当产品默认；不要把 `sdkconfig.defaults` 用到别的硬件上；`sdkconfig`（生成物）永远不提交。
+普通 CI 与 OTA 均使用 S31 产品配置；CI 不能代替真机时序和行为验证。不要单独加载 `sdkconfig.ci`，也不要把产品默认用于其他硬件。生成的 `sdkconfig` 不提交。旧 S3 的 120 MHz / Zbit HPM 参数属于上游背景，不参与 S31 构建。
+CI and OTA share S31 product defaults; compilation does not validate device timing or behavior. Do not load the CI overlay alone or use product defaults on other hardware. Keep generated sdkconfig files untracked. Legacy S3 120 MHz/Zbit HPM settings are upstream background, outside S31 builds.
 
 ### 4.4 生成物与忽略项
 
@@ -369,7 +370,7 @@ File-header `Frozen` blocks remain behavior contracts. `factory/vcom_setup.c` an
 ### 8.5 波形 / 时序禁区
 
 - 不改 `waveforms/*.h`；要试新裁剪参数走 `e0470_waveform_trim.c` 的 API（默认 erase_max 11 / sat_cut 5 / white_sat_cut 0 / hold 3）。
-- 不改 `sdkconfig.defaults` 的 120 MHz 与 HPM 相关项；不开 `SPIRAM_TIMING_TUNING`。
+- S31 保持产品默认的 flash 80 MHz / Octal PSRAM 200 MHz；修改时序前须专项验证。/ Keep S31 product timing; validate timing changes separately.
 - pclk 只在 12–24 MHz 内调，且优先改 `display.c` 常量而不是散落调用。
 
 ### 8.6 换开机图 / 锁屏图
@@ -387,7 +388,7 @@ File-header `Frozen` blocks remain behavior contracts. `factory/vcom_setup.c` an
 - [ ] 没有写 SY7636A 的 VCOM / VLDO / 放电 / 延时 / VCOMCTL。
 - [ ] 没有在 `vcom_setup.c` 以外调用 `read_pico_pmu_vcom_set`；没有把 VCOM 写进 NVS。
 - [ ] 没有碰 `components/epdiy/**`、`main/font/fallback.h`、`stb_truetype.h`、`waveforms/*.h`。
-- [ ] 没有动 `sdkconfig.defaults` 的 120 MHz / HPM / PSRAM 项。
+- [ ] S31 flash / PSRAM 时序保持产品配置；有改动时附专项验证。/ Retain S31 product timing, or attach dedicated validation.
 - [ ] 没有改 UI 字面量或日志字符串（除非任务明确要求）。
 - [ ] `render()` 仍然纯。
 - [ ] 没有改 `app_loop.c` 来加页面功能。
@@ -416,7 +417,7 @@ File-header `Frozen` blocks remain behavior contracts. `factory/vcom_setup.c` an
 | 标签 | 含义 |
 | --- | --- |
 | `未编译` | 只改了文件，没跑 build |
-| `已编译 ci` | `-DSDKCONFIG_DEFAULTS=sdkconfig.ci` 通过 |
+| `已编译 ci` | S31 `-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci"` 通过 |
 | `已编译 defaults` | 默认配置 build 通过（还未上板）。写明在哪里编的：本机 IDF / docker run / devcontainer |
 | `已烧写未验证启动` | esptool `Hash of data verified` 了，但**没开串口看开机日志**。必须附烧写命令原文（尤其地址）。不得写成"真机已验证" |
 | `真机已验证` | 必须附：板型 RDP-G01-W、IDF 版本、串口、供电（USB/电池）、串口里看到的开机日志片段、验证了哪些页/操作、未覆盖项 |

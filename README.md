@@ -48,6 +48,18 @@ idf.py --preview build
 
 ESP32-S31 在 IDF 6.1 中仍是 preview，`idf.py` 必须带 `--preview`。
 
+产品与 OTA 使用 `sdkconfig.defaults`（flash 80 MHz、Octal PSRAM 200 MHz）。普通 CI 使用相同产品配置，再加载 `sdkconfig.ci` 的编译警告叠加项：
+Product and OTA builds use `sdkconfig.defaults` (80 MHz flash, 200 MHz octal PSRAM). CI loads the same product defaults followed by the warning overlay:
+
+```bash
+idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" set-target esp32s31
+idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" build
+python3 tools/run_reader_baseline.py
+```
+
+宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
+Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrounds, the event loop, books, display, navigation and ripple effects. See the performance guide for measurement setup; CI builds do not replace device acceptance.
+
 ## 关键文件
 
 - `components/epdiy/src/output_lcd/lcd_driver.c`：S31 LCD/GPU/RMT 后端（来自 Metalio 已验证实现）+ Mogo 行时序。
@@ -62,8 +74,8 @@ ESP32-S31 在 IDF 6.1 中仍是 preview，`idf.py` 必须带 `--preview`。
 产品页面由 `main/CMakeLists.txt` 和 `main/app/app_registry.c` 定义。上游未参与产品构建的硬件演示页、内置演示正文及其 continuous_du 组件已移除；当前阅读翻页、水波纹、快捷栏、蓝牙、前光、震动、存储、升级与出厂流程保留。S31 使用静默蜂鸣器接口，不依赖 PWM 音频组件。
 Product pages are defined by `main/CMakeLists.txt` and `main/app/app_registry.c`. Uncompiled upstream hardware demos, their sample text and continuous_du component have been removed. Reader turns, ripple transitions, quick controls, Bluetooth, frontlight, haptics, storage, updates and factory flows remain. S31 keeps a silent buzzer interface without the PWM audio dependency.
 
-旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`read_pico_pmu_*` 包装电量、充电、RTC 与电源键。S3 后端仍供 `sdkconfig.ci` 编译验证；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
-Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `read_pico_pmu_*` wraps battery, charging, RTC and power keys. The S3 backend still supports compile checks with `sdkconfig.ci`; prune old-board implementations along verified dependency boundaries.
+旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`read_pico_pmu_*` 包装电量、充电、RTC 与电源键。普通 CI 与 OTA 均验证 S31；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
+Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `read_pico_pmu_*` wraps battery, charging, RTC and power keys. Both CI and OTA build S31; prune old-board implementations along verified dependency boundaries.
 
 ### 联网升级 / Online updates
 

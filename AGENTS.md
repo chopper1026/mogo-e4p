@@ -20,19 +20,18 @@ Follow the [Chinese commit convention](docs/COMMIT_CONVENTION.md) for all future
 
 ## 构建 / Build
 
-需要 ESP-IDF v6.1。`components/read_pico/read_pico_flash_hpm.c` 依赖 v6 才有的 `esp_flash_chips/spi_flash_override.h`。
-
-Requires ESP-IDF v6.1. `components/read_pico/read_pico_flash_hpm.c` needs `esp_flash_chips/spi_flash_override.h` (v6 only).
+需要 ESP-IDF v6.1；ESP32-S31 仍为 preview，构建命令必须带 `--preview`。
+Requires ESP-IDF v6.1; ESP32-S31 is a preview target, so build commands require `--preview`.
 
 ```
-idf.py set-target esp32s3
-idf.py build
+idf.py --preview set-target esp32s31
+idf.py --preview build
 ```
 
-- `sdkconfig.defaults`：真机 120 MHz flash / PSRAM 时序，依赖板上 Zbit 型号。/ Board timing for 120 MHz flash / PSRAM; depends on the Zbit part.
-- `sdkconfig.ci`：默认时序，只验证能否编过。/ Default timing; compile-only CI check.
+- `sdkconfig.defaults`：S31 产品配置，flash 80 MHz、Octal PSRAM 200 MHz。/ S31 product configuration: 80 MHz flash and 200 MHz octal PSRAM.
+- `sdkconfig.ci`：在产品配置之后加载的编译警告叠加项。CI 使用 `-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci"`，同样编译 S31。/ Compile-warning overlay loaded after product defaults; CI builds S31 with the same defaults list.
 
-不要在没有对应 flash 的机器上把 CI 配置当产品默认。/ Do not ship the CI timing as the product default.
+CI 只证明能编译；真机时序与行为仍须设备验证。/ CI proves compilation; device timing and behavior still need hardware validation.
 
 ### 版本号与本地测试 / Versions and local tests
 
@@ -177,7 +176,7 @@ A `冻结 / Frozen:` block is a decision, not a hint. Change the behavior only a
 
 - 面板 VCOM 存在 PMU 里。主机开机读一次，不写 ESP NVS，产品页不提供修改入口。标定页（`vcom_setup.c`）是未标定时的出厂拦住路径。/ VCOM lives in the PMU. Host reads once. No NVS copy. No product UI to edit it. `vcom_setup.c` is the factory gate when unset.
 - 不要写 SY7636A 的 VCOM / VLDO / 放电 / 延时 / VCOMCTL。电源页只读。/ Do not write SY7636A VCOM / VLDO / discharge / delay / VCOMCTL. Power page is read-only.
-- `sdkconfig.defaults` 的 120 MHz 时序依赖真机 Zbit flash。覆盖 HPM 表见 `read_pico_flash_hpm.c`。/ 120 MHz timing needs the onboard Zbit part. HPM override is `read_pico_flash_hpm.c`.
+- S31 使用 flash 80 MHz、Octal PSRAM 200 MHz；旧 S3 的 Zbit HPM 覆盖不参与 S31 构建。/ S31 uses 80 MHz flash and 200 MHz octal PSRAM; the legacy S3 Zbit HPM override is outside the S31 build.
 - 不要改 `components/epdiy/**` 来“整理注释”。/ Do not touch `components/epdiy/**` for comment cleanup.
 - 不要手改 `main/font/fallback.h`、`main/font/stb_truetype.h`、`components/e0470_epaper_waveform/waveforms/*.h`。/ Do not hand-edit generated or vendored tables.
 - 不改 UI 字面量或日志字符串，除非任务明确要求。/ Do not change UI strings or log text unless asked.

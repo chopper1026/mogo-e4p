@@ -109,11 +109,12 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 需要 ESP-IDF **v6.1**，目标芯片为 ESP32-S3：
 
 ```sh
-idf.py set-target esp32s3
-idf.py build
+idf.py --preview set-target esp32s31
+idf.py --preview build
 ```
 
-`sdkconfig.defaults` 使用本开发板对应的 Flash/PSRAM 时序；`sdkconfig.ci` 仅用于编译检查。硬件资料请看 [MindReset 官方文档](https://dot.mindreset.tech/docs/read_0)。预编译固件仅面向 RDP-G01-W。
+当前 S31 产品构建使用 `sdkconfig.defaults`；CI 通过 `-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci"` 加载同一产品配置与编译警告叠加项，具体命令见根目录 README。下文 RDP-G01-W 硬件信息仅作上游背景。
+S31 product builds use sdkconfig.defaults; CI adds the warning overlay to the same defaults. See the root README for commands; RDP-G01-W hardware details remain upstream background.
 
 ## 书籍与字体
 
