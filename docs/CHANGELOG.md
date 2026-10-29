@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 
+- 主页面与顶部快捷栏在电量、充电状态变化时自动局部更新；开机首帧先尝试采样电量，避免必须切页才能恢复显示。
+  Main pages and the top quick layer locally update battery and charging changes; sample before the first boot frame so recovery no longer depends on switching pages.
+
 - TXT 目录支持较长的篇卷与章节复合标题、全角缩进和连续重复题头合并；旧目录缓存自动重建，无有效章节时继续按 Part 分段。
   TXT indexes recognize longer volume/chapter headings and full-width indentation, merge consecutive repeated headings, and rebuild old caches; texts without usable headings retain Part segmentation.
 

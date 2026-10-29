@@ -4,6 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
@@ -380,7 +381,7 @@ typedef struct {bool time_synced;time_t unix_sec;} pmu_snapshot_t;
 typedef struct {bool network_ready;int mode;} wifi_transfer_status_t;
 static pmu_snapshot_t pmu;
 static int pct;
-static bool wifi,bluetooth,s_system_ttf;
+static bool wifi,bluetooth,s_system_ttf,charging;
 #define TTF_FONT_PATH_MAX 160
 static bool chosen_system,reading_context;
 static const char *app_settings_system_font_path(void){return chosen_system?"system.ttf":"";}
@@ -389,7 +390,7 @@ static bool ttf_font_is_builtin(void){return false;}
 static char signature[96];
 static const pmu_snapshot_t *device_power_get(void){return &pmu;}
 static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct;}
-static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return false;}
+static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return charging;}
 static void wifi_transfer_get_status(wifi_transfer_status_t *status){*status=(wifi_transfer_status_t){wifi,WIFI_TRANSFER_MODE_STA};}
 static bool app_settings_ble_turner(void){return bluetooth;}
 static const char *app_settings_status_signature(void){return signature;}
@@ -450,6 +451,13 @@ int main(void){
  }
  reading_context=false;ui_nav_status_font_context(false,false);
  signature[0]=0;text_count=0;ui_nav_status(&fb);assert(text_count==2);
+ // 未知到有效、插线、拔线及百分比变更均可检测；画完立即消除变化标记。
+ // Detect unknown-to-valid, plug, unplug and percentage changes, clearing the flag after painting.
+ assert(!ui_nav_status_power_changed());
+ pct=50;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
+ charging=true;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
+ charging=false;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
+ pct=49;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
  puts("PASS: larger status text shares the icon centerline with builtin/custom metrics; simultaneous radios, 100% and long UTF-8 signatures do not overlap");
 }
 '''
@@ -562,14 +570,18 @@ int main(void){
 '''
 
 from reader_session_test_state import position_state
-unit = position_state(page=0) + unit
+from run_reader_baseline import toolchain
+shelf = position_state(page=0) + shelf
 with tempfile.TemporaryDirectory() as folder:
-    for name, unit in (("shelf", shelf), ("status", status),
-                       ("nav-modes", navigation), ("image-bw", image_bw)):
+    env, _ = toolchain(Path(folder))
+    units = (("status", status),) if "--status-only" in sys.argv else (
+        ("shelf", shelf), ("status", status), ("nav-modes", navigation), ("image-bw", image_bw))
+    for name, unit in units:
         source, binary = Path(folder) / (name + ".c"), Path(folder) / name
         source.write_text(unit)
         extras = [str(root / "main/ui/ui_image_dither.c")] if name == "image-bw" else []
         subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                        "-fsanitize=address,undefined", "-g",
                         "-I" + str(root),
-                        str(source), *extras, "-o", str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+                        str(source), *extras, "-o", str(binary)], check=True, env=env)
+        subprocess.run([str(binary)], check=True, env=env)

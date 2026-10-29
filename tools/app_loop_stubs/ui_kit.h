@@ -8,6 +8,7 @@
 #define UI_LOCK_HEIGHT 1216
 EpdRect ui_content_refresh_area(void);
 EpdRect ui_rect_union(EpdRect a, EpdRect b);
+void ui_fill_rect_fast(EpdRect area, uint8_t gray, uint8_t *fb);
 static inline void ui_text_set_system_scale(bool enabled) { (void)enabled; }
 static inline void ui_text_set_system_font(bool enabled) { (void)enabled; }
 

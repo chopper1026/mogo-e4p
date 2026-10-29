@@ -158,6 +158,14 @@ static int shelf_exit_arms;
 static int nav_arms, nav_draws, nav_full_arms, nav_area_draws;
 static const void *nav_armed;
 static bool main_source_visible, main_target_visible;
+static bool battery_test;
+static int battery_samples[32], battery_cached, battery_shown, battery_boot, battery_first_frame;
+static int battery_refreshes, battery_status_draws;
+bool ui_nav_status_power_changed(void) {return battery_test && battery_cached != battery_shown;}
+void ui_nav_status(uint8_t *fb) {(void)fb;battery_shown=battery_cached;++battery_status_draws;}
+void ui_fill_rect_fast(EpdRect area,uint8_t gray,uint8_t *fb) {
+    (void)fb;assert(area.x==0&&area.y==0&&area.width==684&&area.height==76&&gray==255);
+}
 static bool media_test, sd_font, saved_sd_font;
 static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, remounts, loss_step;
@@ -230,7 +238,10 @@ enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void
 }
 void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool bluetooth) {(void)fb;(void)menu;(void)wifi;(void)bluetooth;++quick_draws;}
 void ui_quick_menu_end(void) {}
-void ui_quick_menu_draw_status(uint8_t *fb) {(void)fb;++quick_status_draws;}
+void ui_quick_menu_draw_status(uint8_t *fb) {
+    (void)fb;++quick_status_draws;
+    if(battery_test)ui_nav_status(fb);
+}
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
     return (EpdRect){0,0,684,menu->frontlight&&menu->fl_on?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
 }
@@ -310,8 +321,12 @@ void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
 void rails_idle_check(int64_t n) {(void)n;}
-bool device_power_ready(void) {return lock_due||step==power_trigger_step;}
-device_power_key_action_t device_power_take_key_action(void) {return step==power_trigger_step?DEVICE_POWER_KEY_LONG:DEVICE_POWER_KEY_SHORT;}
+bool device_power_ready(void) {return battery_test||lock_due||step==power_trigger_step;}
+esp_err_t device_power_refresh(void) {++battery_refreshes;battery_cached=battery_boot;return ESP_OK;}
+device_power_key_action_t device_power_take_key_action(void) {
+    if(battery_test){battery_cached=battery_samples[step];return DEVICE_POWER_KEY_NONE;}
+    return step==power_trigger_step?DEVICE_POWER_KEY_LONG:DEVICE_POWER_KEY_SHORT;
+}
 void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader,bool light_only) {(void)tp;(void)h;(void)t;(void)a;(void)reader;(void)light_only;assert(!nav_armed);++idle_locks;lock_due=false;time_offset+=1000000;}
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
@@ -353,7 +368,11 @@ bool ui_menu_row_rect(int l,int r,EpdRect*out) {(void)l;*out=(EpdRect){0,r*100+1
 void ui_draw_menu_row_pressed(uint8_t*f,const app_desc_t*a,int l,int r,bool p) {(void)f;(void)a;(void)l;(void)r;if(p)highlights++;else restores++;}
 static void enter(app_ctx_t*c) {(void)c;enters++;}
 static void leave(app_ctx_t*c) {(void)c;exits++;}
-static void render(app_ctx_t*c,uint8_t*f) {(void)c;(void)f;++base_renders;}
+static void render(app_ctx_t*c,uint8_t*f) {
+    (void)c;(void)f;
+    if(battery_test){if(!base_renders)battery_first_frame=battery_cached;battery_shown=battery_cached;}
+    ++base_renders;
+}
 static void home_enter(app_ctx_t*c) {c->leaf=0;enters++;home_enters++;}
 static void home_render(app_ctx_t*c,uint8_t*f) {(void)f;rendered_leaf=c->leaf;home_renders++;}
 static app_redraw_t touch(app_ctx_t*c,const app_touch_t*t) {
@@ -381,6 +400,8 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    battery_test=false;battery_cached=battery_shown=battery_boot=battery_first_frame=-1;
+    battery_refreshes=battery_status_draws=0;memset(battery_samples,0,sizeof(battery_samples));
     quick_button_draws=quick_status_draws=quick_press_draws=quick_recent_requests=base_renders=0;
     power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=false;
     last_du_area=(EpdRect){0};
@@ -437,6 +458,32 @@ static app_redraw_t nav_return_tick(app_ctx_t* ctx) {
 static void enter_with_pending_tab(app_ctx_t* ctx){enter(ctx);ctx->request_app=&second;}
 static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ? response : APP_REDRAW_NONE;}
 int main(void) {
+    // 无触摸也补齐未知电量、插线与拔线；采样不变时不重复刷状态栏。
+    // Repair unknown battery data and cable edges without touch, and never refresh unchanged samples.
+    reset();enable_main_tabs();battery_test=true;time_step=200000;
+    battery_boot=-1;battery_samples[0]=-1;battery_samples[1]=50;battery_samples[2]=151;battery_samples[3]=50;
+    for(int i=0;i<5;++i){if(i==4)battery_samples[i]=50;add(0,0,0,0);}run();
+    assert(battery_first_frame==-1&&battery_refreshes==1&&battery_status_draws==3&&gl_areas==3&&base_renders==1);
+    reset();enable_main_tabs();battery_test=true;time_step=200000;battery_boot=50;
+    for(int i=0;i<3;++i){battery_samples[i]=50;add(0,0,0,0);}run();
+    assert(battery_first_frame==50&&battery_refreshes==1&&!battery_status_draws&&!gl_areas);
+    // 状态栏隐藏或菜单占用时不盖正文；触摸结束后再补一次局刷。
+    // Never cover a hidden status bar or an owned menu; defer one local update until touch ends.
+    reset();enable_main_tabs();battery_test=true;time_step=200000;main_source_visible=false;
+    battery_samples[0]=50;add(0,0,0,0);run();assert(!battery_status_draws);
+    reset();enable_main_tabs();battery_test=true;time_step=200000;menu_on_tick=true;
+    battery_samples[0]=50;battery_samples[1]=50;add(0,0,0,0);add(0,0,0,0);run();assert(!battery_status_draws);
+    reset();enable_main_tabs();battery_test=true;time_step=200000;
+    battery_samples[0]=battery_samples[1]=50;add(100,400,1,0);add(0,0,0,0);run();assert(battery_status_draws==1);
+    reset();battery_test=true;first.holds_pmu=true;add(0,0,0,0);run();assert(!battery_refreshes&&!battery_status_draws);
+    // 快捷层空闲时仍占有输入，但电量变化必须更新其自有状态栏。
+    // An idle quick layer still owns input, but power changes must update its own status strip.
+    reset();battery_test=true;time_step=200000;battery_boot=50;
+    for(int i=0;i<6;++i)battery_samples[i]=i<4?50:151;
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(quick_draws==1&&quick_status_draws==1&&battery_shown==151&&base_renders==2);
+    puts("PASS: boot sampling, late valid SOC, idle cable edges, unchanged-state silence, input/menu/hidden guards and quick-layer power updates");
     // 第一帧报点立即切页，尚未抬手也能响应；同次停留和释放不重复。
     // The first contact switches before lift; its subsequent hold and release never repeat navigation.
     for(int policy=0;policy<3;++policy) {

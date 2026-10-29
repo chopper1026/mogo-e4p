@@ -37,6 +37,19 @@
 #define UI_STATUS_SIGNATURE_PX 26
 
 static bool s_status_reading;
+static int s_status_power = -1;
+
+// 只比较屏幕实际显示的电量和充电标志，不让原始采样抖动触发刷新。
+// Compare only the displayed percentage and charging mark, avoiding refreshes from raw sample jitter.
+static int status_power(void) {
+    const pmu_snapshot_t *pmu = device_power_get();
+    return (pmu_battery_percent(pmu) + 1) * 2 + (pmu_battery_charging(pmu) ? 1 : 0);
+}
+
+bool ui_nav_status_power_changed(void) {
+    return s_status_power != status_power();
+}
+
 static struct {
     bool ready;
     char signature[96], face[TTF_FONT_PATH_MAX], chosen[TTF_FONT_PATH_MAX];
@@ -235,6 +248,7 @@ void ui_nav_status(uint8_t *fb) {
                      UI_ICON_BLUETOOTH, UI_GRAY_BLACK);
     ui_nav_battery_draw(fb, 606, status_center_y);
     ui_text_fixed_vc(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
+    s_status_power = status_power();
 }
 
 int ui_nav_hit(uint16_t x, uint16_t y) {

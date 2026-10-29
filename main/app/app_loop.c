@@ -77,6 +77,7 @@
 #include "ui_nav.h"
 #include "ui_gesture.h"
 #include "ui_power_dialog.h"
+#include "ui_quick_menu.h"
 #include "app_quick_layer.h"
 #include "ui_click_feedback.h"
 #include "usb_storage.h"
@@ -466,6 +467,9 @@ void app_loop_run(const app_loop_config_t* config) {
     if (current->on_enter != NULL) current->on_enter(&ctx);
     rp_boot_mark("enter");
     app_media_poll(&ctx, current, &media_mounted, &media_invalidated);
+    // 首帧先采样；暂时读不到时，后续状态变化会自动补上有效电量。
+    // Sample before the first frame; a transient failure is repaired automatically when valid power data arrives.
+    if (device_power_ready() && !current->holds_pmu) (void)device_power_refresh();
     // 首帧必须整屏 GC16：fb 里还是 app_main 画的开机图，DU 盖不掉。
     // First frame must be full GC16: fb still holds the splash; DU cannot cover it.
     app_present(&ctx, current, APP_REDRAW_FULL);
@@ -1065,6 +1069,25 @@ void app_loop_run(const app_loop_config_t* config) {
             app_redraw_t redraw = current->on_tick(&ctx);
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) held_key = -1;
             present_page(&ctx, current, &gesture, redraw);
+        }
+        // 主页面和快捷层共享白底状态栏；只在电量变化且没有输入覆盖时局部推屏。
+        // Main roots and the quick layer share a white status strip; present power changes locally when input is uncovered.
+        if (!power_dialog_open && !menu_open && (!quick_input_owned || app_quick_layer_is_open()) && !touch.touched &&
+            !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
+            (app_quick_layer_is_open() || app_navigation_main_page_ready(&ctx, current)) &&
+            ui_nav_status_power_changed()) {
+            EpdRect area = {0, 0, UI_LOCK_WIDTH, 76};
+            if (app_quick_layer_is_open()) ui_quick_menu_draw_status(ctx.fb);
+            else {
+                ui_fill_rect_fast(area, 0xff, ctx.fb);
+                ui_nav_status(ctx.fb);
+            }
+            enum EpdDrawError error = display_refresh_area(ctx.hl, DISPLAY_REFRESH_DETAIL, area, DISPLAY_REFRESH_DEFAULT);
+            guard_draw_result(ctx.hl, error);
+            if (error != EPD_DRAW_SUCCESS) {
+                app_quick_layer_reset();
+                app_present(&ctx, current, APP_REDRAW_FULL);
+            }
         }
         if (ctx.user_activity) { last_input_ms = ctx.now_ms; ctx.user_activity = false; }
         uint32_t ble_input = ble_pt_input_serial();

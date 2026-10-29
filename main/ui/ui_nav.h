@@ -16,6 +16,9 @@
 
 void ui_nav_draw(uint8_t *fb, int active);
 void ui_nav_status(uint8_t *fb);
+/// 电量或充电标志是否与上次绘制的状态栏不同；调用方负责可见性及推屏。
+/// Whether percentage or charging differs from the last painted status bar; callers own visibility and presentation.
+bool ui_nav_status_power_changed(void);
 /// 系统字体就绪时缓存状态栏字宽，阅读页只复用，不重载整份系统字体。
 /// Cache status metrics when the system face is ready; reading reuses them without reloading that font.
 void ui_nav_status_font_context(bool reading, bool face_changed);
