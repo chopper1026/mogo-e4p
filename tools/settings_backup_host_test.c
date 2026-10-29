@@ -32,23 +32,23 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t))
 #include "../main/settings/settings.c"
 
-static read_pico_transfer_wifi_backup_t saved_wifi = {
+static wifi_transfer_wifi_backup_t saved_wifi = {
     .configured = 1, .ssid = "Home_2.4G", .password = "password123"
 };
 static unsigned wifi_imports;
-esp_err_t read_pico_transfer_export_wifi_backup(read_pico_transfer_wifi_backup_t *out) {
+esp_err_t wifi_transfer_export_wifi_backup(wifi_transfer_wifi_backup_t *out) {
     *out = saved_wifi;
     return ESP_OK;
 }
-bool read_pico_transfer_wifi_backup_valid(const read_pico_transfer_wifi_backup_t *backup) {
+bool wifi_transfer_wifi_backup_valid(const wifi_transfer_wifi_backup_t *backup) {
     if (!backup || backup->configured > 1) return false;
     if (!backup->configured) return !backup->ssid[0] && !backup->password[0];
     return backup->ssid[0] &&
            strnlen(backup->ssid, sizeof(backup->ssid)) < sizeof(backup->ssid) &&
            strnlen(backup->password, sizeof(backup->password)) < sizeof(backup->password);
 }
-esp_err_t read_pico_transfer_import_wifi_backup(const read_pico_transfer_wifi_backup_t *backup) {
-    if (!read_pico_transfer_wifi_backup_valid(backup)) return ESP_ERR_INVALID_ARG;
+esp_err_t wifi_transfer_import_wifi_backup(const wifi_transfer_wifi_backup_t *backup) {
+    if (!wifi_transfer_wifi_backup_valid(backup)) return ESP_ERR_INVALID_ARG;
     saved_wifi = *backup;
     ++wifi_imports;
     return ESP_OK;
@@ -100,7 +100,7 @@ static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
 static uint8_t loaded_idle;static bool has_idle;
 static int loaded_margin=-1,loaded_margin_l=-1,loaded_margin_r=-1,loaded_margin_t=-1,loaded_margin_b=-1;
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
+esp_err_t board_sd_get_info(board_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }

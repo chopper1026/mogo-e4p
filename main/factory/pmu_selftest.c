@@ -19,9 +19,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "read_pico_board.h"
-#include "read_pico_pmu.h"
-#include "read_pico_sd.h"
+#include "board_hardware.h"
+#include "device_power.h"
+#include "board_sd.h"
 
 #define TAG "pmu_st"
 #define NVS_NS "pmu_st"
@@ -119,12 +119,12 @@ static void mark(int id, uint8_t res, const char* msg) {
 }
 
 static bool i2c_dead(void) {
-    return read_pico_pmu_get()->last_err != ESP_OK;
+    return device_power_get()->last_err != ESP_OK;
 }
 
 static bool cmd_ok(uint16_t code, const uint8_t* payload, uint8_t plen) {
-    if (read_pico_pmu_cmd(code, payload, plen) != ESP_OK) return false;
-    uint16_t st = read_pico_pmu_get()->last_op_status;
+    if (device_power_cmd(code, payload, plen) != ESP_OK) return false;
+    uint16_t st = device_power_get()->last_op_status;
     return st == PMU_STATUS_OK || st == PMU_STATUS_ACCEPTED;
 }
 
@@ -142,8 +142,8 @@ static void wr32(uint8_t* p, uint32_t v) {
 }
 
 static bool run_ident(void) {
-    if (read_pico_pmu_refresh() != ESP_OK) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    if (device_power_refresh() != ESP_OK) return false;
+    const pmu_snapshot_t* s = device_power_get();
     if (!s->identity_ok || s->device_id != PMU_DEVICE_ID) return false;
     if (s->proto_major != 1) return false;
     if (s->fw_major != PMU_FW_MAJOR) return false;
@@ -152,8 +152,8 @@ static bool run_ident(void) {
 }
 
 static bool run_handshake(void) {
-    if (read_pico_pmu_poll() != ESP_OK) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    if (device_power_poll() != ESP_OK) return false;
+    const pmu_snapshot_t* s = device_power_get();
     return s->power_state == PMU_PWR_RUNNING
         && (s->flags & PMU_STATUS_HOST_EN_HIGH) != 0;
 }
@@ -165,15 +165,15 @@ static bool run_ping(void) {
 static bool run_status(void) {
     for (int i = 0; i < 3; i++) {
         if (i) vTaskDelay(pdMS_TO_TICKS(20));
-        if (read_pico_pmu_poll() != ESP_OK) continue;
-        if (read_pico_pmu_get()->status_ok) return true;
+        if (device_power_poll() != ESP_OK) continue;
+        if (device_power_get()->status_ok) return true;
     }
     return false;
 }
 
 static bool run_quick_bat(void) {
-    if (read_pico_pmu_poll() != ESP_OK) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    if (device_power_poll() != ESP_OK) return false;
+    const pmu_snapshot_t* s = device_power_get();
     bool valid = (s->qb_flags & 0x01) != 0 && s->qb_mv >= 2700 && s->qb_mv <= 4400;
     bool charging = (s->qb_flags & 0x04) != 0
         || s->charge_state == PMU_CHARGE_CHARGING;
@@ -190,7 +190,7 @@ static bool run_time_sync(void) {
     wr32(buf, t);
     if (!cmd_ok(PMU_CMD_TIME_SYNC, buf, 4)) return false;
     if (!cmd_ok(PMU_CMD_TIME_GET, NULL, 0)) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    const pmu_snapshot_t* s = device_power_get();
     if (!s->time_ok || !s->time_synced) return false;
     int32_t d = (int32_t)s->unix_sec - (int32_t)t;
     if (d < 0) d = -d;
@@ -201,7 +201,7 @@ static bool run_alarm_set(void) {
     uint8_t buf[5] = { 1, 10, 0, 0, 0 };
     if (!cmd_ok(PMU_CMD_ALARM_SET, buf, 5)) return false;
     if (!cmd_ok(PMU_CMD_ALARM_GET, NULL, 0)) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    const pmu_snapshot_t* s = device_power_get();
     return s->alarm_ok && s->alarm_mode == 1
         && s->alarm_remain >= 5 && s->alarm_remain <= 15;
 }
@@ -210,7 +210,7 @@ static bool run_alarm_off(void) {
     uint8_t buf[5] = { 0 };
     if (!cmd_ok(PMU_CMD_ALARM_SET, buf, 5)) return false;
     if (!cmd_ok(PMU_CMD_ALARM_GET, NULL, 0)) return false;
-    return read_pico_pmu_get()->alarm_mode == 0;
+    return device_power_get()->alarm_mode == 0;
 }
 
 static bool cfg_rw_u8(uint16_t cmd, uint8_t orig, uint16_t orig_th, bool soc) {
@@ -224,7 +224,7 @@ static bool cfg_rw_u8(uint16_t cmd, uint8_t orig, uint16_t orig_th, bool soc) {
     }
     if (!cmd_ok(cmd, buf, plen)) return false;
     if (!cmd_ok(PMU_CMD_CONFIG_GET, NULL, 0)) return false;
-    const pmu_snapshot_t* s = read_pico_pmu_get();
+    const pmu_snapshot_t* s = device_power_get();
     uint8_t got = 0;
     if (cmd == PMU_CMD_CONFIG_SET_WAKE_ON_CHARGE) got = s->config.wake_on_charge;
     else if (cmd == PMU_CMD_CONFIG_SET_KEY_EVENTS) got = s->config.key_raw_events;
@@ -245,7 +245,7 @@ static bool cfg_rw_u8(uint16_t cmd, uint8_t orig, uint16_t orig_th, bool soc) {
 
 static bool run_cfg(uint16_t cmd) {
     if (!cmd_ok(PMU_CMD_CONFIG_GET, NULL, 0)) return false;
-    const pmu_config_t* c = &read_pico_pmu_get()->config;
+    const pmu_config_t* c = &device_power_get()->config;
     if (cmd == PMU_CMD_CONFIG_SET_WAKE_ON_CHARGE) {
         return cfg_rw_u8(cmd, c->wake_on_charge, 0, false);
     }
@@ -260,9 +260,9 @@ static bool run_cfg(uint16_t cmd) {
 
 static bool run_evt_clear(void) {
     if (!cmd_ok(PMU_CMD_EVENTS_CLEAR_ALL, NULL, 0)) return false;
-    read_pico_pmu_drain_events();
-    if (read_pico_pmu_poll() != ESP_OK) return false;
-    return read_pico_pmu_get()->pending_events == 0;
+    device_power_drain_events();
+    if (device_power_poll() != ESP_OK) return false;
+    return device_power_get()->pending_events == 0;
 }
 
 static bool run_led_cmd(void) {
@@ -272,8 +272,8 @@ static bool run_led_cmd(void) {
 }
 
 static bool run_sy_rail(void) {
-    read_pico_status_t st = { 0 };
-    if (read_pico_get_status(&st) != ESP_OK) return false;
+    board_status_t st = { 0 };
+    if (board_get_status(&st) != ESP_OK) return false;
     return st.rails_on && (st.ioe_input & SY_PGOOD_BIT) != 0;
 }
 
@@ -346,7 +346,7 @@ void pmu_selftest_run_probe(void) {
     memset(&s_blob, 0, sizeof(s_blob));
     s_blob.magic = BLOB_MAGIC;
     recount();
-    if (!read_pico_pmu_ready()) {
+    if (!device_power_ready()) {
         for (int i = 0; i < PMU_ST_CMD_END; i++) {
             mark(i, PMU_ST_RES_FAIL, "PMU 未就绪");
         }
@@ -395,7 +395,7 @@ void pmu_selftest_run_probe(void) {
 
 void pmu_selftest_prepare_powerdown(void) {
     epd_poweroff();
-    esp_err_t err = read_pico_sd_sync();
+    esp_err_t err = board_sd_sync();
     if (err != ESP_OK && err != ESP_ERR_NOT_FINISHED) {
         ESP_LOGW(TAG, "sd sync %s", esp_err_to_name(err));
     }

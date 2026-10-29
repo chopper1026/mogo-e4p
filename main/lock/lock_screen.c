@@ -15,7 +15,7 @@
 #include "boot_state.h"
 #include "display.h"
 #include "display_refresh.h"
-#include "read_pico_pmu.h"
+#include "device_power.h"
 #include "ble_page_turner.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -122,7 +122,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         while(!cancel){
             int64_t now=esp_timer_get_time()/1000;
             if(now-active_at>=30000){cancel=true;break;}
-            if(now-last_poll>=40){last_poll=now;(void)read_pico_pmu_poll();if(read_pico_pmu_take_key_action()!=READ_PICO_PMU_KEY_NONE){cancel=true;break;}}
+            if(now-last_poll>=40){last_poll=now;(void)device_power_poll();if(device_power_take_key_action()!=DEVICE_POWER_KEY_NONE){cancel=true;break;}}
             if(pad.blocked&&lock_pin_available()&&now>=retry_at){ui_pinpad_reset(&pad,NULL,"请重新输入");ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());}
             app_touch_t sample={0};esp_err_t error=s31_input_read_touch(touch,&sample);
             bool down=error==ESP_OK&&sample.touched;
@@ -136,7 +136,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                 if(r!=UI_PIN_NONE){ui_pinpad_paint_input(fb,&pad);present_input(hl,dirty);}
                 if(r==UI_PIN_COMPLETE){
                     bool verified=lock_pin_verify(pad.digits);
-                    if(verified){ui_pinpad_end(&pad);free(original);read_pico_pmu_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;}
+                    if(verified){ui_pinpad_end(&pad);free(original);device_power_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;}
                     ui_pinpad_reset(&pad,NULL,"密码不正确，请重试");
                     if(++failures>=3){failures=0;retry_at=now+10000;pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
                     ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());

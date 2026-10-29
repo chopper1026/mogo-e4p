@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-production = (ROOT / "components/read_pico_transfer/read_pico_transfer.c").read_text()
+production = (ROOT / "components/wifi_transfer/wifi_transfer.c").read_text()
 
 
 def function(name):
@@ -29,11 +29,11 @@ harness = (ROOT / "tools/transfer_wifi_host_test.c").read_text()
 harness = harness.replace("int main(void)", "static void policy_test(void)")
 harness = harness.replace('"../components/', '"' + str(ROOT / "components") + '/')
 harness += r'''
-enum {READ_PICO_TRANSFER_MODE_AP, READ_PICO_TRANSFER_MODE_STA};
-enum {READ_PICO_TRANSFER_STOPPED, READ_PICO_TRANSFER_STARTING, READ_PICO_TRANSFER_READY,
-      READ_PICO_TRANSFER_UPLOADING, READ_PICO_TRANSFER_ERROR};
-typedef struct {int mode,state;bool wifi_configured;char wifi_ssid[33];} read_pico_transfer_status_t;
-static read_pico_transfer_status_t s_status;
+enum {WIFI_TRANSFER_MODE_AP, WIFI_TRANSFER_MODE_STA};
+enum {WIFI_TRANSFER_STOPPED, WIFI_TRANSFER_STARTING, WIFI_TRANSFER_READY,
+      WIFI_TRANSFER_UPLOADING, WIFI_TRANSFER_ERROR};
+typedef struct {int mode,state;bool wifi_configured;char wifi_ssid[33];} wifi_transfer_status_t;
+static wifi_transfer_status_t s_status;
 static bool s_wifi,s_started,s_config_busy;
 static bool cancel_time_sync(bool automatic_only){(void)automatic_only;return true;}
 static void *s_http,*s_netif;
@@ -42,13 +42,13 @@ static void *s_http,*s_netif;
 #define ESP_LOGI(...) ((void)0)
 '''
 harness += "\n".join(function(name) for name in (
-    "read_pico_transfer_get_status", "claim_config", "release_config",
-    "publish_credentials", "read_pico_transfer_forget_wifi"))
+    "wifi_transfer_get_status", "claim_config", "release_config",
+    "publish_credentials", "wifi_transfer_forget_wifi"))
 harness += r'''
 static void saved_network(int mode, int state) {
     fail_open=fail_write=fail_commit=0;
     s_wifi=s_started=s_config_busy=false;s_http=s_netif=NULL;
-    s_status=(read_pico_transfer_status_t){.mode=mode,.state=state};
+    s_status=(wifi_transfer_status_t){.mode=mode,.state=state};
     transfer_credentials_t c;
     assert(credentials_from_text("saved", "12345678", &c));
     assert(store_credentials(&c)==ESP_OK);publish_credentials(&c);
@@ -58,36 +58,36 @@ int main(void) {
     policy_test();
     // 已清理的失败连接可遗忘；NVS 提交失败保留配置与公开状态，下一次确认可重试。
     // A cleaned-up failed connection can be forgotten; failed commits retain credentials and allow retry.
-    saved_network(READ_PICO_TRANSFER_MODE_STA, READ_PICO_TRANSFER_ERROR);
+    saved_network(WIFI_TRANSFER_MODE_STA, WIFI_TRANSFER_ERROR);
     fail_commit=1;
-    assert(read_pico_transfer_forget_wifi()==ESP_FAIL && present && s_status.wifi_configured);
+    assert(wifi_transfer_forget_wifi()==ESP_FAIL && present && s_status.wifi_configured);
     assert(!s_config_busy && !handles && !strcmp(s_status.wifi_ssid,"saved"));
     fail_commit=0;
-    assert(read_pico_transfer_forget_wifi()==ESP_OK && !present && !s_status.wifi_configured);
+    assert(wifi_transfer_forget_wifi()==ESP_OK && !present && !s_status.wifi_configured);
     assert(!s_config_busy && !handles && !s_status.wifi_ssid[0]);
     transfer_credentials_t check;
     assert(load_credentials(&check)==ESP_OK && !check.version);
-    assert(read_pico_transfer_forget_wifi()==ESP_OK);
-    saved_network(READ_PICO_TRANSFER_MODE_STA, READ_PICO_TRANSFER_ERROR);
+    assert(wifi_transfer_forget_wifi()==ESP_OK);
+    saved_network(WIFI_TRANSFER_MODE_STA, WIFI_TRANSFER_ERROR);
     fail_open=1;
-    assert(read_pico_transfer_forget_wifi()==ESP_FAIL && present && s_status.wifi_configured);
+    assert(wifi_transfer_forget_wifi()==ESP_FAIL && present && s_status.wifi_configured);
     fail_open=0;s_config_busy=true;
-    assert(read_pico_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
+    assert(wifi_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
     s_config_busy=false;
     // 任一 STA 资源仍活跃都拒绝；热点遗忘只删保存的 STA，不中断热点。
     // Reject any live STA resource; forgetting saved STA credentials leaves an AP intact.
     for(int resource=0;resource<4;++resource){
-        saved_network(READ_PICO_TRANSFER_MODE_STA, READ_PICO_TRANSFER_ERROR);
+        saved_network(WIFI_TRANSFER_MODE_STA, WIFI_TRANSFER_ERROR);
         if(resource==0)s_wifi=true;if(resource==1)s_started=true;
         if(resource==2)s_http=&s_status;if(resource==3)s_netif=&s_status;
-        assert(read_pico_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
+        assert(wifi_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
     }
-    saved_network(READ_PICO_TRANSFER_MODE_AP, READ_PICO_TRANSFER_READY);
+    saved_network(WIFI_TRANSFER_MODE_AP, WIFI_TRANSFER_READY);
     s_wifi=s_started=true;s_http=s_netif=&s_status;
-    assert(read_pico_transfer_forget_wifi()==ESP_OK && !present && s_wifi && s_started && s_http && s_netif);
+    assert(wifi_transfer_forget_wifi()==ESP_OK && !present && s_wifi && s_started && s_http && s_netif);
     for(int mode=0;mode<2;++mode){
-        saved_network(mode, READ_PICO_TRANSFER_UPLOADING);
-        assert(read_pico_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
+        saved_network(mode, WIFI_TRANSFER_UPLOADING);
+        assert(wifi_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
     }
     puts("transfer WiFi forget: failed-start recovery, persistence faults, busy/upload and resource guards PASS");
 }

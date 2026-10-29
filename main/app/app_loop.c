@@ -63,10 +63,10 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "read_pico_board.h"
-#include "read_pico_crashlog.h"
-#include "read_pico_pmu.h"
-#include "read_pico_transfer.h"
+#include "board_hardware.h"
+#include "board_crashlog.h"
+#include "device_power.h"
+#include "wifi_transfer.h"
 #include "settings.h"
 #include "haptics.h"
 #include "sleep.h"
@@ -83,7 +83,7 @@
 #include "touch_diag.h"
 #include "touch_sampler.h"
 #if CONFIG_TOUCH_DIAG && CONFIG_TOUCH_DIAG_BEEP
-#include "read_pico_buzzer.h"
+#include "board_buzzer.h"
 #endif
 #include "local_latency_probe.h"
 
@@ -101,7 +101,7 @@ static int32_t td_max_stall_ms, td_max_present_ms;
 #if CONFIG_TOUCH_DIAG_BEEP
 static void td_beep_task(void* arg) {
     (void)arg;
-    (void)read_pico_buzzer_tone(2200, 60);
+    (void)board_buzzer_tone(2200, 60);
     vTaskDelete(NULL);
 }
 void touch_diag_beep(void) {
@@ -394,7 +394,7 @@ static void up_key_global_tick(app_ctx_t* ctx, const app_desc_t* current) {
     if (ctx->now_ms - s_poll_ms < UP_KEY_POLL_MS) return;
     s_poll_ms = ctx->now_ms;
     bool pressed = false;
-    if (read_pico_read_up_key(&pressed) != ESP_OK) {
+    if (board_read_up_key(&pressed) != ESP_OK) {
         s_down = false;
         return;
     }
@@ -651,7 +651,7 @@ void app_loop_run(const app_loop_config_t* config) {
         app_navigation_observe_contact(err, touch.touched);
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
-            TD_TIME("transfer_poll", read_pico_transfer_service_poll());
+            TD_TIME("transfer_poll", wifi_transfer_service_poll());
             // 后台对时是系统服务（同 app_media_poll / 字体重试），守卫在 time_service 内部；
             // 空闲门控沿用上游：触压、近期输入、独占 PMU 的页面、USB 与联网升级期间不动。
             // Background sync is a system service like app_media_poll or the font retry, with its
@@ -892,16 +892,16 @@ void app_loop_run(const app_loop_config_t* config) {
 
         // 电源键短按默认锁屏；阅读正文可选择将它用于下一页。
         // A short power press normally locks; the reader body may use it for the next page.
-        if (quick_lock_requested || (read_pico_pmu_ready() && !current->holds_pmu && !usb_storage_active()
+        if (quick_lock_requested || (device_power_ready() && !current->holds_pmu && !usb_storage_active()
             && ctx.now_ms - last_lock_poll_ms >= APP_LOCK_POLL_MS)) {
             last_lock_poll_ms = ctx.now_ms;
-            read_pico_pmu_key_action_t key_action;
+            device_power_key_action_t key_action;
             if (quick_lock_requested) {
-                key_action = READ_PICO_PMU_KEY_SHORT;
+                key_action = DEVICE_POWER_KEY_SHORT;
             } else {
-                TD_TIME("pmu_poll", key_action = read_pico_pmu_take_key_action());
+                TD_TIME("pmu_poll", key_action = device_power_take_key_action());
             }
-            if (key_action != READ_PICO_PMU_KEY_NONE) {
+            if (key_action != DEVICE_POWER_KEY_NONE) {
                 last_input_ms = ctx.now_ms;
                 bool quick_was_open = app_quick_layer_is_open();
                 if (quick_was_open && !quick_lock_requested) {
@@ -910,7 +910,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 }
                 if (!quick_lock_requested && ctx.now_ms < s_lock_ignore_until_ms) {
                     ESP_LOGI(TAG, "ignore boot power-key action %d", (int)key_action);
-                } else if (key_action == READ_PICO_PMU_KEY_LONG) {
+                } else if (key_action == DEVICE_POWER_KEY_LONG) {
                     held_key = -1;
                     app_input_cancel_gesture(&ctx, current, &gesture);
                     if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
@@ -1041,9 +1041,9 @@ void app_loop_run(const app_loop_config_t* config) {
         // out; sync() carries the memory gate, the failure back-off and the crash-loop lock.
         // WiFi 在 C6、BLE 在 S3；传输仍与 BLE 竞争 S3 内部内存，网络占用先拆 BLE，结束后恢复。
         // WiFi runs on C6 and BLE on S3; both consume S3 internal memory, so network leases pause BLE and release it afterwards.
-        read_pico_transfer_status_t transfer;
-        read_pico_transfer_get_status(&transfer);
-        const bool wifi_busy = transfer.state != READ_PICO_TRANSFER_STOPPED ||
+        wifi_transfer_status_t transfer;
+        wifi_transfer_get_status(&transfer);
+        const bool wifi_busy = transfer.state != WIFI_TRANSFER_STOPPED ||
             pico_online_busy();
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
         TD_TIME("ble_poll", ble_pt_poll());

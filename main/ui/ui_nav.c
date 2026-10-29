@@ -18,9 +18,9 @@
 #include <string.h>
 #include <time.h>
 #include "app_registry.h"
-#include "read_pico_pmu.h"
-#include "read_pico_pmu_protocol.h"
-#include "read_pico_transfer.h"
+#include "device_power.h"
+#include "pmu_protocol.h"
+#include "wifi_transfer.h"
 #include "ui_kit.h"
 #include "settings.h"
 #include "ui_click_feedback.h"
@@ -149,7 +149,7 @@ void ui_nav_draw(uint8_t *fb, int active) {
 
 static time_t status_time(void) {
     time_t now = time(NULL);
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    const pmu_snapshot_t *pmu = device_power_get();
     if (now < 1704067200 && pmu && pmu->time_synced && pmu->unix_sec >= 1704067200)
         now = pmu->unix_sec;
     return now;
@@ -178,7 +178,7 @@ void ui_nav_battery_draw(uint8_t *fb, int x, int cy) {
     EpdRect battery = {x, cy - 11, 40, 22};
     ui_draw_round_rect(fb, battery, 6, UI_GRAY_BLACK);
     ui_fill_round_rect(fb, (EpdRect){x + 4, cy - 4, 5, 8}, 2, UI_GRAY_BLACK);
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    const pmu_snapshot_t *pmu = device_power_get();
     int gauge_percent = pmu_battery_percent(pmu);
     bool charging = pmu_battery_charging(pmu);
     if (gauge_percent >= 0) {
@@ -195,15 +195,15 @@ void ui_nav_battery_draw(uint8_t *fb, int x, int cy) {
 }
 void ui_nav_status(uint8_t *fb) {
     status_prepare_metrics();
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    const pmu_snapshot_t *pmu = device_power_get();
     char clock[12]; clock_text(clock,sizeof(clock));
     const int status_center_y = 40;
     // 固定状态栏字号，让系统字体缩放时文字仍与图标共用中心线。
     // Keep status type fixed so text and glyphs share one centerline at every system font scale.
     ui_text_fixed_vc(fb, 36, status_center_y, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_LEFT, false);
-    read_pico_transfer_status_t network = {0};
-    read_pico_transfer_get_status(&network);
-    const bool wifi_visible = network.network_ready && network.mode == READ_PICO_TRANSFER_MODE_STA;
+    wifi_transfer_status_t network = {0};
+    wifi_transfer_get_status(&network);
+    const bool wifi_visible = network.network_ready && network.mode == WIFI_TRANSFER_MODE_STA;
     const bool bluetooth_visible = app_settings_ble_turner();
     char percent[8] = "--%";
     int gauge_percent = pmu_battery_percent(pmu);

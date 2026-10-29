@@ -27,7 +27,7 @@
  */
 
 #include "display.h"
-#include "read_pico_board.h"
+#include "board_hardware.h"
 #include "ota_online.h"
 
 #include <stdbool.h>
@@ -72,12 +72,12 @@ void rails_keepalive(void) {
     const int64_t now_ms = esp_timer_get_time() / 1000;
     // 包括无变化和失败返回：释放像素驱动，不增加扫描或全刷。
     // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
-    drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
+    drive_release_retry_ms = board_epd_release_drive() ? 0 : now_ms + 50;
     rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
 #if CONFIG_DISPLAY_POWER_DIAG
     ESP_LOGI(TAG, "RAIL_DIAG event=release now_ms=%lld deadline_ms=%lld retry_ms=%lld on=%d",
              (long long)now_ms, (long long)rails_deadline_ms,
-             (long long)drive_release_retry_ms, read_pico_rails_on());
+             (long long)drive_release_retry_ms, board_rails_on());
 #endif
     pico_online_display_end(held);
 }
@@ -91,14 +91,14 @@ void rails_idle_check(int64_t now_ms) {
     // 短暂 I2C 故障按50ms重试；成功后不再访问总线，也不重画页面。
     // Retry a transient I2C failure at 50ms intervals; stop bus access on success without repainting.
     if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
-        drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
+        drive_release_retry_ms = board_epd_release_drive() ? 0 : now_ms + 50;
     if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
 #if CONFIG_DISPLAY_POWER_DIAG
         // 同时记录真实时钟与循环快照，区分阻塞等待和采样回放的旧时间。
         // Record the real clock and loop snapshot to distinguish blocking from stale replay time.
         ESP_LOGI(TAG, "RAIL_DIAG event=idle_off loop_ms=%lld late_ms=%lld on=%d",
                  (long long)now_ms,
-                 (long long)(esp_timer_get_time() / 1000 - rails_deadline_ms), read_pico_rails_on());
+                 (long long)(esp_timer_get_time() / 1000 - rails_deadline_ms), board_rails_on());
 #endif
         rails_deadline_ms = 0;
         drive_release_retry_ms = 0;
@@ -114,7 +114,7 @@ void rails_idle_check(int64_t now_ms) {
 static void use_scan_for(const EpdWaveform* waveform, enum EpdDrawMode mode) {
     const bool fast = (mode & 0xF) == MODE_DU &&
         (waveform == &E0470_FOLLOW_WAVEFORM || waveform == &E0470_CAPSULE_DRAG_WAVEFORM);
-    read_pico_epd_use_scan(fast ? READ_PICO_EPD_SCAN_FAST : READ_PICO_EPD_SCAN_FULL);
+    board_epd_use_scan(fast ? BOARD_EPD_SCAN_FAST : BOARD_EPD_SCAN_FULL);
     // 高层刷新保持整屏扫描；两条63行可用队列在第127行入队前启动。
     // High-level updates scan the full panel; two 63-slot queues start before line 127 is enqueued.
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : (fast ? 64 : 32));
@@ -273,7 +273,7 @@ static bool s_power_fault;
 static bool display_power_ready(void) {
     if (s_power_retry_ms && esp_timer_get_time() / 1000 < s_power_retry_ms) return false;
     epd_poweron();
-    if (read_pico_rails_on()) {
+    if (board_rails_on()) {
         s_power_retry_ms = 0;
         return true;
     }
@@ -298,7 +298,7 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
     display_main_transition_cancel();
     if (error & EPD_DRAW_EMPTY_LINE_QUEUE) {
         s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-        read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+        board_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     }
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
@@ -399,7 +399,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         // Water outputs the final gray target directly, without a BW prepass or a second
         // whole-page gray update; the marker joins the same scan so the old bar is erased
         // with the body's stronger whitening. Common recovery handles failure.
-        read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
+        board_epd_use_scan(BOARD_EPD_SCAN_FAST);
         epd_lcd_set_prefill_lines(127);
         EpdRect ripple = main_body_area();
         ripple.height = UI_NAV_MARKER_SCAN_END;
@@ -766,7 +766,7 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     if (main_before_update(hl, &intercepted)) return intercepted;
     // 阅读页显式选择时调用；主页面水波纹有独立裁剪路径，普通模式不受影响。
     // Explicit reader effect; main-tab water has its own bounded path, and ordinary mode is unaffected.
-    read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
+    board_epd_use_scan(BOARD_EPD_SCAN_FAST);
     epd_lcd_set_prefill_lines(s_bulk_io ? 127 : 64);
     if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     // 水波纹使用面板原厂GL16表：每种灰阶转换保留前导擦除，灰阶由原厂脉冲校准；
@@ -787,7 +787,7 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     // An interrupted scan may leave intermediate pixels. Rebuild the whole baseline from white.
     if (result & EPD_DRAW_EMPTY_LINE_QUEUE) {
         s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-        read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+        board_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     }
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     epd_clear();
@@ -807,7 +807,7 @@ static void guard_draw_result_unlocked(EpdiyHighlevelState* hl, enum EpdDrawErro
     if (!(result & EPD_DRAW_EMPTY_LINE_QUEUE)) return;
     display_main_transition_cancel();
     s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
-    read_pico_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
+    board_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     if (!display_power_ready()) return;
     epd_clear();

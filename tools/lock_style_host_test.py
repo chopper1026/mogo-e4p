@@ -34,7 +34,7 @@ static void log_sink(const char *fmt, ...) { (void)fmt; }
 #define pdMS_TO_TICKS(x) (x)
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int unused;} EpdiyHighlevelState;
-typedef struct {bool mounted;} read_pico_sd_info_t;
+typedef struct {bool mounted;} board_sd_info_t;
 typedef struct {bool active;} app_lock_font_t;
 typedef void *sc7a20h_handle_t;typedef void *cst836u_handle_t;
 typedef int app_wake_source_t;
@@ -74,21 +74,21 @@ static void epd_hl_set_all_white(void *h){(void)h;memset(pixels,255,FRAME_BYTES)
 static enum EpdDrawError epd_hl_update_screen_from_white(void *h,int mode,int temp){(void)h;assert(mode==MODE_GC16&&temp==25&&frame_ready&&panel[0]==255);assert(pixels[0]==(draw_ok?0x10+style:0xfe));memcpy(panel,pixels,FRAME_BYTES);++presents;return EPD_DRAW_SUCCESS;}
 static void app_font_begin_lock(app_lock_font_t *s){assert(panel[0]==(feedback_seen?0xff:0x32));s->active=true;++font_begin;}
 static void app_font_end_lock(app_lock_font_t *s){assert(s->active);++font_end;}
-static bool read_pico_transfer_pause_for_sleep(void){++pause;return transfer_ok;}
-static void read_pico_transfer_resume_after_sleep(void){++resume;}
+static bool wifi_transfer_pause_for_sleep(void){++pause;return transfer_ok;}
+static void wifi_transfer_resume_after_sleep(void){++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
 static app_wake_source_t app_light_sleep_wait(void *acc){(void)acc;return APP_WAKE_KEY;}
 static int app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);if(deep_fail)return -1;longjmp(deep,1);}
-static void read_pico_pmu_drain_events(void){}
-static void read_pico_pmu_consume_key_press(void){}
+static void device_power_drain_events(void){}
+static void device_power_consume_key_press(void){}
 // 后台对时取消只验证被调用，本测试不桥接对时状态机。/ Cancelling background sync is only counted as called; this test does not bridge its state machine.
 static unsigned time_cancels;
 static void app_time_service_cancel(void){++time_cancels;}
 static int64_t esp_timer_get_time(void){return 2000000;}
 static bool lock_screen_restore(uint8_t *fb){if(!cache_ok||cached_style!=style)return false;memset(fb,0x10+style,FRAME_BYTES);return true;}
 static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot){(void)h;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache);assert(pixels[0]==(draw_ok?0x10+style:0xfe));++auths;}
-static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return 0;}
+static int board_sd_get_info(board_sd_info_t *i){i->mounted=true;return 0;}
 static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}

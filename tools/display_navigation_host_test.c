@@ -78,12 +78,12 @@ enum EpdRotation epd_get_rotation(void) {return rotation;}
 int epd_rotated_display_width(void) {return H;}
 int epd_rotated_display_height(void) {return W;}
 int64_t esp_timer_get_time(void) {return now_us;}
-void read_pico_epd_set_pclk(int mhz) {assert(mhz == DISPLAY_PCLK_SAFE_MHZ);}
-void read_pico_epd_use_scan(read_pico_epd_scan_t mode) {scan = mode;}
+void board_epd_set_pclk(int mhz) {assert(mhz == DISPLAY_PCLK_SAFE_MHZ);}
+void board_epd_use_scan(board_epd_scan_t mode) {scan = mode;}
 void epd_lcd_set_prefill_lines(int lines) {prefill = lines;}
 void epd_poweron(void) {}
-bool read_pico_rails_on(void) { return !power_failure; }
-bool read_pico_epd_release_drive(void) {return true;}
+bool board_rails_on(void) { return !power_failure; }
+bool board_epd_release_drive(void) {return true;}
 void epd_poweroff(void) {}
 void epd_clear(void) { assert(ota_display_depth);++clears; memset(panel, 255, BYTES);}
 void epd_hl_set_all_white(EpdiyHighlevelState* state) {memset(state->front_fb, 255, BYTES);}
@@ -92,7 +92,7 @@ enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* state, EpdRect area, e047
     assert(ota_display_depth);
     (void)dir; ++water_calls;
     last_water_area=area;
-    assert(area.y>=0 && area.y%32==0 && (area.y+area.height==UI_NAV_REFRESH_END || area.y+area.height==UI_NAV_MARKER_SCAN_END) && scan==READ_PICO_EPD_SCAN_FAST);
+    assert(area.y>=0 && area.y%32==0 && (area.y+area.height==UI_NAV_REFRESH_END || area.y+area.height==UI_NAV_MARKER_SCAN_END) && scan==BOARD_EPD_SCAN_FAST);
     if(water_fails)return (enum EpdDrawError)water_fails;
     const size_t stride=W/2;
     for(int y=0;y<H;++y){memcpy(panel+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);memcpy(state->back_fb+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);}
@@ -143,9 +143,9 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
     last_mode = mode; last_wave=state->waveform;
     if (mode == MODE_DU) {
         ++bw_calls;
-        if (state->waveform == &E0470_FOLLOW_WAVEFORM) assert(scan == READ_PICO_EPD_SCAN_FAST);
+        if (state->waveform == &E0470_FOLLOW_WAVEFORM) assert(scan == BOARD_EPD_SCAN_FAST);
         else {
-            assert((state->waveform == &main_bw || state->waveform == &main_exit || state->waveform == &E0470_WAVEFORM) && scan == READ_PICO_EPD_SCAN_FULL);
+            assert((state->waveform == &main_bw || state->waveform == &main_exit || state->waveform == &E0470_WAVEFORM) && scan == BOARD_EPD_SCAN_FULL);
             ++complete_bw_calls; exit_calls += state->waveform == &main_exit;
             for (int y = 0; y < H; ++y)
                 for (int x = x0 / 2; x < x1 / 2; ++x) {
@@ -161,7 +161,7 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
         }
     } else {
         ++gray_calls; gc_calls += mode == MODE_GC16;
-        assert(scan == READ_PICO_EPD_SCAN_FULL);
+        assert(scan == BOARD_EPD_SCAN_FULL);
         if (state->waveform==&main_acrylic_clean) {
             ++clean_calls;
             assert(full && mode==MODE_GL16 && x1<=UI_NAV_REFRESH_END);
@@ -207,7 +207,7 @@ enum EpdDrawError epd_hl_update_screen_from_white(EpdiyHighlevelState* state, en
 enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* state, EpdRect area,
     EpdRect strong, const EpdWaveform* soft, const EpdWaveform* calibrated,
     enum EpdDrawMode strong_mode) {
-    assert(ota_display_depth && scan==READ_PICO_EPD_SCAN_FULL);
+    assert(ota_display_depth && scan==BOARD_EPD_SCAN_FULL);
     assert(soft==&main_water && calibrated==&main_acrylic);
     assert(area.y==0 && area.height==UI_NAV_MARKER_SCAN_END);
     assert(strong.y>=0 && strong.y+strong.height<=UI_NAV_REFRESH_END && !(strong.y&31) && !(strong.height&31));
@@ -301,7 +301,7 @@ int main(void) {
         assert(last_area.y == 0 && last_area.height == UI_NAV_MARKER_SCAN_END);
         assert(last_area.height % 32 == 0 && last_area.height <= UI_NAV_MARKER_SCAN_END);
         assert(!gray_calls && !full_calls && !gc_calls && !clears && !nav_draws && !allocations);
-        assert(hl.waveform == &E0470_WAVEFORM && scan == READ_PICO_EPD_SCAN_FULL);
+        assert(hl.waveform == &E0470_WAVEFORM && scan == BOARD_EPD_SCAN_FULL);
     }
     now_us += 200000; rails_idle_check(now_us / 1000);
     display_main_transition_cancel(); assert(calls == 200); assert_final();
@@ -708,7 +708,7 @@ int main(void) {
             front[200*(W/2)+700/2]=step%2?0x0f:0xf0;memcpy(final,front,BYTES);
             display_main_transition_arm(&owner_a,false,false);
             assert(update_display_area_diff_with(&hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,(EpdRect){0,640,H,256})==EPD_DRAW_SUCCESS);
-            assert(last_wave==&E0470_FOLLOW_WAVEFORM&&last_mode==MODE_DU&&scan==READ_PICO_EPD_SCAN_FAST);
+            assert(last_wave==&E0470_FOLLOW_WAVEFORM&&last_mode==MODE_DU&&scan==BOARD_EPD_SCAN_FAST);
             assert(calls==step&&bw_calls==step&&!gray_calls&&!full_calls&&!clears&&!water_calls&&!nav_draws&&!allocations);
             assert_final();
         }

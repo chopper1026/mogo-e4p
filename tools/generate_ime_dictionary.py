@@ -19,7 +19,7 @@ def array(name, kind, data):
 
 
 def main():
-    component = ROOT / "components/read_pico_search"
+    component = ROOT / "components/book_search"
     source = (component / "search_table.h").read_text()
     cps, groups, offsets, readings, syllables = [values(source, n) for n in (
         "search_codepoints", "search_groups", "search_group_offsets", "search_readings", "search_syllable_offsets")]

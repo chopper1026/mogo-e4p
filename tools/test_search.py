@@ -15,16 +15,16 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build/search-tests"
 BUILD.mkdir(parents=True, exist_ok=True)
-source = ROOT / "components/read_pico_search/read_pico_search.c"
+source = ROOT / "components/book_search/book_search.c"
 flags = ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
-         "-I" + str(ROOT / "components/read_pico_search/include")]
+         "-I" + str(ROOT / "components/book_search/include")]
 exe = BUILD / "search-host"
 subprocess.run(flags + ["-g", "-fsanitize=address,undefined", str(ROOT / "tools/search_host_test.c"), str(source), "-o", str(exe)], check=True)
 subprocess.run([str(exe)], check=True)
 shared = BUILD / "search.so"
 subprocess.run(flags + ["-shared", "-fPIC", str(source), "-o", str(shared)], check=True)
 lib = ctypes.CDLL(str(shared))
-match = lib.read_pico_search_match
+match = lib.book_search_match
 match.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 match.restype = ctypes.c_bool
 

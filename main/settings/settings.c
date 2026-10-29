@@ -34,9 +34,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "haptics.h"
-#include "read_pico_pmu.h"
-#include "read_pico_sd.h"
-#include "read_pico_transfer.h"
+#include "device_power.h"
+#include "board_sd.h"
+#include "wifi_transfer.h"
 #include "book/book_history_backup.h"
 
 #define TAG "settings"
@@ -628,7 +628,7 @@ void app_settings_set_batt_log(bool on) {
     nvs_put_u8(NVS_KEY_BATT_LOG, on ? 1 : 0);
     // 立即生效：关闭后下一次唤醒不再建文件；打开后最多一分钟写入第一行。
     // Take effect at once: off stops any further file creation, on writes the first line within a minute.
-    read_pico_pmu_set_batt_log(on);
+    device_power_set_batt_log(on);
 }
 
 uint8_t app_settings_haptic_intensity(void) { return s_haptic_intensity; }
@@ -1150,7 +1150,7 @@ typedef struct {
 } settings_backup_profile_t;
 
 typedef struct {
-    read_pico_transfer_wifi_backup_t credentials;
+    wifi_transfer_wifi_backup_t credentials;
     uint8_t checksum[4];
 } settings_backup_wifi_t;
 
@@ -1376,7 +1376,7 @@ static bool backup_wifi_valid(const settings_backup_wifi_t *wifi) {
     uint32_t stored = 0;
     for (int i = 0; i < 4; ++i) stored |= (uint32_t)wifi->checksum[i] << (i * 8);
     return stored == backup_wifi_checksum(wifi) &&
-           read_pico_transfer_wifi_backup_valid(&wifi->credentials);
+           wifi_transfer_wifi_backup_valid(&wifi->credentials);
 }
 
 enum {
@@ -1424,8 +1424,8 @@ static void backup_seal(settings_backup_v1_t *backup) {
 }
 
 static bool backup_card_ready(void) {
-    read_pico_sd_info_t info = {0};
-    return read_pico_sd_get_info(&info) == ESP_OK && info.mounted;
+    board_sd_info_t info = {0};
+    return board_sd_get_info(&info) == ESP_OK && info.mounted;
 }
 
 esp_err_t app_settings_backup_save(void) {
@@ -1540,7 +1540,7 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t margins_hash = backup_margins_checksum(&margins);
     for (unsigned i = 0; i < 4; ++i) margins.checksum[i] = (uint8_t)(margins_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
-    esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
+    esp_err_t wifi_err = wifi_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
     backup_wifi_seal(&wifi);
     settings_backup_background_t background = {0};
@@ -1986,7 +1986,7 @@ esp_err_t app_settings_backup_restore(void) {
         if (history_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return history_err; }
     }
     if (has_wifi) {
-        esp_err_t wifi_err = read_pico_transfer_import_wifi_backup(&wifi.credentials);
+        esp_err_t wifi_err = wifi_transfer_import_wifi_backup(&wifi.credentials);
         backup_erase_secret(&wifi, sizeof(wifi));
         if (wifi_err != ESP_OK) return wifi_err;
     }

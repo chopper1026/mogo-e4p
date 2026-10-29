@@ -109,12 +109,12 @@ int main(void) {
     // 核对词组读音，跨批次候选不重复，超过八个同音字可选且保留剩余拼音。
     // Validate phrase readings, unique multi-batch homophones, and selection beyond eight without losing the suffix.
     for(size_t i=0;i<sizeof(phrases)/sizeof(phrases[0]);i++) {
-        if(!read_pico_search_match(phrases[i].text,phrases[i].roman)) {
+        if(!book_search_match(phrases[i].text,phrases[i].roman)) {
             fprintf(stderr,"wrong phrase reading: %s %s\n",phrases[i].roman,phrases[i].text);abort();
         }
     }
     out=malloc(sizeof(*out));assert(out);
-    uint32_t all[2048];size_t total=read_pico_search_candidates("shi",all,2048,0);assert(total>24);
+    uint32_t all[2048];size_t total=book_search_candidates("shi",all,2048,0);assert(total>24);
     bool seen[65536]={0};size_t offset=0,unique=0;
     do {
         assert(ui_ime_candidates_page("shi",false,"","",offset,out));

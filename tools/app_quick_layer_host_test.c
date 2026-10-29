@@ -5,7 +5,7 @@
 #include "app_quick_layer.h"
 #include "ui_quick_menu.h"
 #include "display_normalize.h"
-#include "read_pico_transfer.h"
+#include "wifi_transfer.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -21,7 +21,7 @@ static unsigned settings_writes, applies, rows, pushes, renders, fallback, failu
 static unsigned wifi_starts, wifi_stops, captures, enters, exits, setup_wifi, setup_bt;
 static bool configured = true, can_stop = true, expect_origin;
 static int error_once;
-static read_pico_transfer_status_t network;
+static wifi_transfer_status_t network;
 static app_ctx_t ctx;
 static app_touch_t touch;
 static uint8_t fb[1];
@@ -58,14 +58,14 @@ void ble_pt_reconnect_recent(void) {assert(ble); record(12, 1);}
 void ble_pt_cancel_recent(void) {assert(!ble); record(13, 0);}
 bool pico_online_busy(void) {return online;}
 bool usb_storage_active(void) {return usb;}
-void read_pico_transfer_get_status(read_pico_transfer_status_t *s) {*s = network;}
-int read_pico_transfer_get_saved_wifi(char *ssid, bool *ok) {ssid[0] = 0; *ok = configured; return ESP_OK;}
-int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {
-    assert(cfg->mode == READ_PICO_TRANSFER_MODE_STA && cfg->network_only);
+void wifi_transfer_get_status(wifi_transfer_status_t *s) {*s = network;}
+int wifi_transfer_get_saved_wifi(char *ssid, bool *ok) {ssid[0] = 0; *ok = configured; return ESP_OK;}
+int wifi_transfer_start(const wifi_transfer_cfg_t *cfg) {
+    assert(cfg->mode == WIFI_TRANSFER_MODE_STA && cfg->network_only);
     ++wifi_starts; network.mode = cfg->mode; network.state = 1; record(14, wifi_starts); return ESP_OK;
 }
-bool read_pico_transfer_try_stop_if_idle(void) {
-    ++wifi_stops; if (can_stop) network.state = READ_PICO_TRANSFER_STOPPED;
+bool wifi_transfer_try_stop_if_idle(void) {
+    ++wifi_stops; if (can_stop) network.state = WIFI_TRANSFER_STOPPED;
     record(15, can_stop); return can_stop;
 }
 void app_navigation_capture_reader_return(const app_desc_t *p) {assert(p == current); ++captures; record(16, captures);}

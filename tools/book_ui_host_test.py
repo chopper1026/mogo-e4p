@@ -102,7 +102,7 @@ static void ui_keyboard_end(void){}
 typedef enum {BATCH_DELETE,BATCH_CLEAR,BATCH_UNSHELF} batch_kind_t;
 static bool s_batch_confirm;
 static batch_kind_t s_batch_kind;
-static bool read_pico_search_match(const char* name,const char* query){return !*query||strstr(name,query)!=NULL;}
+static bool book_search_match(const char* name,const char* query){return !*query||strstr(name,query)!=NULL;}
 static int book_chapter_count(void){return 1;}
 static size_t book_navigation_count(void){return (size_t)book_chapter_count();}
 #define BOOK_TOC_ROWS 7
@@ -359,9 +359,9 @@ static void book_layout_set_image_bleed_width(int screen_width){(void)screen_wid
 static void book_layout_set_right_slack(int px){(void)px;}
 static void book_layout_set_vertical(bool vertical){test_book_vertical=vertical;}
 static bool app_settings_book_shake(void){return false;}
-static void read_pico_sd_start_probe(void){}
-typedef struct {bool present,mounted;} read_pico_sd_info_t;
-static int read_pico_sd_get_info(read_pico_sd_info_t* out){*out=(read_pico_sd_info_t){0};return 0;}
+static void board_sd_start_probe(void){}
+typedef struct {bool present,mounted;} board_sd_info_t;
+static int board_sd_get_info(board_sd_info_t* out){*out=(board_sd_info_t){0};return 0;}
 static bool s_shelf_cache_valid,s_cache_sd_present,s_cache_sd_mounted;
 static uint8_t s_cache_shelf_style;
 static int test_open_dirs,test_nav_depth;

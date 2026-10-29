@@ -31,7 +31,7 @@ static sdmmc_card_t test_card = {
 };
 
 #define mkdir(path, mode) (0)
-#include "../components/read_pico/read_pico_sd.c"
+#include "../components/board_support/board_sd.c"
 #undef mkdir
 
 static FATFS test_fat={.free_clst=1};
@@ -51,12 +51,12 @@ bool sdmmc_host_check_buffer_alignment(int slot,const void *buffer,size_t size){
 esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
 esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
-bool read_pico_sd_present(void) { return test_present; }
+bool board_sd_present(void) { return test_present; }
 // 宿主按「有 CD 脚」跑：软件卡检测的任务与 CMD13 不进入这些用例。
 // The host pretends the board has a CD pin, so the soft-detect task and CMD13 stay out of these cases.
-bool read_pico_sd_has_cd(void) { return true; }
+bool board_sd_has_cd(void) { return true; }
 esp_err_t sdmmc_get_status(sdmmc_card_t *c) { (void)c; return ESP_OK; }
-esp_err_t read_pico_sd_detect(bool* present) {
+esp_err_t board_sd_detect(bool* present) {
     if (detect_failure) return ESP_ERR_TIMEOUT;
     *present = test_present;
     return ESP_OK;
@@ -113,41 +113,41 @@ esp_err_t esp_vfs_fat_info(const char* path, uint64_t* total, uint64_t* free_byt
 }
 
 int main(void) {
-    read_pico_sd_info_t info = {0};
-    assert(read_pico_sd_start_probe() == ESP_ERR_NOT_FOUND);
-    assert(read_pico_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
+    board_sd_info_t info = {0};
+    assert(board_sd_start_probe() == ESP_ERR_NOT_FOUND);
+    assert(board_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
     assert(!info.present && !info.mounted && mount_calls == 0);
 
     test_present = true;
-    assert(read_pico_sd_get_info(&info) == ESP_ERR_INVALID_STATE);
+    assert(board_sd_get_info(&info) == ESP_ERR_INVALID_STATE);
     assert(info.present && !info.mounted);
-    assert(read_pico_sd_start_probe() == ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info) == ESP_OK);
+    assert(board_sd_start_probe() == ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info) == ESP_OK);
     assert(info.present && info.mounted && mount_calls == 1);
 
     detect_failure = true;
-    assert(read_pico_sd_get_info(&info) == ESP_OK && info.mounted && info.capacity_bytes);
-    assert(read_pico_sd_start_probe() == ESP_OK && mount_calls == 1);
+    assert(board_sd_get_info(&info) == ESP_OK && info.mounted && info.capacity_bytes);
+    assert(board_sd_start_probe() == ESP_OK && mount_calls == 1);
     detect_failure = false;
 
     // 一次 CD 读错不能判掉卡，连续确认才失效。
     // One bad CD read must not drop the card; a sustained absence does.
     test_present = false;
     mock_us += 60000;
-    assert(read_pico_sd_get_info(&info) == ESP_OK && info.mounted);
+    assert(board_sd_get_info(&info) == ESP_OK && info.mounted);
     mock_us += 60000;
-    assert(read_pico_sd_get_info(&info) == ESP_OK && info.mounted);
+    assert(board_sd_get_info(&info) == ESP_OK && info.mounted);
     mock_us += 60000;
-    assert(read_pico_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
+    assert(board_sd_get_info(&info) == ESP_ERR_NOT_FOUND);
     test_present = true;
-    assert(read_pico_sd_start_probe() == ESP_ERR_INVALID_STATE);
-    assert(read_pico_sd_remount() == ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info) == ESP_OK);
+    assert(board_sd_start_probe() == ESP_ERR_INVALID_STATE);
+    assert(board_sd_remount() == ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info) == ESP_OK);
     assert(info.mounted && mount_calls == 2 && unmount_calls == 1);
     test_card.csd.capacity = 536870912u; // 256 GiB / 512 byte sectors, exceeds 32-bit byte range.
     test_fail_above_khz=10000;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_OK&&info.mounted);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_OK&&info.mounted);
     assert(info.capacity_bytes==256ull*1024*1024*1024);
     assert(mount_calls==6 && delays==3);
     assert(clock_history[2]==40000 && clock_history[3]==40000 && clock_history[4]==20000 && clock_history[5]==10000);
@@ -155,71 +155,71 @@ int main(void) {
     // CMD6 忙不能终止降速；默认频率跳过高速切换。/ CMD6 busy must fall back; default speed skips HS negotiation.
     test_mount_error=ESP_ERR_INVALID_STATE;
     test_fail_above_khz=20000;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && mount_calls==9);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted && mount_calls==9);
     assert(clock_history[6]==40000 && clock_history[7]==40000 && clock_history[8]==20000);
 
     // 资源错误立即失败，初始化失败不建议格式化。/ Resource errors fail immediately; init failures never suggest format.
     test_mount_error=ESP_ERR_NO_MEM;
     test_fail_above_khz=1;
     int before=mount_calls, previous_delays=delays;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NO_MEM && !info.mounted && !info.needs_format);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_ERR_NO_MEM && !info.mounted && !info.needs_format);
     assert(mount_calls==before+1 && delays==previous_delays);
     test_mount_error=ESP_ERR_INVALID_STATE;
     before=mount_calls;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.needs_format);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.needs_format);
     assert(mount_calls==before+4 && delays==previous_delays+3);
     test_mount_error=ESP_FAIL;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_FAIL && !info.needs_format);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_FAIL && !info.needs_format);
 
     test_exfat=true;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_FAIL && info.needs_format);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_FAIL && info.needs_format);
     test_raw_error=true;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_FAIL && !info.needs_format);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_FAIL && !info.needs_format);
     test_raw_error=test_exfat=false;
 
     // CD 通信未知时仍尝试实际挂载，不能假设拔卡。/ Unknown CD still permits an actual mount, not assumed removal.
     detect_failure=true;
     test_fail_above_khz=0;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && info.present);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted && info.present);
     detect_failure=false;
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
     assert(info.space_valid && info.filesystem_bytes==test_total && info.free_bytes==test_free);
     assert(invalidations>0);
     // 多分区卡只统计挂载分区；256GiB卡不能截断，挂载状态与统计错误独立。
     test_total=128ull*1024*1024*1024; test_free=100ull*1024*1024*1024;
     unsigned before_space=space_calls;
-    assert(read_pico_sd_refresh_space()==ESP_OK && space_calls==before_space+1);
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.capacity_bytes==256ull*1024*1024*1024 &&
+    assert(board_sd_refresh_space()==ESP_OK && space_calls==before_space+1);
+    assert(board_sd_get_info(&info)==ESP_OK && info.capacity_bytes==256ull*1024*1024*1024 &&
            info.filesystem_bytes==test_total && info.filesystem_bytes-info.free_bytes==28ull*1024*1024*1024);
     test_free-=512*1024;
-    assert(read_pico_sd_refresh_space()==ESP_OK);
-    assert(read_pico_sd_get_info(&info)==ESP_OK&&info.free_bytes==test_free);
+    assert(board_sd_refresh_space()==ESP_OK);
+    assert(board_sd_get_info(&info)==ESP_OK&&info.free_bytes==test_free);
     test_info_error=ESP_FAIL;
-    assert(read_pico_sd_refresh_space()==ESP_FAIL);
-    assert(read_pico_sd_get_info(&info)==ESP_OK&&info.mounted&&!info.space_valid&&info.space_error==ESP_FAIL&&info.free_bytes==0);
+    assert(board_sd_refresh_space()==ESP_FAIL);
+    assert(board_sd_get_info(&info)==ESP_OK&&info.mounted&&!info.space_valid&&info.space_error==ESP_FAIL&&info.free_bytes==0);
     test_info_error=ESP_OK;test_free=test_total+1;
-    assert(read_pico_sd_refresh_space()==ESP_FAIL);
-    assert(read_pico_sd_get_info(&info)==ESP_OK&&!info.space_valid);
+    assert(board_sd_refresh_space()==ESP_FAIL);
+    assert(board_sd_get_info(&info)==ESP_OK&&!info.space_valid);
     test_free=0;
-    assert(read_pico_sd_refresh_space()==ESP_OK);
-    assert(read_pico_sd_get_info(&info)==ESP_OK&&info.space_valid&&info.free_bytes==0);
+    assert(board_sd_refresh_space()==ESP_OK);
+    assert(board_sd_get_info(&info)==ESP_OK&&info.space_valid&&info.free_bytes==0);
     // 连续确认后才判掉卡；之前空间统计仍走已挂载的卡。
     // The card drops only after sustained confirmation; until then space still reads as mounted.
     test_present=false;before_space=space_calls;
     mock_us+=60000;
-    assert(read_pico_sd_refresh_space()==ESP_OK&&space_calls==before_space+1);
+    assert(board_sd_refresh_space()==ESP_OK&&space_calls==before_space+1);
     mock_us+=60000;
-    assert(read_pico_sd_refresh_space()==ESP_OK&&space_calls==before_space+2);
+    assert(board_sd_refresh_space()==ESP_OK&&space_calls==before_space+2);
     mock_us+=60000;
-    assert(read_pico_sd_refresh_space()==ESP_ERR_NOT_FOUND&&space_calls==before_space+2);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND&&!info.mounted&&!info.space_valid);
+    assert(board_sd_refresh_space()==ESP_ERR_NOT_FOUND&&space_calls==before_space+2);
+    assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND&&!info.mounted&&!info.space_valid);
     puts("sd_probe: empty boot/insertion, checked CD, bounded settle/fallback, CMD6 busy, OOM, no format suggestion, 256 GiB passed");
     return 0;
 }

@@ -25,7 +25,7 @@ unit = r'''
 typedef int esp_err_t;
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {char path[128];bool is_flash;} book_store_root_t;
-typedef struct {bool present,mounted;} read_pico_sd_info_t;
+typedef struct {bool present,mounted;} board_sd_info_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
 typedef struct {const void *request_app;} app_ctx_t;
 typedef struct {int type,x0,y0;} ui_gesture_event_t;
@@ -41,7 +41,7 @@ static void ui_nav_request(app_ctx_t *ctx,int tab){assert(tab==0);ctx->request_a
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&y>=r.y&&x<r.x+r.width&&y<r.y+r.height;}
 static bool pico_boot_interrupted_book(char *out,size_t cap){if(!recorded||strlen(recorded_path)>=cap)return false;strcpy(out,recorded_path);return true;}
 static void pico_boot_forget_interrupted_book(void){recorded=false;}
-static esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *sd){sd->present=sd->mounted=card_ready;return card_ready?ESP_OK:ESP_ERR_INVALID_STATE;}
+static esp_err_t board_sd_get_info(board_sd_info_t *sd){sd->present=sd->mounted=card_ready;return card_ready?ESP_OK:ESP_ERR_INVALID_STATE;}
 static bool book_store_flash_ready(void){return flash_ready;}
 static esp_err_t book_store_roots(book_store_root_t *out,int *n){(void)out;*n=0;return ESP_FAIL;}
 static void book_store_notify_changed(void){++changes;}

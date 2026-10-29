@@ -106,7 +106,7 @@ static EpdRect reader_area(void){return (EpdRect){0,160,684,900};}
 unit+=function('paint_reading',book)+'\n'
 files=ROOT/'main/apps/app_files.c'
 unit+=r'''
-typedef struct {bool mounted,space_valid;uint64_t filesystem_bytes,free_bytes,capacity_bytes;}read_pico_sd_info_t;
+typedef struct {bool mounted,space_valid;uint64_t filesystem_bytes,free_bytes,capacity_bytes;}board_sd_info_t;
 '''
 for name in ('storage_space_valid','storage_amount','storage_usage'):unit+=function(name,files)+'\n'
 unit+=r'''
@@ -158,7 +158,7 @@ int main(void){
  assert(paint_reading(&ctx,MODE_GL16)==APP_REDRAW_AREA);
  assert(fb[20*684+36]==110&&fb[160*684]==15&&fb[159*684]==255&&s_area.y==160);
  s_view=SHELF;++minute;assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
- read_pico_sd_info_t info={.mounted=true,.space_valid=true,.filesystem_bytes=128ULL*1024*1024*1024,.free_bytes=100ULL*1024*1024*1024,.capacity_bytes=256ULL*1024*1024*1024};
+ board_sd_info_t info={.mounted=true,.space_valid=true,.filesystem_bytes=128ULL*1024*1024*1024,.free_bytes=100ULL*1024*1024*1024,.capacity_bytes=256ULL*1024*1024*1024};
  char total[32],usage[96];storage_usage(&info,total,sizeof(total),usage,sizeof(usage));
  assert(!strcmp(total,"128.00 GB")&&strstr(usage,"28.00 GB")&&strstr(usage,"100.00 GB"));
  info.free_bytes=info.filesystem_bytes-1024*1024;
@@ -171,7 +171,7 @@ int main(void){
 '''
 # Render may not decode/read NVS, and clock prefix may not prepare/cache whole pages.
 s=function('render',settings)
-assert 'ui_wallpaper_draw_rounded' not in s and 'read_pico_transfer_get_saved_wifi' not in s
+assert 'ui_wallpaper_draw_rounded' not in s and 'wifi_transfer_get_saved_wifi' not in s
 assert 'prepare_inline_image' not in branch and 'kick_prep' not in branch
 from reader_session_test_state import position_state
 unit = position_state(page=2) + unit

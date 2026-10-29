@@ -8,7 +8,7 @@ root = Path(__file__).resolve().parents[1]
 out = root / 'build/sd-media-test'
 out.mkdir(parents=True, exist_ok=True)
 for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h', 'esp_timer.h',
-             'freertos/FreeRTOS.h', 'freertos/task.h', 'read_pico_board.h',
+             'freertos/FreeRTOS.h', 'freertos/task.h', 'board_hardware.h',
              'sdmmc_cmd.h', 'esp_err.h', 'esp_heap_caps.h'):
     p = out / name
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -71,7 +71,7 @@ static int mounts, unmounts, formats;
 static bool made_books, made_fonts, made_pictures;
 static sdmmc_card_t mock_card={.cid={"MOCK"},.csd={2048,512}};
 static void (*pending)(void*);
-esp_err_t read_pico_sd_detect(bool* detected);
+esp_err_t board_sd_detect(bool* detected);
 static void vTaskDelay(int n) {(void)n;}
 static void vTaskDelete(void* p) {(void)p;}
 static int xTaskCreate(void (*f)(void*), const char* n,int z,void* a,int pr,void* h) {
@@ -93,10 +93,10 @@ static int mock_mkdir(const char* p,int mode){
 #define mkdir mock_mkdir
 // 板级接口在包含实现文件之前先声明：生成的头文件只占位。
 // Declare the board hook before the implementation include; the generated headers are placeholders.
-bool read_pico_sd_has_cd(void);
+bool board_sd_has_cd(void);
 static int64_t mock_us;
 static int64_t esp_timer_get_time(void){return mock_us;}
-#include "../../components/read_pico/read_pico_sd.c"
+#include "../../components/board_support/board_sd.c"
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。
 // This fixture checks media lifecycle; allocation counting is covered by sd_probe_host_test.
 BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return 0xff;}
@@ -121,116 +121,116 @@ static void finish_probe(void) {assert(pending);void(*f)(void*)=pending;pending=
 static void* snapshot_reader(void* arg) {
     (void)arg;
     for(int i=0;i<20000;i++) {
-        read_pico_sd_info_t info;
-        int err=read_pico_sd_get_info(&info);
+        board_sd_info_t info;
+        int err=board_sd_get_info(&info);
         if(err==ESP_OK) assert(info.mounted && info.capacity_bytes==1048576 && info.free_bytes==524288);
     }
     return NULL;
 }
 int main(void) {
-    read_pico_sd_info_t info;
-    assert(read_pico_sd_detect(NULL)==ESP_ERR_INVALID_ARG);
+    board_sd_info_t info;
+    assert(board_sd_detect(NULL)==ESP_ERR_INVALID_ARG);
     bool detected=true;
     s_ioe=NULL;
-    assert(read_pico_sd_detect(&detected)==ESP_ERR_INVALID_STATE && detected);
-    assert(!read_pico_sd_present());
+    assert(board_sd_detect(&detected)==ESP_ERR_INVALID_STATE && detected);
+    assert(!board_sd_present());
     s_ioe=(void*)1;
     detect_fail=true;
-    assert(read_pico_sd_detect(&detected)==ESP_ERR_TIMEOUT && detected);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_TIMEOUT && !info.mounted);
+    assert(board_sd_detect(&detected)==ESP_ERR_TIMEOUT && detected);
+    assert(board_sd_get_info(&info)==ESP_ERR_TIMEOUT && !info.mounted);
     detect_fail=false;
-    assert(read_pico_sd_get_info(NULL)==ESP_ERR_INVALID_ARG);
-    assert(read_pico_sd_start_probe()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_sync()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(NULL)==ESP_ERR_INVALID_ARG);
+    assert(board_sd_start_probe()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_sync()==ESP_ERR_NOT_FINISHED);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);
     assert(made_books && made_fonts && made_pictures);
     detect_fail=true;
-    for(int i=0;i<20;i++) assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);
-    assert(read_pico_sd_start_probe()==ESP_OK && mounts==1 && unmounts==0);
+    for(int i=0;i<20;i++) assert(board_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);
+    assert(board_sd_start_probe()==ESP_OK && mounts==1 && unmounts==0);
     detect_fail=false;
     present=false;
     // 已挂载时一次 CD 抖动不判掉卡；连续确认才失效。
     // One CD glitch must not drop a mounted card; a sustained absence does.
-    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
-    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
-    mock_us+=60000; assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    mock_us+=60000; assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
+    mock_us+=60000; assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
+    mock_us+=60000; assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     assert(!info.mounted && !info.needs_format && !info.capacity_bytes && !info.free_bytes && !info.name[0]);
     assert(unmounts==0 && card==&mock_card);
     present=true;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && info.present && !info.mounted);
-    assert(read_pico_sd_start_probe()==ESP_ERR_INVALID_STATE && mounts==1);
-    assert(read_pico_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED && unmounts==1);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && info.present && !info.mounted);
+    assert(board_sd_start_probe()==ESP_ERR_INVALID_STATE && mounts==1);
+    assert(board_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED && unmounts==1);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted && mounts==2);
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted && mounts==2);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
     // 挂载途中拔卡同样要连续确认，单次观测不锁存。
     // Removal during a mount also needs sustained confirmation; one sample must not latch.
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
     mock_us+=60000;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.needs_format);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.needs_format);
     // 真拔卡之后的检测读错不能让探测结果绕过失效锁存。
     // A detection fault after real removal must not let a probe bypass the removal latch.
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     present=false;
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
     mock_us+=60000;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
+    assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND);
     present=true;
     detect_fail=true;
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.capacity_bytes);
-    assert(read_pico_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.capacity_bytes);
+    assert(board_sd_format()==ESP_ERR_INVALID_STATE && formats==0);
     detect_fail=false;
     drop_during_mount=true;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
     // 挂载过程中卡掉了同样要连续确认，单次观测不算。
     // A card lost during mount also needs the sustained confirmation; one sample is not enough.
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
-    mock_us+=60000; (void)read_pico_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
+    mock_us+=60000; (void)board_sd_get_info(&info);
     mock_us+=60000;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
+    assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
     present=true;
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE);
     drop_during_mount=false;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_OK);
+    assert(board_sd_get_info(&info)==ESP_OK);
     detect_fail=true;
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_get_info(&info)==ESP_ERR_NOT_FINISHED);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
     detect_fail=false;
-    assert(read_pico_sd_sync()==ESP_OK);
-    assert(read_pico_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.capacity_bytes);
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_sync()==ESP_OK);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && !info.mounted && !info.capacity_bytes);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
     unmount_fail=true;
-    assert(read_pico_sd_sync()==ESP_FAIL && card==&mock_card);
-    assert(read_pico_sd_get_info(&info)==ESP_FAIL && info.mounted);
+    assert(board_sd_sync()==ESP_FAIL && card==&mock_card);
+    assert(board_sd_get_info(&info)==ESP_FAIL && info.mounted);
     unmount_fail=false;
-    assert(read_pico_sd_sync()==ESP_OK && card==NULL);
+    assert(board_sd_sync()==ESP_OK && card==NULL);
     // USB 导出期间 health tick 必须跳过：没有本机卡可探测，也不能占用忙状态挡住退出后的重挂。
     // While the card is exported to USB the health tick must skip: nothing to probe, and it must
     // not claim the busy state that would refuse the post-USB remount.
     for(int i=0;i<3;i++) sd_health_tick();
-    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
     finish_probe();
-    assert(read_pico_sd_get_info(&info)==ESP_OK && info.mounted);
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
     pthread_t reader;
     assert(pthread_create(&reader,NULL,snapshot_reader,NULL)==0);
     for(int i=0;i<100;i++) {
-        assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED);
+        assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);
         finish_probe();
     }
     assert(pthread_join(reader,NULL)==0);
@@ -238,11 +238,11 @@ int main(void) {
     puts("PASS: real checked CD/I2C faults, unknown mount, removal, stale reinsertion, busy lifecycle, mid-probe removal, explicit recovery, concurrent snapshots, no autoformat");
 }
 '''
-board = (root / 'components/read_pico/read_pico_board.c').read_text(encoding='utf-8')
-detect = board[board.index('esp_err_t read_pico_sd_detect('):board.index('void read_pico_clear_ioe_int(')]
+board = (root / 'components/board_support/board_legacy_s3.c').read_text(encoding='utf-8')
+detect = board[board.index('esp_err_t board_sd_detect('):board.index('void board_clear_ioe_int(')]
 (out / 'test.c').write_text(source.replace('@BOARD_DETECT@', detect), encoding='utf-8')
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                 '-Wno-unused-variable', '-fsanitize=address,undefined', '-g', '-pthread',
-                '-I'+str(out), '-I'+str(root/'components/read_pico/include'),
+                '-I'+str(out), '-I'+str(root/'components/board_support/include'),
                 str(out/'test.c'), '-o', str(out/'test')], check=True)
 subprocess.run([str(out/'test')], check=True)

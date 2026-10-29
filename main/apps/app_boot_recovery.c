@@ -9,7 +9,7 @@
 #include "boot_state.h"
 #include "book_progress.h"
 #include "book_store.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "ui_gesture.h"
 #include "ui_kit.h"
 #include "ui_nav.h"
@@ -62,7 +62,7 @@ static esp_err_t delete_book(void) {
     const char *name = strrchr(s_path, '/'), *ext = strrchr(s_path, '.');
     if (!name || !ext || (strcasecmp(ext, ".epub") && strcasecmp(ext, ".txt"))) return ESP_ERR_INVALID_ARG;
     if (!strncmp(s_path, "/sdcard/", 8)) {
-        read_pico_sd_info_t sd = {0}; read_pico_sd_get_info(&sd);
+        board_sd_info_t sd = {0}; board_sd_get_info(&sd);
         if (!sd.present || !sd.mounted) return ESP_ERR_INVALID_STATE;
     } else if (!book_store_flash_ready()) {
         book_store_root_t roots[BOOK_STORE_ROOT_MAX]; int n;

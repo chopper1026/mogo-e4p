@@ -52,6 +52,6 @@ int main(void){
 ''')
     binary = work / 'test'
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                    '-I' + str(work), '-I' + str(ROOT / 'components/read_pico_transfer'),
+                    '-I' + str(work), '-I' + str(ROOT / 'components/wifi_transfer'),
                     str(work / 'test.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

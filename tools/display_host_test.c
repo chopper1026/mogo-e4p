@@ -87,16 +87,16 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,
     assert(ota_display_depth);
     assert(hl&&area.width>0&&dir==E0470_TURN_RTL);
     assert(waveform==&reader_water&&bands==E0470_TURN_FAST_BANDS);
-    ++water_calls;assert(last_scan==READ_PICO_EPD_SCAN_FAST);
+    ++water_calls;assert(last_scan==BOARD_EPD_SCAN_FAST);
     return water_result;
 }
 
-void read_pico_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
-void read_pico_epd_use_scan(read_pico_epd_scan_t scan) { last_scan = scan; }
+void board_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
+void board_epd_use_scan(board_epd_scan_t scan) { last_scan = scan; }
 void epd_lcd_set_prefill_lines(int lines) { prefill = lines; }
 void epd_poweron(void) { ++powerons; drive_active = !power_failure; }
-bool read_pico_rails_on(void) { return !power_failure; }
-bool read_pico_epd_release_drive(void) {
+bool board_rails_on(void) { return !power_failure; }
+bool board_epd_release_drive(void) {
     assert(ota_display_depth);
     ++drive_releases;
     if (release_failures) { --release_failures; return false; }
@@ -241,12 +241,12 @@ int main(void) {
     for (int i = 0; i < APP_UI_FAST_GC16_EVERY - 1; ++i) {
         int prior_full = full_draws;
         assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
-        assert(last_mode == MODE_GL16 && last_scan == READ_PICO_EPD_SCAN_FULL);
+        assert(last_mode == MODE_GL16 && last_scan == BOARD_EPD_SCAN_FULL);
         assert(waveform_at_draw == &soft_gray && hl.waveform == &E0470_WAVEFORM);
         assert(full_draws == prior_full);
     }
     assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
-    assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_WAVEFORM && last_scan == READ_PICO_EPD_SCAN_FULL && full_draws > 0);
+    assert(last_mode == MODE_GC16 && waveform_at_draw == &E0470_WAVEFORM && last_scan == BOARD_EPD_SCAN_FULL && full_draws > 0);
 
     // Image pages clear the optical state and use the full grayscale waveform.
     memcpy(front, target, FB_BYTES);
@@ -299,7 +299,7 @@ int main(void) {
     water_calls = draws = clears = 0;
     water_result = EPD_DRAW_SUCCESS;
     assert(update_display_water_turn(&hl,(EpdRect){0,0,16,16},E0470_TURN_RTL)==EPD_DRAW_SUCCESS);
-    assert(water_calls==1&&!draws&&!clears&&last_scan==READ_PICO_EPD_SCAN_FULL);
+    assert(water_calls==1&&!draws&&!clears&&last_scan==BOARD_EPD_SCAN_FULL);
     assert(turn_tick_us==21000&&!ota_display_depth);
     water_calls=0;
     water_result = EPD_DRAW_NO_PHASES_AVAILABLE;

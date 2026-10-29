@@ -375,9 +375,9 @@ enum {UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_ZAP};
 #define UI_GRAY_WHITE 255
 #define UI_INK_BLACK 0
 #define UI_INK_WHITE 15
-#define READ_PICO_TRANSFER_MODE_STA 1
+#define WIFI_TRANSFER_MODE_STA 1
 typedef struct {bool time_synced;time_t unix_sec;} pmu_snapshot_t;
-typedef struct {bool network_ready;int mode;} read_pico_transfer_status_t;
+typedef struct {bool network_ready;int mode;} wifi_transfer_status_t;
 static pmu_snapshot_t pmu;
 static int pct;
 static bool wifi,bluetooth,s_system_ttf;
@@ -387,10 +387,10 @@ static const char *app_settings_system_font_path(void){return chosen_system?"sys
 static const char *ttf_font_path(void){return reading_context?"reader.ttf":chosen_system?"system.ttf":"builtin";}
 static bool ttf_font_is_builtin(void){return false;}
 static char signature[96];
-static const pmu_snapshot_t *read_pico_pmu_get(void){return &pmu;}
+static const pmu_snapshot_t *device_power_get(void){return &pmu;}
 static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct;}
 static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return false;}
-static void read_pico_transfer_get_status(read_pico_transfer_status_t *status){*status=(read_pico_transfer_status_t){wifi,READ_PICO_TRANSFER_MODE_STA};}
+static void wifi_transfer_get_status(wifi_transfer_status_t *status){*status=(wifi_transfer_status_t){wifi,WIFI_TRANSFER_MODE_STA};}
 static bool app_settings_ble_turner(void){return bluetooth;}
 static const char *app_settings_status_signature(void){return signature;}
 static int letters(const char *s){int n=0;for(;*s;++s)if(((unsigned char)*s&0xc0)!=0x80)++n;return n;}

@@ -49,7 +49,7 @@ void app_time_service_cancel(void) { event('T'); }
 bool pico_online_busy(void) { event('O'); return ota; }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('C'); return cover_ok; }
 bool ui_avatar_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('A'); return avatar_ok; }
-bool read_pico_transfer_pause_for_sleep(void) { event('W'); return transfer_ok; }
+bool wifi_transfer_pause_for_sleep(void) { event('W'); return transfer_ok; }
 esp_err_t ble_pt_stop(uint32_t timeout_ms) { assert(timeout_ms == 2000); event('B'); return ble_error; }
 esp_err_t ble_pt_stop_for_sleep(uint32_t timeout_ms) { assert(timeout_ms == 2000); event('L'); return ble_error; }
 

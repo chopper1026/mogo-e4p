@@ -52,10 +52,10 @@ int sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card);
 int gpio_reset_pin(int pin);
 int gpio_set_direction(int pin,int mode);
 int gpio_set_level(int pin,int level);
-typedef struct {bool mounted;} read_pico_sd_info_t;
-int read_pico_sd_get_info(read_pico_sd_info_t *info);
-int read_pico_sd_sync(void);
-int read_pico_sd_remount(void);
+typedef struct {bool mounted;} board_sd_info_t;
+int board_sd_get_info(board_sd_info_t *info);
+int board_sd_sync(void);
+int board_sd_remount(void);
 bool ttf_font_is_builtin(void);
 int ttf_font_open_builtin(void);
 typedef void *tinyusb_msc_storage_handle_t;
@@ -91,9 +91,9 @@ static int cover_calls,avatar_calls;
 static int failed(int where){return stage==where?ESP_FAIL:ESP_OK;}
 void vTaskDelay(int ms){assert(ms>0);}
 const char *esp_err_to_name(int e){(void)e;return "test";}
-int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=mounted;return ESP_OK;}
-int read_pico_sd_sync(void){assert(mounted);mounted=false;return ESP_OK;}
-int read_pico_sd_remount(void){assert(!driver&&!borrowed&&!msc&&!host&&switch_level==1);mounted=true;++remounts;return ESP_OK;}
+int board_sd_get_info(board_sd_info_t *i){i->mounted=mounted;return ESP_OK;}
+int board_sd_sync(void){assert(mounted);mounted=false;return ESP_OK;}
+int board_sd_remount(void){assert(!driver&&!borrowed&&!msc&&!host&&switch_level==1);mounted=true;++remounts;return ESP_OK;}
 bool ttf_font_is_builtin(void){return true;}
 int ttf_font_open_builtin(void){return ESP_OK;}
 int sdmmc_host_init(void){assert(!mounted&&!host&&switch_level==0);if(failed(1))return ESP_FAIL;host=true;return ESP_OK;}
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory() as d:
     p = Path(d)
     (p/'usb_stub.h').write_text(STUB)
     for name in ('esp_err.h','driver/sdmmc_host.h','esp_log.h','driver/gpio.h',
-                 'freertos/FreeRTOS.h','freertos/task.h','read_pico_sd.h','sdmmc_cmd.h',
+                 'freertos/FreeRTOS.h','freertos/task.h','board_sd.h','sdmmc_cmd.h',
                  'tinyusb.h','tinyusb_default_config.h','tinyusb_msc.h','ttf_font.h',
                  'ui_avatar.h','book_cover_jobs.h','book_lock_collage.h'):
         header=p/name;header.parent.mkdir(parents=True,exist_ok=True);header.write_text('#include "usb_stub.h"\n')

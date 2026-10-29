@@ -16,7 +16,7 @@
 #include "epd_highlevel.h"
 #include "epdiy.h"
 #include "e0470_page_turn.h"
-#include "read_pico_epd_timing.h"
+#include "board_epd_timing.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,11 +32,11 @@ extern "C" {
 #define DISPLAY_PCLK_DEFAULT_MHZ 20
 // 出现供数不足（EPD_DRAW_EMPTY_LINE_QUEUE）时退回这个确定安全的频率。
 // Fall back to this known-safe clock on underrun (EPD_DRAW_EMPTY_LINE_QUEUE).
-#define DISPLAY_PCLK_SAFE_MHZ READ_PICO_EPD_PCLK_MIN_MHZ
+#define DISPLAY_PCLK_SAFE_MHZ BOARD_EPD_PCLK_MIN_MHZ
 // 工程页上还能继续往上试。行消隐与 CKV 宽度会跟着频率重解。
 // The lab page can still step higher. Line blanking and CKV width re-solve with the clock.
-#define DISPLAY_PCLK_MIN_MHZ READ_PICO_EPD_PCLK_MIN_MHZ
-#define DISPLAY_PCLK_MAX_MHZ READ_PICO_EPD_PCLK_MAX_MHZ
+#define DISPLAY_PCLK_MIN_MHZ BOARD_EPD_PCLK_MIN_MHZ
+#define DISPLAY_PCLK_MAX_MHZ BOARD_EPD_PCLK_MAX_MHZ
 #define DISPLAY_PCLK_STEP_MHZ 1
 
 /// 板级供电未就绪；没有推屏或推进差分基准，后续成功输出将重建整屏。

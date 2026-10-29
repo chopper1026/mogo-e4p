@@ -15,7 +15,7 @@
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
-#include "read_pico_transfer.h"
+#include "wifi_transfer.h"
 #include "time_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -114,28 +114,28 @@ static bool online(bool *owned) {
     // The updater owns the radio: an in-flight background sync cancels first, so the stop/start
     // below is never held up by it.
     app_time_service_cancel();
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    if (!(status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready)) {
+    wifi_transfer_status_t status;
+    wifi_transfer_get_status(&status);
+    if (!(status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready)) {
         char ssid[33]; bool saved = false;
-        if (read_pico_transfer_get_saved_wifi(ssid, &saved) != ESP_OK || !saved) {
+        if (wifi_transfer_get_saved_wifi(ssid, &saved) != ESP_OK || !saved) {
             state(PICO_UPDATE_FAILED, "请先在 WiFi 设置中连接网络"); return false;
         }
-        read_pico_transfer_stop();
-        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
+        wifi_transfer_stop();
+        wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
         *owned = true;
-        if (read_pico_transfer_start(&cfg) != ESP_OK) {
+        if (wifi_transfer_start(&cfg) != ESP_OK) {
             state(PICO_UPDATE_FAILED, "WiFi 连接失败，请重试"); return false;
         }
     }
     int64_t deadline = esp_timer_get_time() + 30000000;
     while (!atomic_load(&s_cancel)) {
-        read_pico_transfer_service_poll();
-        read_pico_transfer_get_status(&status);
-        if (status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready) {
+        wifi_transfer_service_poll();
+        wifi_transfer_get_status(&status);
+        if (status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready) {
             if (time(NULL) < 1704067200) {
                 uint32_t utc;
-                if (read_pico_transfer_sync_time_online(&utc) != ESP_OK) {
+                if (wifi_transfer_sync_time_online(&utc) != ESP_OK) {
                     state(PICO_UPDATE_FAILED, "网络对时失败，请对时后重试"); return false;
                 }
                 // 主机时钟已准，后台对时不必为了同一件事再开一次无线。
@@ -145,7 +145,7 @@ static bool online(bool *owned) {
             }
             return !atomic_load(&s_cancel);
         }
-        if (status.state == READ_PICO_TRANSFER_ERROR || esp_timer_get_time() >= deadline) break;
+        if (status.state == WIFI_TRANSFER_ERROR || esp_timer_get_time() >= deadline) break;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     if (!atomic_load(&s_cancel)) state(PICO_UPDATE_FAILED, "网络连接超时，请重试");
@@ -202,11 +202,11 @@ static esp_http_client_handle_t open_http(const char *url, int *status, int64_t 
 static bool wait_network(void) {
     int64_t deadline = esp_timer_get_time() + 30000000;
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < deadline) {
-        read_pico_transfer_service_poll();
-        read_pico_transfer_status_t status;
-        read_pico_transfer_get_status(&status);
-        if (status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready) return true;
-        if (status.state == READ_PICO_TRANSFER_ERROR) return false;
+        wifi_transfer_service_poll();
+        wifi_transfer_status_t status;
+        wifi_transfer_get_status(&status);
+        if (status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready) return true;
+        if (status.state == WIFI_TRANSFER_ERROR) return false;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return false;
@@ -215,7 +215,7 @@ static bool wait_network(void) {
 // Retry temporary read timeouts and renew the idle deadline after each chunk.
 static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap, int64_t *idle) {
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < *idle) {
-        read_pico_transfer_service_poll();
+        wifi_transfer_service_poll();
         int n = esp_http_client_read(client, (char *)buffer, cap);
         if (n > 0) { *idle = esp_timer_get_time() + 30000000; return n; }
         if (!n && esp_http_client_is_complete_data_received(client)) return 0;
@@ -393,7 +393,7 @@ static void worker(void *unused) {
         else if (s_download) (void)download(); else (void)check_feed();
     }
     if (restore_ps) (void)esp_wifi_set_ps(previous_ps);
-    if (owned) read_pico_transfer_stop();
+    if (owned) wifi_transfer_stop();
     if (atomic_load(&s_cancel)) state(PICO_UPDATE_CANCELLED, "已取消，当前版本保持不变");
     xSemaphoreTake(s_mutex, portMAX_DELAY); s_status->busy = false; ++s_status->revision; xSemaphoreGive(s_mutex);
     xSemaphoreGive(s_done);

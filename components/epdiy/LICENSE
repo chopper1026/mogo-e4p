@@ -6,7 +6,7 @@ License: LGPL-3.0-or-later (see idf_component.yml)
 裁剪而来，只保留 ESP32-S3 的 LCD 外设输出路径与本板需要的显示定义，本地改动包括：
 
 - 删除 ESP32 的 I2S 输出路径（src/output_i2s/）、社区波形表与示例图片
-- src/board/ 换成本板定义（引脚在 components/read_pico/read_pico_board.c 里注册）
+- src/board/ 换成本板定义（引脚在 components/board_support/board_legacy_s3.c 里注册）
 - src/displays.c 只保留 4.7" 1216x684 单色面板（E0470_DISPLAY）
 - 波形表改为从 components/e0470_epaper_waveform 取
 - src/render.c / highlevel.c：差分按列裁剪、按 (from,to) 直方图无损跳过前导空相位、

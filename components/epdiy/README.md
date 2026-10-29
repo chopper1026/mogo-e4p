@@ -10,7 +10,7 @@ E-paper renderer for the Read Pico board. This directory is a fork of [epdiy](ht
 ## 与上游的差异 / What changed from upstream
 
 - 删除 ESP32 的 I2S 输出路径（`src/output_i2s/`）、社区波形表与示例图片。/ The ESP32 I2S output path (`src/output_i2s/`), community waveform tables and example images are removed.
-- `src/board/` 换成本板定义；引脚在 `components/read_pico/read_pico_board.c` 中注册。/ `src/board/` is replaced by this board's definition; pins are registered from `components/read_pico/read_pico_board.c`.
+- `src/board/` 换成本板定义；引脚在 `components/board_support/board_legacy_s3.c` 中注册。/ `src/board/` is replaced by this board's definition; pins are registered from `components/board_support/board_legacy_s3.c`.
 - `src/displays.c` 只保留 4.7 寸 1216 × 684 单色面板（`E0470_DISPLAY`）。/ `src/displays.c` keeps only the 4.7" 1216 × 684 monochrome panel (`E0470_DISPLAY`).
 - 波形表改为从 `components/e0470_epaper_waveform` 获取，不再使用内置表。/ Waveform tables come from `components/e0470_epaper_waveform` instead of the built-in set.
 - `src/render.c` / `src/highlevel.c`：差分按列裁剪，按 (from, to) 直方图无损跳过前导空相位，并记录各阶段耗时。/ Diff is cropped by column, leading empty phases are skipped losslessly using a (from, to) histogram, and per-stage timing is recorded.

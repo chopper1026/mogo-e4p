@@ -64,19 +64,19 @@ esp_err_t esp_ota_write(esp_ota_handle_t h,const void *p,size_t n){assert_flash_
 esp_err_t esp_ota_abort(esp_ota_handle_t h){assert_flash_locked();assert(h==7);++abort_calls;return ESP_OK;}
 esp_err_t esp_ota_end(esp_ota_handle_t h){assert_flash_locked();assert(h==7);return end_error;}
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t *p){assert_flash_locked();assert(p==&inactive);++boot_calls;return ESP_OK;}
-void read_pico_transfer_get_status(read_pico_transfer_status_t*s){*s=(read_pico_transfer_status_t){.mode=1,.network_ready=offline_polls==0};}
-esp_err_t read_pico_transfer_get_saved_wifi(char*s,bool*b){strcpy(s,"test");*b=true;return ESP_OK;}
-void read_pico_transfer_stop(void){}
+void wifi_transfer_get_status(wifi_transfer_status_t*s){*s=(wifi_transfer_status_t){.mode=1,.network_ready=offline_polls==0};}
+esp_err_t wifi_transfer_get_saved_wifi(char*s,bool*b){strcpy(s,"test");*b=true;return ESP_OK;}
+void wifi_transfer_stop(void){}
 // 联网升级与自动对时互斥：升级路径只取消自动对时并登记成功，本用例不验证对时本身。
 // Online updates and auto time sync are mutually exclusive; the update path only cancels the
 // sync and records success, which this case does not exercise.
 void app_time_service_cancel(void){}
 void app_time_service_note_success(uint32_t utc_seconds){(void)utc_seconds;}
-esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t*c){(void)c;return ESP_OK;}
-void read_pico_transfer_service_poll(void){if(offline_polls){--offline_polls;if(cancel_reconnect)atomic_store(&s_cancel,true);}}
+esp_err_t wifi_transfer_start(const wifi_transfer_cfg_t*c){(void)c;return ESP_OK;}
+void wifi_transfer_service_poll(void){if(offline_polls){--offline_polls;if(cancel_reconnect)atomic_store(&s_cancel,true);}}
 esp_err_t esp_wifi_get_ps(wifi_ps_type_t*p){*p=wifi_ps;return ESP_OK;}
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t p){wifi_ps=p;if(p==WIFI_PS_NONE)++ps_disabled;else ++ps_restored;return ESP_OK;}
-esp_err_t read_pico_transfer_sync_time_online(uint32_t*p){*p=1791200000;return ESP_OK;}
+esp_err_t wifi_transfer_sync_time_online(uint32_t*p){*p=1791200000;return ESP_OK;}
 int esp_crt_bundle_attach(void*p){(void)p;return ESP_OK;}
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t*c){assert(c->disable_auto_redirect&&c->crt_bundle_attach&&c->timeout_ms==15000);struct FakeHttp*h=calloc(1,sizeof(*h));h->firmware=!strstr(c->url,"update.json");h->primary=!strncmp(c->url,PICO_OTA_FEED_URL,strlen(PICO_OTA_FEED_URL));if(!h->firmware){if(h->primary)++primary_feeds;else ++fallback_feeds;}h->data=h->firmware?firmware:(const uint8_t*)feed;h->size=h->firmware?sizeof(firmware):strlen(feed);h->event_handler=c->event_handler;h->user_data=c->user_data;return h;}
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t h,const char*k,const char*v){if(!strcmp(k,"Range")){unsigned long at=0;assert(sscanf(v,"bytes=%lu-",&at)==1);h->offset=at;h->at=ignored_range?0:at;++range_requests;}return ESP_OK;}

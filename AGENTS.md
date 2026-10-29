@@ -10,8 +10,8 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 
 ## 本移植仓库 / This port
 
-当前硬件为 Metalio E-INK4 Plus（ESP32-S31）；构建及硬件入口以根目录 [README.md](README.md) 为准。下文 S3 / CW32 / SY7636A 内容是上游背景；不要据此将产品目标切回 S3。现用 `read_pico_*`、`cst836u_*`、`fca9555_*` 名称包含新板兼容接口，不能仅凭旧芯片名删除。
-This port targets Metalio E-INK4 Plus (ESP32-S31); use the root [README.md](README.md) for its build and hardware entry points. S3 / CW32 / SY7636A details below describe upstream history, not the product target. Existing `read_pico_*`, `cst836u_*` and `fca9555_*` names include active compatibility interfaces for this board; a legacy chip name does not imply dead code.
+当前硬件为 Metalio E-INK4 Plus（ESP32-S31）；构建及硬件入口以根目录 [README.md](README.md) 为准。下文 S3 / CW32 / SY7636A 内容是上游背景；不要据此将产品目标切回 S3。现用 `board_*`、`cst836u_*`、`fca9555_*` 名称包含新板兼容接口，不能仅凭旧芯片名删除。
+This port targets Metalio E-INK4 Plus (ESP32-S31); use the root [README.md](README.md) for its build and hardware entry points. S3 / CW32 / SY7636A details below describe upstream history, not the product target. Existing `board_*`, `cst836u_*` and `fca9555_*` names include active compatibility interfaces for this board; a legacy chip name does not imply dead code.
 
 ## Git 提交 / Git commits
 
@@ -80,9 +80,10 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `main/diagnostics/` | 阅读计时与资源诊断。/ Reader timing and resource diagnostics. |
 | `main/platform/` | S31 输入适配。/ S31 input adaptation. |
 | `main/assets/` | 内置资源与生成数据。/ Bundled resources and generated assets. |
-| `components/read_pico/` | 板级 BSP：I2C、EPD 板定义与扫描时序、TF 卡、蜂鸣器、flash HPM。/ Board BSP. |
-| `components/read_pico_search/` | 离线拼音/首字母/英文书名匹配，设备和网页共用；字表由工具生成。/ Shared offline pinyin, initials and English matching with a generated table. |
-| `components/read_pico_pmu/` | CW32L010 协议主机端。线格式在 `read_pico_pmu_protocol.h`。/ PMU host. |
+| `components/board_support/` | 板级 BSP：I2C、EPD 板定义与扫描时序、TF 卡、蜂鸣器、flash HPM。/ Board BSP. |
+| `components/book_search/` | 离线拼音/首字母/英文书名匹配，设备和网页共用；字表由工具生成。/ Shared offline pinyin, initials and English matching with a generated table. |
+| `components/device_power/` | 电量、充电、RTC 与电源键接口；S31 选 Metalio 后端，旧 CW32 线格式在 `pmu_protocol.h`。/ Battery, charging, RTC and power keys; S31 selects Metalio, with the legacy CW32 wire format in `pmu_protocol.h`. |
+| `components/wifi_transfer/` | 热点与已有 WiFi 传书、配网和校时会话。/ AP/STA book transfer, provisioning and time-sync sessions. |
 | `components/epdiy/` | 上游裁剪 fork（LCD 路径）。改动清单在其 LICENSE。不要为注释去改它。/ Trimmed upstream fork. Leave it alone for comment work. |
 | `components/cst836u/` `sc7a20h/` `fca9555/` `sy7636a/` | 芯片驱动。/ Chip drivers. |
 | `components/e0470_epaper_waveform/` | 面板波形与裁剪。`waveforms/*.h` 是数据表。/ Panel waveforms. |

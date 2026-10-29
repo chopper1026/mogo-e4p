@@ -53,7 +53,7 @@ python3 tools/run_reader_baseline.py
 | 图片尺寸、解码与缩放 / Image probing, decoding, scaling | main/image |
 | 公共控件与题头 / Shared controls and headings | main/ui |
 | 字体加载与缓存 / Font loading and caches | main/font |
-| 板级驱动 / Board support | components/read_pico、read_pico_pmu 及实际芯片组件 / Actual driver components |
+| 板级驱动 / Board support | components/board_support、device_power 及实际芯片组件 / Actual driver components |
 | 显示、波形与灰阶 / Display, waveforms and gray normalization | main/display |
 | 自动锁屏、密码与锁屏图缓存 / Idle lock, PIN and lock-frame cache | main/lock |
 | 睡眠、唤醒与关机 / Sleep, wake and power-off | main/power |

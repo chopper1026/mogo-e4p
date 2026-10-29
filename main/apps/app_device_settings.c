@@ -57,9 +57,9 @@
 #include "book_lock_bookmark.h"
 #include "boot_state.h"
 #include "ble_page_turner.h"
-#include "read_pico_pmu.h"
-#include "read_pico_pmu_protocol.h"
-#include "read_pico_transfer.h"
+#include "device_power.h"
+#include "pmu_protocol.h"
+#include "wifi_transfer.h"
 #include "esp_log.h"
 #include "ttf_font.h"
 #include "app_font_context.h"
@@ -71,7 +71,7 @@
 #include "ui_wallpaper.h"
 #include "ui_reader_background.h"
 #include "ui_avatar.h"
-#include "read_pico_search.h"
+#include "book_search.h"
 #include "book_store.h"
 #include "book_cover.h"
 #include "ota_update.h"
@@ -534,7 +534,7 @@ static int64_t civil_days(int year, int month, int day) {
 static void time_open(void) {
     time_t now = time(NULL);
     if (now < 1704067200) {
-        const pmu_snapshot_t *pmu = read_pico_pmu_get();
+        const pmu_snapshot_t *pmu = device_power_get();
         if (pmu && pmu->time_synced && pmu->unix_sec >= 1704067200) now = pmu->unix_sec;
     }
     if (now < 1704067200) {
@@ -574,9 +574,9 @@ static bool time_save(void) {
     if (settimeofday(&tv, NULL)) return false;
     uint8_t payload[4] = {(uint8_t)epoch, (uint8_t)(epoch >> 8),
                           (uint8_t)(epoch >> 16), (uint8_t)(epoch >> 24)};
-    esp_err_t err = read_pico_pmu_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
-    if (err == ESP_OK) err = read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0);
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    esp_err_t err = device_power_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
+    if (err == ESP_OK) err = device_power_cmd(PMU_CMD_TIME_GET, NULL, 0);
+    const pmu_snapshot_t *pmu = device_power_get();
     if (err != ESP_OK || !pmu || !pmu->time_synced) {
         snprintf(s_notice, sizeof(s_notice), "系统时间已设置，PMU 同步失败");
         return false;
@@ -662,7 +662,7 @@ static void time_auto_hint(char *out, size_t cap) {
     }
     char ssid[33];
     bool configured = false;
-    if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) {
+    if (wifi_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) {
         snprintf(out, cap, "自动对时需要先在 WiFi 设置里连接网络。");
         return;
     }
@@ -1540,9 +1540,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         char ble_status[80];
         if (!app_settings_ble_turner()) snprintf(ble_status, sizeof(ble_status), "已关闭");
         else if (!ble_pt_running()) {
-            read_pico_transfer_status_t network;
-            read_pico_transfer_get_status(&network);
-            snprintf(ble_status, sizeof(ble_status), network.state != READ_PICO_TRANSFER_STOPPED ? "WiFi 使用中，蓝牙暂停" : "启动中…");
+            wifi_transfer_status_t network;
+            wifi_transfer_get_status(&network);
+            snprintf(ble_status, sizeof(ble_status), network.state != WIFI_TRANSFER_STOPPED ? "WiFi 使用中，蓝牙暂停" : "启动中…");
         }
         else if (ble_pt_connected()) snprintf(ble_status, sizeof(ble_status), "已连接 %s", ble_pt_connected_name());
         else if (ble_pt_connecting()) snprintf(ble_status, sizeof(ble_status), "连接中…");
@@ -1713,7 +1713,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
-    (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
+    (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
     settings_prepare_profile();
     // 每次进页先清掉上一次直达的返回目标，避免离开时未经过主列表而留下旧值。
     // Clear the previous direct-visit back target on every entry so a visit that
@@ -1880,7 +1880,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         s_boot_pending = false;
         pmu_selftest_prepare_powerdown();
         uint8_t req[2] = {0, 0};
-        esp_err_t error = read_pico_pmu_cmd(PMU_CMD_HOST_REQUEST_RESET, req, sizeof(req));
+        esp_err_t error = device_power_cmd(PMU_CMD_HOST_REQUEST_RESET, req, sizeof(req));
         if (error != ESP_OK) ESP_LOGW(TAG, "BOOT PMU notice: %s", esp_err_to_name(error));
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
         // FORCE_DOWNLOAD_BOOT 是 S3 RTC 寄存器；S31 只能靠按住 BOOT 或 esptool 进入下载。
@@ -2040,7 +2040,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 
     if (s_page == SETTINGS_BOOT) {
         if (ev->type != UI_GESTURE_TAP || s_boot_pending) return APP_REDRAW_NONE;
-        if (ev->y0 < 190 && ev->x0 < 170) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if (ev->y0 < 190 && ev->x0 < 170) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         if (ui_rect_hit((EpdRect){60, 438, 564, 78}, ev->x0, ev->y0)) { s_boot_pending = true; return APP_REDRAW_PAGE; }
         int tab = ui_nav_hit(ev->x0, ev->y0);
         if (tab >= 0) ui_nav_request(ctx, tab);
@@ -2188,7 +2188,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (tab >= 0) { ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
     int y = ev->y0;
     if (s_page == SETTINGS_PROFILE) {
-        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         if (y >= 266 && y < 350) { profile_editor_open(false); return APP_REDRAW_PAGE; }
         if (y >= 366 && y < 450) { s_bookmark_picker=false;wallpaper_scan(); s_page = SETTINGS_AVATAR; return APP_REDRAW_PAGE; }
         return APP_REDRAW_NONE;
@@ -2237,7 +2237,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_READING_BG) {
-        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         if (y >= 956 && y < 1032) {
             if (!app_settings_set_book_background_path("")) return APP_REDRAW_NONE;
             snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已恢复白底");
@@ -2257,7 +2257,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
-        if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+        if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         for (int i = 0; i < 3; ++i) {
             if (y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll && y < 1096) {
                 app_settings_set_shelf_style((uint8_t)(i == 2 ? 5 : i + 1));
@@ -2280,7 +2280,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
-    if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+    if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_AUTO_LOCK) {
         const uint8_t values[] = {1, 5, 10, 0};
@@ -2467,7 +2467,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             char saved_ssid[33] = {0};
             bool wifi_saved = false;
             if (err == ESP_OK)
-                (void)read_pico_transfer_get_saved_wifi(saved_ssid, &wifi_saved);
+                (void)wifi_transfer_get_saved_wifi(saved_ssid, &wifi_saved);
             snprintf(s_notice, sizeof(s_notice), "%s",
                      err == ESP_OK ? (wifi_saved ? "配置与阅读记录已恢复；WiFi 请重新连接" :
                                                    "配置与阅读记录已恢复") :
@@ -2686,9 +2686,9 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (s_page == SETTINGS_READING_BG) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_AVATAR) { s_page = SETTINGS_PROFILE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_TEXT_EDIT) { ui_keyboard_end(); s_page = s_editor_signature ? SETTINGS_MAIN : SETTINGS_PROFILE; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_PROFILE) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_PROFILE) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_TIME_EDIT) { s_page = SETTINGS_TIME; return APP_REDRAW_PAGE; }
-    if (s_page != SETTINGS_MAIN) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
+    if (s_page != SETTINGS_MAIN) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     ui_nav_request(ctx, 0);
     return APP_REDRAW_NONE;
 }

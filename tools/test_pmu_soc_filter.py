@@ -5,7 +5,7 @@ limit, charge-done snap, boot restore and load compensation."""
 from pathlib import Path
 import subprocess, tempfile, re
 root=Path(__file__).resolve().parents[1]
-source=(root/'components/read_pico_pmu/read_pico_pmu_metalio.c').read_text()
+source=(root/'components/device_power/device_power_metalio.c').read_text()
 def extract(name):
     m=re.search(r'^(?:static )?[^\n]+\b'+name+r'\([^;{}]*?\)\s*\{',source,re.M)
     assert m, name

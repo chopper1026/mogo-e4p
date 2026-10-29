@@ -4,10 +4,10 @@
  *
  * 主机离线渲染曲谱为 32 kHz / 16-bit 单声道 WAV，并核对小节、延音、重触发与混音。
  *
- * cc -O2 -std=c11 -I../components/read_pico/include \
+ * cc -O2 -std=c11 -I../components/board_support/include \
  *    -o buzzer_score_wav buzzer_score_wav.c \
- *    ../components/read_pico/buzzer_score.c \
- *    ../components/read_pico/buzzer_duty_map.c -lm
+ *    ../components/board_support/buzzer_score.c \
+ *    ../components/board_support/buzzer_duty_map.c -lm
  */
 
 #include <stdint.h>

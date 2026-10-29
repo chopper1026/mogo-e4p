@@ -26,8 +26,8 @@
 #define ESP_CHIP_ID_ESP32S3 9
 #define ESP_CHIP_ID_ESP32S31 0x20
 #define ESP_APP_DESC_MAGIC_WORD 0xabcd5432
-#define READ_PICO_TRANSFER_MODE_STA 1
-#define READ_PICO_TRANSFER_ERROR 3
+#define WIFI_TRANSFER_MODE_STA 1
+#define WIFI_TRANSFER_ERROR 3
 #define PSA_SUCCESS 0
 #define PSA_ALG_SHA_256 1
 #define PSA_HASH_OPERATION_INIT {0}
@@ -46,8 +46,8 @@ typedef int wifi_ps_type_t;
 #define WIFI_PS_NONE 0
 esp_err_t esp_wifi_get_ps(wifi_ps_type_t*);
 esp_err_t esp_wifi_set_ps(wifi_ps_type_t);
-typedef struct {int mode,state;bool network_ready;} read_pico_transfer_status_t;
-typedef struct {int mode;bool network_only;} read_pico_transfer_cfg_t;
+typedef struct {int mode,state;bool network_ready;} wifi_transfer_status_t;
+typedef struct {int mode;bool network_only;} wifi_transfer_cfg_t;
 typedef struct {size_t bytes;} psa_hash_operation_t;
 void *heap_caps_malloc(size_t,int);
 void *heap_caps_calloc(size_t,size_t,int);
@@ -74,12 +74,12 @@ esp_err_t esp_ota_write(esp_ota_handle_t,const void*,size_t);
 esp_err_t esp_ota_abort(esp_ota_handle_t);
 esp_err_t esp_ota_end(esp_ota_handle_t);
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t*);
-void read_pico_transfer_get_status(read_pico_transfer_status_t*);
-esp_err_t read_pico_transfer_get_saved_wifi(char*,bool*);
-void read_pico_transfer_stop(void);
-esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t*);
-void read_pico_transfer_service_poll(void);
-esp_err_t read_pico_transfer_sync_time_online(uint32_t*);
+void wifi_transfer_get_status(wifi_transfer_status_t*);
+esp_err_t wifi_transfer_get_saved_wifi(char*,bool*);
+void wifi_transfer_stop(void);
+esp_err_t wifi_transfer_start(const wifi_transfer_cfg_t*);
+void wifi_transfer_service_poll(void);
+esp_err_t wifi_transfer_sync_time_online(uint32_t*);
 int esp_crt_bundle_attach(void*);
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t*);
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t,const char*,const char*);

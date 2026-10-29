@@ -10,7 +10,7 @@ import tempfile
 from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
-BOARD = ROOT / "components/read_pico/board_metalio_e4p.c"
+BOARD = ROOT / "components/board_support/board_metalio_e4p.c"
 source = BOARD.read_text()
 # 保留实际引脚和寄存器定义，合并多行宏后提取。/ Keep real pins/registers and join continued macros before extraction.
 defines = "\n".join(line for line in source.replace("\\\n", "").splitlines()
@@ -94,10 +94,10 @@ static void tps_set_vcom_mv(int mv) { assert(mv == s_vcom_mv); }
 unit += defines + "\n"
 for name in ("ioe_write", "ioe_read", "p0_value", "p0_write", "p1_write", "ioe_init",
              "board_set_ctrl", "board_poweron", "board_poweroff",
-             "read_pico_epd_release_drive", "read_pico_sd_detect",
-             "read_pico_sd_present", "read_pico_sd_has_cd", "read_pico_ioe_sleep",
-             "read_pico_ioe_wake", "read_pico_tp_rst", "read_pico_touch_reset",
-             "read_pico_pwr_pulse", "read_pico_has_motor", "read_pico_motor"):
+             "board_epd_release_drive", "board_sd_detect",
+             "board_sd_present", "board_sd_has_cd", "board_ioe_sleep",
+             "board_ioe_wake", "board_tp_rst", "board_touch_reset",
+             "board_pwr_pulse", "board_has_motor", "board_motor"):
     unit += function(name, BOARD) + "\n"
 unit += r'''
 static void reset(void) {
@@ -139,7 +139,7 @@ int main(void) {
     }
     reset(); s_ioe = NULL; s_ioe_ok = false; allocation_failure = true;
     assert(ioe_init() == ESP_FAIL && !s_ioe_ok && !s_ioe && init_allocations == 1 && !bus_resets);
-    reset(); assert(read_pico_epd_release_drive() && !writes && !tps_writes);
+    reset(); assert(board_epd_release_drive() && !writes && !tps_writes);
     board_poweron(&state);
     assert(s_rails_on && s_tps_ok && s_pwrup && s_vcom_ctrl && s_wakeup);
     assert((output[0] & P0_TPS_MASK) == P0_TPS_MASK && pins[EPD_PIN_XOE]);
@@ -152,7 +152,7 @@ int main(void) {
     board_set_ctrl(&state, &(epd_ctrl_state_t){.ep_mode = true});
     uint8_t keep = output[0];
     for (int i = 0; i < 100; ++i) {
-        assert(read_pico_epd_release_drive());
+        assert(board_epd_release_drive());
         assert(!state.ep_mode && !state.ep_output_enable);
         assert(!pins[EPD_PIN_MODE] && !pins[EPD_PIN_XOE]);
         assert(s_rails_on && s_vcom_ctrl && output[0] == keep && tps_writes == tps_before);
@@ -169,43 +169,43 @@ int main(void) {
     assert(!s_rails_on && !s_tps_ok && probes == 3 && reads == 600 && waits == 700);
     board_poweroff(&state); assert(!(output[0] & P0_TPS_MASK));
     for (int host_off = 0; host_off < 2; ++host_off) {
-        reset(); board_poweron(&state); assert(read_pico_motor(true) == ESP_OK);
+        reset(); board_poweron(&state); assert(board_motor(true) == ESP_OK);
         s_p1_out |= IOE_BIT(IO_PWR_PULSE);
-        assert(read_pico_ioe_sleep(host_off) == ESP_OK);
+        assert(board_ioe_sleep(host_off) == ESP_OK);
         assert(!(output[0] & (P0_TPS_MASK | IOE_BIT(IO_MOTOR))));
         assert((output[0] & (IOE_BIT(IO_PA_EN) | IOE_BIT(IO_CAM_SCR))) == s_p0_extra);
         assert(!(output[1] & IOE_BIT(IO_PWR_PULSE)) && (output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
         assert(config[1] == P1_INPUT_MASK);
-        assert(read_pico_ioe_wake() == ESP_OK);
+        assert(board_ioe_wake() == ESP_OK);
         assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
         assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK && clears == 2);
     }
     // 缺失扩展器与方向写入失败不假报唤醒成功。
     // Missing expanders and failed direction writes must not report a successful wake.
     reset(); s_ioe_ok = false;
-    assert(read_pico_ioe_sleep(false) == ESP_ERR_INVALID_STATE);
-    assert(read_pico_ioe_wake() == ESP_ERR_INVALID_STATE);
-    assert(read_pico_motor(true) == ESP_ERR_INVALID_STATE && !writes);
+    assert(board_ioe_sleep(false) == ESP_ERR_INVALID_STATE);
+    assert(board_ioe_wake() == ESP_ERR_INVALID_STATE);
+    assert(board_motor(true) == ESP_ERR_INVALID_STATE && !writes);
     for (int port = 0; port < 2; ++port) {
-        reset(); fail_config = port; assert(read_pico_ioe_wake() == ESP_FAIL);
-        fail_config = -1; assert(read_pico_ioe_wake() == ESP_OK);
+        reset(); fail_config = port; assert(board_ioe_wake() == ESP_FAIL);
+        fail_config = -1; assert(board_ioe_wake() == ESP_OK);
     }
     reset(); board_poweron(&state); keep = output[0];
-    assert(read_pico_has_motor() && read_pico_motor(true) == ESP_OK);
+    assert(board_has_motor() && board_motor(true) == ESP_OK);
     assert(output[0] == (uint8_t)(keep | IOE_BIT(IO_MOTOR)));
-    assert(read_pico_motor(false) == ESP_OK && output[0] == keep);
-    failed_output = true; assert(read_pico_motor(true) == ESP_FAIL); failed_output = false;
+    assert(board_motor(false) == ESP_OK && output[0] == keep);
+    failed_output = true; assert(board_motor(true) == ESP_FAIL); failed_output = false;
     unsigned delay_before = waits;
-    assert(read_pico_touch_reset() == ESP_OK && waits - delay_before == 310);
+    assert(board_touch_reset() == ESP_OK && waits - delay_before == 310);
     assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
-    assert(read_pico_pwr_pulse(true) == ESP_OK && (output[1] & IOE_BIT(IO_PWR_PULSE)));
-    assert(read_pico_pwr_pulse(false) == ESP_OK && !(output[1] & IOE_BIT(IO_PWR_PULSE)));
+    assert(board_pwr_pulse(true) == ESP_OK && (output[1] & IOE_BIT(IO_PWR_PULSE)));
+    assert(board_pwr_pulse(false) == ESP_OK && !(output[1] & IOE_BIT(IO_PWR_PULSE)));
     // S31 没有 CD，存在接口不代表物理卡在线；存储层另测 CMD13 拔卡。
     // S31 has no CD; presence hooks do not prove physical media. Storage tests cover CMD13 removal.
     bool present = false;
-    assert(read_pico_sd_detect(NULL) == ESP_ERR_INVALID_ARG);
-    assert(read_pico_sd_detect(&present) == ESP_OK && present);
-    assert(read_pico_sd_present() && !read_pico_sd_has_cd());
+    assert(board_sd_detect(NULL) == ESP_ERR_INVALID_ARG);
+    assert(board_sd_detect(&present) == ESP_OK && present);
+    assert(board_sd_present() && !board_sd_has_cd());
     puts("PASS: actual S31 VCOM retention, masked GPIO, power timeout, motor isolation, sleep/wake rails, touch reset, pulse and no-CD contract");
 }
 '''

@@ -32,8 +32,8 @@
 #include "display.h"
 #include "display_refresh.h"
 #include "file_tree.h"
-#include "read_pico_sd.h"
-#include "read_pico_search.h"
+#include "board_sd.h"
+#include "book_search.h"
 #include "settings.h"
 #include "ttf_font.h"
 #include "app_font_context.h"
@@ -70,7 +70,7 @@ static bool s_pager_paint_pending;
 static int64_t s_space_poll_ms;
 static char s_message[96];
 static char s_dir[288] = "/sdcard";
-static read_pico_sd_info_t s_sd;
+static board_sd_info_t s_sd;
 // 卡在、挂不上、又不是超时，多半是文件系统本机不认（exFAT 之类）。这种卡仍然格得动，
 // 所以卡片本身变成可点的：第一次点只是问，第二次点才真的格。
 // A card is in the slot but will not mount and it is not a timeout: most likely a filesystem this
@@ -201,7 +201,7 @@ static esp_err_t copy_selected_item(char out_name[128]) {
         }
         if (number == 99) return ESP_ERR_INVALID_SIZE;
     }
-    read_pico_sd_get_info(&s_sd);
+    board_sd_get_info(&s_sd);
     if (!s_sd.mounted) return ESP_ERR_INVALID_STATE;
     esp_err_t err = file_tree_copy(s_selected.path, destination, s_sd.free_bytes);
     if (err != ESP_OK) return err;
@@ -315,7 +315,7 @@ static void leave_move(bool changed) {
 }
 
 static app_redraw_t move_selected(void) {
-    read_pico_sd_get_info(&s_sd);
+    board_sd_get_info(&s_sd);
     if (!s_sd.mounted) {
         snprintf(s_message, sizeof(s_message), "TF 卡不可用"); return APP_REDRAW_PAGE;
     }
@@ -372,7 +372,7 @@ static void scan_folder(int folder) {
     s_count = s_page = 0;
     s_message[0] = 0;
     s_scan_retry_ms = 0;
-    read_pico_sd_get_info(&s_sd);
+    board_sd_get_info(&s_sd);
     if (!s_sd.mounted) { snprintf(s_message, sizeof(s_message), "TF 卡尚未挂载"); return; }
     const char *root = folder_root(folder);
     errno = 0;
@@ -555,7 +555,7 @@ static void render_rename(uint8_t *fb) {
     ui_keyboard_draw(fb, 560);
 }
 
-static bool storage_space_valid(const read_pico_sd_info_t *info) {
+static bool storage_space_valid(const board_sd_info_t *info) {
     return info->mounted && info->space_valid && info->filesystem_bytes &&
            info->free_bytes<=info->filesystem_bytes && info->filesystem_bytes<=info->capacity_bytes;
 }
@@ -565,7 +565,7 @@ static void storage_amount(char *text,size_t size,uint64_t bytes) {
     else if (bytes) snprintf(text,size,"%.1f KB",bytes/1024.0);
     else snprintf(text,size,"0 MB");
 }
-static void storage_usage(const read_pico_sd_info_t *info,char *total,size_t total_size,char *usage,size_t usage_size) {
+static void storage_usage(const board_sd_info_t *info,char *total,size_t total_size,char *usage,size_t usage_size) {
     storage_amount(total,total_size,info->space_valid?info->filesystem_bytes:info->capacity_bytes);
     if (!storage_space_valid(info)) { snprintf(usage,usage_size,"空间统计暂不可用，请重新进入此页"); return; }
     char used[24],available[24];
@@ -716,9 +716,9 @@ static void on_enter(app_ctx_t *ctx) {
     s_delete_confirm = false;
     snprintf(s_dir, sizeof(s_dir), "/sdcard");
     s_page = 0; s_scan_pending = true;
-    read_pico_sd_start_probe();
-    if (read_pico_sd_get_info(&s_sd)==ESP_OK && s_sd.mounted) {
-        (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd);
+    board_sd_start_probe();
+    if (board_sd_get_info(&s_sd)==ESP_OK && s_sd.mounted) {
+        (void)board_sd_refresh_space(); board_sd_get_info(&s_sd);
     }
     s_space_poll_ms=ctx->now_ms;
     s_sd_format_confirm = false;
@@ -731,7 +731,7 @@ static void on_media_lost(app_ctx_t *ctx) {
     s_pager_pressed=UI_PAGER_NONE;s_pager_paint_pending=false;
     (void)ctx; ui_keyboard_end(); s_folder = -1; s_count = 0; s_scan_pending = false;
     s_view = FILE_VIEW_LIST; s_delete_confirm = false;
-    memset(s_counts, 0, sizeof(s_counts)); read_pico_sd_get_info(&s_sd);
+    memset(s_counts, 0, sizeof(s_counts)); board_sd_get_info(&s_sd);
 }
 static void on_media_ready(app_ctx_t *ctx) {
     (void)ctx;
@@ -756,16 +756,16 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     if (!s_scan_pending) {
         if (s_folder<0 && s_sd.mounted && !(ctx->touch && ctx->touch->touched) && ctx->now_ms-s_space_poll_ms>=15000) {
             s_space_poll_ms=ctx->now_ms;
-            read_pico_sd_info_t previous=s_sd;
-            (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd);
+            board_sd_info_t previous=s_sd;
+            (void)board_sd_refresh_space(); board_sd_get_info(&s_sd);
             if (previous.space_valid!=s_sd.space_valid || previous.filesystem_bytes!=s_sd.filesystem_bytes || previous.free_bytes!=s_sd.free_bytes)
                 return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
     }
-    if (read_pico_sd_get_info(&s_sd) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
+    if (board_sd_get_info(&s_sd) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
     s_scan_pending = false;
-    if (s_sd.mounted) { (void)read_pico_sd_refresh_space(); read_pico_sd_get_info(&s_sd); }
+    if (s_sd.mounted) { (void)board_sd_refresh_space(); board_sd_get_info(&s_sd); }
     s_space_poll_ms=ctx->now_ms;
     for (int i = 0; i < 3; ++i) s_counts[i] = count_root(i);
     if (s_folder >= 0) scan_folder(s_folder);
@@ -1006,8 +1006,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         } else {
             s_sd_format_confirm = false;
             snprintf(s_sd_notice, sizeof(s_sd_notice), "正在格式化…");
-            esp_err_t err = storage_jobs_quiesce(2000) ? read_pico_sd_format() : ESP_ERR_NOT_FINISHED;
-            read_pico_sd_get_info(&s_sd);
+            esp_err_t err = storage_jobs_quiesce(2000) ? board_sd_format() : ESP_ERR_NOT_FINISHED;
+            board_sd_get_info(&s_sd);
             if (err == ESP_OK) {
                 s_sd_notice[0] = 0;
                 s_scan_pending = true;
@@ -1026,7 +1026,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         // Cover/avatar jobs may hold the card; remount only after a clean quiesce and let the
         // user tap again when busy.
         if (!storage_jobs_quiesce(2000)) return APP_REDRAW_NONE;
-        (void)read_pico_sd_remount();
+        (void)board_sd_remount();
         s_scan_pending = true;
         return APP_REDRAW_PAGE;
     }

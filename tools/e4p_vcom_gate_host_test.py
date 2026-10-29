@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-source = (root / 'components/read_pico/board_metalio_e4p.c').read_text()
+source = (root / 'components/board_support/board_metalio_e4p.c').read_text()
 
 
 def function(name):
@@ -45,11 +45,11 @@ static void board_set_ctrl(epd_ctrl_state_t *st, const epd_ctrl_state_t *mask) {
     ++ctrl_calls;
 }
 """
-unit += function('read_pico_epd_release_drive') + '\n'
+unit += function('board_epd_release_drive') + '\n'
 unit += r"""
 int main(void) {
     (void)p0_write;
-    assert(read_pico_epd_release_drive());
+    assert(board_epd_release_drive());
     assert(ctrl_calls == 1);
     assert(!state.ep_mode && !state.ep_output_enable);
     // 释放像素驱动不能撤掉 VCOM_CTRL，否则同一 burst 内后续扫描没有公共电压。
@@ -57,7 +57,7 @@ int main(void) {
     assert(s_vcom_ctrl);
     assert(p0_writes == 0);
     s_rails_on = false;
-    assert(read_pico_epd_release_drive());
+    assert(board_epd_release_drive());
     assert(ctrl_calls == 1);
     puts("PASS: E4P release_drive keeps VCOM_CTRL on while the rails are powered");
 }

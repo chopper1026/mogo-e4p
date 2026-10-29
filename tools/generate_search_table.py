@@ -11,7 +11,7 @@ import zipfile
 
 VERSION = "0.55.0"
 WHEEL_SHA256 = "d53b1e8ad2cdb815fb2cb604ed3123372f5a28c6f447571244aca36fc62a286f"
-ROOT = Path(__file__).resolve().parents[1] / "components/read_pico_search"
+ROOT = Path(__file__).resolve().parents[1] / "components/book_search"
 
 
 def normalize(value):

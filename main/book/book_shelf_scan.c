@@ -18,7 +18,7 @@
 #include "book_progress.h"
 #include "book_title.h"
 #include "boot_state.h"
-#include "read_pico_search.h"
+#include "book_search.h"
 #include "settings.h"
 
 // 截断必须停在UTF8字符边界。/ Truncation must stop at a UTF8 character boundary.
@@ -126,7 +126,7 @@ void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool i
             if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
                 copy_text(item->author, sizeof(item->author), author);
         }
-        item->search_match = read_pico_search_match(item->name, scan->query);
+        item->search_match = book_search_match(item->name, scan->query);
         item->size = st.st_size;
         item->is_flash = is_flash;
         book_progress_t p;
@@ -183,7 +183,7 @@ static bool shelf_backfill_visit(const char *path, const book_progress_t *progre
     item->pct = progress->pct;
     item->chapter = progress->chapter;
     item->recent = progress->last_open_s;
-    item->search_match = read_pico_search_match(item->name, scan->query);
+    item->search_match = book_search_match(item->name, scan->query);
     item->favorite = backfill->favorites && scan->favorite_read(backfill->favorites, item->path);
     (*scan->catalog.entries)[(*scan->catalog.count)++] = candidate;
     return true;
@@ -213,6 +213,6 @@ void book_shelf_scan_retries(const book_shelf_scan_t *scan, const struct book_sh
         }
         (*scan->catalog.entries)[i] = p->entry;
         (*scan->catalog.entries)[i].selected = false;
-        (*scan->catalog.entries)[i].search_match = read_pico_search_match(p->entry.name, scan->query);
+        (*scan->catalog.entries)[i].search_match = book_search_match(p->entry.name, scan->query);
     }
 }

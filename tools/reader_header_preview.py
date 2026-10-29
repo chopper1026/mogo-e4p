@@ -86,9 +86,9 @@ uint8_t ui_contrast_gray(uint8_t gray);
 enum {UI_ICON_ZAP=1,UI_ICON_WIFI,UI_ICON_BLUETOOTH};
 // 传书状态替身：预览时 WiFi/蓝牙均不显示。
 // Transfer status shim: neither WiFi nor Bluetooth shows in previews.
-typedef struct {bool network_ready;int mode;} read_pico_transfer_status_t;
-enum {READ_PICO_TRANSFER_MODE_STA=1};
-static void read_pico_transfer_get_status(read_pico_transfer_status_t *out){out->network_ready=false;out->mode=0;}
+typedef struct {bool network_ready;int mode;} wifi_transfer_status_t;
+enum {WIFI_TRANSFER_MODE_STA=1};
+static void wifi_transfer_get_status(wifi_transfer_status_t *out){out->network_ready=false;out->mode=0;}
 static void ui_nav_wifi_icon(uint8_t *fb,int cx,int cy,int size,uint8_t gray){(void)fb;(void)cx;(void)cy;(void)size;(void)gray;}
 // 预览用简单闪电占位，替代 Lucide 掩模；电池框/电量条/百分比走真实代码。
 // A simple bolt placeholder replaces the Lucide mask in previews; the battery frame, fill and
@@ -115,7 +115,7 @@ static void copy_text(char *d,size_t n,const char *v){snprintf(d,n,"%s",v);}
 static void epd_draw_bitmap_region_stub(void){}
 static time_t fake_now;
 static int fake_percent=88,fake_charging;
-static const pmu_snapshot_t *read_pico_pmu_get(void){static pmu_snapshot_t s;s.present=1;s.quick_ok=1;s.qb_flags=3|(fake_charging?4:0);s.qb_soc=fake_percent*10;return &s;}
+static const pmu_snapshot_t *device_power_get(void){static pmu_snapshot_t s;s.present=1;s.quick_ok=1;s.qb_flags=3|(fake_charging?4:0);s.qb_soc=fake_percent*10;return &s;}
 static time_t status_time(void){return fake_now;}
 int64_t ui_nav_clock_minute(void){return fake_now/60;}
 '''
@@ -158,7 +158,7 @@ int main(int argc,char **argv){
     (p/'test.c').write_text(unit)
     flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function',
            '-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/settings"),
-           '-I'+str(ROOT/'components/read_pico_pmu/include'),'-I'+str(ROOT/'main/book')]
+           '-I'+str(ROOT/'components/device_power/include'),'-I'+str(ROOT/'main/book')]
     subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)
     subprocess.run(flags+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),str(ROOT/'main/ui/ui_gesture.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test'),str(args.font.resolve())],check=True)

@@ -8,9 +8,9 @@
  * floor and failure cooldown/attempt caps (decisions reuse time_sync_policy.h, hardware-free and
  * covered by the host test).
  *
- * 冻结：会话所有权在 read_pico_transfer 内部；主循环独占 PMU 与 NVS 交接；手动对时经
+ * 冻结：会话所有权在 wifi_transfer 内部；主循环独占 PMU 与 NVS 交接；手动对时经
  * 组件内抢占，本文件不再管理无线会话。
- * Frozen: session ownership lives inside read_pico_transfer; the main loop alone hands time to
+ * Frozen: session ownership lives inside wifi_transfer; the main loop alone hands time to
  * PMU/NVS; manual syncs preempt inside the component, so this file never manages radio sessions.
  */
 #include "time_service.h"
@@ -22,8 +22,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "read_pico_pmu.h"
-#include "read_pico_transfer.h"
+#include "device_power.h"
+#include "wifi_transfer.h"
 #include "settings.h"
 #include "sleep.h"
 #include "time_sync_policy.h"
@@ -47,7 +47,7 @@ static unsigned s_boot_attempts;
 static void clock_worker(void *arg) {
     (void)arg;
     uint32_t utc = 0;
-    esp_err_t err = read_pico_transfer_sync_time_auto(&utc);
+    esp_err_t err = wifi_transfer_sync_time_auto(&utc);
     ESP_LOGI("clock", "background calibration: %s", esp_err_to_name(err));
     atomic_store(&s_running, false);
     vTaskDelete(NULL);
@@ -57,7 +57,7 @@ void app_time_service_cancel(void) {
     if (atomic_load(&s_running)) {
         // 让组件内 100 ms 分片的 SNTP 等待感知取消；worker 收尾后自行清 running。
         // The component's 100 ms sliced SNTP wait notices the cancel; the worker clears running.
-        read_pico_transfer_cancel_time_sync();
+        wifi_transfer_cancel_time_sync();
     }
 }
 
@@ -81,21 +81,21 @@ void app_time_service_note_success(uint32_t utc_seconds) {
 
 app_time_sync_result_t app_time_service_sync_manual(void) {
     uint32_t utc = 0;
-    read_pico_transfer_status_t network = {0};
-    read_pico_transfer_get_status(&network);
+    wifi_transfer_status_t network = {0};
+    wifi_transfer_get_status(&network);
     // 手动对时优先：组件内的准入会在同一次调用里自动抢占后台对时。
     // A manual sync goes first: the component's admission preempts an automatic run for us.
-    esp_err_t err = read_pico_transfer_sync_time(&utc);
+    esp_err_t err = wifi_transfer_sync_time(&utc);
     bool network_time_received = err == ESP_OK;
     if (network_time_received) {
         // 临时 WiFi 收尾可能耗时；写入 PMU 时取当前 S3 时间，避免回写旧秒数。
         // Temporary WiFi teardown takes time; seed the PMU from the current S3 clock.
         utc = (uint32_t)time(NULL);
         uint8_t payload[4] = {(uint8_t)utc, (uint8_t)(utc >> 8), (uint8_t)(utc >> 16), (uint8_t)(utc >> 24)};
-        err = read_pico_pmu_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
-        if (err == ESP_OK) err = read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0);
+        err = device_power_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
+        if (err == ESP_OK) err = device_power_cmd(PMU_CMD_TIME_GET, NULL, 0);
         if (err == ESP_OK) {
-            const pmu_snapshot_t *pmu = read_pico_pmu_get();
+            const pmu_snapshot_t *pmu = device_power_get();
             if (!pmu || !pmu->time_synced || pmu->unix_sec < utc || pmu->unix_sec - utc > 10)
                 err = ESP_ERR_INVALID_RESPONSE;
         }
@@ -120,7 +120,7 @@ void app_time_service_poll(bool idle) {
         s_loaded = true;
     }
     uint32_t received;
-    if (read_pico_transfer_take_time_sync(&received)) {
+    if (wifi_transfer_take_time_sync(&received)) {
         // 只有真实网络成功才持久化；普通重启/手动设时间不能伪装成网络校准。
         // Persist only a real network success; reboot/manual edits do not count as calibration.
         s_last_sync = received;
@@ -140,11 +140,11 @@ void app_time_service_poll(bool idle) {
     // 用户开关优先；关着就不做任何后台联网，也不推进尝试预算。
     // The user switch wins: while off there is no background networking and no attempt budgeting.
     if (!app_settings_auto_time_sync()) return;
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    bool online = status.state == READ_PICO_TRANSFER_READY &&
-                  status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready;
-    if (!online && status.state != READ_PICO_TRANSFER_STOPPED) return;
+    wifi_transfer_status_t status;
+    wifi_transfer_get_status(&status);
+    bool online = status.state == WIFI_TRANSFER_READY &&
+                  status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready;
+    if (!online && status.state != WIFI_TRANSFER_STOPPED) return;
     time_t now = time(NULL);
     // 节奏固定 6 小时：已联网就复用现有连接，不额外开射频；离线才短连已保存 WiFi。
     // A flat six-hour cadence: reuse an existing link when online, otherwise dial the saved WiFi.
@@ -165,13 +165,13 @@ void app_time_service_poll(bool idle) {
     }
     if (s_boot_attempts >= APP_TIME_SYNC_ATTEMPTS_PER_BOOT) return;
     // 电量极低且未充电时不为了对时开无线。/ Low and unplugged: not worth a radio session.
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    const pmu_snapshot_t *pmu = device_power_get();
     int percent = pmu_battery_percent(pmu);
     if (percent >= 0 && percent < CLOCK_MIN_BATTERY_PERCENT && !pmu_battery_charging(pmu)) return;
     s_next_attempt_us = monotonic + CLOCK_RETRY_US;
     if (!online) {
         char ssid[33]; bool configured = false;
-        if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
+        if (wifi_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
     }
     atomic_store(&s_running, true);
     // 仅对时期间保留任务栈；不创建常驻无线任务或页面缓存。

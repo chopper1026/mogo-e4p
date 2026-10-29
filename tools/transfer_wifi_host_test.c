@@ -5,7 +5,7 @@
  */
 #include <assert.h>
 #include <stdio.h>
-#include "../components/read_pico_transfer/transfer_policy.h"
+#include "../components/wifi_transfer/transfer_policy.h"
 
 static int64_t body_time;
 static int body_reads, body_cancel_at, body_step = 4000, body_failure;
@@ -39,7 +39,7 @@ static void test_body_deadline(void) {
 }
 
 // 故障注入只替换NVS边界；生产读写函数原样执行。/ Inject faults only at NVS boundaries; run production storage helpers unchanged.
-#define READ_PICO_TRANSFER_NVS_TEST
+#define WIFI_TRANSFER_NVS_TEST
 typedef int esp_err_t;
 typedef unsigned nvs_handle_t;
 enum { ESP_OK, ESP_ERR_NVS_NOT_FOUND, ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG, ESP_FAIL };
@@ -73,7 +73,7 @@ static esp_err_t nvs_commit(nvs_handle_t handle) {
     committed = staged; present = pending_present; return ESP_OK;
 }
 static void nvs_close(nvs_handle_t handle) { assert(handle == 1); --handles; clear_secret(&staged, sizeof(staged)); }
-#include "../components/read_pico_transfer/transfer_credentials_store.h"
+#include "../components/wifi_transfer/transfer_credentials_store.h"
 
 static bool parse(const char *json, transfer_credentials_t *c) { return parse_credentials(json, strlen(json), c); }
 int main(void) {
@@ -92,9 +92,9 @@ int main(void) {
     assert(!credentials_from_text("device", "short", &c) && c.version == 0);
     assert(!credentials_from_text("", "12345678", &c));
     assert(!credentials_from_text("123456789012345678901234567890123", "12345678", &c));
-    read_pico_transfer_network_t networks[READ_PICO_TRANSFER_SCAN_MAX] = {0};
+    wifi_transfer_network_t networks[WIFI_TRANSFER_SCAN_MAX] = {0};
     size_t count = 0;
-    read_pico_transfer_network_t ap = {.ssid = "same", .rssi = -70, .requires_password = true, .supported = true};
+    wifi_transfer_network_t ap = {.ssid = "same", .rssi = -70, .requires_password = true, .supported = true};
     scan_offer(networks, &count, &ap); ap.rssi = -40; scan_offer(networks, &count, &ap);
     assert(count == 1 && networks[0].rssi == -40);
     ap.ssid[0] = 0; scan_offer(networks, &count, &ap); assert(count == 1);
@@ -102,11 +102,11 @@ int main(void) {
         snprintf(ap.ssid, sizeof(ap.ssid), "network-%02d", i); ap.rssi = (int8_t)(-100 + i);
         scan_offer(networks, &count, &ap);
     }
-    assert(count == READ_PICO_TRANSFER_SCAN_MAX && networks[0].rssi == -40);
+    assert(count == WIFI_TRANSFER_SCAN_MAX && networks[0].rssi == -40);
     for (size_t i = 1; i < count; ++i) assert(networks[i - 1].rssi >= networks[i].rssi);
     strcpy(ap.ssid, "network-24"); ap.rssi = -20; ap.requires_password = false;
     scan_offer(networks, &count, &ap);
-    assert(count == READ_PICO_TRANSFER_SCAN_MAX && networks[0].rssi == -20 && !networks[0].requires_password);
+    assert(count == WIFI_TRANSFER_SCAN_MAX && networks[0].rssi == -20 && !networks[0].requires_password);
     assert(parse("{\"ssid\":\"家庭 WiFi\",\"password\":\"12345678\"}", &c));
     assert(!strcmp(c.ssid, "家庭 WiFi"));
     assert(parse("{\"ssid\":\"open\",\"password\":\"\"}", &c));

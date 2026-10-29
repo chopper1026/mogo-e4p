@@ -52,13 +52,13 @@
 #include "ui_home_clock.h"
 #include "ui_wallpaper.h"
 #include "ui_avatar.h"
-#include "read_pico_pmu.h"
-#include "read_pico_crashlog.h"
+#include "device_power.h"
+#include "board_crashlog.h"
 #include <math.h>
 #include "display.h"
 #include "display_refresh.h"
 #include "esp_heap_caps.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "settings.h"
 #include "ttf_font.h"
 #include "ui_gesture.h"
@@ -229,8 +229,8 @@ static void scan_books(void) {
         }
     }
     (void)book_progress_list(recent_visit,NULL);
-    read_pico_sd_info_t sd = {0};
-    read_pico_sd_get_info(&sd);
+    board_sd_info_t sd = {0};
+    board_sd_get_info(&sd);
     if (sd.mounted) {
         if (!strcmp(app_settings_books_dir(), "/sdcard/books")) scan_root("/sdcard/book");
         scan_root(app_settings_books_dir());
@@ -265,7 +265,7 @@ static void refresh_progress(void) {
     }
 }
 
-static void remember_scan_state(const read_pico_sd_info_t *sd) {
+static void remember_scan_state(const board_sd_info_t *sd) {
     s_books_cache_valid = true;
     s_cached_store_revision = book_store_revision();
     s_cached_sd_present = sd->present;
@@ -382,7 +382,7 @@ static void circle_frame(uint8_t *fb,int x,int y,int radius) {
 }
 static bool date_now(struct tm *out) {
     time_t now=time(NULL);
-    if(now<1704067200) { const pmu_snapshot_t *pmu=read_pico_pmu_get(); if(pmu&&pmu->time_synced)now=pmu->unix_sec; }
+    if(now<1704067200) { const pmu_snapshot_t *pmu=device_power_get(); if(pmu&&pmu->time_synced)now=pmu->unix_sec; }
     if(now<1704067200) {memset(out,0,sizeof(*out));return false;}
     now+=8*3600;gmtime_r(&now,out);return true;
 }
@@ -780,7 +780,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_widget_trail.valid=s_time_trail.valid=false;
     (void)ctx;s_view=HOME_ROOT;s_clock_pending=s_time_pending=s_widget_pending=s_component_pending=false;s_press_pending=false;s_save_error=false;s_time_stamp=s_widget_stamp=-1;s_motion_ms=-100;
     s_home_force_full_once=app_settings_home_full_refresh();refresh_days();avatar_prepare_state();
-    read_pico_sd_info_t sd={0};esp_err_t error=read_pico_sd_get_info(&sd);
+    board_sd_info_t sd={0};esp_err_t error=board_sd_get_info(&sd);
     bool same=s_books_cache_valid&&error!=ESP_ERR_NOT_FINISHED&&s_cached_store_revision==book_store_revision()&&
         s_cached_sd_present==sd.present&&s_cached_sd_mounted==sd.mounted&&!strcmp(s_cached_books_dir,app_settings_books_dir());
     char last[BOOK_STORE_PATH_MAX]={0};book_progress_last_path(last,sizeof(last));
@@ -788,7 +788,7 @@ static void on_enter(app_ctx_t *ctx) {
     if(same&&!changed){if(s_cached_progress_revision!=progress_revision)refresh_progress();s_scan_pending=false;}
     else {
         memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_scan_pending=!same;
-        if(s_scan_pending) read_pico_sd_start_probe();
+        if(s_scan_pending) board_sd_start_probe();
         scan_books();
         if(same||error!=ESP_ERR_NOT_FINISHED)remember_scan_state(&sd);
     }
@@ -814,7 +814,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     bool folder_preview=s_view==HOME_COMPONENT&&s_component_browse==APP_HOME_FOLDER;
     if(s_view==HOME_ROOT||folder_preview){
     if(s_scan_pending) {
-        read_pico_sd_info_t info={0};if(read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return APP_REDRAW_NONE;
+        board_sd_info_t info={0};if(board_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return APP_REDRAW_NONE;
         s_scan_pending=false;
         if(info.mounted) {
             s_cover_generation=book_cover_jobs_begin();

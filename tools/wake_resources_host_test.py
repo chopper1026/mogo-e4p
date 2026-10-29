@@ -19,9 +19,9 @@ u=r'''
 #define ESP_ERR_NOT_FINISHED 1
 #define pdMS_TO_TICKS(x) (x)
 typedef struct{uint8_t *back_fb;}EpdiyHighlevelState;
-typedef struct{bool mounted;}read_pico_sd_info_t;
+typedef struct{bool mounted;}board_sd_info_t;
 static int probes,waits,remaining;static bool good;
-static int read_pico_sd_get_info(read_pico_sd_info_t *p){(void)p;++probes;return remaining-->0?1:0;}
+static int board_sd_get_info(board_sd_info_t *p){(void)p;++probes;return remaining-->0?1:0;}
 static void vTaskDelay(int ms){assert(ms==20);++waits;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}

@@ -84,6 +84,6 @@ direct_dependencies:
 - espressif/qrcode
 - espressif/tinyusb
 - idf
-manifest_hash: 099ade4c7b9fcdd7acaccb9a05db45dbda812746d085898c086cfe0b00bcca43
+manifest_hash: df8cd09ea1c95006636f4c27965889bdb07aaa3c7508f461a8ca30d57e407619
 target: esp32s31
 version: 3.0.0

@@ -25,8 +25,8 @@ SCAN_DIRS = [
     ROOT / "main/ota/ota_online.c",
     ROOT / "components/sy7636a",
     ROOT / "components/sc7a20h",
-    ROOT / "components/read_pico",
-    ROOT / "components/read_pico_pmu",
+    ROOT / "components/board_support",
+    ROOT / "components/device_power",
 ]
 TEXT_SUFFIXES = {".md", ".txt"}
 # 阅读正文补齐后 VF 子集会超过旧的 400KB；系统字库使用固定 Medium 字重。

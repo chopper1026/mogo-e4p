@@ -19,8 +19,8 @@ unit = r'''
 #include "ui_lock_feedback.h"
 typedef struct EpdiyHighlevelState {int id;} EpdiyHighlevelState;
 #define MODE_DU 1
-#define READ_PICO_TRANSFER_UPLOADING 3
-typedef struct {int state;} read_pico_transfer_status_t;
+#define WIFI_TRANSFER_UPLOADING 3
+typedef struct {int state;} wifi_transfer_status_t;
 static uint8_t frame[684u*1216u/2u], original[sizeof(frame)], back[sizeof(frame)];
 static unsigned style=2, pushes, white_pushes, cancels, touches;
 static int rotation, transfer, result, white_result;
@@ -44,7 +44,7 @@ void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){
 static unsigned pixel(const uint8_t *fb,int x,int y){size_t at=offset(x,y);return(fb[at/2]>>((at&1)*4))&15;}
 static unsigned app_settings_lock_style(void){return style;}
 static bool pico_online_busy(void){return online;}
-static void read_pico_transfer_get_status(read_pico_transfer_status_t *s){s->state=transfer;}
+static void wifi_transfer_get_status(wifi_transfer_status_t *s){s->state=transfer;}
 static uint8_t* epd_hl_get_framebuffer(EpdiyHighlevelState *h){assert(h);return missing?NULL:frame;}
 static void display_main_transition_cancel(void){++cancels;}
 static void epd_hl_set_all_white(EpdiyHighlevelState *h){assert(h);memset(frame,255,sizeof(frame));}
@@ -85,7 +85,7 @@ int main(int argc,char **argv){
  }
  for(unsigned s=0;s<3;++s){reset();style=s;app_lock_feedback(&hl);assert(pushes==(s==2)&&white_pushes==(s==2)&&cancels==(s==2));}
  reset();online=true;app_lock_feedback(&hl);assert(!pushes&&!white_pushes&&!touches&&!memcmp(frame,original,sizeof(frame)));
- reset();transfer=READ_PICO_TRANSFER_UPLOADING;app_lock_feedback(&hl);assert(!pushes&&!white_pushes&&!touches&&!memcmp(frame,original,sizeof(frame)));
+ reset();transfer=WIFI_TRANSFER_UPLOADING;app_lock_feedback(&hl);assert(!pushes&&!white_pushes&&!touches&&!memcmp(frame,original,sizeof(frame)));
  reset();missing=true;app_lock_feedback(&hl);assert(!pushes&&!white_pushes&&!touches);
  reset();app_lock_feedback(NULL);assert(!pushes&&!white_pushes&&!touches);
  reset();white_result=1;app_lock_feedback(&hl);assert(white_pushes==1&&!pushes&&!touches&&!s_lock_feedback_visible&&!memcmp(back,original,sizeof(frame)));

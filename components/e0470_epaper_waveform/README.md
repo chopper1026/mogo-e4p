@@ -41,9 +41,9 @@ Default trim: `erase_max = 11`, `sat_cut = 5`, `white_sat_cut = 0`, `hold = 3`.
 
 Changing panel waveforms voids the device warranty. The `waveforms/*.h` files are data tables and are not meant to be edited by hand.
 
-帧周期固定为 11 090 µs（约 90 Hz），取自面板算法文档的设计点。扫描时序由 `read_pico`（`read_pico_epd_timing.h`）负责，不在本组件内。
+帧周期固定为 11 090 µs（约 90 Hz），取自面板算法文档的设计点。扫描时序由 `board_support`（`board_epd_timing.h`）负责，不在本组件内。
 
-The frame period is fixed at 11 090 µs (about 90 Hz), the design point in the panel's algorithm document. Scan timing is owned by `read_pico` (`read_pico_epd_timing.h`), not by this component.
+The frame period is fixed at 11 090 µs (about 90 Hz), the design point in the panel's algorithm document. Scan timing is owned by `board_support` (`board_epd_timing.h`), not by this component.
 
 ## 依赖 / Dependencies
 

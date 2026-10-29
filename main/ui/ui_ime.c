@@ -4,7 +4,7 @@
  */
 #include "ui_ime.h"
 #include "ui_ime_phrases.h"
-#include "read_pico_search.h"
+#include "book_search.h"
 #include "esp_heap_caps.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -25,7 +25,7 @@ void ui_ime_release(void) { free(s_workspace); s_workspace = NULL; s_syllable_co
 static bool workspace(void) {
     if (s_workspace) return true;
     size_t count = 0;
-    while (read_pico_search_syllable(count)) ++count;
+    while (book_search_syllable(count)) ++count;
     if (count > 512) return false;
     s_workspace = heap_caps_malloc(sizeof(*s_workspace) + count * sizeof(glyph_cache_t), CAPS);
     if (!s_workspace) return false;
@@ -39,7 +39,7 @@ static const glyph_cache_t *characters(size_t index, unsigned limit) {
     if (index >= s_syllable_count) return NULL;
     glyph_cache_t *entry = &s_workspace->glyphs[index];
     if (entry->limit < limit) {
-        entry->count = read_pico_search_candidates(read_pico_search_syllable(index), entry->points, limit, 0);
+        entry->count = book_search_candidates(book_search_syllable(index), entry->points, limit, 0);
         entry->limit = limit;
     }
     return entry;
@@ -131,7 +131,7 @@ bool ui_ime_candidates_page(const char *raw, bool nine, const char *preferred,
                 extend(paths, at, strlen(roman), phrases[i].text, roman, (int)strlen(roman) * 100 + 40);
         }
         for (size_t i = 0;; ++i) {
-            const char *roman = read_pico_search_syllable(i); if (!roman) break;
+            const char *roman = book_search_syllable(i); if (!roman) break;
             if (!preferred_ok(roman, preferred, at) || !prefix(raw + at, roman, nine)) continue;
             const glyph_cache_t *entry = characters(i, 1); char text[5];
             if (entry && entry->count) {
@@ -156,7 +156,7 @@ bool ui_ime_candidates_page(const char *raw, bool nine, const char *preferred,
         memset(s_workspace->seen_chars, 0, sizeof(s_workspace->seen_chars));
         size_t matches = 0;
         for (size_t i = 0; i < s_syllable_count; ++i) {
-            const char *roman = read_pico_search_syllable(i);
+            const char *roman = book_search_syllable(i);
             if (strlen(roman) == length && preferred_ok(roman, preferred, 0) && prefix(raw, roman, nine))
                 s_workspace->matches[matches++] = (uint16_t)i;
         }
@@ -165,9 +165,9 @@ bool ui_ime_candidates_page(const char *raw, bool nine, const char *preferred,
         for (size_t rank = 0; matches; ++rank) {
             bool found = false;
             for (size_t m = 0; m < matches; ++m) {
-                const char *roman = read_pico_search_syllable(s_workspace->matches[m]);
+                const char *roman = book_search_syllable(s_workspace->matches[m]);
                 uint32_t cp;
-                if (!read_pico_search_candidates(roman, &cp, 1, rank)) continue;
+                if (!book_search_candidates(roman, &cp, 1, rank)) continue;
                 found = true;
                 if (cp < 0x4e00 || cp > 0x9fff) continue;
                 unsigned index = cp - 0x4e00, mask = 1u << (index & 7);

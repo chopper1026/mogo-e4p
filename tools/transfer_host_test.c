@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * 传书公共实现的主机回归。/ Host regression of the shared transfer implementation.
  */
-#define READ_PICO_TRANSFER_HOST_TEST
+#define WIFI_TRANSFER_HOST_TEST
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -39,7 +39,7 @@ static int test_rename(const char *from, const char *to) {
 #define rename test_rename
 #define remove test_remove
 #define stat(path, out) test_stat(path, out)
-#include "../components/read_pico_transfer/read_pico_transfer.c"
+#include "../components/wifi_transfer/wifi_transfer.c"
 #undef fwrite
 #undef fclose
 #undef rename

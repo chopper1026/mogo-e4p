@@ -35,7 +35,7 @@ UNIT = r'''
 #define BOOK_STORE_PATH_MAX 288
 #define ESP_ERR_NOT_FINISHED 7
 typedef struct { char path[BOOK_STORE_PATH_MAX]; } home_book_t;
-typedef struct { bool present, mounted; } read_pico_sd_info_t;
+typedef struct { bool present, mounted; } board_sd_info_t;
 typedef struct { int unused; } app_ctx_t;
 typedef int esp_err_t;
 typedef enum {
@@ -58,7 +58,7 @@ static uint32_t s_cached_progress_revision=UINT32_MAX,s_folder_key;
 static uint8_t *s_folder;
 static int s_cover_next,scans,refreshes,probes;
 static char latest[BOOK_STORE_PATH_MAX];
-static esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *out){*out=(read_pico_sd_info_t){.present=true,.mounted=true};return 0;}
+static esp_err_t board_sd_get_info(board_sd_info_t *out){*out=(board_sd_info_t){.present=true,.mounted=true};return 0;}
 static unsigned book_store_revision(void){return 7;}
 static const char *app_settings_books_dir(void){return "/sdcard/books";}
 static bool app_settings_home_full_refresh(void){return false;}
@@ -79,7 +79,7 @@ static void rp_boot_mark(const char *name){(void)name;}
 static void scan_books(void){++scans;snprintf(s_current.path,sizeof(s_current.path),"%s",latest);}
 static void refresh_progress(void){++refreshes;}
 static void restore_cover_cache(void){}
-static void read_pico_sd_start_probe(void){++probes;}
+static void board_sd_start_probe(void){++probes;}
 '''
 UNIT += function("remember_scan_state") + "\n" + function("refresh_days") + "\n" + function("on_enter")
 UNIT += r'''

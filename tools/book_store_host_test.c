@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "book_store.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "esp_vfs_fat.h"
 
 static bool sd_mounted;
@@ -78,7 +78,7 @@ esp_err_t book_progress_forget(const char* path) {
 #undef unlink
 #undef rename
 
-esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* out) {
+esp_err_t board_sd_get_info(board_sd_info_t* out) {
     memset(out, 0, sizeof(*out)); out->mounted = sd_mounted;
     out->present = sd_mounted || sd_invalid_present; return ESP_OK;
 }

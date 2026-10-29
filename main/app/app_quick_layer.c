@@ -14,7 +14,7 @@
 #include "display_refresh.h"
 #include "frontlight.h"
 #include "ota_online.h"
-#include "read_pico_transfer.h"
+#include "wifi_transfer.h"
 #include "settings.h"
 #include "ui_click_feedback.h"
 #include "ui_kit.h"
@@ -58,9 +58,9 @@ void app_quick_layer_reset(void) {
     s_fl_shown_on=s_quick.fl_on;
 }
 static unsigned quick_status(void) {
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    bool wifi = status.mode == READ_PICO_TRANSFER_MODE_STA && status.state != READ_PICO_TRANSFER_STOPPED;
+    wifi_transfer_status_t status;
+    wifi_transfer_get_status(&status);
+    bool wifi = status.mode == WIFI_TRANSFER_MODE_STA && status.state != WIFI_TRANSFER_STOPPED;
     return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (status.network_ready ? 4u : 0u);
 }
 
@@ -157,20 +157,20 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
 }
 
 static void quick_toggle_wifi(void) {
-    read_pico_transfer_status_t status;
-    read_pico_transfer_get_status(&status);
-    if (status.state != READ_PICO_TRANSFER_STOPPED) {
+    wifi_transfer_status_t status;
+    wifi_transfer_get_status(&status);
+    if (status.state != WIFI_TRANSFER_STOPPED) {
         // 上传期间拒绝断开，复用存储任务已有的原子准入保护。
         // Refuse disconnecting during upload using the storage owner's atomic admission guard.
-        (void)read_pico_transfer_try_stop_if_idle();
+        (void)wifi_transfer_try_stop_if_idle();
     } else {
         char ssid[33] = {0}; bool configured = false;
-        if (read_pico_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
+        if (wifi_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
             // 先释放蓝牙占用，再用既有异步连接/重试流程；不新开上传服务器或改写凭据。
             // Release Bluetooth resources first, then reuse connection/retry handling without starting uploads or rewriting credentials.
             ble_pt_sync(false);
-            const read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
-            (void)read_pico_transfer_start(&cfg);
+            const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
+            (void)wifi_transfer_start(&cfg);
         }
     }
 }

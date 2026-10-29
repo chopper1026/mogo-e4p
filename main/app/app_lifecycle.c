@@ -9,7 +9,7 @@
 #include "time_service.h"
 #include "storage_jobs.h"
 #include "ota_online.h"
-#include "read_pico_transfer.h"
+#include "wifi_transfer.h"
 #include "ble_page_turner.h"
 
 void app_lifecycle_checkpoint(app_ctx_t *ctx, const app_desc_t *current) {
@@ -26,12 +26,12 @@ void app_lifecycle_checkpoint(app_ctx_t *ctx, const app_desc_t *current) {
 
 bool app_lifecycle_pause_for_lock(void) {
     app_time_service_cancel();
-    return read_pico_transfer_pause_for_sleep();
+    return wifi_transfer_pause_for_sleep();
 }
 
 bool app_lifecycle_prepare_poweroff(void) {
     app_time_service_cancel();
-    if (pico_online_busy() || !storage_jobs_quiesce(2000) || !read_pico_transfer_pause_for_sleep()) return false;
+    if (pico_online_busy() || !storage_jobs_quiesce(2000) || !wifi_transfer_pause_for_sleep()) return false;
     (void)ble_pt_stop(2000);
     return true;
 }

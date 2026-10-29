@@ -8,7 +8,7 @@
 #include "transfer_ui_test_env.h"
 #include "../main/apps/app_transfer.c"
 #include <assert.h>
-#include "../components/read_pico_transfer/transfer_signature.h"
+#include "../components/wifi_transfer/transfer_signature.h"
 static bool test_usb_active;
 static esp_err_t test_usb_stop_error;
 esp_err_t usb_storage_start(void) { test_usb_active = true; return ESP_OK; }
@@ -29,10 +29,10 @@ static void tap(app_ctx_t* ctx, EpdRect rect) {
     on_gesture(ctx, &ev);
 }
 static void qr_regression(app_ctx_t* ctx) {
-    test_status = (read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_AP,.state=READ_PICO_TRANSFER_READY,.network_ready=true};
+    test_status = (wifi_transfer_status_t){.mode=WIFI_TRANSFER_MODE_AP,.state=WIFI_TRANSFER_READY,.network_ready=true};
     strcpy(test_status.ssid,"ReadPico-test");
     strcpy(test_status.url,"http://192.168.4.1");
-    s_mode = READ_PICO_TRANSFER_MODE_AP;
+    s_mode = WIFI_TRANSFER_MODE_AP;
     on_enter(ctx);
     s_view = TRANSFER_HOME;
     s_qr_url = true;
@@ -67,9 +67,9 @@ static void qr_regression(app_ctx_t* ctx) {
     on_tick(ctx);
     assert(!s_qr_ready);
     test_qr_failure=false;
-    queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+    queue_network_start(WIFI_TRANSFER_MODE_STA);
     assert(!s_qr_ready && !test_qr_payload[0]);
-    test_status.mode=READ_PICO_TRANSFER_MODE_STA;
+    test_status.mode=WIFI_TRANSFER_MODE_STA;
     strcpy(test_status.url,"http://10.20.30.40");
     on_tick(ctx);
     assert(s_qr_url && s_qr_ready && !strcmp(test_qr_payload,test_status.url));
@@ -78,8 +78,8 @@ static void qr_regression(app_ctx_t* ctx) {
     assert(test_qr_encodes==encodes);
     stop_session();
     assert(!s_qr_ready && !test_qr_payload[0]);
-    test_status=(read_pico_transfer_status_t){0};
-    s_mode=READ_PICO_TRANSFER_MODE_AP;
+    test_status=(wifi_transfer_status_t){0};
+    s_mode=WIFI_TRANSFER_MODE_AP;
     test_qr_encodes=0;
     ctx->now_ms=0;
 }
@@ -91,8 +91,8 @@ static void wifi_recovery_regression(app_ctx_t* ctx) {
     s_wifi_settings_only = true;
     s_session_started = false;
     s_start_pending = s_network_connect_pending = s_scan_pending = false;
-    test_status = s_status = (read_pico_transfer_status_t){.mode=READ_PICO_TRANSFER_MODE_STA,
-        .state=READ_PICO_TRANSFER_ERROR,.wifi_configured=true};
+    test_status = s_status = (wifi_transfer_status_t){.mode=WIFI_TRANSFER_MODE_STA,
+        .state=WIFI_TRANSFER_ERROR,.wifi_configured=true};
     test_wifi_running = true;
     int stops = test_stop_count;
     tap(ctx, network_control_rect(6));
@@ -122,7 +122,7 @@ static void wifi_recovery_regression(app_ctx_t* ctx) {
     clear_password();
     s_wifi_settings_only = false;
     s_forget_confirm = false;
-    test_status = (read_pico_transfer_status_t){0};
+    test_status = (wifi_transfer_status_t){0};
 }
 static void password_caret_regression(app_ctx_t *ctx) {
     clear_password();ui_keyboard_begin(&s_password_input,true);
@@ -176,7 +176,7 @@ int main(void) {
     on_enter(&ctx);
     tap(&ctx, method_control_rect(0));
     assert(s_view == TRANSFER_HOME && s_start_pending && !s_scan_pending);
-    assert(s_mode == READ_PICO_TRANSFER_MODE_STA);
+    assert(s_mode == WIFI_TRANSFER_MODE_STA);
     on_tick(&ctx);
     tap(&ctx, control_rect(2));
     assert(s_view == TRANSFER_METHODS && !s_start_pending);
@@ -238,7 +238,7 @@ int main(void) {
     assert(!s_start_pending && !s_network_connect_pending && test_forget_count == 2);
     test_status.network_ready = s_status.network_ready = false;
     tap(&ctx, network_control_rect(6));
-    assert(s_start_pending && s_mode == READ_PICO_TRANSFER_MODE_STA);
+    assert(s_start_pending && s_mode == WIFI_TRANSFER_MODE_STA);
     s_start_pending = false; s_view = TRANSFER_NETWORKS;
     tap(&ctx, network_control_rect(9));
     assert(s_network_page == 1);
@@ -267,7 +267,7 @@ int main(void) {
     assert(s_view == TRANSFER_PASSWORD && strlen(s_password) == 63);
     test_save_error = ESP_OK;
     tap(&ctx, password_control_rect(46));
-    assert(s_view == TRANSFER_HOME && s_mode == READ_PICO_TRANSFER_MODE_STA && s_start_pending);
+    assert(s_view == TRANSFER_HOME && s_mode == WIFI_TRANSFER_MODE_STA && s_start_pending);
     assert(!s_password[0]);
     assert(strcmp(test_saved_ssid, "中文家庭网络") == 0);
     enter_networks();
@@ -285,7 +285,7 @@ int main(void) {
     network_ui_tick(&ctx);
     assert(!s_network_count && s_network_message[0]);
     tap(&ctx, network_control_rect(6));
-    assert(s_view == TRANSFER_HOME && s_start_pending && s_mode == READ_PICO_TRANSFER_MODE_STA);
+    assert(s_view == TRANSFER_HOME && s_start_pending && s_mode == WIFI_TRANSFER_MODE_STA);
     int stops_before = test_stop_count;
     tap(&ctx, control_rect(2));
     assert(test_stop_count == stops_before + 1 && !s_start_pending);

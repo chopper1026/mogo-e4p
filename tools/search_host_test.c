@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  * 离线书名匹配边界与性能测试。/ Offline filename boundary and performance tests.
  */
-#include "read_pico_search.h"
+#include "book_search.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-static void match(const char* name, const char* q) { assert(read_pico_search_match(name, q)); }
-static void miss(const char* name, const char* q) { assert(!read_pico_search_match(name, q)); }
+static void match(const char* name, const char* q) { assert(book_search_match(name, q)); }
+static void miss(const char* name, const char* q) { assert(!book_search_match(name, q)); }
 int main(void) {
     match("三体.txt", "st"); match("三体.TXT", "san ti"); match("三体.txt", "SANTI");
     match("三体.txt", "体"); match("三体.txt", ""); match("三体.epub", "   ");
@@ -27,14 +27,14 @@ int main(void) {
     miss("甲\xc0\xaf.txt", "a"); miss("甲.txt", "\xed\xa0\x80");
     miss("甲\xf0\x9f.txt", "a"); miss(NULL, ""); miss("a.txt", NULL);
     uint32_t candidates[12] = {0};
-    size_t found = read_pico_search_candidates("hai", candidates, 12, 0);
+    size_t found = book_search_candidates("hai", candidates, 12, 0);
     bool saw_sea = false;
     for (size_t i = 0; i < found; ++i) if (candidates[i] == 0x6d77) saw_sea = true;
     assert(saw_sea);
-    assert(read_pico_search_candidates("hai1", candidates, 12, 0) == 0);
+    assert(book_search_candidates("hai1", candidates, 12, 0) == 0);
     uint32_t next[5] = {0};
-    assert(read_pico_search_candidates("xin", candidates, 5, 0) == 5);
-    assert(read_pico_search_candidates("xin", next, 5, 5) > 0);
+    assert(book_search_candidates("xin", candidates, 5, 0) == 5);
+    assert(book_search_candidates("xin", next, 5, 5) > 0);
     assert(candidates[0] != next[0]);
     char query[66]; memset(query, 'a', 64); query[64] = 0;
     char title[257]; memset(title, 'a', 251); memcpy(title + 251, ".txt", 5);

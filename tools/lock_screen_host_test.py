@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory() as folder:
 #define APP_WAKE_KEY 1
 #define APP_WAKE_PICKUP 2
 #define APP_WAKE_TIMEOUT 3
-#define READ_PICO_PMU_KEY_NONE 0
+#define DEVICE_POWER_KEY_NONE 0
 #define pdMS_TO_TICKS(x) (x)
 typedef void *cst836u_handle_t;typedef void *sc7a20h_handle_t;typedef int esp_err_t;
 typedef struct EpdiyHighlevelState {int unused;} EpdiyHighlevelState;
@@ -82,9 +82,9 @@ static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void app_lock_wait_key_idle(int ms){(void)ms;}
 static int app_light_sleep_wait(void *acc){(void)acc;++waits;return waits%2?APP_WAKE_KEY:APP_WAKE_PICKUP;}
 static int64_t esp_timer_get_time(void){return now*1000;}
-static int read_pico_pmu_poll(void){return 0;}
-static int read_pico_pmu_take_key_action(void){int action=power_pending;power_pending=0;return action;}
-static void read_pico_pmu_drain_events(void){}
+static int device_power_poll(void){return 0;}
+static int device_power_take_key_action(void){int action=power_pending;power_pending=0;return action;}
+static void device_power_drain_events(void){}
 static int ble_pt_stop_for_sleep(int ms){assert(ms==2000);++stops;return 0;}
 static bool ble_pt_pop_key(ble_pt_event_t *e){(void)e;return false;}
 static bool ble_pt_pop_raw(ble_pt_raw_t *e){(void)e;return false;}

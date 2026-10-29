@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const html = fs.readFileSync('components/read_pico_transfer/upload.html', 'utf8');
+const html = fs.readFileSync('components/wifi_transfer/upload.html', 'utf8');
 const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const flush = () => new Promise(resolve => setImmediate(resolve));
 

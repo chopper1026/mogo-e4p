@@ -186,11 +186,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "read_pico_init.h"
-#include "read_pico_board.h"
-#include "read_pico_sd.h"
-#include "read_pico_transfer.h"
-#include "read_pico_search.h"
+#include "board_init.h"
+#include "board_hardware.h"
+#include "board_sd.h"
+#include "wifi_transfer.h"
+#include "book_search.h"
 #include "settings.h"
 #include "book/book_reader_input.h"
 #include "ttf_font.h"
@@ -1212,7 +1212,7 @@ static void search_begin(void) {
 }
 static void refresh_search_matches(void) {
     for (int i = 0; i < s_count; ++i)
-        s_shelf[i].search_match = read_pico_search_match(s_shelf[i].name, s_query);
+        s_shelf[i].search_match = book_search_match(s_shelf[i].name, s_query);
 }
 static void search_finish(app_ctx_t* ctx, bool apply) {
     ui_keyboard_end();
@@ -4047,8 +4047,8 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     }
     s_reader_return_home = false;
     if (!strncmp(path, "/sdcard/", 8)) {
-        read_pico_sd_info_t sd = {0};
-        read_pico_sd_get_info(&sd);
+        board_sd_info_t sd = {0};
+        board_sd_get_info(&sd);
         if (!sd.present || !sd.mounted) {
             copy_text(s_message, sizeof(s_message), "TF 卡不可用，请重新挂载后打开");
             return false;
@@ -4069,8 +4069,8 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
         copy_text(s_message, sizeof(s_message), "内置存储单本限 1 MB");
         return false;
     }
-    read_pico_transfer_status_t network = {0};
-    read_pico_transfer_get_status(&network);
+    wifi_transfer_status_t network = {0};
+    wifi_transfer_get_status(&network);
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     // 书架封面和上一本书的预渲染缓冲可以重建；先释放，再解析 EPUB。
     // Cover and previous-page caches are rebuildable; release them before EPUB parsing.
@@ -4368,8 +4368,8 @@ static void scan_shelf(app_ctx_t* ctx) {
     else if (skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
     else if (s_pending_invalidated) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "图书已更新，旧待保存进度已作废");
     if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT 或 EPUB");
-    read_pico_sd_info_t cache_sd = {0};
-    read_pico_sd_get_info(&cache_sd);
+    board_sd_info_t cache_sd = {0};
+    board_sd_get_info(&cache_sd);
     s_cache_sd_present = cache_sd.present;
     s_cache_sd_mounted = cache_sd.mounted;
     s_cache_shelf_style = app_settings_shelf_style();
@@ -5730,8 +5730,8 @@ static void on_enter(app_ctx_t* ctx) {
     // Entering the app alone does not force a full refresh; only an actually opened book does.
     s_reader_entry_full = false;
     s_poll_ms = 0;
-    read_pico_sd_info_t sd = {0};
-    esp_err_t media_err = read_pico_sd_get_info(&sd);
+    board_sd_info_t sd = {0};
+    esp_err_t media_err = board_sd_get_info(&sd);
     bool reuse = s_shelf_cache_valid && media_err != ESP_ERR_NOT_FINISHED &&
                  sd.present == s_cache_sd_present && sd.mounted == s_cache_sd_mounted &&
                  s_cache_shelf_style == app_settings_shelf_style() &&
@@ -5751,7 +5751,7 @@ static void on_enter(app_ctx_t* ctx) {
             s_scan_pending = false;
             return;
         }
-        read_pico_sd_start_probe();
+        board_sd_start_probe();
     }
 
 }
@@ -6435,7 +6435,7 @@ static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
     if (ctx->now_ms - s_poll_ms < READER_VOLUME_POLL_MS) return APP_REDRAW_NONE;
     s_poll_ms = ctx->now_ms;
     uint8_t keys = 0;
-    if (read_pico_read_volume_keys(&keys) != ESP_OK) {
+    if (board_read_volume_keys(&keys) != ESP_OK) {
         s_last_keys = 0xff;
         return APP_REDRAW_NONE;
     }
@@ -6443,7 +6443,7 @@ static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
     s_last_keys = keys;
     if (!edges) return APP_REDRAW_NONE;
     s_stats_activity_ms = ctx->now_ms;
-    return turn_page(ctx, (edges & READ_PICO_VOLUME_UP) ? -1 : 1);
+    return turn_page(ctx, (edges & BOARD_VOLUME_UP) ? -1 : 1);
 }
 // 上键单击：按下沿去抖，松开时仍在短按窗口内才执行；按住不会重复触发。
 // Up-key single press: debounce the press edge and fire on release inside the short-press window;
@@ -6462,7 +6462,7 @@ static app_redraw_t reader_up_key_tick(app_ctx_t* ctx) {
     if (ctx->now_ms - s_poll_ms < READER_VOLUME_POLL_MS) return APP_REDRAW_NONE;
     s_poll_ms = ctx->now_ms;
     bool pressed = false;
-    if (read_pico_read_up_key(&pressed) != ESP_OK) {
+    if (board_read_up_key(&pressed) != ESP_OK) {
         s_down = false;
         return APP_REDRAW_NONE;
     }
@@ -6538,8 +6538,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     }
     if (s_scan_pending && ctx->now_ms - s_poll_ms >= 500) {
         s_poll_ms = ctx->now_ms;
-        read_pico_sd_info_t info = {0};
-        if (read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
+        board_sd_info_t info = {0};
+        if (board_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
         s_scan_pending = false;
         scan_shelf(ctx);
         if (ctx->request_app) return APP_REDRAW_NONE;

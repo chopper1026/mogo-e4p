@@ -25,7 +25,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "read_pico_pmu.h"
+#include "device_power.h"
 #include "ui_kit.h"
 
 #define TAG "vcom_setup"
@@ -241,9 +241,9 @@ static void eat_touch(cst836u_handle_t tp, bool* was_touched) {
 }
 
 static bool persist(int mv) {
-    if (read_pico_pmu_vcom_set(mv) != ESP_OK) return false;
+    if (device_power_vcom_set(mv) != ESP_OK) return false;
     int got = 0;
-    if (read_pico_pmu_vcom_get(&got) != ESP_OK || got != mv) return false;
+    if (device_power_vcom_get(&got) != ESP_OK || got != mv) return false;
     epd_set_vcom((uint16_t)mv);
     return true;
 }

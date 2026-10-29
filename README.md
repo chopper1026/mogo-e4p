@@ -25,7 +25,7 @@
 | M1 | 开机 EPD 测试图案（`CONFIG_MOGO_EPD_TEST_PATTERN`）：灰阶条、棋盘、细线、四角、中心圆、边框、20 次 GL16 局刷 | ✅ 已接入，默认开启 |
 | M3 | FT6336U 触摸驱动，沿用 `cst836u_*` API；普通触点逆旋转 + 盖板三键归一化 | ✅ 编译通过 |
 | M4 | SDMMC 4-bit（CLK24 / CMD25 / D0–D3 20–23）；USB MSC 同步改 4-bit + ANA_SW | ✅ 编译通过 |
-| M5 | `read_pico_pmu_*` 兼容层：BQ27220 电量、CX25601N 充电、PCF8563 RTC、TCA P17 电源键、NVS VCOM | ✅ 编译通过 |
+| M5 | `device_power_*` 兼容层：BQ27220 电量、CX25601N 充电、PCF8563 RTC、TCA P17 电源键、NVS VCOM | ✅ 编译通过 |
 | M6 | OTA 分区地址与芯片 ID 更新；在线升级 board/layout 改为新板（旧升级源自然失效） | ✅ 编译通过 |
 | 实机 | 2026-10-19 烧录并启动：TCA9555 0x20、TPS65185 REVID 0x65、FT6336U ID 0x64、SD 4-bit 挂载 15200 MB、BQ/CX/RTC 全部在线；测试图案 GC16 成功，UI 进入首页 | ✅ 启动通过 |
 | 实机 | 触摸：FT6336U 已按竖屏逻辑坐标上报，改为恒等映射；普通触点和盖板三键均可命中 | ✅ |
@@ -65,10 +65,10 @@ Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrou
 ## 关键文件
 
 - `components/epdiy/src/output_lcd/lcd_driver.c`：S31 LCD/GPU/RMT 后端（来自 Metalio 已验证实现）+ Mogo 行时序。
-- `components/read_pico/board_metalio_e4p.c`：Metalio 板级 BSP（TPS/TCA/8-bit 总线）。
+- `components/board_support/board_metalio_e4p.c`：Metalio 板级 BSP（TPS/TCA/8-bit 总线）。
 - `components/epdiy/src/epdiy_riscv_ve_stub.c`：RISC-V 替代 Xtensa PIE 的三个热路径函数。
 - `components/cst836u/cst836u.c`：S31 下走 FT6336U，保留 CST836U API。
-- `components/read_pico_pmu/read_pico_pmu_metalio.c`：BQ27220/CX25601N/PCF8563/TCA 电源键兼容层。
+- `components/device_power/device_power_metalio.c`：BQ27220/CX25601N/PCF8563/TCA 电源键兼容层。
 - `main/factory/epd_test.c`：M1 面板测试图案。
 
 ## 代码边界 / Code boundaries
@@ -76,8 +76,8 @@ Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrou
 产品页面由 `main/CMakeLists.txt` 和 `main/app/app_registry.c` 定义。上游未参与产品构建的硬件演示页、内置演示正文及其 continuous_du 组件已移除；当前阅读翻页、水波纹、快捷栏、蓝牙、前光、震动、存储、升级与出厂流程保留。S31 使用静默蜂鸣器接口，不依赖 PWM 音频组件。
 Product pages are defined by `main/CMakeLists.txt` and `main/app/app_registry.c`. Uncompiled upstream hardware demos, their sample text and continuous_du component have been removed. Reader turns, ripple transitions, quick controls, Bluetooth, frontlight, haptics, storage, updates and factory flows remain. S31 keeps a silent buzzer interface without the PWM audio dependency.
 
-旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`read_pico_pmu_*` 包装电量、充电、RTC 与电源键。普通 CI 与 OTA 均验证 S31；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
-Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `read_pico_pmu_*` wraps battery, charging, RTC and power keys. Both CI and OTA build S31; prune old-board implementations along verified dependency boundaries.
+旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`device_power_*` 包装电量、充电、RTC 与电源键。普通 CI 与 OTA 均验证 S31；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
+Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `device_power_*` wraps battery, charging, RTC and power keys. Both CI and OTA build S31; prune old-board implementations along verified dependency boundaries.
 
 产品构建仅接受 `esp32s31`，直接选择 Metalio 板级、电源兼容层和静默蜂鸣器实现；旧 S3 后端与 HPM 覆盖不再由产品构建选择。部分旧源码仍供宿主测试和离线工具使用，删除前需先迁移这些消费者。
 Product builds accept only `esp32s31` and directly select the Metalio board, power compatibility layer and silent buzzer. Legacy S3 backends and HPM overrides are no longer product build choices. Some old sources still support host tests and offline tools; migrate those consumers before removing the files.

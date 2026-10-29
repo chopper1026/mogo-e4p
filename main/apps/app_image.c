@@ -18,7 +18,7 @@
 #include "image_decode.h"
 #include "display.h"
 #include "esp_heap_caps.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "ui_gesture.h"
 #include "ui_image_dither.h"
 #include "ui_kit.h"
@@ -114,8 +114,8 @@ static void scan_images(void) {
     memset(s_items, 0, sizeof(s_items[0]));
     strcpy(s_items[0].name, "内置灰阶测试图");
     s_items[0].png = true;
-    read_pico_sd_info_t sd = {0};
-    read_pico_sd_get_info(&sd);
+    board_sd_info_t sd = {0};
+    board_sd_get_info(&sd);
     if (sd.mounted) {
         scan_dir("/sdcard/pictures");
         scan_dir("/sdcard/images");

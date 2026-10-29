@@ -18,7 +18,7 @@
 #endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "sdmmc_cmd.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
@@ -107,7 +107,7 @@ static void release_card(void) {
 static void restore_local(void) {
     release_card();
     ana_sw(true);
-    esp_err_t err = read_pico_sd_remount();
+    esp_err_t err = board_sd_remount();
     if (err != ESP_OK && err != ESP_ERR_NOT_FINISHED) ESP_LOGW(TAG, "SD remount: %s", esp_err_to_name(err));
 }
 
@@ -116,11 +116,11 @@ esp_err_t usb_storage_start(void) {
     if (!storage_jobs_quiesce(2000)) return ESP_ERR_NOT_FINISHED;
     if (s_cleanup_pending) return ESP_ERR_INVALID_STATE;
     if (s_active) return ESP_OK;
-    read_pico_sd_info_t info = {0};
-    if (read_pico_sd_get_info(&info) != ESP_OK || !info.mounted) return ESP_ERR_INVALID_STATE;
+    board_sd_info_t info = {0};
+    if (board_sd_get_info(&info) != ESP_OK || !info.mounted) return ESP_ERR_INVALID_STATE;
     // 字体文件在 SD 上，先关闭句柄再卸载。/ Close the SD-backed font before unmounting.
     if (!ttf_font_is_builtin()) ttf_font_open_builtin();
-    esp_err_t err = read_pico_sd_sync();
+    esp_err_t err = board_sd_sync();
     if (err != ESP_OK) return err;
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     // USB export uses the same bus as the card; S31 runs 4-bit at 20 MHz.
@@ -141,8 +141,8 @@ esp_err_t usb_storage_start(void) {
     if (!s_card) { err = ESP_ERR_NO_MEM; goto fail; }
     err = sdmmc_card_init(&host, s_card);
     if (err != ESP_OK) goto fail;
-    // 电脑弹出磁盘时不可让 MSC 驱动自动挂载 /data；本机只通过 read_pico_sd 恢复 /sdcard。
-    // Never auto-mount /data on host eject; only read_pico_sd may restore /sdcard.
+    // 电脑弹出磁盘时不可让 MSC 驱动自动挂载 /data；本机只通过 board_support_sd 恢复 /sdcard。
+    // Never auto-mount /data on host eject; only board_support_sd may restore /sdcard.
     tinyusb_msc_driver_config_t msc = {.user_flags.auto_mount_off = 1};
     err = tinyusb_msc_install_driver(&msc);
     if (err != ESP_OK) goto fail;

@@ -29,7 +29,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "read_pico_crashlog.h"
+#include "board_crashlog.h"
 
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"

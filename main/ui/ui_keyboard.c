@@ -15,7 +15,7 @@
 #include "ui_keyboard.h"
 #include "ui_ime.h"
 #include <ui_kit.h>
-#include "read_pico_search.h"
+#include "book_search.h"
 #include "esp_heap_caps.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -162,7 +162,7 @@ static size_t syllables(const char *out[4], bool *more) {
     // 先展示匹配最长的完整读音；更多键可遍历全部读音，避免只保留四种解释。
     // Prefer longer matching syllables; More cycles through every reading instead of keeping only four.
     for (size_t length = 8; length; --length) for (size_t i = 0;; ++i) {
-        const char *word = read_pico_search_syllable(i); if (!word) break;
+        const char *word = book_search_syllable(i); if (!word) break;
         if (strlen(word) != length) continue;
         char digits[16]; if (!ui_ime_digits(word, digits, sizeof(digits))) continue;
         if (strlen(s_raw) < length || strncmp(s_raw, digits, length)) continue;

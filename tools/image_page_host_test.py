@@ -36,13 +36,13 @@ typedef struct {uint8_t *fb;void *hl,*request_app;bool request_return;} app_ctx_
 typedef enum {UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_TAP} gesture_type;
 typedef struct {gesture_type type;int x0,y0;} ui_gesture_event_t;
 typedef struct {const char *title,*detail;bool enter_full,owns_keys;bool(*menu_handle_enabled)(app_ctx_t*);void(*on_enter)(app_ctx_t*),(*on_exit)(app_ctx_t*),(*on_media_lost)(app_ctx_t*),(*render)(app_ctx_t*,uint8_t*);bool(*present)(app_ctx_t*,app_redraw_t);app_redraw_t(*on_key)(app_ctx_t*,int),(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*);} app_desc_t;
-typedef struct {bool mounted;} read_pico_sd_info_t;
+typedef struct {bool mounted;} board_sd_info_t;
 static int test_alloc_fail,test_malloc_fail,test_dimensions_fail,test_decode_fail,test_decodes,test_presentations;
 static unsigned test_pixels;
 static bool test_mounted;
 static void *heap_caps_calloc(size_t n,size_t size,int cap){(void)cap;return test_alloc_fail?NULL:calloc(n,size);}
 static void *heap_caps_malloc(size_t n,int cap){(void)cap;if(test_malloc_fail&&!--test_malloc_fail)return NULL;return malloc(n);}
-static void read_pico_sd_get_info(read_pico_sd_info_t *out){out->mounted=test_mounted;}
+static void board_sd_get_info(board_sd_info_t *out){out->mounted=test_mounted;}
 static const uint8_t display_test_png_start[]={1,2,3,4},display_test_png_end[]={0};
 static bool book_image_dimensions(const uint8_t *data,size_t size,bool png,unsigned *w,unsigned *h){(void)png;assert(data&&size>=4);if(test_dimensions_fail)return false;*w=300;*h=400;return true;}
 static bool book_image_grayscale(const uint8_t *data,size_t size,bool png,unsigned w,unsigned h,uint8_t *out){(void)png;assert(data&&size>=4&&w<=684&&h<=1216);++test_decodes;if(test_decode_fail)return false;memset(out,117,(size_t)w*h);return true;}

@@ -402,11 +402,11 @@ assert 'ble_pt_scan_start(BLE_PT_SCAN_FOREVER)' in function(SETTINGS, 'on_tick')
 # 对时入口经 sync_time_run 落到持有 BLE 租约的 sync_time_impl；扫描与传输入口直接取租约。
 # The sync-time entry delegates through sync_time_run to the leased sync_time_impl; scan and
 # transfer start hold the lease directly.
-transfer = (ROOT / 'components/read_pico_transfer/read_pico_transfer.c').read_text()
-for name in ('read_pico_transfer_start', 'read_pico_transfer_scan_wifi', 'sync_time_impl'):
-    assert 'ble_pt_network_acquire()' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', name)
-assert 'sync_time_run(utc_seconds, false, false)' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'read_pico_transfer_sync_time')
-assert 'sync_time_impl(utc_seconds)' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'sync_time_run')
+transfer = (ROOT / 'components/wifi_transfer/wifi_transfer.c').read_text()
+for name in ('wifi_transfer_start', 'wifi_transfer_scan_wifi', 'sync_time_impl'):
+    assert 'ble_pt_network_acquire()' in function(ROOT / 'components/wifi_transfer/wifi_transfer.c', name)
+assert 'sync_time_run(utc_seconds, false, false)' in function(ROOT / 'components/wifi_transfer/wifi_transfer.c', 'wifi_transfer_sync_time')
+assert 'sync_time_impl(utc_seconds)' in function(ROOT / 'components/wifi_transfer/wifi_transfer.c', 'sync_time_run')
 assert transfer.count('ble_pt_network_acquire()') == 3
 # 描述符遍历只能在自己的特征定义范围内，Report Map 必须分段读全。
 # Descriptor discovery must stay inside its own characteristic definition, and the Report Map must

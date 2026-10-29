@@ -5,10 +5,10 @@ if(NOT IDF_TARGET STREQUAL "esp32s31")
 endif()
 
 set(main_requires
-    read_pico
+    board_support
     frontlight
-    read_pico_transfer
-    read_pico_search
+    wifi_transfer
+    book_search
     espressif__qrcode
     espressif__esp_jpeg
     # 渐进式 JPEG；基线仍走 esp_jpeg。/ Progressive JPEG; baseline stays on esp_jpeg.
@@ -26,7 +26,7 @@ set(main_requires
     ble_page_turner
     e0470_epaper_waveform
     e0470_page_turn
-    read_pico_pmu
+    device_power
     fatfs
     wear_levelling
     bootloader_support

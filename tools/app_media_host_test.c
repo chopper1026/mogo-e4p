@@ -1,12 +1,12 @@
 /* 中文：验证真实介质服务的通知、停止顺序与恢复边界。/ English: Verify notification, shutdown ordering and recovery boundaries in the real media service. */
 #include "app_media.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
-static read_pico_sd_info_t info;
+static board_sd_info_t info;
 static int status;
 static bool usb, font_ready, builtin, saved_builtin, open_failed;
 static bool quiesce_ok = true;
@@ -37,9 +37,9 @@ static uint32_t random_value(void) {
     return rng;
 }
 bool usb_storage_active(void) { return usb; }
-int read_pico_sd_get_info(read_pico_sd_info_t *out) { event('I'); *out = info; return status; }
-void read_pico_sd_start_probe(void) { event('P'); ++probes; }
-int read_pico_sd_remount(void) { event('M'); ++remounts; return ESP_ERR_NOT_FINISHED; }
+int board_sd_get_info(board_sd_info_t *out) { event('I'); *out = info; return status; }
+void board_sd_start_probe(void) { event('P'); ++probes; }
+int board_sd_remount(void) { event('M'); ++remounts; return ESP_ERR_NOT_FINISHED; }
 bool ttf_font_ready(void) { return font_ready; }
 bool ttf_font_is_builtin(void) { return builtin; }
 bool ttf_font_path_is_builtin(const char *path) { (void)path; return saved_builtin; }

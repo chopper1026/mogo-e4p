@@ -57,8 +57,8 @@ HARNESS = r'''
 #define MALLOC_CAP_8BIT 2
 #define MALLOC_CAP_INTERNAL 4
 typedef struct {unsigned now_ms;} app_ctx_t;
-typedef struct {bool present,mounted;} read_pico_sd_info_t;
-typedef struct {bool network_ready;} read_pico_transfer_status_t;
+typedef struct {bool present,mounted;} board_sd_info_t;
+typedef struct {bool network_ready;} wifi_transfer_status_t;
 typedef struct pending_progress {
     char path[BOOK_STORE_PATH_MAX]; book_progress_t value;
     bool dirty,progress_saved; book_progress_watch_t *watch; struct pending_progress *next;
@@ -96,11 +96,11 @@ static void log_event(const char *tag,const char *format,...){(void)tag;(void)fo
 #define ESP_LOGW(...) log_event(__VA_ARGS__)
 static const char *esp_err_to_name(int err){(void)err;return "test";}
 static bool book_file_path_supported(const char *path){(void)path;return supported;}
-static void read_pico_sd_get_info(read_pico_sd_info_t *sd){*sd=(read_pico_sd_info_t){sd_present,sd_mounted};}
+static void board_sd_get_info(board_sd_info_t *sd){*sd=(board_sd_info_t){sd_present,sd_mounted};}
 static bool delete_retry_find(const char *path){(void)path;return deleted;}
 static int test_stat(const char *path,struct stat *st){(void)path;memset(st,0,sizeof(*st));st->st_mode=regular?S_IFREG:S_IFDIR;st->st_size=file_size;return unreadable?-1:0;}
 #define stat(path,st) test_stat(path,st)
-static void read_pico_transfer_get_status(read_pico_transfer_status_t *s){s->network_ready=network_ready;}
+static void wifi_transfer_get_status(wifi_transfer_status_t *s){s->network_ready=network_ready;}
 static void invalidate_covers(void){event('c');}
 static void app_home_release_clock_cache(void){event('h');}
 static void lock_draw(void){assert(!locked);locked=true;event('[');}

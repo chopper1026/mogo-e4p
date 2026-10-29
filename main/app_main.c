@@ -28,7 +28,7 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <sys/stat.h>
@@ -44,11 +44,11 @@
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include "soc/rtc_cntl_reg.h"
 #endif
-#include "read_pico_board.h"
-#include "read_pico_crashlog.h"
-#include "read_pico_init.h"
-#include "read_pico_pmu.h"
-#include "read_pico_pmu_protocol.h"
+#include "board_hardware.h"
+#include "board_crashlog.h"
+#include "board_init.h"
+#include "device_power.h"
+#include "pmu_protocol.h"
 #include "haptics.h"
 #include "settings.h"
 #include "sleep.h"
@@ -67,8 +67,8 @@ static void restore_time_from_pmu(void) {
     struct timeval current;
     if (gettimeofday(&current, NULL) == 0 && current.tv_sec >= 1704067200 &&
         current.tv_sec <= 4102444799U) return;
-    if (read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0) != ESP_OK) return;
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    if (device_power_cmd(PMU_CMD_TIME_GET, NULL, 0) != ESP_OK) return;
+    const pmu_snapshot_t *pmu = device_power_get();
     if (!pmu || !pmu->time_ok || !pmu->time_synced || pmu->unix_millis >= 1000 ||
         pmu->unix_sec < 1704067200 || pmu->unix_sec > 4102444799U) return;
     struct timeval tv = {.tv_sec = (time_t)pmu->unix_sec, .tv_usec = pmu->unix_millis * 1000};
@@ -81,7 +81,7 @@ static void restore_time_from_pmu(void) {
 static bool resolve_vcom_at_boot(void) {
     int mv = 0;
     for (int i = 0; i < 3; i++) {
-        if (read_pico_pmu_vcom_get(&mv) == ESP_OK) {
+        if (device_power_vcom_get(&mv) == ESP_OK) {
             epd_set_vcom((uint16_t)mv);
             ESP_LOGI(TAG, "panel VCOM loaded from PMU");
             return true;
@@ -139,8 +139,8 @@ static void glyph_failure_note(uint32_t codepoint, int gid, int pixel_height,
 // 缓存验证失败时继续原开机路径，不假设未知屏幕已经全白。
 // A rejected cache keeps the original startup path; never assume an unknown panel is white.
 static bool restore_retained_lock(EpdiyHighlevelState *hl,uint8_t *framebuffer) {
-    read_pico_sd_info_t info;
-    for(unsigned wait=0;wait<150 && read_pico_sd_get_info(&info)==ESP_ERR_NOT_FINISHED;++wait)
+    board_sd_info_t info;
+    for(unsigned wait=0;wait<150 && board_sd_get_info(&info)==ESP_ERR_NOT_FINISHED;++wait)
         vTaskDelay(pdMS_TO_TICKS(20));
     if(!lock_screen_restore(framebuffer))return false;
     memcpy(hl->back_fb,framebuffer,(size_t)epd_width()*epd_height()/2);
@@ -166,15 +166,15 @@ void app_main(void) {
     pico_boot_init(reset == ESP_RST_PANIC || reset == ESP_RST_INT_WDT ||
                    reset == ESP_RST_TASK_WDT || reset == ESP_RST_WDT);
 
-    read_pico_handle_t hw;
-    if (read_pico_init(&hw) != ESP_OK) return;
+    board_handle_t hw;
+    if (board_init(&hw) != ESP_OK) return;
     // 马达能力与定时器在板级就绪后建立；开关/强度已由设置初始化写入。
     // / Set up the motor timer once the board is ready; settings init already applied switch and intensity.
     haptics_init();
     // 电量校准日志按设置启动；默认关闭时不创建 batt.log，也不打印 batt 行。
     // Start the battery calibration log per the setting; the off default creates no batt.log
     // and prints no batt line.
-    read_pico_pmu_set_batt_log(app_settings_batt_log());
+    device_power_set_batt_log(app_settings_batt_log());
     // 前光在板级初始化里已挂好 LEDC；这里按 NVS 恢复用户状态，早于首帧。
     // The board step already wired LEDC; restore the user state before the first frame.
     const bool fl_on = app_settings_frontlight_on();
@@ -214,7 +214,7 @@ void app_main(void) {
     }
     if(!restored_lock) {
         epd_poweron();
-        if(!resuming)read_pico_i2c_census_take();
+        if(!resuming)board_i2c_census_take();
         epd_clear();
         epd_hl_set_all_white(&hl);
         (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOADING);
@@ -252,8 +252,8 @@ void app_main(void) {
             // 挂载等待有界；恢复入口已消费，无卡或资源失败不会反复自动开书。
             // Bound mount waiting after consuming the checkpoint; absent media or failed resources cannot auto-open in a loop.
             if (!strncmp(resume.path, "/sdcard/", 8)) {
-                read_pico_sd_info_t info;
-                for (unsigned wait = 0; wait < 150 && read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED; ++wait)
+                board_sd_info_t info;
+                for (unsigned wait = 0; wait < 150 && board_sd_get_info(&info) == ESP_ERR_NOT_FINISHED; ++wait)
                     vTaskDelay(pdMS_TO_TICKS(20));
             }
             if (!strncmp(resume.path, "/flash/books/", 13) && !book_store_flash_ready()) {

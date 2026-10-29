@@ -54,7 +54,7 @@ static void copy_text(char *out,size_t cap,const char *s){snprintf(out,cap,"%s",
 static bool book_title_from_path(const char *p,char *out,size_t cap){const char *base=strrchr(p,'/');copy_text(out,cap,base?base+1:p);return true;}
 static void clean_filename(char *out,size_t cap,const char *s){copy_text(out,cap,s);}
 static bool pico_boot_asset_allowed(const char *p){(void)p;return true;}
-static bool read_pico_search_match(const char *name,const char *query){(void)name;(void)query;return true;}
+static bool book_search_match(const char *name,const char *query){(void)name;(void)query;return true;}
 static int book_epub_metadata_cached(const char *p,char *title,size_t tcap,char *author,size_t acap){assert(book_file_path_supported(p));title[0]=author[0]=0;(void)tcap;(void)acap;return ESP_FAIL;}
 static int book_epub_metadata(const char *p,char *title,size_t tcap,char *author,size_t acap){return book_epub_metadata_cached(p,title,tcap,author,acap);}
 '''
@@ -81,8 +81,8 @@ static home_book_t s_current,s_recent[6];
 static home_book_t *book_at(int index){return index==0?&s_current:&s_recent[index-1];}
 static const char *app_settings_books_dir(void){return books_root;}
 static bool book_store_flash_ready(void){return false;}
-typedef struct {bool mounted;} read_pico_sd_info_t;
-static void read_pico_sd_get_info(read_pico_sd_info_t *out){out->mounted=true;}
+typedef struct {bool mounted;} board_sd_info_t;
+static void board_sd_get_info(board_sd_info_t *out){out->mounted=true;}
 '''
 for name in ('is_book','copy_title','title_for','consider_book','scan_root','recent_visit','scan_books'):
     unit += function(name, home) + '\n'

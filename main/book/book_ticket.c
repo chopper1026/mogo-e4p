@@ -23,7 +23,7 @@
 #include "epdiy.h"
 #include "esp_heap_caps.h"
 #include "nvs.h"
-#include "read_pico_pmu.h"
+#include "device_power.h"
 #include "ttf_font.h"
 #include "ui_kit.h"
 #include "ui_image_dither.h"
@@ -56,7 +56,7 @@ static void month_load(nvs_handle_t h, ticket_month_t *out) {
 static uint32_t local_day(void) {
     time_t now = time(NULL);
     if (now < 1704067200) {
-        const pmu_snapshot_t *pmu = read_pico_pmu_get();
+        const pmu_snapshot_t *pmu = device_power_get();
         if (pmu && pmu->time_synced && pmu->unix_sec >= 1704067200) now = pmu->unix_sec;
     }
     if (now < 1704067200) return 0;

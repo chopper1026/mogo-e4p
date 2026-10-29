@@ -9,7 +9,7 @@
 
 #include "haptics.h"
 #include "esp_timer.h"
-#include "read_pico_board.h"
+#include "board_hardware.h"
 
 static esp_timer_create_args_t created;
 static int creates, starts, motor_writes;
@@ -29,8 +29,8 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t handle, uint64_t timeout_us) {
     return start_fails ? ESP_ERR_INVALID_STATE : ESP_OK;
 }
 esp_err_t esp_timer_stop(esp_timer_handle_t handle) { (void)handle; return ESP_OK; }
-bool read_pico_has_motor(void) { return has_motor; }
-esp_err_t read_pico_motor(bool on) { motor_on = on; ++motor_writes; return ESP_OK; }
+bool board_has_motor(void) { return has_motor; }
+esp_err_t board_motor(bool on) { motor_on = on; ++motor_writes; return ESP_OK; }
 
 int main(int argc, char **argv) {
     const bool no_motor = argc > 1 && !strcmp(argv[1], "nomotor");

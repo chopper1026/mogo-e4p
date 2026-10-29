@@ -15,7 +15,7 @@ void app_book_cover_mode_changed(void) {}
 void app_home_cover_mode_changed(void) {}
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) { (void)resume; return ESP_OK; }
 void pico_boot_clear_resume(void) {}
-#include "read_pico_transfer.h"
+#include "wifi_transfer.h"
 #include "ble_page_turner.h"
 #include "ui_nav_layout.h"
 #include <assert.h>
@@ -136,7 +136,7 @@ static int idle_locks, before_locks, lock_feedback_calls, lock_badges, wake_clea
 static bool feedback_enabled;
 static bool online_busy;
 static bool ble_enabled, saved_wifi, upload_busy, click_enabled, click_active;
-static read_pico_transfer_status_t transfer_status;
+static wifi_transfer_status_t transfer_status;
 static int quick_draws, quick_gl, quick_du, wifi_starts, wifi_stops, ble_resets, click_presses, click_restores;
 
 static app_redraw_t long_key(app_ctx_t* c, int k) { assert(k==UI_KEY_2); ++long_keys; c->request_menu=true; return APP_REDRAW_NONE; }
@@ -273,10 +273,10 @@ esp_err_t frontlight_apply(bool on,uint8_t brightness,uint8_t cct) {
 void ble_pt_reset_failure(void) {++ble_resets;}
 bool ble_pt_pop_key(ble_pt_event_t *e) {(void)e;return false;}
 bool ble_pt_pop_raw(ble_pt_raw_t *e) {(void)e;return false;}
-void read_pico_transfer_get_status(read_pico_transfer_status_t *s) {*s=transfer_status;}
-int read_pico_transfer_get_saved_wifi(char *ssid,bool *configured) {strcpy(ssid,"saved");*configured=saved_wifi;return ESP_OK;}
-int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg) {assert(cfg->mode==READ_PICO_TRANSFER_MODE_STA&&cfg->network_only);++wifi_starts;transfer_status.mode=cfg->mode;transfer_status.state=1;return ESP_OK;}
-bool read_pico_transfer_try_stop_if_idle(void) {if(upload_busy)return false;++wifi_stops;transfer_status.state=0;return true;}
+void wifi_transfer_get_status(wifi_transfer_status_t *s) {*s=transfer_status;}
+int wifi_transfer_get_saved_wifi(char *ssid,bool *configured) {strcpy(ssid,"saved");*configured=saved_wifi;return ESP_OK;}
+int wifi_transfer_start(const wifi_transfer_cfg_t *cfg) {assert(cfg->mode==WIFI_TRANSFER_MODE_STA&&cfg->network_only);++wifi_starts;transfer_status.mode=cfg->mode;transfer_status.state=1;return ESP_OK;}
+bool wifi_transfer_try_stop_if_idle(void) {if(upload_busy)return false;++wifi_stops;transfer_status.state=0;return true;}
 void ui_click_feedback_reset(void) {click_active=false;}
 void ui_click_feedback_begin(uint8_t *fb) {(void)fb;click_active=false;}
 bool ui_click_feedback_active(void) {return click_active;}
@@ -310,8 +310,8 @@ void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
 void rails_idle_check(int64_t n) {(void)n;}
-bool read_pico_pmu_ready(void) {return lock_due||step==power_trigger_step;}
-read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return step==power_trigger_step?READ_PICO_PMU_KEY_LONG:READ_PICO_PMU_KEY_SHORT;}
+bool device_power_ready(void) {return lock_due||step==power_trigger_step;}
+device_power_key_action_t device_power_take_key_action(void) {return step==power_trigger_step?DEVICE_POWER_KEY_LONG:DEVICE_POWER_KEY_SHORT;}
 void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader,bool light_only) {(void)tp;(void)h;(void)t;(void)a;(void)reader;(void)light_only;assert(!nav_armed);++idle_locks;lock_due=false;time_offset+=1000000;}
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
@@ -324,7 +324,7 @@ bool app_settings_reader_power_turn(void) {return false;}
 // / The global up-key fallback stays unbound in host tests: the GPIO is never
 // polled and existing scenarios keep their exact behavior.
 app_reader_key_action_t app_settings_reader_up_action(void) {return APP_READER_KEY_NONE;}
-esp_err_t read_pico_read_up_key(bool* pressed) {*pressed=false;return ESP_OK;}
+esp_err_t board_read_up_key(bool* pressed) {*pressed=false;return ESP_OK;}
 app_shutdown_style_t app_settings_shutdown_style(void) {return staged_shutdown ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL;}
 bool ttf_font_path_is_builtin(const char*p) {(void)p;return !font_due&&!saved_sd_font;}
 bool ttf_font_ready(void) {return true;}
@@ -332,11 +332,11 @@ bool ttf_font_is_builtin(void) {return !sd_font;}
 const char* ttf_font_path(void) {return "other";}
 int ttf_font_open(const char*p) {(void)p;font_opens++;sd_font=true;return 0;}
 int ttf_font_open_builtin(void) {assert(media_lost>0);builtin_opens++;sd_font=font_due=false;return 0;}
-int read_pico_sd_get_info(read_pico_sd_info_t*i) {i->present=media_test?present_steps[step]:font_due;i->mounted=media_test?mounted_steps[step]:font_due;return media_test&&!i->mounted?ESP_ERR_INVALID_STATE:0;}
-void read_pico_sd_start_probe(void) {probes++;}
+int board_sd_get_info(board_sd_info_t*i) {i->present=media_test?present_steps[step]:font_due;i->mounted=media_test?mounted_steps[step]:font_due;return media_test&&!i->mounted?ESP_ERR_INVALID_STATE:0;}
+void board_sd_start_probe(void) {probes++;}
 // 失效后卡回位的自动重挂：宿主用不到真实挂载，只记录调用。
 // Auto-remount once a latched card returns; the host keeps the count without a real mount.
-int read_pico_sd_remount(void) {++remounts;return ESP_ERR_NOT_FINISHED;}
+int board_sd_remount(void) {++remounts;return ESP_ERR_NOT_FINISHED;}
 static void lost(app_ctx_t*c) {(void)c;media_lost++;loss_step=step;}
 static void ready(app_ctx_t*c) {(void)c;media_ready++;}
 EpdRect ui_content_refresh_area(void) {return (EpdRect){0,0,684,1000};}
@@ -385,7 +385,7 @@ static void reset(void) {
     power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=false;
     last_du_area=(EpdRect){0};
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
-    transfer_status=(read_pico_transfer_status_t){0};
+    transfer_status=(wifi_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
     wifi_setup_requests=bt_settings_requests=0;
     bt_return_to_origin=false;
@@ -675,7 +675,7 @@ int main(void) {
     add(85,156,1,0);add(85,156,1,0);add(0,0,0,0);
     add(85,156,1,0);add(0,0,0,0);run();
     assert(wifi_starts==1&&wifi_stops==1&&quick_gl==1&&quick_du==4&&quick_draws==1&&base_renders==2&&quick_press_draws==2&&!touch_calls);
-    reset();upload_busy=true;transfer_status=(read_pico_transfer_status_t){.state=1,.mode=READ_PICO_TRANSFER_MODE_STA};
+    reset();upload_busy=true;transfer_status=(wifi_transfer_status_t){.state=1,.mode=WIFI_TRANSFER_MODE_STA};
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);add(85,156,1,0);add(0,0,0,0);run();
     assert(!wifi_starts&&!wifi_stops&&transfer_status.state==1);
     reset();add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);add(85,156,1,0);add(0,0,0,0);run();
@@ -890,7 +890,7 @@ bool ble_pt_connected(void) { return false; }
 
 // 调度回归链接真实生命周期服务；失败组合由独立生命周期测试控制。
 // Scheduler regressions link the actual lifecycle service; dedicated lifecycle tests control failure combinations.
-bool read_pico_transfer_pause_for_sleep(void) { return true; }
+bool wifi_transfer_pause_for_sleep(void) { return true; }
 bool ui_avatar_quiesce(unsigned timeout) { (void)timeout; return true; }
 esp_err_t ble_pt_stop(uint32_t timeout) { (void)timeout; return ESP_OK; }
 esp_err_t ble_pt_stop_for_sleep(uint32_t timeout) { (void)timeout; return ESP_OK; }

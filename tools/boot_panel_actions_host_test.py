@@ -10,7 +10,7 @@ import tempfile
 from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
-CRASH = ROOT / 'components/read_pico'
+CRASH = ROOT / 'components/board_support'
 SETTINGS = ROOT / 'main/apps/app_device_settings.c'
 
 BOOT = r'''
@@ -20,7 +20,7 @@ BOOT = r'''
 #include <string.h>
 static int64_t clock_us;
 int64_t esp_timer_get_time(void) { return clock_us; }
-#include "read_pico_crashlog.c"
+#include "board_crashlog.c"
 int main(void) {
     rp_crash_log_clear();
     assert(!rp_crash_log_count());

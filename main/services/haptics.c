@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：触摸震动。短脉冲由 esp_timer 单次定时关断，不依赖主循环 tick；
- * 强度只改脉宽，不做软 PWM。板级接口见 read_pico_motor()。
+ * 强度只改脉宽，不做软 PWM。板级接口见 board_motor()。
  * English: Touch vibration. One esp_timer shot turns the motor off, independent of the
  * main-loop tick; intensity only changes the pulse width, with no soft PWM. The board
- * primitive is read_pico_motor().
+ * primitive is board_motor().
  *
  * 冻结：只做短脉冲，不提供连续震动；睡前与断电前必须关断。
  * Frozen: short pulses only, never continuous vibration; always stop before sleep or power-off.
@@ -17,7 +17,7 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "read_pico_board.h"
+#include "board_hardware.h"
 
 #define TAG "haptics"
 
@@ -40,11 +40,11 @@ static uint32_t pulse_ms(uint8_t intensity) {
 static void on_pulse_end(void *arg) {
     (void)arg;
     s_pulsing = false;
-    (void)read_pico_motor(false);
+    (void)board_motor(false);
 }
 
 void haptics_init(void) {
-    s_available = read_pico_has_motor();
+    s_available = board_has_motor();
     if (!s_available) return;
     if (s_timer == NULL) {
         const esp_timer_create_args_t args = {
@@ -60,7 +60,7 @@ void haptics_init(void) {
             return;
         }
     }
-    (void)read_pico_motor(false);
+    (void)board_motor(false);
     ESP_LOGI(TAG, "ready enabled=%d intensity=%u pulse=%ums",
              (int)s_enabled, (unsigned)s_intensity, (unsigned)pulse_ms(s_intensity));
 }
@@ -83,16 +83,16 @@ void haptics_pulse(void) {
     // 先停旧定时器再上电，避免上一记的回调在本次上电后立刻关断。
     // / Stop the previous shot before powering up so its callback cannot cut this pulse.
     (void)esp_timer_stop(s_timer);
-    if (read_pico_motor(true) != ESP_OK) return;
+    if (board_motor(true) != ESP_OK) return;
     s_pulsing = true;
     if (esp_timer_start_once(s_timer, (uint64_t)pulse_ms(s_intensity) * 1000ULL) != ESP_OK) {
         s_pulsing = false;
-        (void)read_pico_motor(false);
+        (void)board_motor(false);
     }
 }
 
 void haptics_stop(void) {
     if (s_timer != NULL) (void)esp_timer_stop(s_timer);
     s_pulsing = false;
-    if (s_available) (void)read_pico_motor(false);
+    if (s_available) (void)board_motor(false);
 }

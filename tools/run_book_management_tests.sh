@@ -8,7 +8,7 @@ bash tools/run_book_host_tests.sh
 python3 tools/test_book_epub.py
 mkdir -p build/book-tests/settings-card
 cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
-    -Icomponents/read_pico_transfer/include -Imain -Imain/services \
+    -Icomponents/wifi_transfer/include -Imain -Imain/services \
     tools/settings_backup_host_test.c -o build/book-tests/settings-backup
 build/book-tests/settings-backup
 cc -std=c11 -Wall -Wextra -Werror -Imain -Imain/boot -Imain/display -Imain/lock -Imain/ota -Imain/services -Imain/settings tools/auto_lock_host_test.c -o build/book-tests/auto-lock
@@ -59,13 +59,13 @@ python3 tools/test_search.py
 flags=(-std=gnu11 -Wall -Wextra -Werror -Wno-deprecated-declarations -g -fsanitize=address,undefined)
 gcc "${flags[@]}" -Itools/file_tree_stubs -Imain/apps tools/file_tree_host_test.c main/apps/file_tree.c -o build/book-tests/file-tree
 build/book-tests/file-tree
-gcc "${flags[@]}" -Icomponents/read_pico_search/include tools/transfer_host_test.c components/read_pico_search/read_pico_search.c -o build/book-tests/transfer
+gcc "${flags[@]}" -Icomponents/book_search/include tools/transfer_host_test.c components/book_search/book_search.c -o build/book-tests/transfer
 build/book-tests/transfer
 gcc "${flags[@]}" -Imanaged_components/espressif__cjson/cJSON tools/transfer_wifi_host_test.c managed_components/espressif__cjson/cJSON/cJSON.c -lm -o build/book-tests/transfer-wifi
 build/book-tests/transfer-wifi
 python3 tools/test_transfer_wifi_forget.py
-gcc "${flags[@]}" -Itools/transfer_ui_stubs -Icomponents/read_pico_transfer/include -Icomponents/read_pico_search/include -Imain/ui \
-    tools/transfer_ui_host_test.c main/ui/ui_text_edit.c main/ui/ui_text_input.c main/ui/ui_keyboard.c main/ui/ui_ime.c components/read_pico_search/read_pico_search.c -o build/book-tests/transfer-ui
+gcc "${flags[@]}" -Itools/transfer_ui_stubs -Icomponents/wifi_transfer/include -Icomponents/book_search/include -Imain/ui \
+    tools/transfer_ui_host_test.c main/ui/ui_text_edit.c main/ui/ui_text_input.c main/ui/ui_keyboard.c main/ui/ui_ime.c components/book_search/book_search.c -o build/book-tests/transfer-ui
 python3 tools/test_usb_storage.py
 build/book-tests/transfer-ui
 bash tools/run_app_loop_host_tests.sh

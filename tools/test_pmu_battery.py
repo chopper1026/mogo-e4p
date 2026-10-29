@@ -3,7 +3,7 @@
 from pathlib import Path
 import subprocess, tempfile, re
 root=Path(__file__).resolve().parents[1]
-source=(root/'components/read_pico_pmu/read_pico_pmu.c').read_text()
+source=(root/'components/device_power/device_power_cw32.c').read_text()
 def extract(name):
     m=re.search(r'^(?:static )?[^\n]+\b'+name+r'\([^;{}]*?\)\s*\{',source,re.M)
     assert m, name
@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as tmp:
     p=Path(tmp);(p/'driver').mkdir()
     (p/'driver/i2c_master.h').write_text('#pragma once\ntypedef void *i2c_master_bus_handle_t;\n')
     (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n')
-    code='#include "read_pico_pmu.h"\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\nstatic pmu_snapshot_t s_snap;\n'
+    code='#include "device_power.h"\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\nstatic pmu_snapshot_t s_snap;\n'
     code+='\n'.join(extract(f) for f in ['pmu_crc16_ccitt_false','rd16','rd32','crc_ok','parse_status','parse_quick'])
     code+='''
 static void crc(uint8_t *b,int n) {unsigned c=pmu_crc16_ccitt_false(b,n);b[n]=c;b[n+1]=c>>8;}
@@ -50,7 +50,7 @@ int main(void) {
         try:
             # 本机 ASan 主机测试会挂（见 IDF 构建环境记忆），只用基础告警编译。
             # ASan host tests hang on this machine (see the IDF build-env note); plain warnings only.
-            subprocess.run(cmd+['-std=c11','-Wall','-Wextra','-Werror','-I'+tmp,'-I'+str(root/'components/read_pico_pmu/include'),str(p/'test.c'),'-o',str(p/'test')],check=True)
+            subprocess.run(cmd+['-std=c11','-Wall','-Wextra','-Werror','-I'+tmp,'-I'+str(root/'components/device_power/include'),str(p/'test.c'),'-o',str(p/'test')],check=True)
         except subprocess.CalledProcessError as e:
             last=e; continue
         subprocess.run([str(p/'test')],check=True)

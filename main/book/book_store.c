@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-#include "read_pico_sd.h"
+#include "board_sd.h"
 #include "wear_levelling.h"
 
 static const char* TAG = "book_store";
@@ -49,8 +49,8 @@ static esp_err_t ensure_dir(const char* path) {
 }
 
 static bool sd_ready(void) {
-    read_pico_sd_info_t info = {0};
-    read_pico_sd_get_info(&info);
+    board_sd_info_t info = {0};
+    board_sd_get_info(&info);
     return info.present && info.mounted;
 }
 
@@ -87,8 +87,8 @@ esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n) {
             snprintf(out[(*n)++].path, sizeof(out[0].path), "%s", app_settings_books_dir());
         else s_roots_degraded = true;
     } else {
-        read_pico_sd_info_t info = {0};
-        read_pico_sd_get_info(&info);
+        board_sd_info_t info = {0};
+        board_sd_get_info(&info);
         if (info.present) s_roots_degraded = true;
     }
     esp_err_t err = flash_root(&out[*n]);
@@ -101,8 +101,8 @@ esp_err_t book_store_upload_root(book_store_root_t* out) {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
     if (!sd_ready()) {
-        read_pico_sd_info_t info = {0};
-        read_pico_sd_get_info(&info);
+        board_sd_info_t info = {0};
+        board_sd_get_info(&info);
         // 有卡但挂载失效时让用户显式重挂，不能悄悄改写内置目录。
         // Present but invalid media requires an explicit remount, not silent flash redirection.
         if (info.present) return ESP_ERR_INVALID_STATE;

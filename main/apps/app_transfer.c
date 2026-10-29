@@ -42,8 +42,8 @@
 #include "display_refresh.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "read_pico_transfer.h"
-#include "read_pico_sd.h"
+#include "wifi_transfer.h"
+#include "board_sd.h"
 #include "settings.h"
 #include "ttf_font.h"
 #include "ui_gesture.h"
@@ -57,11 +57,11 @@
 
 static const char* TAG = "transfer_page";
 static book_store_root_t s_root;
-static read_pico_transfer_status_t s_status;
+static wifi_transfer_status_t s_status;
 static bool s_start_pending, s_settle, s_any_changed;
 static bool s_media_lost;
 static int s_pressed = -1;
-static read_pico_transfer_mode_t s_mode = READ_PICO_TRANSFER_MODE_AP;
+static wifi_transfer_mode_t s_mode = WIFI_TRANSFER_MODE_AP;
 static bool s_session_started;
 static int64_t s_poll_ms;
 static uint64_t s_free;
@@ -162,16 +162,16 @@ static void clear_qr(void) {
 static void prepare_qr(void) {
     clear_qr();
     if (!s_status.network_ready) return;
-    s_qr_ready = s_qr_url || s_mode == READ_PICO_TRANSFER_MODE_STA
+    s_qr_ready = s_qr_url || s_mode == WIFI_TRANSFER_MODE_STA
         ? ui_wifi_qr_prepare_url(s_status.url)
-        : ui_wifi_qr_prepare(s_status.ssid, READ_PICO_TRANSFER_PASSWORD);
+        : ui_wifi_qr_prepare(s_status.ssid, WIFI_TRANSFER_PASSWORD);
 }
 
 typedef enum { TRANSFER_METHODS, TRANSFER_HOME, TRANSFER_NETWORKS, TRANSFER_PASSWORD } transfer_view_t;
 #define NETWORK_ROWS 4
 #define PASSWORD_MAX 64
 static transfer_view_t s_view;
-static read_pico_transfer_network_t s_networks[READ_PICO_TRANSFER_SCAN_MAX], s_selected;
+static wifi_transfer_network_t s_networks[WIFI_TRANSFER_SCAN_MAX], s_selected;
 static size_t s_network_count, s_network_page;
 static bool s_scan_pending, s_network_connect_pending, s_saved_configured, s_password_visible, s_forget_confirm;
 static char s_saved_ssid[33], s_password[PASSWORD_MAX + 1], s_network_message[96], s_method_message[96];
@@ -311,7 +311,7 @@ static void draw_networks(uint8_t* fb) {
         ui_nav_wifi_icon(fb, 74, 265, 28, UI_GRAY_BLACK);
         ui_text(fb, 104, 243, 29, saved, EPD_DRAW_ALIGN_LEFT, false);
         const char *state = s_status.network_ready ? "已连接" :
-            s_network_connect_pending || s_status.state == READ_PICO_TRANSFER_STARTING ? "正在连接…" : "已保存 · 尚未连接";
+            s_network_connect_pending || s_status.state == WIFI_TRANSFER_STARTING ? "正在连接…" : "已保存 · 尚未连接";
         ui_text(fb, 64, 297, 23, state, EPD_DRAW_ALIGN_LEFT, false);
         char address[80];
         const char *url = !strncmp(s_status.url, "http://", 7) ? s_status.url + 7 : s_status.url;
@@ -343,7 +343,7 @@ static void draw_networks(uint8_t* fb) {
     for (int row = 0; !s_scan_pending && row < NETWORK_ROWS; ++row) {
         size_t index = s_network_page * NETWORK_ROWS + row;
         if (index >= s_network_count) break;
-        const read_pico_transfer_network_t* network = &s_networks[index];
+        const wifi_transfer_network_t* network = &s_networks[index];
         EpdRect rect = network_control_rect(row);
         if (s_pressed == row) ui_draw_pressed_round_rect(fb, rect, 0);
         if (row) ui_fill_rect_fast((EpdRect){64, rect.y, 556, 2}, 0x70, fb);
@@ -392,9 +392,9 @@ static void draw_password(uint8_t* fb) {
     ui_keyboard_draw(fb, 560);
 }
 
-static void queue_network_start(read_pico_transfer_mode_t mode) {
+static void queue_network_start(wifi_transfer_mode_t mode) {
     s_mode = mode;
-    s_qr_url = mode == READ_PICO_TRANSFER_MODE_STA;
+    s_qr_url = mode == WIFI_TRANSFER_MODE_STA;
     clear_qr();
     s_view = s_wifi_settings_only ? TRANSFER_NETWORKS : TRANSFER_HOME;
     s_forget_confirm = false;
@@ -403,7 +403,7 @@ static void queue_network_start(read_pico_transfer_mode_t mode) {
     clear_password();
     memset(&s_status, 0, sizeof(s_status));
     s_status.mode = s_mode;
-    read_pico_transfer_get_saved_wifi(s_status.wifi_ssid, &s_status.wifi_configured);
+    wifi_transfer_get_saved_wifi(s_status.wifi_ssid, &s_status.wifi_configured);
     s_saved_configured = s_status.wifi_configured;
     snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
     if (s_wifi_settings_only) {
@@ -413,7 +413,7 @@ static void queue_network_start(read_pico_transfer_mode_t mode) {
 }
 
 static bool enter_networks(void) {
-    if (!read_pico_transfer_try_stop_if_idle()) return false;
+    if (!wifi_transfer_try_stop_if_idle()) return false;
     stop_session();
     s_start_pending = false;
     s_view = TRANSFER_NETWORKS;
@@ -424,15 +424,15 @@ static bool enter_networks(void) {
     s_network_message[0] = 0;
     s_saved_ssid[0] = 0;
     s_saved_configured = false;
-    read_pico_transfer_get_saved_wifi(s_saved_ssid, &s_saved_configured);
+    wifi_transfer_get_saved_wifi(s_saved_ssid, &s_saved_configured);
     clear_password();
     return true;
 }
 
 static bool start_hotspot_service(void) {
-    if (!read_pico_transfer_try_stop_if_idle()) return false;
+    if (!wifi_transfer_try_stop_if_idle()) return false;
     stop_session();
-    s_mode = READ_PICO_TRANSFER_MODE_AP;
+    s_mode = WIFI_TRANSFER_MODE_AP;
     s_qr_url = false;
     clear_qr();
     memset(&s_status, 0, sizeof(s_status));
@@ -449,22 +449,22 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_NETWORKS || s_forget_confirm || ctx->consumed) return APP_REDRAW_NONE;
     if (s_network_connect_pending) {
         s_network_connect_pending = false;
-        read_pico_transfer_cfg_t cfg = {.mode = READ_PICO_TRANSFER_MODE_STA, .network_only = true};
-        esp_err_t err = read_pico_transfer_start(&cfg);
+        wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
+        esp_err_t err = wifi_transfer_start(&cfg);
         s_session_started = err == ESP_OK;
-        read_pico_transfer_get_status(&s_status);
+        wifi_transfer_get_status(&s_status);
         if (err != ESP_OK) snprintf(s_network_message, sizeof(s_network_message), "连接启动失败，请重试");
         return APP_REDRAW_PAGE;
     }
     if (s_session_started) {
-        read_pico_transfer_service_poll();
-        read_pico_transfer_status_t next = {0};
-        read_pico_transfer_get_status(&next);
+        wifi_transfer_service_poll();
+        wifi_transfer_status_t next = {0};
+        wifi_transfer_get_status(&next);
         bool changed = next.state != s_status.state || next.network_ready != s_status.network_ready ||
                        next.last_error != s_status.last_error;
         s_status = next;
         if (s_status.network_ready) snprintf(s_network_message, sizeof(s_network_message), "连接成功");
-        else if (s_status.state == READ_PICO_TRANSFER_ERROR) snprintf(s_network_message, sizeof(s_network_message), "连接失败，请检查密码或信号");
+        else if (s_status.state == WIFI_TRANSFER_ERROR) snprintf(s_network_message, sizeof(s_network_message), "连接失败，请检查密码或信号");
         return changed ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
     }
     if (!s_scan_pending) return APP_REDRAW_NONE;
@@ -474,7 +474,7 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     // bitmaps before starting WiFi, then recreate them while drawing the result.
     // This prevents the hosted radio from competing with the UI cache at init.
     ttf_font_cache_clear();
-    esp_err_t err = read_pico_transfer_scan_wifi(s_networks, &s_network_count);
+    esp_err_t err = wifi_transfer_scan_wifi(s_networks, &s_network_count);
     s_scan_error = err;
     if (err != ESP_OK) {
         s_network_count = 0;
@@ -515,9 +515,9 @@ static app_redraw_t provisioning_action(int id) {
                 return APP_REDRAW_PAGE;
             }
             s_network_connect_pending = s_scan_pending = false;
-            esp_err_t err = read_pico_transfer_forget_wifi();
+            esp_err_t err = wifi_transfer_forget_wifi();
             if (err == ESP_OK) {
-                read_pico_transfer_get_status(&s_status);
+                wifi_transfer_get_status(&s_status);
                 s_forget_confirm = false;
                 s_saved_configured = false;
                 s_saved_ssid[0] = 0;
@@ -534,9 +534,9 @@ static app_redraw_t provisioning_action(int id) {
                 return APP_REDRAW_PAGE;
             }
             if (!s_selected.requires_password) {
-                esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid, "");
+                esp_err_t err = wifi_transfer_save_wifi(s_selected.ssid, "");
                 if (err == ESP_OK) {
-                    queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+                    queue_network_start(WIFI_TRANSFER_MODE_STA);
                     return APP_REDRAW_PAGE;
                 }
                 snprintf(s_network_message, sizeof(s_network_message), "开放网络保存失败，请重试");
@@ -562,7 +562,7 @@ static app_redraw_t provisioning_action(int id) {
                     return APP_REDRAW_PAGE;
                 }
                 s_network_connect_pending = false;
-                queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+                queue_network_start(WIFI_TRANSFER_MODE_STA);
             }
         }
         else if (id == 7 && s_network_page) --s_network_page;
@@ -582,9 +582,9 @@ static app_redraw_t provisioning_action(int id) {
         if (s_selected.requires_password && len < 8) {
             snprintf(s_network_message, sizeof(s_network_message), "加密网络密码至少 8 个字符");
         } else {
-            esp_err_t err = read_pico_transfer_save_wifi(s_selected.ssid,
+            esp_err_t err = wifi_transfer_save_wifi(s_selected.ssid,
                 s_selected.requires_password ? s_password : "");
-            if (err == ESP_OK) { queue_network_start(READ_PICO_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
+            if (err == ESP_OK) { queue_network_start(WIFI_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
             snprintf(s_network_message, sizeof(s_network_message), "%s", err == ESP_ERR_INVALID_ARG ?
                      "密码须 8–63 字符或 64 位十六进制" : "保存失败，输入已保留，请重试");
         }
@@ -677,18 +677,18 @@ static void draw_status(uint8_t* fb) {
     ui_fill_round_rect(fb, area, 24, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, area, 24, 0x98);
     const char* state = "网络已停止";
-    if (s_start_pending || s_status.state == READ_PICO_TRANSFER_STARTING) state = "正在准备传书…";
-    else if (s_status.state == READ_PICO_TRANSFER_READY) state = "等待上传";
-    else if (s_status.state == READ_PICO_TRANSFER_UPLOADING) state = "正在接收";
-    else if (s_status.state == READ_PICO_TRANSFER_ERROR) state = s_status.network_ready ? "上传失败，请重试" :
-        s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传书未启动" : "WiFi 传书未启动";
+    if (s_start_pending || s_status.state == WIFI_TRANSFER_STARTING) state = "正在准备传书…";
+    else if (s_status.state == WIFI_TRANSFER_READY) state = "等待上传";
+    else if (s_status.state == WIFI_TRANSFER_UPLOADING) state = "正在接收";
+    else if (s_status.state == WIFI_TRANSFER_ERROR) state = s_status.network_ready ? "上传失败，请重试" :
+        s_mode == WIFI_TRANSFER_MODE_AP ? "热点传书未启动" : "WiFi 传书未启动";
     if (s_media_lost) state = "存储已移除，传书已停止";
     ui_text(fb, area.x + 28, area.y + 24, 26, state, EPD_DRAW_ALIGN_LEFT, false);
     char line[256];
     if (s_media_lost) snprintf(line, sizeof(line), "重新进入传书可使用内置存储");
-    else if (s_status.state == READ_PICO_TRANSFER_ERROR && !s_status.network_ready)
+    else if (s_status.state == WIFI_TRANSFER_ERROR && !s_status.network_ready)
         snprintf(line, sizeof(line), "原因：%s", esp_err_to_name(s_status.last_error));
-    else if (s_mode == READ_PICO_TRANSFER_MODE_AP)
+    else if (s_mode == WIFI_TRANSFER_MODE_AP)
         snprintf(line, sizeof(line), "已连接 %u 台 · 已完成 %u 本", s_status.sta_count, s_status.done_count);
     else snprintf(line, sizeof(line), "同网浏览器上传 · 已完成 %u 本", s_status.done_count);
     ui_text(fb, area.x + 28, area.y + 68, 19, line, EPD_DRAW_ALIGN_LEFT, false);
@@ -767,19 +767,19 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     if (s_view == TRANSFER_NETWORKS) { draw_networks(fb); return; }
     if (s_view == TRANSFER_PASSWORD) { draw_password(fb); return; }
     ui_clear_page(fb);
-    transfer_header(fb, s_mode == READ_PICO_TRANSFER_MODE_AP ? "热点传书" : "WiFi 传书", NULL);
+    transfer_header(fb, s_mode == WIFI_TRANSFER_MODE_AP ? "热点传书" : "WiFi 传书", NULL);
     EpdRect connection = {36, 168, 612, 132};
     ui_fill_round_rect(fb, connection, 24, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, connection, 24, 0x98);
     char name[64];
-    snprintf(name, sizeof(name), "%s", s_mode == READ_PICO_TRANSFER_MODE_AP ? s_status.ssid : s_status.wifi_ssid);
-    if (!name[0]) snprintf(name, sizeof(name), "%s", s_mode == READ_PICO_TRANSFER_MODE_AP ? "kiikoread 热点" : "已保存的 WiFi");
+    snprintf(name, sizeof(name), "%s", s_mode == WIFI_TRANSFER_MODE_AP ? s_status.ssid : s_status.wifi_ssid);
+    if (!name[0]) snprintf(name, sizeof(name), "%s", s_mode == WIFI_TRANSFER_MODE_AP ? "kiikoread 热点" : "已保存的 WiFi");
     fit_label(name, 26, 420);
     ui_text(fb, 66, 190, 26, name, EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, 66, 236, 19,
-            s_mode == READ_PICO_TRANSFER_MODE_AP ? "口令：" READ_PICO_TRANSFER_PASSWORD :
+            s_mode == WIFI_TRANSFER_MODE_AP ? "口令：" WIFI_TRANSFER_PASSWORD :
             s_status.network_ready ? "设备已连接；手机需同网" :
-            s_start_pending || s_status.state == READ_PICO_TRANSFER_STARTING ? "正在连接已保存网络…" :
+            s_start_pending || s_status.state == WIFI_TRANSFER_STARTING ? "正在连接已保存网络…" :
             s_status.wifi_configured ? "已保存，尚未连接" : "尚未选择 WiFi",
             EPD_DRAW_ALIGN_LEFT, false);
     ui_text_vc(fb, 605, 234, 20, s_status.network_ready ? "服务已开启" : "准备中", EPD_DRAW_ALIGN_RIGHT, false);
@@ -791,7 +791,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
         ui_draw_round_rect(fb, (EpdRect){222, 330, 240, 240}, 8, 0xa0);
         ui_text_vc(fb, 342, 450, 22, s_start_pending ? "正在生成二维码…" : "等待网络地址…", EPD_DRAW_ALIGN_CENTER, false);
     }
-    if (s_mode == READ_PICO_TRANSFER_MODE_AP) {
+    if (s_mode == WIFI_TRANSFER_MODE_AP) {
         ui_text_vc(fb, 342, 583, 20,
                    s_status.network_ready ? s_status.url : "热点就绪后显示访问地址",
                    EPD_DRAW_ALIGN_CENTER, false);
@@ -811,7 +811,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     EpdRect back = control_rect(2);
     if (s_pressed == 2) ui_draw_pressed_round_rect(fb, back, UI_BTN_RADIUS);
     ui_draw_button(fb, back,
-                   s_mode == READ_PICO_TRANSFER_MODE_AP && s_status.state == READ_PICO_TRANSFER_ERROR && !s_status.network_ready
+                   s_mode == WIFI_TRANSFER_MODE_AP && s_status.state == WIFI_TRANSFER_ERROR && !s_status.network_ready
                        ? "重试热点传书" : "停止传输服务", false);
     ui_nav_draw(fb, 2);
 }
@@ -821,7 +821,7 @@ static void on_enter(app_ctx_t* ctx) {
     display_set_bulk_io(true);
     s_media_lost = false;
     memset(&s_status, 0, sizeof(s_status));
-    s_qr_url = s_mode == READ_PICO_TRANSFER_MODE_STA;
+    s_qr_url = s_mode == WIFI_TRANSFER_MODE_STA;
     clear_qr();
     memset(&s_root, 0, sizeof(s_root));
     s_heap_before = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -844,12 +844,12 @@ static void on_enter(app_ctx_t* ctx) {
     s_pressed = -1;
     s_settle = s_any_changed = false;
     s_status.mode = s_mode;
-    read_pico_transfer_get_saved_wifi(s_status.wifi_ssid, &s_status.wifi_configured);
+    wifi_transfer_get_saved_wifi(s_status.wifi_ssid, &s_status.wifi_configured);
     s_poll_ms = 0;
     s_free = 0;
     if (s_usb_requested) {
-        read_pico_sd_info_t usb_sd = {0};
-        if (read_pico_sd_get_info(&usb_sd) == ESP_OK) s_usb_capacity_bytes = usb_sd.capacity_bytes;
+        board_sd_info_t usb_sd = {0};
+        if (board_sd_get_info(&usb_sd) == ESP_OK) s_usb_capacity_bytes = usb_sd.capacity_bytes;
         s_usb_requested = false;
         s_view = TRANSFER_HOME;
         s_usb_start_pending = true;
@@ -858,18 +858,18 @@ static void on_enter(app_ctx_t* ctx) {
         s_hotspot_requested = false;
         if (!start_hotspot_service()) {
             s_view = TRANSFER_HOME;
-            s_status.state = READ_PICO_TRANSFER_ERROR;
+            s_status.state = WIFI_TRANSFER_ERROR;
             snprintf(s_method_message, sizeof(s_method_message), "传输正在结束，请稍后再试");
         }
     } else if (s_wifi_upload_requested) {
         s_wifi_upload_requested = false;
         // 配网页可能留下常驻的仅联网会话；传书前先释放它再启动上传服务。
         // Provisioning may leave a network-only session alive; release it before starting upload.
-        if (s_status.wifi_configured && read_pico_transfer_try_stop_if_idle())
-            queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+        if (s_status.wifi_configured && wifi_transfer_try_stop_if_idle())
+            queue_network_start(WIFI_TRANSFER_MODE_STA);
         else if (s_status.wifi_configured) {
             s_view = TRANSFER_HOME;
-            s_status.state = READ_PICO_TRANSFER_ERROR;
+            s_status.state = WIFI_TRANSFER_ERROR;
             snprintf(s_method_message, sizeof(s_method_message), "传输正在结束，请稍后再试");
         }
         else if (!enter_networks()) {
@@ -879,8 +879,8 @@ static void on_enter(app_ctx_t* ctx) {
         }
     } else if (s_wifi_setup_requested) {
         s_wifi_setup_requested = false;
-        read_pico_transfer_get_status(&s_status);
-        if (s_status.network_ready && s_status.mode == READ_PICO_TRANSFER_MODE_STA) {
+        wifi_transfer_get_status(&s_status);
+        if (s_status.network_ready && s_status.mode == WIFI_TRANSFER_MODE_STA) {
             s_session_started = true;
             s_view = TRANSFER_NETWORKS;
             s_saved_configured = s_status.wifi_configured;
@@ -898,14 +898,14 @@ static void stop_session(void) {
     clear_qr();
     // 停服后读最终计数，保留本页跨模式文件变更的记录。
     // Join reception before reading counts and retain file changes across mode switches.
-    read_pico_transfer_stop();
-    read_pico_transfer_get_status(&s_status);
+    wifi_transfer_stop();
+    wifi_transfer_get_status(&s_status);
     if (s_session_started && s_status.changed_count) s_any_changed = true;
     s_session_started = false;
 }
 
 static bool stop_upload_if_idle(void) {
-    if (!read_pico_transfer_try_stop_if_idle()) return false;
+    if (!wifi_transfer_try_stop_if_idle()) return false;
     stop_session();
     s_start_pending = false;
     return true;
@@ -937,10 +937,10 @@ static void transfer_on_exit(app_ctx_t* ctx) {
     }
     clear_password();
     s_scan_pending = s_network_connect_pending = false;
-    read_pico_transfer_status_t latest = {0};
-    read_pico_transfer_get_status(&latest);
+    wifi_transfer_status_t latest = {0};
+    wifi_transfer_get_status(&latest);
     bool keep_sta = s_wifi_settings_only && latest.network_ready &&
-                    latest.mode == READ_PICO_TRANSFER_MODE_STA;
+                    latest.mode == WIFI_TRANSFER_MODE_STA;
     if (keep_sta) {
         clear_qr();
         s_session_started = false; // 全局循环接管保活；再次进页会从组件状态恢复。
@@ -999,20 +999,20 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (err == ESP_OK) {
             s_media_lost = false;
             s_free = book_store_free_bytes(&s_root);
-            read_pico_transfer_cfg_t cfg = {.mode = s_mode, .root_dir = s_root.path, .is_flash = s_root.is_flash,
+            wifi_transfer_cfg_t cfg = {.mode = s_mode, .root_dir = s_root.path, .is_flash = s_root.is_flash,
                 .file_limit = book_store_file_limit(&s_root), .free_bytes_cb = free_bytes, .free_bytes_ctx = &s_root,
                 .file_changed_cb = book_progress_forget, .file_deleted_cb = transfer_file_deleted,
                 .file_moved_cb = transfer_file_moved,
                 .wallpaper_set_cb = transfer_set_wallpaper,
                 .signature_get_cb = transfer_signature_get, .signature_set_cb = transfer_signature_set,
                 .title_get_cb = NULL, .title_set_cb = NULL};
-            err = read_pico_transfer_start(&cfg);
+            err = wifi_transfer_start(&cfg);
             s_session_started = err == ESP_OK;
-            read_pico_transfer_get_status(&s_status);
+            wifi_transfer_get_status(&s_status);
             if (err == ESP_OK) s_free = book_store_free_bytes(&s_root);
         }
         s_status.mode = s_mode;
-        if (err != ESP_OK) { s_status.state = READ_PICO_TRANSFER_ERROR; s_status.last_error = err; }
+        if (err != ESP_OK) { s_status.state = WIFI_TRANSFER_ERROR; s_status.last_error = err; }
         if (err == ESP_OK) prepare_qr();
         else clear_qr();
         ESP_LOGI(TAG, "start root=%s result=%s", s_root.path, esp_err_to_name(err));
@@ -1020,17 +1020,17 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     }
     if (ctx->consumed || ctx->now_ms - s_poll_ms < 2000) return APP_REDRAW_NONE;
     s_poll_ms = ctx->now_ms;
-    read_pico_transfer_service_poll();
-    read_pico_transfer_status_t next = {0};
-    read_pico_transfer_get_status(&next);
+    wifi_transfer_service_poll();
+    wifi_transfer_status_t next = {0};
+    wifi_transfer_get_status(&next);
     // 接收期间让屏幕保持静止，网页端显示实时进度；避免刷屏与写卡争用。
     // Keep the panel still during reception; the browser owns live progress.
-    if (next.state == READ_PICO_TRANSFER_UPLOADING && s_status.state == READ_PICO_TRANSFER_UPLOADING) {
+    if (next.state == WIFI_TRANSFER_UPLOADING && s_status.state == WIFI_TRANSFER_UPLOADING) {
         s_status.cur_bytes = next.cur_bytes;
         s_status.sta_count = next.sta_count;
         return APP_REDRAW_NONE;
     }
-    if (s_status.state == READ_PICO_TRANSFER_ERROR && next.state == READ_PICO_TRANSFER_STOPPED) return APP_REDRAW_NONE;
+    if (s_status.state == WIFI_TRANSFER_ERROR && next.state == WIFI_TRANSFER_STOPPED) return APP_REDRAW_NONE;
     bool network_changed = next.network_ready != s_status.network_ready ||
         next.mode != s_status.mode || strcmp(next.ssid, s_status.ssid) ||
         next.wifi_configured != s_status.wifi_configured || strcmp(next.url, s_status.url) ||
@@ -1040,7 +1040,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         next.done_count == s_status.done_count && next.changed_count == s_status.changed_count && next.last_error == s_status.last_error &&
         !strcmp(next.cur_name, s_status.cur_name)) return APP_REDRAW_NONE;
     s_settle = next.changed_count != s_status.changed_count || next.done_count != s_status.done_count ||
-        (s_status.state == READ_PICO_TRANSFER_UPLOADING && next.state != READ_PICO_TRANSFER_UPLOADING);
+        (s_status.state == WIFI_TRANSFER_UPLOADING && next.state != WIFI_TRANSFER_UPLOADING);
     s_status = next;
     if (network_changed) prepare_qr();
     if (s_settle) {
@@ -1057,7 +1057,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 
 static int hit_control(uint16_t x, uint16_t y) {
     if (usb_storage_active()) return ui_rect_hit(control_rect(2), x, y) ? 2 : -1;
-    if (s_mode == READ_PICO_TRANSFER_MODE_AP && s_view == TRANSFER_HOME)
+    if (s_mode == WIFI_TRANSFER_MODE_AP && s_view == TRANSFER_HOME)
         for (int i = 0; i < 2; ++i) if (ui_rect_hit(control_rect(i), x, y)) return i;
     return ui_rect_hit(control_rect(2), x, y) ? 2 : -1;
 }
@@ -1091,7 +1091,7 @@ static app_redraw_t method_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev)
         if (origin == 0) {
             if (s_status.wifi_configured) {
                 if (stop_upload_if_idle()) {
-                    queue_network_start(READ_PICO_TRANSFER_MODE_STA);
+                    queue_network_start(WIFI_TRANSFER_MODE_STA);
                     s_method_message[0] = 0;
                     return APP_REDRAW_PAGE;
                 }
@@ -1113,7 +1113,7 @@ static app_redraw_t method_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev)
 }
 
 static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
-    if (s_status.state == READ_PICO_TRANSFER_UPLOADING) return APP_REDRAW_NONE;
+    if (s_status.state == WIFI_TRANSFER_UPLOADING) return APP_REDRAW_NONE;
     if (ev->type == UI_GESTURE_TAP && s_view != TRANSFER_PASSWORD && !usb_storage_active()) {
         int tab = ui_nav_hit(ev->x0, ev->y0);
         if (tab >= 0 && tab == ui_nav_hit(ev->x, ev->y)) {
@@ -1160,7 +1160,7 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
             return APP_REDRAW_NONE;
         }
         if (origin == 2) {
-            if (s_mode == READ_PICO_TRANSFER_MODE_AP && s_status.state == READ_PICO_TRANSFER_ERROR &&
+            if (s_mode == WIFI_TRANSFER_MODE_AP && s_status.state == WIFI_TRANSFER_ERROR &&
                 !s_status.network_ready && start_hotspot_service()) return APP_REDRAW_PAGE;
             // 即使没有切页历史也先停服，取消尚未执行的启动请求。
             // Stop even without navigation history and cancel a queued start.

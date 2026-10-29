@@ -9,7 +9,7 @@ import tempfile
 from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
-board = ROOT / 'components/read_pico/read_pico_board.c'
+board = ROOT / 'components/board_support/board_legacy_s3.c'
 sleep = ROOT / 'main/power/sleep.c'
 text = board.read_text()
 defines = '\n'.join(line for line in text.splitlines() if re.match(
@@ -72,8 +72,8 @@ static esp_err_t ioe_commit(void) { return fca9555_set_output(s_ioe, 0, ioe_outp
 static void gpio_sleep_set_direction(int p, int d) { assert(p >= 0 && p < 49); pin_direction[p] = d; }
 static void gpio_sleep_set_pull_mode(int p, int m) { pin_pull[p] = m; }
 static void gpio_sleep_sel_en(int p) { ++pins[p]; }
-static bool read_pico_buzzer_score_busy(void) { return buzzer; }
-static int read_pico_buzzer_score_stop(void) { buzzer = false; return ESP_OK; }
+static bool board_buzzer_score_busy(void) { return buzzer; }
+static int board_buzzer_score_stop(void) { buzzer = false; return ESP_OK; }
 static bool sc7a20h_powered(void *h) { return h && acc_on; }
 static int sc7a20h_power_down(void *h) { assert(h == s_acc); acc_on = false; ++acc_downs; return ESP_OK; }
 static int sc7a20h_power_up(void *h) { assert(h == s_acc); acc_on = true; ++acc_ups; return ESP_OK; }
@@ -82,8 +82,8 @@ static int cst836u_set_mode(void *h, int m) { assert(h == s_tp); tp_mode = m; re
 static int cst836u_wake(void *h) { assert(h == s_tp); assert(config[0] == 0x64 && config[1] == 0xff); tp_mode = CST836U_MODE_NORMAL; ++touch_wakes; return ESP_OK; }
 static int sleep_cpu_configure(bool enabled) { assert(enabled); ++cpu_requests; return ESP_OK; }
 static bool pico_online_busy(void) { return ota; }
-static bool read_pico_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
-static void read_pico_transfer_resume_after_sleep(void) { ++resumes; }
+static bool wifi_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
+static void wifi_transfer_resume_after_sleep(void) { ++resumes; }
 static int ble_pt_stop(int timeout) { assert(timeout == 2000); ++radio_stops; return ESP_OK; }
 // 前光在锁屏/下电时先灭、醒来再恢复；测试只关心这两次调用发生。
 // The frontlight goes dark before parking and comes back on wake; the test only checks the calls.
@@ -99,14 +99,14 @@ static int pmu_result(void) {
     assert(!(output[0] & 5));
     return error_result;
 }
-static int read_pico_pmu_power_off(void) { ++off_calls; return pmu_result(); }
-static int read_pico_pmu_report_sleep(void) { ++deep_calls; return pmu_result(); }
+static int device_power_power_off(void) { ++off_calls; return pmu_result(); }
+static int device_power_report_sleep(void) { ++deep_calls; return pmu_result(); }
 static void vTaskDelay(int ms) { waits += ms; }
 '''
 for i in range(49):
     unit += f'\n#define GPIO_NUM_{i} {i}\n'
 unit += defines + '\n'
-for name in ('sleep_pulldown_pins', 'read_pico_ioe_sleep', 'read_pico_ioe_wake'):
+for name in ('sleep_pulldown_pins', 'board_ioe_sleep', 'board_ioe_wake'):
     unit += function(name, board) + '\n'
 unit += function('storage_jobs_quiesce', ROOT/'main/services/storage_jobs.c') + '\n'
 unit += function('app_lifecycle_prepare_poweroff', ROOT/'main/app/app_lifecycle.c') + '\n'
@@ -142,9 +142,9 @@ int main(void) {
         assert(fl_pauses == 1 && fl_resumes == 1);
     }
     reset(); acc_on = false; periph_suspend(false); periph_resume(); assert(!acc_on && !acc_ups);
-    reset(); s_ioe = NULL; assert(read_pico_ioe_sleep(true) == ESP_ERR_INVALID_STATE);
-    assert(read_pico_ioe_wake() == ESP_ERR_INVALID_STATE && !step);
-    for (int f = 1; f <= 4; ++f) { reset(); fault = f; assert(read_pico_ioe_sleep(true) == ESP_FAIL); fault = 0; assert(read_pico_ioe_wake() == ESP_OK); assert(config[0] == 0x64 && config[1] == 0xff); }
+    reset(); s_ioe = NULL; assert(board_ioe_sleep(true) == ESP_ERR_INVALID_STATE);
+    assert(board_ioe_wake() == ESP_ERR_INVALID_STATE && !step);
+    for (int f = 1; f <= 4; ++f) { reset(); fault = f; assert(board_ioe_sleep(true) == ESP_FAIL); fault = 0; assert(board_ioe_wake() == ESP_OK); assert(config[0] == 0x64 && config[1] == 0xff); }
     // 下电前先卸轨，失败和 EN 不落均有界返回并恢复触摸/网络；不重启循环。
     // Drop rails before parking; failed commands or stuck EN return boundedly and restore touch/network without reboot loops.
     for (int mode = APP_SLEEP_DEEP; mode <= APP_SLEEP_OFF; ++mode) for (int ack = 0; ack < 2; ++ack) {
