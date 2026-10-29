@@ -167,6 +167,7 @@
 #include "reader_turn.h"
 #include "reader_reflow.h"
 #include "reader_session_layout.h"
+#include "reader_chapter.h"
 #include "reader_prefetch.h"
 #include "reader_present.h"
 #include "book_store.h"
@@ -4424,121 +4425,59 @@ static void prepare_inline_image(void) {
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     }
 }
-// 标题匹配要宽松：书内导航与正文的写法常常不同（"第一章 出发" 对 "出发"、"1. Prologue" 对
-// "序章"，竖排书尤其如此）。逐字比较失败时正文标题块不会被跳过，题头与正文就各显示一次。
-// Heading matching has to be forgiving: an authored navigation title rarely matches the body text
-// verbatim ("Chapter 1 Departure" against "Departure", a numbered English title against its
-// Japanese one), and a strict compare leaves the body heading on the page, so it shows up twice.
-static bool heading_text_matches(const char *text, const char *toc, const char *heading,
-                                 const char *label) {
-    if (text == NULL || text[0] == 0) return false;
-    const char *candidates[3] = {toc, heading, label};
-    for (int i = 0; i < 3; ++i) {
-        const char *cand = candidates[i];
-        if (cand == NULL || cand[0] == 0) continue;
-        // 互相包含即视为同一标题；短于三个字节的候选不作为依据，免得误吞正文。
-        // Either containing the other counts as the same heading; candidates shorter than three
-        // bytes are ignored so ordinary body text cannot be swallowed.
-        if (strlen(cand) < 3) continue;
-        if (strstr(text, cand) != NULL || strstr(cand, text) != NULL) return true;
-    }
-    return false;
+typedef struct {
+    size_t skip;
+    unsigned height, width;
+    reader_dims_ctx_t dims;
+} chapter_layout_undo_t;
+
+static void chapter_restore_images(void *ctx) {
+    const chapter_layout_undo_t *undo = ctx;
+    // 候选章释放前恢复图片借用。/ Restore image borrows before freeing the candidate.
+    s_reader_dims_ctx = undo->dims;
+}
+
+static void chapter_restore_lead(void *ctx) {
+    const chapter_layout_undo_t *undo = ctx;
+    s_chapter_lead_skip = undo->skip;
+    s_chapter_lead_height = undo->height;
+    s_chapter_lead_width = undo->width;
+    book_layout_set_chapter_lead(undo->skip, undo->height);
+    book_layout_set_chapter_lead_width(undo->width);
 }
 
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
     bool clear_toc = chapter != s_reader_session.position.chapter || (!anchor && source_offset == SIZE_MAX);
-    html_text_t loaded = {0};
-    size_t anchor_offset = 0;
-    esp_err_t err = book_chapter_load_blocks_target(chapter, anchor, source_offset,
-                                                    &anchor_offset, &loaded);
+    reader_chapter_t candidate = {0};
+    esp_err_t err = reader_chapter_read(&candidate, chapter, anchor, source_offset,
+                                        body_rect().height, READER_HEADING_BAND_HEIGHT);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "chapter load failed: %s", esp_err_to_name(err));
         copy_text(s_message, sizeof(s_message), "加载失败，请检查存储卡后重试");
         return false;
     }
-    char heading[128] = {0}, label[32] = {0}, toc_title[128] = {0};
-    size_t lead_skip = 0;
-    unsigned lead_height = 0;
-    if (book_kind() == BOOK_KIND_EPUB && loaded.len) {
-        // 已识别的正文编号题头优先；没有时沿用书内导航或备用标题。
-        // Prefer a recognized numbered body heading, then authored navigation or a fallback title.
-        if (book_chapter_title(chapter, toc_title, sizeof(toc_title)) != ESP_OK)
-            snprintf(toc_title, sizeof(toc_title), "第 %u 节", (unsigned)chapter + 1);
-        copy_text(heading, sizeof(heading), toc_title);
-        char *chapter_mark = strstr(heading, "章");
-        if (chapter_mark && chapter_mark - heading < 24) {
-            char *after = chapter_mark + strlen("章");
-            while (*after == ' ' || *after == '\t' || *after == ':' || *after == '-' ||
-                   !strncmp(after, "：", strlen("：")) || !strncmp(after, "、", strlen("、"))) {
-                if (*after == ' ' || *after == '\t' || *after == ':' || *after == '-') ++after;
-                else after += strlen("：");
-            }
-            if (*after && (size_t)(chapter_mark + strlen("章") - heading) < sizeof(label)) {
-                size_t label_len = (size_t)(chapter_mark + strlen("章") - heading);
-                memcpy(label, heading, label_len); label[label_len] = 0;
-                memmove(heading, after, strlen(after) + 1);
-            }
-        }
-        size_t skip_blocks = 0;
-        // 最多看四个块：标题可能被拆成"第一章"、"出发"、"——副标题"这样几块。
-        // Up to four blocks: a heading can arrive split across several.
-        while (skip_blocks < loaded.count && skip_blocks < 4 &&
-               loaded.blocks[skip_blocks].heading && loaded.blocks[skip_blocks].image < 0) {
-            char body_heading[128] = {0};
-            size_t len = loaded.blocks[skip_blocks].len;
-            if (len >= sizeof(body_heading)) break;
-            memcpy(body_heading, loaded.utf8 + loaded.blocks[skip_blocks].offset, len);
-            while (len && (body_heading[len - 1] == ' ' || body_heading[len - 1] == '\t')) body_heading[--len] = 0;
-            const char *trimmed = body_heading;
-            while (*trimmed == ' ' || *trimmed == '\t') ++trimmed;
-            if (!heading_text_matches(trimmed, toc_title, heading, label)) break;
-            ++skip_blocks;
-        }
-        if (skip_blocks) lead_skip = skip_blocks < loaded.count ? loaded.blocks[skip_blocks].offset : loaded.len;
-        // 首块是插图时不预留题头：那页整页留给插图，标题在它后面才排。
-        // 这个条件一直是题头该不该出现的判据，横排竖排都一样。
-        // An illustration at the head of the chapter reserves nothing: it owns that page and the
-        // heading follows. This condition has always decided whether a sheet gets a heading at all,
-        // in either setting.
-        if (skip_blocks < loaded.count && loaded.blocks[skip_blocks].image >= 0) {
-            lead_skip = 0;
-            lead_height = 0;
-        } else {
-            lead_height = body_rect().height > READER_HEADING_BAND_HEIGHT
-                ? READER_HEADING_BAND_HEIGHT : 0;
-        }
-    }
-    size_t old_lead_skip = s_chapter_lead_skip;
-    unsigned old_lead_height = s_chapter_lead_height;
-    unsigned old_lead_width = s_chapter_lead_width;
-    reader_dims_ctx_t old_dims_ctx = s_reader_dims_ctx;
+    chapter_layout_undo_t undo = {
+        .skip = s_chapter_lead_skip, .height = s_chapter_lead_height,
+        .width = s_chapter_lead_width, .dims = s_reader_dims_ctx,
+    };
+    reader_chapter_rollback_t rollback = {
+        .ctx = &undo, .restore_images = chapter_restore_images,
+        .restore_lead = chapter_restore_lead,
+    };
     lock_draw();
     invalidate_prep();
     // 题头几何按当前模式重算，横排留顶部行高、竖排留右侧列宽，绘制与预留不会错开。
     // Recompute the heading geometry for the current mode -- rows at the top horizontally,
     // columns at the right vertically -- so drawing and reservation cannot drift apart.
-    apply_chapter_lead(heading, label, lead_skip, lead_height);
-    s_reader_dims_ctx = (reader_dims_ctx_t){chapter, loaded.images, loaded.image_count};
+    apply_chapter_lead(candidate.heading, candidate.label, candidate.lead_skip, candidate.lead_height);
+    s_reader_dims_ctx = (reader_dims_ctx_t){chapter, candidate.content.images, candidate.content.image_count};
     book_layout_set_image_dims(reader_image_dims, &s_reader_dims_ctx);
-    bool ok = reader_session_build_layout(&s_reader_session, &loaded, body_rect(), s_px);
-    if (!ok) {
-        // 回滚前恢复旧章上下文，避免尺寸回调引用已释放的新章图片。/ Restore the previous context before rollback to avoid a freed image list.
-        s_reader_dims_ctx = old_dims_ctx;
-        html_text_free(&loaded);
-        // run 表随 loaded 一起没了，先把排版还回旧章的那份，否则重排会读到已释放的内存。
-        // The run table dies with `loaded`, so put the previous chapter's back before the
-        // rollback layout reads freed memory.
-        // 题头几何也跟着回滚，否则这一章的题头参数会留在失败的那次上。
-        // Roll the heading geometry back too, or the failed chapter's parameters would stick.
-        s_chapter_lead_skip = old_lead_skip;
-        s_chapter_lead_height = old_lead_height;
-        s_chapter_lead_width = old_lead_width;
-        book_layout_set_chapter_lead(old_lead_skip, old_lead_height);
-        book_layout_set_chapter_lead_width(old_lead_width);
-        bool restored = s_text && reader_session_build_layout(&s_reader_session, reader_session_content(&s_reader_session), body_rect(), s_px);
+    reader_chapter_result_t result = reader_chapter_apply_locked(&s_reader_session, &candidate,
+                                                                body_rect(), s_px, &rollback);
+    if (result != READER_CHAPTER_APPLIED) {
         unlock_draw();
-        if (!restored) {
+        if (result == READER_CHAPTER_LOST_LAYOUT) {
             free_book();
             s_view = SHELF;
             ctx->leaf = 0;
@@ -4546,19 +4485,17 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
         copy_text(s_message, sizeof(s_message), "排版失败：内存不足或章节过长");
         return false;
     }
-    book_excerpt_offer(s_reader_session.book.path, &loaded);
-    reader_session_adopt_chapter(&s_reader_session, &loaded);
     reader_bind_chapter();
     release_page_images();
     s_reader_session.position.chapter = chapter;
     if (clear_toc) s_selected_toc = SIZE_MAX;
-    s_chapter_lead_skip = lead_skip;
-    s_chapter_lead_row_height = lead_height;
-    copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), heading);
-    copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), label);
+    s_chapter_lead_skip = candidate.lead_skip;
+    s_chapter_lead_row_height = candidate.lead_height;
+    copy_text(s_chapter_heading_title, sizeof(s_chapter_heading_title), candidate.heading);
+    copy_text(s_chapter_heading_label, sizeof(s_chapter_heading_label), candidate.label);
     s_reader_session.position.page = last_page ? book_layout_page_count() - 1 :
-             book_layout_page_for_offset(anchor || source_offset != SIZE_MAX ? anchor_offset : offset);
-    s_jump_offset = anchor || source_offset != SIZE_MAX ? anchor_offset : SIZE_MAX;
+             book_layout_page_for_offset(anchor || source_offset != SIZE_MAX ? candidate.anchor_offset : offset);
+    s_jump_offset = anchor || source_offset != SIZE_MAX ? candidate.anchor_offset : SIZE_MAX;
     s_jump_page = s_reader_session.position.page;
     if (book_chapter_title(chapter, s_reader_session.book.chapter_title, sizeof(s_reader_session.book.chapter_title)) != ESP_OK)
         snprintf(s_reader_session.book.chapter_title, sizeof(s_reader_session.book.chapter_title), "第 %u 节", (unsigned)chapter + 1);

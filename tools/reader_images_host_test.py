@@ -39,6 +39,8 @@ unit = r'''
 #include "html_text.h"
 #include "reader_session.h"
 #include "reader_session_layout.h"
+#include "reader_chapter.h"
+#include "book_source.h"
 static reader_session_t s_reader_session = {.position = {.chapter = 3}, .book = {.path = "test"}};
 #define s_chapter s_reader_session.position.chapter
 #define s_page s_reader_session.position.page
@@ -50,7 +52,6 @@ typedef struct {int leaf;} app_ctx_t;
 #define MALLOC_CAP_8BIT 2
 #define UI_PX_CAPTION 20
 #define EPD_DRAW_ALIGN_CENTER 0
-#define BOOK_KIND_EPUB 1
 // load_chapter_at 按题头带高算预留；测试只关心图片路径，取值与固件一致即可。
 // load_chapter_at reserves the heading band height; the test only exercises image paths, so the
 // value just has to match the firmware.
@@ -130,7 +131,7 @@ static void copy_text(char *out,size_t size,const char *in){snprintf(out,size,"%
 static void fit_text(char *out,int px,int max){(void)px;if(max<40)out[0]=0;}
 static const char *esp_err_to_name(int err){(void)err;return "error";}
 static void vTaskDelay(unsigned ticks){(void)ticks;}
-static esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **out,size_t *size,bool *png){
+esp_err_t book_chapter_image(size_t chapter,const char *path,uint8_t **out,size_t *size,bool *png){
  assert(path);if(locked)measured_chapter=chapter;else assert(chapter==s_chapter);++reads;reading_image=atoi(path);
  if(reading_image==read_failure)return ESP_FAIL;
  *out=malloc(1);assert(*out);*size=1;*png=false;return ESP_OK;
@@ -156,7 +157,7 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
 }
-static void book_excerpt_offer(const char *path,const html_text_t *text){(void)path;(void)text;}
+void book_excerpt_offer(const char *path,const html_text_t *text){(void)path;(void)text;}
 static char *s_text;
 static blk_t *s_blocks;
 static html_run_t *s_runs;
@@ -180,13 +181,13 @@ static char s_message[128],s_chapter_heading_title[128],s_chapter_heading_label[
 static int load_error,reflow_failures,reflows;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
-static int book_kind(void){return 0;}
+book_kind_t book_kind(void){return 0;}
 static const char *ttf_font_path(void){return "font";}
-static esp_err_t book_chapter_title(size_t chapter,char *out,size_t cap){snprintf(out,cap,"chapter%zu",chapter);return ESP_OK;}
+esp_err_t book_chapter_title(size_t chapter,char *out,size_t cap){snprintf(out,cap,"chapter%zu",chapter);return ESP_OK;}
 void html_text_free(html_text_t *text){
  free(text->utf8);free(text->blocks);free(text->runs);for(size_t i=0;i<text->image_count;++i)free(text->images[i]);free(text->images);memset(text,0,sizeof(*text));
 }
-static esp_err_t book_chapter_load_blocks_target(size_t chapter,const char *anchor,size_t source,size_t *off,html_text_t *out){
+esp_err_t book_chapter_load_blocks_target(size_t chapter,const char *anchor,size_t source,size_t *off,html_text_t *out){
  (void)chapter;(void)anchor;(void)source;assert(!locked);if(load_error)return ESP_FAIL;*off=4;
  out->utf8=strdup("new\nIMG");out->len=7;out->blocks=calloc(2,sizeof(blk_t));out->count=2;
  out->blocks[0]=(blk_t){.offset=0,.len=3,.image=-1};out->blocks[1]=(blk_t){.offset=4,.len=3,.image=0};
@@ -212,7 +213,8 @@ static void free_book(void){
  book_layout_set_image_dims(NULL,NULL);s_reader_dims_ctx=(reader_dims_ctx_t){0};
 }
 '''
-for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'reader_bind_chapter', 'load_chapter_at'):
+unit += '\n' + source[source.index('typedef struct {\n    size_t skip;'):source.index('static void chapter_restore_images')]
+for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'reader_bind_chapter', 'chapter_restore_images', 'chapter_restore_lead', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
 static void setup_images(int count){
@@ -274,6 +276,15 @@ int main(void){
  assert(load_chapter_at(&ctx,4,0,false,NULL,SIZE_MAX));
  assert(s_chapter==4&&!strcmp(s_text,"new\nIMG")&&s_page==0&&s_selected_toc==SIZE_MAX&&!locked);
  assert(measured_chapter==4&&s_reader_dims_ctx.images==s_images);
+ // 同章目录锚点和源偏移保留目录选择；末页加载仍落在最后一页。
+ // Same-chapter anchors/source offsets retain TOC selection; last-page loads still select the last page.
+ s_selected_toc=42;
+ assert(load_chapter_at(&ctx,4,0,false,"inside",SIZE_MAX));
+ assert(s_page==1&&s_jump_offset==4&&s_jump_page==1&&s_selected_toc==42);
+ assert(load_chapter_at(&ctx,4,0,false,NULL,128));
+ assert(s_page==1&&s_jump_offset==4&&s_selected_toc==42);
+ assert(load_chapter_at(&ctx,4,0,true,NULL,SIZE_MAX));
+ assert(s_page==1&&s_jump_offset==SIZE_MAX&&s_selected_toc==SIZE_MAX);
  reflow_failures=2;assert(!load_chapter_at(&ctx,5,0,false,NULL,SIZE_MAX));assert(!s_text&&s_view==SHELF&&!locked);
  assert(!dims_fn&&!s_reader_dims_ctx.images);
  free_book();release_page_images();
@@ -328,5 +339,5 @@ with tempfile.TemporaryDirectory() as folder:
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', '-I'+str(root/'main/book'),
                     '-I'+str(root/'tools/book_layout_stubs'),
-                    '-I'+str(root/'tools/book_source_host_stubs'), str(root/'main/book/reader_session.c'), str(c), '-o', str(binary)], check=True)
+                    '-I'+str(root/'tools/book_source_host_stubs'), str(root/'main/book/reader_session.c'), str(root/'main/book/reader_chapter.c'), str(c), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

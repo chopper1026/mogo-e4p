@@ -124,6 +124,7 @@ idf_component_register(
         "book/book_store.c"
         "book/book_shelf_model.c"
         "book/reader_session.c"
+        "book/reader_chapter.c"
         "book/reader_prefetch.c"
         "book/reader_present.c"
         "book/reader_turn.c"
