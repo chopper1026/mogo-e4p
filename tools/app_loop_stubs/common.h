@@ -58,6 +58,8 @@ void display_main_transition_disarm(void);
 void display_main_transition_cancel(void);
 void rails_idle_check(int64_t);
 bool device_power_ready(void);
+bool device_power_key_sampler_start(void);
+bool device_power_key_sampler_enable(bool);
 typedef enum { DEVICE_POWER_KEY_NONE, DEVICE_POWER_KEY_SHORT, DEVICE_POWER_KEY_LONG } device_power_key_action_t;
 device_power_key_action_t device_power_take_key_action(void);
 void enter_lock_and_sleep(EpdiyHighlevelState*, int64_t*, void*, void*, bool, bool);

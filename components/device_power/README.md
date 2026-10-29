@@ -19,6 +19,14 @@ The local component is `device_power`, derived from `mindreset/read_pico_pmu`; r
 - 电源交接：`device_power_report_sleep()` 返回不支持，由应用按当前板路径转入关机；`device_power_power_off()` 发送关机脉冲，耗尽重试后进入 ESP 深睡。/ Soft sleep reports not supported so the application escalates along the current board's power-off path; power-off sends the pulse train and falls back to ESP deep sleep after its retry limit.
 - 面板 VCOM：启动读取已有标定值，写入接口仅供出厂流程使用。/ Reads existing calibration at boot; the write API is reserved for factory setup.
 
+## 电源键采样 / Power-key sampling
+
+主循环启动默认暂停的快采任务，正常页面启用后每轮只读 P17，轮间等待 10 ms；原有 20 ms 按下复查、30 ms 短按门限与 1 s 长按门限保持不变。事件与直读共用互斥锁及原有短按/长按待处理标记，长按优先；快采不执行电量采样、文件写入或绘屏。主循环恢复处理前保留待处理动作，不承诺在硬件推屏中途立即锁屏。
+The loop starts an initially paused task which reads only P17 on active pages and waits 10 ms between polls. Existing 20 ms press confirmation, 30 ms short-press and 1 s long-press thresholds remain. Sampling and direct reads share a mutex and the existing short/long pending flags, with long presses taking priority. The task does no battery, file or display work. Pending actions survive until the loop can handle them; locking need not interrupt a hardware refresh already in progress.
+
+`device_power_key_sampler_enable(false)` 等待在途读取结束，丢弃旧动作及当前按住状态的释放；浅睡、下电和 USB/设备独占前必须完成此交接，避免 TCA Input 读操作清掉唤醒中断。嵌套调用按返回的原状态恢复。锁屏保留直读唤醒，解锁先消费唤醒键再恢复快采；任务创建失败保留原轮询，反初始化暂停任务，后续初始化可复用。页面导航暂停快采，下一轮按新页面归属恢复。
+`device_power_key_sampler_enable(false)` joins in-flight reads and discards stale actions and the current held press's release. Complete this handoff before sleep, power-off or USB/device-exclusive use so TCA Input reads cannot clear wake interrupts. Nested callers restore the returned previous state. Locks retain direct wake reads and consume the wake press before resuming sampling. Failed task creation retains direct polling; deinit pauses the reusable task. Navigation pauses sampling until the next iteration establishes the new page's ownership.
+
 ## 充电与 RTC / Charging and RTC
 
 CX25601N 请求 1 A，经原厂 80 mA 档位量化为 960 mA，输入限流跟随量化值；VREG 为 4.4 V。轮询按有效电压切换终止，输入存在且空闲/近零电流时补充充电，无输入且有效电压 ≤3.1 V 时按原厂关 BATFET。配置不完整时报告失败，并尽力恢复硬件终止与停充。
@@ -48,7 +56,7 @@ historical CW32 protocol references, not current Metalio hardware specifications
 ## 验证 / Validation
 
 ```sh
-python3 tools/run_reader_baseline.py metalio_drivers battery battery_filter storage
+python3 tools/run_reader_baseline.py power_key loop metalio_drivers battery battery_filter storage
 ```
 
 采样与滤波测试执行当前 Metalio 实现；存储组同时覆盖 S31 外设睡眠恢复和应用下电交接。宿主测试不能替代真机电压、充电和关机验证。

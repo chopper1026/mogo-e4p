@@ -56,6 +56,7 @@ SUITES = {
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],
     "background": [sys.executable, "tools/reader_stability_host_test.py"],
     "loop": ["bash", "tools/run_app_loop_host_tests.sh"],
+    "power_key": [sys.executable, "tools/power_key_sampler_host_test.py"],
     "lifecycle": [sys.executable, "tools/app_lifecycle_host_test.py"],
     "platform_input": [sys.executable, "tools/s31_input_host_test.py"],
     "ble": [sys.executable, "tools/ble_turner_host_test.py"],

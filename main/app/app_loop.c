@@ -488,11 +488,14 @@ void app_loop_run(const app_loop_config_t* config) {
     // / F4: a dedicated task keeps sampling while the loop is blocked and frames
     // are replayed on wake; if the task cannot start, the loop reads directly.
     touch_sampler_start(config->tp);
+    (void)device_power_key_sampler_start();
 
     // 上一轮是否切过页/换过屏；只有这种残留导航才丢弃，普通刷新阻塞期间的点击必须放行。
     // Whether the previous iteration changed screens; only such stale navigation is dropped.
     bool just_transitioned = false;
     while (true) {
+        const bool sample_power_key = device_power_ready() && !current->holds_pmu && !usb_storage_active();
+        (void)device_power_key_sampler_enable(sample_power_key);
 #if CONFIG_READER_PERF
         reader_perf_input_begin();
 #endif
@@ -1157,6 +1160,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_return = false;
             ctx.consumed = true;
             just_transitioned = true;
+            (void)device_power_key_sampler_enable(false);
             app_navigation_apply_request(&ctx, &current, &menu_open, &menu_leaf,
                 &navigation, (app_navigation_request_t){next, go_back, selected_from_menu},
                 navigation_present_menu, &feedback);

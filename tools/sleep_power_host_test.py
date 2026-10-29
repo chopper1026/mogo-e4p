@@ -58,6 +58,8 @@ static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
 static int error_result, waits;
 static bool soft_supported;
+static bool key_sampling=true;
+static bool device_power_key_sampler_enable(bool enabled){bool previous=key_sampling;key_sampling=enabled;return previous;}
 static esp_err_t operation(void) { return ++step == fault ? ESP_FAIL : ESP_OK; }
 static esp_err_t fca9555_set_output(void *h, int p, uint8_t v) {
     assert(h == s_ioe); esp_err_t e = operation(); if (!e) output[p] = v; return e;
@@ -106,7 +108,7 @@ static int cst836u_wake(void *h) {
     tp_mode = CST836U_MODE_NORMAL; ++touch_wakes; return ESP_OK;
 }
 static int pmu_result(void) {
-    assert(prepared && !rails_on && !acc_on && tp_mode == CST836U_MODE_DEEPSLEEP);
+    assert(!key_sampling && prepared && !rails_on && !acc_on && tp_mode == CST836U_MODE_DEEPSLEEP);
     assert(config[1] == P1_INPUT_MASK && !(output[0] & (P0_TPS_MASK | IOE_BIT(IO_MOTOR))));
     assert(!(output[1] & IOE_BIT(IO_PWR_PULSE)));
     return error_result;
@@ -118,6 +120,7 @@ for name in ('app_sleep_bind', 'periph_suspend', 'periph_resume', 'app_enter_hos
     unit += function(name, sleep) + '\n'
 unit += r'''
 static void reset(void) {
+    key_sampling=true;
     s_ioe = (void *)1; s_ioe_ok = true; step = fault = clears = 0;
     config[0] = P0_INPUT_MASK; config[1] = P1_INPUT_MASK;
     s_pwrup = s_vcom_ctrl = s_wakeup = true;
@@ -160,6 +163,7 @@ int main(void) {
     for (int mode = APP_SLEEP_DEEP; mode <= APP_SLEEP_OFF; ++mode) for (int ack = 0; ack < 2; ++ack) {
         reset(); rails_on = true; error_result = ack ? ESP_OK : ESP_FAIL;
         assert(app_enter_host_sleep(mode) == (ack ? ESP_ERR_TIMEOUT : ESP_FAIL));
+        assert(key_sampling);
         assert(prepared == 1 && syncs == 1 && radio_stops == 1 && resumes == 1 && pauses == 1);
         assert(off_calls == 1 && deep_calls == (mode == APP_SLEEP_DEEP));
         assert(waits == (ack ? 5000 : 0));
@@ -175,6 +179,8 @@ int main(void) {
     reset(); cover_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared); cover_ok = true;
     reset(); avatar_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared); avatar_ok = true;
     reset(); assert(app_enter_host_sleep(APP_SLEEP_LIGHT) == ESP_ERR_INVALID_ARG && !pauses && !prepared);
+    assert(key_sampling);
+    reset();key_sampling=false;assert(app_enter_host_sleep(APP_SLEEP_OFF)==ESP_FAIL&&!key_sampling);
     puts("PASS: actual S31 peripheral parking/restore, motor isolation, touch/PA rails, TCA faults, soft-sleep escalation, bounded handoff and storage/OTA guards");
 }
 '''

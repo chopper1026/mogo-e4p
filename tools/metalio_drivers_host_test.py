@@ -365,16 +365,19 @@ typedef struct {bool jobs_ready,ble_stopped;} app_lifecycle_light_t;
 static bool jobs_ready=true, ble_stopped=true, pickup_setting=true, key_pending;
 static unsigned suspend_count,resume_count,sleep_count,key_polls,cache_restores,last_wake;
 static int scenario;
+static bool key_sampling=true;
+static bool device_power_key_sampler_enable(bool enabled){bool previous=key_sampling;key_sampling=enabled;return previous;}
 static app_lifecycle_light_t app_lifecycle_prepare_light(void){return (app_lifecycle_light_t){jobs_ready,ble_stopped};}
 static void cache_wake_restore_snapshot(void){}
 static void cache_wake_restore_apply(void){++cache_restores;}
 static bool app_settings_pickup_wake(void){return pickup_setting;}
 static void app_settings_set_last_wake(uint8_t value){last_wake=value;}
-static void periph_suspend(bool off){assert(!off);++suspend_count;}
+static void periph_suspend(bool off){assert(!off&&!key_sampling);++suspend_count;}
 static void periph_resume(void){++resume_count;}
 static int gpio_wakeup_disable(int pin){assert(pin==2);return ESP_OK;}
 static void board_clear_ioe_int(void){devices[0x20].latched[0]=devices[0x20].latched[1]=false;}
 static bool device_power_take_key_wakeup(void){
+    assert(!key_sampling);
     assert(++key_polls<1000);
     if(scenario==1 && key_polls==1)devices[0x19].regs[0x31]=0x40;
     if(scenario==2 && key_polls==1){devices[0x19].regs[0x31]=0x40;devices[0x20].latched[1]=true;}
@@ -384,6 +387,7 @@ static bool device_power_take_key_wakeup(void){
 static int esp_sleep_enable_timer_wakeup(uint64_t usec){assert(usec==APP_LOCK_KEY_POLL_US);return scenario==7?ESP_FAIL:ESP_OK;}
 static int esp_sleep_disable_wakeup_source(int source){assert(source==ESP_SLEEP_WAKEUP_TIMER);return ESP_OK;}
 static int esp_light_sleep_start(void){
+    assert(!key_sampling);
     ++sleep_count;assert(sleep_count<10 && ble_stopped);
     now_us+=(scenario==3 && sleep_count==1)?10000:100000;
     if(scenario==0 || scenario==6)key_pending=true;
@@ -399,6 +403,7 @@ SLEEP_TEST = r"""
 static void reset_sleep(int next){
     model_reset();now_us=1000;shared_irq=true;scenario=next;
     jobs_ready=ble_stopped=pickup_setting=true;key_pending=false;
+    key_sampling=true;
     suspend_count=resume_count=sleep_count=key_polls=cache_restores=last_wake=0;
 }
 int main(void){
@@ -406,6 +411,7 @@ int main(void){
     sc7a20h_handle_t acc=&storage;
     reset_sleep(0);assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1 && cache_restores==1);
     assert(suspend_count==1 && resume_count==1 && !acc->powered && irq_type==GPIO_INTR_LOW_LEVEL);
+    assert(key_sampling);
     for(int n=1;n<=2;++n){reset_sleep(n);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP && !sleep_count && last_wake==APP_WAKE_PICKUP);}
     reset_sleep(3);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP && sleep_count==2);
     reset_sleep(4);ble_stopped=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !sleep_count);
@@ -419,6 +425,8 @@ int main(void){
     reset_sleep(6);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1);
     reset_sleep(7);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !sleep_count);
     reset_sleep(8);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==APP_LOCK_SLEEP_ERROR_LIMIT && !cache_restores);
+    assert(key_sampling);
+    reset_sleep(0);key_sampling=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY&&!key_sampling);
     puts("PASS: actual sleep/SC shared IRQ key and pickup, prelatched motion before IOE checks, short-sleep filtering, arm/config failures, bounded stuck line, BLE/jobs fallback and sleep errors");
 }
 """

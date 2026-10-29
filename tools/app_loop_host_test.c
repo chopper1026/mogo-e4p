@@ -322,6 +322,13 @@ void display_main_transition_arm(const void* owner, bool shelf_exit, bool changi
 void display_main_transition_disarm(void) {nav_armed=NULL;}
 void rails_idle_check(int64_t n) {(void)n;}
 bool device_power_ready(void) {return battery_test||lock_due||step==power_trigger_step;}
+static bool key_sampling, key_sampler_started;
+static unsigned key_sampler_starts, key_sampler_enables;
+#ifdef POWER_KEY_SAMPLER_USB_TEST
+bool power_key_test_usb_active;
+#endif
+bool device_power_key_sampler_start(void) {key_sampler_started=true;++key_sampler_starts;return true;}
+bool device_power_key_sampler_enable(bool enabled) {bool previous=key_sampling;key_sampling=enabled&&key_sampler_started;key_sampler_enables+=key_sampling;return previous;}
 esp_err_t device_power_refresh(void) {++battery_refreshes;battery_cached=battery_boot;return ESP_OK;}
 device_power_key_action_t device_power_take_key_action(void) {
     if(battery_test){battery_cached=battery_samples[step];return DEVICE_POWER_KEY_NONE;}
@@ -400,6 +407,10 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    key_sampling=key_sampler_started=false;key_sampler_starts=key_sampler_enables=0;
+#ifdef POWER_KEY_SAMPLER_USB_TEST
+    power_key_test_usb_active=false;
+#endif
     battery_test=false;battery_cached=battery_shown=battery_boot=battery_first_frame=-1;
     battery_refreshes=battery_status_draws=0;memset(battery_samples,0,sizeof(battery_samples));
     quick_button_draws=quick_status_draws=quick_press_draws=quick_recent_requests=base_renders=0;
@@ -457,7 +468,25 @@ static app_redraw_t nav_return_tick(app_ctx_t* ctx) {
 }
 static void enter_with_pending_tab(app_ctx_t* ctx){enter(ctx);ctx->request_app=&second;}
 static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ? response : APP_REDRAW_NONE;}
+#ifdef POWER_KEY_SAMPLER_USB_TEST
+static app_redraw_t key_sampling_tick(app_ctx_t *ctx) {
+    (void)ctx;
+    assert(key_sampling == (step == 0 || step >= 3));
+    if(step==0)power_key_test_usb_active=true;
+    if(step==2)power_key_test_usb_active=false;
+    return APP_REDRAW_NONE;
+}
+#endif
 int main(void) {
+#ifdef POWER_KEY_SAMPLER_USB_TEST
+    // USB独占期间暂停，退出后恢复；设备独占页保持直读归属。/ Pause for USB ownership, resume afterwards, and leave exclusive pages in control.
+    reset();battery_test=true;first.on_tick=key_sampling_tick;
+    for(int i=0;i<4;++i)add(0,0,0,0);
+    run();assert(key_sampler_starts==1&&key_sampler_enables==2);
+    reset();battery_test=true;first.holds_pmu=true;
+    add(0,0,0,0);add(0,0,0,0);run();assert(key_sampler_starts==1&&!key_sampler_enables&&!key_sampling);
+    puts("PASS: actual loop pauses fast power-key sampling for USB/exclusive use and resumes after USB");
+#endif
     // 无触摸也补齐未知电量、插线与拔线；采样不变时不重复刷状态栏。
     // Repair unknown battery data and cable edges without touch, and never refresh unchanged samples.
     reset();enable_main_tabs();battery_test=true;time_step=200000;

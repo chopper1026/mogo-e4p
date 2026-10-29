@@ -10,7 +10,7 @@ cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
   main/app/app_loop.c
 rm "$out/sdkconfig.h"
 python3 tools/power_dialog_host_test.py --input-c "$out/power.c"
-cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+cc -std=c11 -DPOWER_KEY_SAMPLER_USB_TEST -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -Itools/app_loop_stubs -Imain -Imain/boot -Imain/diagnostics -Imain/display -Imain/lock -Imain/ota -Imain/power -Imain/services -Imain/settings -Imain/time -Icomponents/ble_page_turner/include -Icomponents/board_support/include -Imain/app -Imain/ui -Imain/book -Itools/ui_gesture_stubs \
   "$out/power.c" tools/app_loop_host_test.c tools/refresh_loop_test_boundary.c main/display/display_refresh.c main/display/display_refresh_policy.c main/platform/s31_input.c main/app/app_loop.c main/app/app_lifecycle.c main/services/storage_jobs.c main/app/app_input.c main/app/app_media.c main/app/app_navigation.c main/app/app_quick_layer.c tools/app_loop_stubs/touch_sampler_stub.c main/ui/ui_gesture.c main/ui/ui_quick_menu_input.c -o "$out/test"
 "$out/test"

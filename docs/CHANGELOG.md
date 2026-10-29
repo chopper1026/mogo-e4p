@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 
+- 电源键增加独立快速采样，保留阅读排版与刷屏期间的短按；锁屏浅睡前同步暂停，解锁后的原有保护时间保持不变。
+  Independently sample the power key to retain short presses during reader layout and refresh; synchronously pause before locked sleep and retain the existing post-unlock guard.
+
 - 主页面、顶部快捷栏和阅读页可见的状态栏及页眉，在电量、充电状态变化时自动局部更新；开机首帧先尝试采样电量，避免必须切页才能恢复显示。
   Main pages, the top quick layer and visible reader status bars and headers locally update battery and charging changes; sample before the first boot frame so recovery no longer depends on switching pages.
 

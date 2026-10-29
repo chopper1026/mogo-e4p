@@ -233,6 +233,7 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     const app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
     if (!handoff.jobs_ready) return APP_WAKE_KEY;
+    const bool key_sampling = device_power_key_sampler_enable(false);
     // 蓝牙控制器不能带着活动状态进浅睡：醒来后的第一条 HCI 命令会踩到 BTDM 控制器内部的
     // 链表断言（ble_hw.c）。锁屏不是用户关蓝牙，停栈时保留重连目标，解锁后主循环重新起栈
     // 并自动连回；停不下来就不进浅睡，保持唤醒轮询，绝不把活动控制器送进浅睡。
@@ -409,6 +410,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     }
     periph_resume();
     app_settings_set_last_wake((uint8_t)(wake == APP_WAKE_TIMEOUT ? APP_WAKE_NONE : wake));
+    (void)device_power_key_sampler_enable(key_sampling);
     return wake;
 }
 
@@ -420,6 +422,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     // Quiesce background time sync and cover/avatar jobs first: pause snapshots sessions and the
     // light-sleep wake revives them, which a sync never wants.
     if (!app_lifecycle_prepare_poweroff()) return ESP_ERR_INVALID_STATE;
+    const bool key_sampling = device_power_key_sampler_enable(false);
     (void)app_sync_time_to_pmu();
     // 必须先断面板轨，再拉低 MODE，避免常开逻辑仍耗电。/ Drop panel rails before parking MODE on the always-on supply.
     pmu_selftest_prepare_powerdown();
@@ -459,6 +462,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     // Do not reset/retry on failure; restore peripherals to the lock/PIN caller, which retains checkpoint ownership.
     periph_resume();
     wifi_transfer_resume_after_sleep();
+    (void)device_power_key_sampler_enable(key_sampling);
     return err;
 }
 
@@ -510,6 +514,7 @@ void enter_lock_and_sleep(
         ESP_LOGW(TAG, "lock postponed while transfer is busy");
         return;
     }
+    const bool key_sampling = device_power_key_sampler_enable(false);
     const int64_t lock_t_prep = esp_timer_get_time();
     uint8_t* framebuffer = epd_hl_get_framebuffer(hl);
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
@@ -616,6 +621,7 @@ void enter_lock_and_sleep(
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;
     }
+    (void)device_power_key_sampler_enable(key_sampling);
     ESP_LOGI(TAG, "unlocked");
 }
 

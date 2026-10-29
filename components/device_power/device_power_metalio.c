@@ -33,6 +33,7 @@
 #include "esp_timer.h"
 #include "fca9555.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
 
@@ -90,6 +91,7 @@
 // 200 ms, so a single I2C glitch used to become a short press that locks the device. The
 // recheck only delays confirmation; the press time stays at the first low sample.
 #define KEY_CONFIRM_DELAY_MS 20
+#define KEY_SAMPLE_PERIOD_MS 10
 
 // TCA9555 P17 = Port1 bit7。 / TCA9555 P17 = Port1 bit7.
 #define KEY_POWER_MASK 0x80
@@ -118,6 +120,22 @@ static int64_t s_key_down_us;
 static bool s_key_long_fired;
 static bool s_key_short_pending;
 static bool s_key_long_pending;
+// 按键状态由主循环和快采任务共享；锁内完成整次读数及防抖，暂停返回时已无在途读取。
+// The loop and fast sampler share key state; the mutex covers each read/debounce so pause joins in-flight reads.
+static StaticSemaphore_t s_key_mutex_storage;
+static SemaphoreHandle_t s_key_mutex;
+static portMUX_TYPE s_key_init_mux = portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t s_key_task;
+static bool s_key_sampling;
+
+static void key_lock(void) {
+    portENTER_CRITICAL(&s_key_init_mux);
+    if (s_key_mutex == NULL) s_key_mutex = xSemaphoreCreateMutexStatic(&s_key_mutex_storage);
+    portEXIT_CRITICAL(&s_key_init_mux);
+    (void)xSemaphoreTake(s_key_mutex, portMAX_DELAY);
+}
+
+static void key_unlock(void) { (void)xSemaphoreGive(s_key_mutex); }
 
 static uint8_t bcd_to_dec(uint8_t v) { return (uint8_t)(((v >> 4) * 10) + (v & 0x0F)); }
 static uint8_t dec_to_bcd(uint8_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
@@ -738,6 +756,50 @@ static void poll_key(void) {
     }
 }
 
+// 仅快采按键，不读电量、不访问文件或绘屏；停用后阻塞等待恢复通知。
+// Sample keys only: no battery, file or display work; block for a resume notification when disabled.
+static void key_sampler_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        key_lock();
+        const bool active = s_key_sampling;
+        if (active) poll_key();
+        key_unlock();
+        if (active) vTaskDelay(pdMS_TO_TICKS(KEY_SAMPLE_PERIOD_MS));
+        else (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
+}
+
+bool device_power_key_sampler_start(void) {
+    if (!s_ready) return false;
+    key_lock();
+    if (s_key_task == NULL &&
+        xTaskCreatePinnedToCore(key_sampler_task, "power_key", 3072, NULL, 4, &s_key_task, 1) != pdPASS) {
+        s_key_task = NULL;
+        key_unlock();
+        ESP_LOGW(TAG, "power-key sampler unavailable; keep direct polling");
+        return false;
+    }
+    key_unlock();
+    return true;
+}
+
+bool device_power_key_sampler_enable(bool enabled) {
+    key_lock();
+    const bool previous = s_key_sampling;
+    s_key_sampling = enabled && s_ready && s_key_task != NULL;
+    // 交还锁屏或独占方时丢弃旧动作，按住状态的释放也不带到下一次启用。
+    // Drop stale actions on handoff to lock/exclusive use, including the release of a held press.
+    if (previous && !s_key_sampling) {
+        s_key_short_pending = s_key_long_pending = false;
+        if (s_key_down) s_key_long_fired = true;
+        s_snap.pending_events = 0;
+    }
+    if (s_key_sampling && !previous) xTaskNotifyGive(s_key_task);
+    key_unlock();
+    return previous;
+}
+
 static void poll_battery(void) {
     const int64_t now = esp_timer_get_time();
 
@@ -894,6 +956,9 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
 }
 
 esp_err_t device_power_deinit(void) {
+    // 句柄释放前收齐采样；任务留在通知等待中，后续初始化可复用。
+    // Join sampling before releasing handles; retain the notification-blocked task for reinitialization.
+    (void)device_power_key_sampler_enable(false);
     const esp_err_t parked = cx_charger_park();
     if (parked != ESP_OK) return parked;
     s_charger_configured = false;
@@ -918,9 +983,11 @@ const pmu_snapshot_t* device_power_get(void) { return &s_snap; }
 
 esp_err_t device_power_poll(void) {
     if (!s_ready) return ESP_ERR_INVALID_STATE;
+    key_lock();
     poll_key();
-    poll_battery();
     s_snap.pending_events = (uint8_t)(s_key_short_pending || s_key_long_pending);
+    key_unlock();
+    poll_battery();
     return ESP_OK;
 }
 
@@ -998,13 +1065,16 @@ esp_err_t device_power_action(uint8_t action, uint16_t delay_ms, uint16_t reason
 }
 
 void device_power_drain_events(void) {
+    key_lock();
     s_key_short_pending = false;
     s_key_long_pending = false;
     s_snap.pending_events = 0;
+    key_unlock();
 }
 
 device_power_key_action_t device_power_take_key_action(void) {
     (void)device_power_poll();
+    key_lock();
     device_power_key_action_t action = DEVICE_POWER_KEY_NONE;
     if (s_key_long_pending) {
         action = DEVICE_POWER_KEY_LONG;
@@ -1014,33 +1084,40 @@ device_power_key_action_t device_power_take_key_action(void) {
     s_key_short_pending = false;
     s_key_long_pending = false;
     s_snap.pending_events = 0;
+    key_unlock();
     return action;
 }
 
 bool device_power_take_key_short(void) {
     (void)device_power_poll();
+    key_lock();
     const bool got = s_key_short_pending;
     s_key_short_pending = false;
     s_snap.pending_events = 0;
+    key_unlock();
     return got;
 }
 
 bool device_power_take_key_wakeup(void) {
     (void)device_power_poll();
+    key_lock();
     const bool got = s_key_short_pending || s_key_down;
     s_key_short_pending = false;
     s_snap.pending_events = 0;
+    key_unlock();
     return got;
 }
 
 void device_power_consume_key_press(void) {
     (void)device_power_poll();
+    key_lock();
     s_key_short_pending = false;
     s_key_long_pending = false;
     // 键仍按着时连释放一起吞掉：标记长按已触发，松手不再生成短按。
     // Swallow the release while the key is still down: mark the hold fired so it yields no short press.
     if (s_key_down) s_key_long_fired = true;
     s_snap.pending_events = 0;
+    key_unlock();
 }
 
 esp_err_t device_power_report_sleep(void) {

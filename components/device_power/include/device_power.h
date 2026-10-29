@@ -172,6 +172,13 @@ esp_err_t device_power_refresh(void);
 /// / Poll battery, charging state and pending power keys for page ticks.
 esp_err_t device_power_poll(void);
 
+/// 创建默认暂停的电源键快采任务；失败时保留原轮询，由主循环调用一次。
+/// Create the initially paused fast key sampler once from the loop; failure retains direct polling.
+bool device_power_key_sampler_start(void);
+/// 主循环切换快采并返回之前的启用状态；停用等待在途读取、丢弃旧动作及当前释放，浅睡/独占前必须停用。
+/// Loop-only: switch sampling and return its previous state; disable joins reads and discards stale actions/releases before sleep/exclusive use.
+bool device_power_key_sampler_enable(bool enabled);
+
 /// 电池校准日志开关：打开后每分钟把 batt 行写串口与 TF 卡 `/sdcard/batt.log`，默认关闭。
 /// Battery calibration log switch: when on, one batt line per minute goes to serial and
 /// `/sdcard/batt.log`; off by default, so no file is created and nothing is written.
