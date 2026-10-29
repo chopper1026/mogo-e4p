@@ -13,6 +13,7 @@
 #include "ui_avatar.h"
 #include "book/book_cover_jobs.h"
 #include "book/book_lock_collage.h"
+#include "storage_jobs.h"
 #include "usb_storage.h"
 
 // 失效锁存后卡回位的自动重挂间隔；重挂本身失败时下次再试。
@@ -52,7 +53,9 @@ bool app_media_poll(app_ctx_t* ctx, const app_desc_t* current,
     if (*invalidated && info.present && !info.mounted && err != ESP_ERR_NOT_FINISHED &&
         ctx->now_ms - s_media_remount_ms >= MEDIA_REMOUNT_INTERVAL_MS) {
         s_media_remount_ms = ctx->now_ms;
-        (void)read_pico_sd_remount();
+        // 取消通知后仍可能有旧文件操作；任务交还前保持失效锁存，下轮再试。
+        // Cancellation may leave old file I/O running; retain invalidation and retry after handoff.
+        if (storage_jobs_quiesce(0)) (void)read_pico_sd_remount();
         return false;
     }
     if (err == ESP_ERR_INVALID_STATE && info.present && !*invalidated) {

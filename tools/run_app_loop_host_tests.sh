@@ -19,8 +19,8 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
 printf '%s\n' '#pragma once' '#include <stdbool.h>' 'void ui_text_set_system_font(bool);' > "$out/ui_kit.h"
 printf '%s\n' '#pragma once' '#include <stdbool.h>' 'bool usb_storage_active(void);' > "$out/usb_storage.h"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
-  -I"$out" -Itools/app_loop_stubs -Imain -Imain/app -Imain/ui -Itools/ui_gesture_stubs \
-  tools/app_media_host_test.c main/app/app_media.c -o "$out/media"
+  -I"$out" -Itools/app_loop_stubs -Imain -Imain/app -Imain/ui -Imain/book -Itools/ui_gesture_stubs \
+  tools/app_media_host_test.c main/app/app_media.c main/storage_jobs.c -o "$out/media"
 "$out/media"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   -Itools/app_loop_stubs -Imain/app -Imain/ui -Itools/ui_gesture_stubs \

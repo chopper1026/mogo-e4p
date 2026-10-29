@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-28
 
+- 卡失效后自动重挂前，确认封面和头像后台任务已交还文件操作；仍忙时延后重试，避免卸载正在使用的旧文件系统。
+  Automatic remount after media invalidation checks that cover and avatar jobs have returned file ownership, deferring while busy to avoid unmounting a filesystem still in use.
+
 - 屏幕电源扩展器初始化遇到暂时通信错误时，最多恢复总线并重试两次；检查最终输出写入结果，避免一次失败后屏幕一直无法更新。
   Screen power-expander initialization recovers the bus and retries up to twice after transient communication failures, checking the final output write so one failure does not permanently disable presentation.
 

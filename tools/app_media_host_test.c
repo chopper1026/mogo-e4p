@@ -10,6 +10,7 @@ static read_pico_sd_info_t info;
 static int status;
 static bool usb, font_ready, builtin, saved_builtin, open_failed;
 static bool quiesce_ok = true;
+static bool avatar_ok = true;
 static char events[64];
 static size_t used;
 static uint64_t trace = UINT64_C(14695981039346656037);
@@ -51,6 +52,7 @@ int ttf_font_open(const char *path) {
 int ttf_font_open_builtin(void) { event('B'); builtin = font_ready = true; return ESP_OK; }
 void ui_avatar_invalidate(void) { event('A'); }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) { assert(timeout_ms == 0); event('Q'); return quiesce_ok; }
+bool ui_avatar_quiesce(unsigned timeout_ms) { assert(timeout_ms == 0); event('V'); return avatar_ok; }
 void book_lock_collage_invalidate(void) { event('C'); }
 void ui_text_set_system_font(bool active) { assert(!active); event('S'); }
 static void lost(app_ctx_t *ctx) { assert(ctx); event('L'); ++lost_count; }
@@ -84,11 +86,25 @@ int main(void) {
     assert(!mounted && invalidated && lost_count == 1);
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
     info.present = true;
-    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IM");
+    // 重挂前两个后台使用者都必须交还；失败不重复通知页面，也不访问卡。
+    // Both background consumers must hand back before remount; failures neither renotify the page nor touch the card.
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IQ");
+    assert(!remounts && !mounted && invalidated && lost_count == 1);
     ctx.now_ms = 3999;
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
     ctx.now_ms = 4000;
-    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IM");
+    quiesce_ok = true; avatar_ok = false;
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IQV");
+    assert(!remounts && !mounted && invalidated && lost_count == 1);
+    ctx.now_ms = 5999;
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
+    ctx.now_ms = 6000; avatar_ok = true;
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IQVM");
+    assert(remounts == 1 && !mounted && invalidated && lost_count == 1);
+    ctx.now_ms = 7999;
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
+    ctx.now_ms = 8000;
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IQVM");
     assert(remounts == 2);
     status = ESP_OK; info.mounted = true;
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCR");
@@ -131,6 +147,7 @@ int main(void) {
         font_ready = (r & 128) != 0; builtin = (r & 256) != 0;
         saved_builtin = (r & 512) != 0; open_failed = (r & 1024) != 0;
         quiesce_ok = (r & 2048) != 0;
+        avatar_ok = (r & 65536) != 0;
         page.on_media_lost = (r & 4096) ? lost : NULL;
         page.on_media_ready = (r & 8192) ? ready : NULL;
         clear_events();
