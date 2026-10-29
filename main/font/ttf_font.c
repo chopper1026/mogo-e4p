@@ -14,7 +14,7 @@
  * User revision: titles reuse the active outlines/cache; coverage checks read the existing cmap without switching or loading another face.
  */
 
-#include "../reader_memory.h"
+#include "../diagnostics/reader_memory.h"
 #include "ttf_font.h"
 #include "ttf_stroke_filter.h"
 #include "ttf_block_cache.h"

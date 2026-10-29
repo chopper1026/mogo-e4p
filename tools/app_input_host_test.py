@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix="app-input-") as directory:
         subprocess.run([
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
             "-fsanitize=address,undefined", "-I" + str(work),
-            "-Itools/app_loop_stubs", "-Imain", "-Imain/app", "-Imain/ui",
+            "-Itools/app_loop_stubs", "-Imain", "-Imain/display", "-Imain/app", "-Imain/ui",
             "-Itools/ui_gesture_stubs", "tools/app_input_host_test.c",
             "main/app/app_input.c", "main/ui/ui_gesture.c", "-o", str(binary),
         ], cwd=ROOT, check=True)

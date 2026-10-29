@@ -6,7 +6,7 @@
  * 冻结：原始偏移用于进度；目录上限 2048；不加载整本书。
  * Frozen: Progress uses source offsets; at most 2048 entries; never load the whole book.
  */
-#include "../reader_perf.h"
+#include "../diagnostics/reader_perf.h"
 #include "book_source_internal.h"
 #include "book_index_cache.h"
 #include "gbk.h"

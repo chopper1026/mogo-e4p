@@ -29,16 +29,16 @@ static unsigned s_book_indent_adjust=20;
 static void nvs_put_u8(const char *key,uint8_t v){(void)key;assert(v==s_book_indent_adjust);}
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"
 '''
-settings=(r/'main/settings.h').read_text()
+settings=(r/'main/settings/settings.h').read_text()
 for name in ('APP_BOOK_TRACK_MIN','APP_BOOK_TRACK_MAX','APP_BOOK_TRACK_COUNT','APP_BOOK_PARAGRAPH_COUNT'):
     u+=re.search(r'^#define '+name+r' .*',settings,re.M)[0]+'\n'
 for name in ('app_settings_book_paragraph_value','app_settings_book_paragraph_level'):
-    u+=function(name,r/'main/settings.c')+'\n'
+    u+=function(name,r/'main/settings/settings.c')+'\n'
 u+=function('slider_index',f)+'\n'
 for n in ('body_rect_for_tracking','reader_margin_level','reader_margin_value','reader_margin_input'):
     u+=function(n,f)+'\n'
 for n in ('app_settings_book_indent_adjust','app_settings_set_book_indent_adjust'):
-    u+=function(n,r/'main/settings.c')+'\n'
+    u+=function(n,r/'main/settings/settings.c')+'\n'
 u+=r'''
 int main(void){
  const uint8_t stops[]={0,5,10,15,20,25,30,40,50,75,100};

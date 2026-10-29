@@ -10,9 +10,9 @@ with tempfile.TemporaryDirectory() as tmp:
     exe = Path(tmp) / "lifecycle"
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-g",
-        "-Itools/app_loop_stubs", "-Imain", "-Icomponents/ble_page_turner/include",
+        "-Itools/app_loop_stubs", "-Imain", "-Imain/boot", "-Imain/display", "-Imain/ota", "-Imain/services", "-Imain/time", "-Icomponents/ble_page_turner/include",
         "-Icomponents/read_pico/include", "-Imain/app", "-Imain/ui", "-Imain/book", "-Itools/ui_gesture_stubs",
-        "tools/app_lifecycle_host_test.c", "main/app/app_lifecycle.c", "main/storage_jobs.c",
+        "tools/app_lifecycle_host_test.c", "main/app/app_lifecycle.c", "main/services/storage_jobs.c",
         "-o", str(exe),
     ], cwd=ROOT, check=True)
     subprocess.run([str(exe)], check=True)

@@ -10,7 +10,7 @@ from home_cover_cache_host_test import function
 
 root = Path(__file__).resolve().parents[1]
 reader = root / 'main/apps/app_book.c'
-settings = root / 'main/settings.c'
+settings = root / 'main/settings/settings.c'
 unit = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -70,7 +70,7 @@ static bool book_layout_build_blocks(const char *text,size_t length,const void *
 }
 static void save_progress(void){++saves;}
 '''
-header = (root / 'main/settings.h').read_text()
+header = (root / 'main/settings/settings.h').read_text()
 for name in ('APP_BOOK_TRACK_MIN', 'APP_BOOK_TRACK_MAX', 'APP_BOOK_TRACK_COUNT', 'APP_BOOK_PARAGRAPH_COUNT'):
     unit += re.search(r'^#define ' + name + r' .*', header, re.M)[0] + '\n'
 for name in ('app_settings_book_paragraph_value', 'app_settings_book_paragraph_level',
@@ -159,5 +159,5 @@ with tempfile.TemporaryDirectory() as directory:
     source.write_text(unit)
     binary = source.with_suffix('')
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
-                    '-fsanitize=address,undefined', '-I' + str(root / 'main'), str(source), '-o', str(binary)], check=True)
+                    '-fsanitize=address,undefined', '-I' + str(root / 'main'), "-I" + str(root / "main/boot"), "-I" + str(root / "main/diagnostics"), "-I" + str(root / "main/display"), "-I" + str(root / "main/services"), "-I" + str(root / "main/settings"), str(source), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

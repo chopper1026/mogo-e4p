@@ -8,7 +8,7 @@
  * 冻结：不执行脚本、不加载资源；输出有界，失败释放全部临时分配。
  * Frozen: Never execute scripts or load resources; bound output and release temporary allocations on failure.
  */
-#include "../reader_perf.h"
+#include "../diagnostics/reader_perf.h"
 #include "html_text.h"
 #include <stdint.h>
 #include <stdlib.h>

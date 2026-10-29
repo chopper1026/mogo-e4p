@@ -13,7 +13,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="architecture-") as folder:
         root = Path(folder)
         files = {
-            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" "book/book_shelf_category_state.c" "book/book_shelf_covers.c" "ui/ui_reader_settings.c" PRIV_INCLUDE_DIRS ".")\n',
+            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" "book/book_shelf_category_state.c" "book/book_shelf_covers.c" "ui/ui_reader_settings.c" PRIV_INCLUDE_DIRS "." "app" "apps" "book" "ui" "image" "font" "services" "settings")\n',
             "main/app/loop.c": '#include "contracts.h"\n',
             "main/app/contracts.h": "#pragma once\n",
             "main/apps/page.h": "#pragma once\n",
@@ -21,7 +21,7 @@ def main():
             "main/book/book_shelf_category_state.c": "void categories(void) {}\n",
             "main/book/book_shelf_covers.c": "void covers(void) {}\n",
             "main/ui/ui_reader_settings.c": "void settings_view(void) {}\n",
-            "main/settings.h": "#pragma once\n",
+            "main/settings/settings.h": "#pragma once\n",
             "main/image/image.c": "void image(void) {}\n",
             "main/font/font.c": "void font(void) {}\n",
             "main/services/policy.h": "#pragma once\n",
@@ -56,10 +56,28 @@ def main():
             assert any(expected in error for error in check(root)), (name, expected)
             path.write_text(files[name])
             assert not check(root)
+        # 根目录和真实编译头路径也属于结构契约。/ Root ownership and actual compiler include paths are structural contracts.
+        for name in ("main/orphan.h", "main/orphan.c"):
+            path = root / name
+            path.write_text("// 临时功能文件。/ Temporary feature file.\n")
+            assert any("feature files must live" in error for error in check(root))
+            path.unlink()
+            assert not check(root)
+        cmake = root / "main/CMakeLists.txt"
+        cmake.write_text(files["main/CMakeLists.txt"].replace(' "settings"', ""))
+        page = root / "main/app/loop.c"
+        page.write_text('#include "settings.h"\n')
+        assert any("outside declared private include paths" in error for error in check(root))
+        cmake.write_text(files["main/CMakeLists.txt"])
+        assert not check(root)
+        page.write_text('#include "../missing.h"\n')
+        assert any("missing relative include" in error for error in check(root))
+        page.write_text(files["main/app/loop.c"])
+        assert not check(root)
         # 注释示例不会变成假依赖。/ Commented examples must not become false dependencies.
         (root / "main/app/loop.c").write_text('// #include "../apps/page.h"\n/*\n#include "../apps/page.h"\n*/\n')
         assert not check(root)
-    print("architecture: PASS (real tree and fourteen rejecting fixtures)")
+    print("architecture: PASS (real tree and eighteen rejecting fixtures)")
 
 
 if __name__ == "__main__":

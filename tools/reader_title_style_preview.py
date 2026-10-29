@@ -172,7 +172,7 @@ def compile_unit(work, unit):
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-variable',
              '-Wno-unused-function',
              '-I' + str(work), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
-             '-I' + str(ROOT / 'main')]
+             '-I' + str(ROOT / 'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/settings")]
     subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
     subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             '-Wl,-dead_strip', '-lm', '-o', str(work / 'test')], check=True)
@@ -181,7 +181,7 @@ def compile_unit(work, unit):
 def style_unit():
     """四款样式各自整页画一次，存原始像素。"""
     unit = host_preamble() + epdiy_slices() + kit_slices()
-    unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
+    unit += enum_block(ROOT / 'main/settings/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
     unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', HEADING_HEADER.read_text()).group(0) + '\n'
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
@@ -190,7 +190,7 @@ def style_unit():
     unit += ''.join(m + '\n' for m in re.findall(
         r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX|WRAP_\w+|TITLE_BYTES|LABEL_BYTES) \d+', HEADING.read_text() + HEADING_HEADER.read_text()))
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
-                                                 (ROOT / 'main/settings.h').read_text()))
+                                                 (ROOT / 'main/settings/settings.h').read_text()))
     unit += geometry_slices()
     unit += r'''
 int main(int argc,char **argv){
@@ -224,7 +224,7 @@ def panel_unit():
     # 档位常量要排在面板桩前面：桩里报告的「当前档」就读它。
     # The size levels come before the panel stubs, which report the current level.
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
-                                                 (ROOT / 'main/settings.h').read_text()))
+                                                 (ROOT / 'main/settings/settings.h').read_text()))
     unit += r'''
 static unsigned style_selected=3;
 static int s_title_style_scroll;
@@ -246,7 +246,7 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     for n in ('ui_text_effective_px', 'ui_text_fixed_context_width_px', 'ui_text_fixed_width_px',
               'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_box'):
         unit += function(n, KIT) + '\n'
-    unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
+    unit += enum_block(ROOT / 'main/settings/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
     unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', HEADING_HEADER.read_text()).group(0) + '\n'
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。

@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sched.h>
-#include "../main/ota_online.c"
+#include "../main/ota/ota_online.c"
 // 与 partitions_16M.csv 的 5 MB 双槽一致；本用例按 CONFIG_IDF_TARGET_ESP32S31 编译。
 // Matches the 5 MB dual slots in partitions_16M.csv; this case builds with CONFIG_IDF_TARGET_ESP32S31.
 static const esp_partition_t running={0x10000,0x500000},inactive={0x510000,0x500000},metadata={0xd000,0x2000};

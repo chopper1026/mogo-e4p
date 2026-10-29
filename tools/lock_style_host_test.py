@@ -95,7 +95,7 @@ static int epd_height(void){return 1216;}
 '''
 unit += function('app_lifecycle_pause_for_lock', ROOT/'main/app/app_lifecycle.c') + '\n'
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
-    unit += function(name, ROOT/'main/sleep.c') + '\n'
+    unit += function(name, ROOT/'main/power/sleep.c') + '\n'
 unit += r'''
 static void reset(void){current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;reader=boot_cache=cache_ok=false;}
 int main(void){

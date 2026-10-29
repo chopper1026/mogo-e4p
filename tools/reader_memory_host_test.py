@@ -151,7 +151,7 @@ def main():
         source, binary = folder / 'test.c', folder / 'test'
         source.write_text(UNIT)
         command = ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined']
-        command += ['-I' + str(folder), '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'main/book'), '-I' + str(ROOT / 'main/font')]
+        command += ['-I' + str(folder), '-I' + str(ROOT / 'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/settings"), '-I' + str(ROOT / 'main/book'), '-I' + str(ROOT / 'main/font')]
         subprocess.run(command + [str(source), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
         # 关闭诊断时不暴露堆接口或资源结构。/ Disabled diagnostics expose neither heap APIs nor resource structures.

@@ -48,13 +48,21 @@ python3 tools/run_reader_baseline.py
 | 页面行为 / Page behavior | main/apps，对应 app_desc_t / Corresponding app_desc_t |
 | 新增页面 / Add a page | main/CMakeLists.txt 与 main/app/app_registry.c / Build list and registry |
 | 触摸、导航、睡眠前置 / Input, navigation, sleep handoff | main/app |
-| 字体选择策略、USB 存储 / Font policy, USB storage | main/services |
+| 字体选择策略、USB 存储、文件任务交还与震动 / Font policy, USB storage, file handoff and haptics | main/services |
 | 书源、进度、章节、排版 / Sources, progress, chapters, layout | main/book |
 | 图片尺寸、解码与缩放 / Image probing, decoding, scaling | main/image |
 | 公共控件与题头 / Shared controls and headings | main/ui |
 | 字体加载与缓存 / Font loading and caches | main/font |
 | 板级驱动 / Board support | components/read_pico、read_pico_pmu 及实际芯片组件 / Actual driver components |
-| 显示、设置、OTA / Display, settings, OTA | main 中相应文件 / Corresponding files under main |
+| 显示、波形与灰阶 / Display, waveforms and gray normalization | main/display |
+| 自动锁屏、密码与锁屏图缓存 / Idle lock, PIN and lock-frame cache | main/lock |
+| 睡眠、唤醒与关机 / Sleep, wake and power-off | main/power |
+| 设置存取与备份 / Settings storage and backup | main/settings |
+| TF / 联网升级 / Card and online upgrades | main/ota |
+| 时间服务与校时策略 / Time services and sync policy | main/time |
+| 启动保护与恢复检查点 / Boot protection and resume checkpoints | main/boot |
+| 阅读性能与资源诊断 / Reader timing and resource diagnostics | main/diagnostics |
+| 平台输入适配 / Platform input adaptation | main/platform |
 
 render 只绘图；副作用放在事件或生命周期回调。更改资源释放路径前先核对章节、字体、预绘和后台文件任务的所有权。具体契约见 AGENTS.md、app.h 和各模块头文件。
 Render only paints; events/lifecycle callbacks own side effects. Check chapter, font, prefetch and background-file ownership before changing cleanup. See AGENTS.md, app.h and module headers.

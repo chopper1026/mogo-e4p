@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../main/boot_state.c"
+#include "../main/boot/boot_state.c"
 
 static boot_record_t durable;
 static uint8_t durable_raw[BOOT_PACKED_MAX], staged_raw[BOOT_PACKED_MAX];

@@ -31,7 +31,7 @@ def function(name, path):
 book = ROOT / 'main/ui/ui_reader_heading.c'
 heading_header = ROOT / 'main/ui/ui_reader_heading.h'
 kit = ROOT / 'main/ui/ui_kit.c'
-settings = ROOT / 'main/settings.h'
+settings = ROOT / 'main/settings/settings.h'
 source = book.read_text() + heading_header.read_text()
 
 # 样式表从真实源码取，序号与固件一致。
@@ -353,7 +353,7 @@ int main(int argc,char **argv){
     (p / 'test.c').write_text(unit)
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
              '-I' + str(p), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
-             '-I' + str(ROOT / 'main')]
+             '-I' + str(ROOT / 'main'), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/settings")]
     subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(p / 'ttf.o')], check=True)
     subprocess.run(flags + [str(p / 'test.c'), str(p / 'assets.c'), str(p / 'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             '-Wl,-dead_strip', '-lm', '-o', str(p / 'test')], check=True)

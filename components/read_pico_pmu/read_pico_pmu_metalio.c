@@ -914,8 +914,8 @@ void read_pico_pmu_consume_key_press(void) {
 }
 
 esp_err_t read_pico_pmu_report_sleep(void) {
-    // 无 PMU EN 可拉；软睡由 main/sleep.c 的 esp_light_sleep 路径负责。
-    // No PMU EN to drop; main/sleep.c handles light sleep directly.
+    // 无 PMU EN 可拉；软睡由 main/power/sleep.c 的 esp_light_sleep 路径负责。
+    // No PMU EN to drop; main/power/sleep.c handles light sleep directly.
     return ESP_ERR_NOT_SUPPORTED;
 }
 

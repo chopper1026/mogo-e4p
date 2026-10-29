@@ -157,7 +157,7 @@ int main(int argc,char **argv){
 '''
     (p/'test.c').write_text(unit)
     flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function',
-           '-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'),
+           '-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/settings"),
            '-I'+str(ROOT/'components/read_pico_pmu/include'),'-I'+str(ROOT/'main/book')]
     subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)
     subprocess.run(flags+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),str(ROOT/'main/ui/ui_gesture.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)

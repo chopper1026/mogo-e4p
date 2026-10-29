@@ -60,7 +60,7 @@ static int update_display_area_diff_with(EpdiyHighlevelState *h,const int *w,int
  ++pushes;if(!result)memcpy(back,frame,sizeof(frame));return result;
 }
 '''
-unit += function('app_lock_feedback', ROOT/'main/sleep.c')
+unit += function('app_lock_feedback', ROOT/'main/power/sleep.c')
 unit += r'''
 static void reset(void){memset(frame,0x57,sizeof(frame));memcpy(original,frame,sizeof(frame));memcpy(back,original,sizeof(frame));pushes=white_pushes=cancels=touches=0;style=2;online=missing=small=s_lock_feedback_visible=false;transfer=result=white_result=0;}
 int main(int argc,char **argv){

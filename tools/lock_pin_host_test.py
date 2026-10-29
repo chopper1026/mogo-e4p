@@ -130,5 +130,5 @@ int main(void){
 '''.replace('EXPECTED',expected)
     (p/'test.c').write_text(unit)
     crypto_flags=[] if sys.platform=='darwin' else ['-lcrypto']
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main'),str(p/'test.c'),'-o',str(p/'test')]+crypto_flags,check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main'), "-I" + str(ROOT / "main/lock"),str(p/'test.c'),'-o',str(p/'test')]+crypto_flags,check=True)
     subprocess.run([str(p/'test')],check=True)

@@ -115,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix='pico-vertical-number-') as directory:
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', # GCC 13 会把 ttf_font.c 里既有的 snprintf 告警升级成错误。
              '-Wno-error=format-truncation',
              '-I' + str(work), '-I' + str(ROOT / 'main/font'), '-I' + str(ROOT / 'main/ui'),
-             '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
+             '-I' + str(ROOT / 'main'), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/settings"), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
     subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'),
                             str(ROOT / 'main/font/ttf_font.c'), str(ROOT / 'main/font/ttf_font_source.c'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'), '-lm',
                             '-o', str(work / 'test')], check=True)

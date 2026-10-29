@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory(prefix="reader-present-") as directory:
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
         "-fsanitize=address,undefined", "-Itools/display_host_stubs",
-        "-Icomponents/e0470_page_turn/include", "-Imain", "-Imain/book",
+        "-Icomponents/e0470_page_turn/include", "-Imain", "-Imain/display", "-Imain/book",
         "tools/reader_present_host_test.c", "main/book/reader_present.c",
         "-o", str(binary),
     ], cwd=ROOT, check=True)

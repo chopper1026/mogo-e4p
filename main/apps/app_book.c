@@ -129,8 +129,8 @@
  * needed while erasing the solid progress bar left an outline; dirty-mask dilation now re-drives
  * the neighbouring rows/columns, so the full-pixel pass is no longer required.
  */
-#include "../reader_perf.h"
-#include "../reader_memory.h"
+#include "../diagnostics/reader_perf.h"
+#include "../diagnostics/reader_memory.h"
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>

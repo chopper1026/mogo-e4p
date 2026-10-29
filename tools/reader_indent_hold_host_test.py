@@ -31,11 +31,11 @@ static bool s_clear_confirm,s_indent_feedback_pending;
 static EpdRect s_area;
 static int s_mode;
 '''
-settings=(root/'main/settings.h').read_text()
+settings=(root/'main/settings/settings.h').read_text()
 for name in ('APP_BOOK_TRACK_MIN','APP_BOOK_TRACK_MAX','APP_BOOK_TRACK_COUNT','APP_BOOK_PARAGRAPH_COUNT'):
     unit+=re.search(r'^#define '+name+r' .*',settings,re.M)[0]+'\n'
 for name in ('app_settings_book_paragraph_value','app_settings_book_paragraph_level'):
-    unit+=function(name,root/'main/settings.c')+'\n'
+    unit+=function(name,root/'main/settings/settings.c')+'\n'
 unit+=re.search(r'static struct \{\s+bool active, cancelled, repeated;[\s\S]*?\} s_indent_hold;',text)[0]+'\n'
 unit+=r'''
 static int saved,reflows,draws,pushes,invalidated;
@@ -156,5 +156,5 @@ assert 'reader_indent_gesture(ctx,ev,&indent_handled)' in function('gesture_even
 assert 'reader_indent_hold_tick(ctx)' in function('on_tick',book)
 with tempfile.TemporaryDirectory() as directory:
     p=Path(directory)/'test.c';p.write_text(unit);exe=p.with_suffix('')
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(root/'main'),str(p),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(root/'main'), "-I" + str(root / "main/boot"), "-I" + str(root / "main/diagnostics"), "-I" + str(root / "main/display"), "-I" + str(root / "main/services"), "-I" + str(root / "main/settings"),str(p),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

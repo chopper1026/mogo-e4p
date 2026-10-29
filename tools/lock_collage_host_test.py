@@ -236,7 +236,7 @@ int main(int argc,char **argv){
     flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable',
            '-Wno-missing-field-initializers','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections',
            '-I'+str(work),'-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'main/font'),
-           '-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main'),'-I'+str(ROOT/'tools/ui_gesture_stubs')]
+           '-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/settings"),'-I'+str(ROOT/'tools/ui_gesture_stubs')]
     subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(work/'ttf.o')],check=True)
     gc='-Wl,-dead_strip' if os.uname().sysname=='Darwin' else '-Wl,--gc-sections'
     subprocess.run(flags+[f'-DBOOK_LOCK_CACHE_PARENT="{work}/cache"',str(work/'test.c'),str(work/'assets.c'),

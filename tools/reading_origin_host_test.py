@@ -43,7 +43,7 @@ static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;nav=tab;}
 static bool app_book_request_open_from_home(const char *path){assert(!strcmp(path,book.path));++open_calls;return !fail_open;}
 '''
 unit+='\n'.join(function(n,home) for n in ['continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','hit','control','on_gesture'])
-settings=(root/'main/settings.h').read_text();a=settings.index('typedef enum {\n    APP_READER_KEY_PREV');b=settings.index('} app_reader_key_action_t;',a)+len('} app_reader_key_action_t;');unit+=settings[a:b]
+settings=(root/'main/settings/settings.h').read_text();a=settings.index('typedef enum {\n    APP_READER_KEY_PREV');b=settings.index('} app_reader_key_action_t;',a)+len('} app_reader_key_action_t;');unit+=settings[a:b]
 unit+=r'''
 enum {READER_PANEL_NONE,READER_PANEL_TOOLS};
 static bool s_reader_return_home;static int s_reader_panel,s_reader_slider,s_stats_activity_ms;

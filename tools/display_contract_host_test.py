@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix="display-contract-") as folder:
     for name in ("epdiy.h", "epd_highlevel.h", "cst836u.h", "sc7a20h_lab.h"):
         (work / name).write_text('#error "page contract imported a hardware header"\n')
     (work / "public.c").write_text('#include "app/app.h"\napp_ctx_t page;\n')
-    flags = ["cc", "-Wall", "-Wextra", "-Werror", "-I" + str(work), "-Imain", "-Imain/app"]
+    flags = ["cc", "-Wall", "-Wextra", "-Werror", "-I" + str(work), "-Imain", "-Imain/display", "-Imain/app"]
     for language, standard in (("c", "c11"), ("c++", "c++11")):
         subprocess.run(flags + ["-x", language, "-std=" + standard, "-fsyntax-only",
                                 str(work / "public.c")], cwd=ROOT, check=True)

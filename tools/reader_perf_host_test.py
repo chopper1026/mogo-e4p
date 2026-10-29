@@ -100,7 +100,7 @@ def main():
         source, binary = folder / "test.c", folder / "test"
         source.write_text(CODE)
         flags = ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
-                 "-fsanitize=address,undefined", "-I" + str(folder), "-I" + str(ROOT / "main")]
+                 "-fsanitize=address,undefined", "-I" + str(folder), "-I" + str(ROOT / "main"), "-I" + str(ROOT / "main/diagnostics")]
         subprocess.run(flags + [str(source), "-o", str(binary)], check=True)
         output = subprocess.check_output([str(binary)], text=True)
         rows = [dict(word.split("=", 1) for word in line.split()[1:])
@@ -159,7 +159,7 @@ def main():
         # 禁用构建不得产生测量符号。/ Disabled builds must emit no profiler symbols.
         (folder / "sdkconfig.h").write_text("#define CONFIG_READER_PERF 0\n")
         obj = folder / "disabled.o"
-        subprocess.run(flags + ["-c", str(ROOT / "main/reader_perf.c"), "-o", str(obj)], check=True)
+        subprocess.run(flags + ["-c", str(ROOT / "main/diagnostics/reader_perf.c"), "-o", str(obj)], check=True)
         symbols = subprocess.check_output(["nm", str(obj)], text=True)
         assert "reader_perf_" not in symbols
         print("PASS: disabled profiler has no symbols")

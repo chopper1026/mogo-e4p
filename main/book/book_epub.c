@@ -13,7 +13,7 @@
  * Navigation accepts EPUB 3 type/role markers and an unmarked nav; numbered body headings take priority and are cached.
  */
 #include "book_epub.h"
-#include "../reader_memory.h"
+#include "../diagnostics/reader_memory.h"
 #include "book_cover.h"
 #include "book_index_cache.h"
 #include "zip_reader.h"

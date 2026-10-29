@@ -234,7 +234,7 @@ int main(int argc,char **argv){
     flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
              '-Wno-unused-variable', '-fsanitize=address,undefined', '-ffunction-sections', '-fdata-sections',
              '-I' + str(work), '-I' + str(ROOT / 'main/font'), '-I' + str(ROOT / 'main/ui'),
-             '-I' + str(ROOT / 'main'), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
+             '-I' + str(ROOT / 'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/diagnostics"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/settings"), '-I' + str(ROOT / 'tools/ui_gesture_stubs')]
     subprocess.run(flags + ['-Dopen=title_test_open', '-Dclose=title_test_close', '-c',
                             str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
     subprocess.run(flags + ['-Dclose=title_test_close', '-c',

@@ -38,7 +38,7 @@
  * User revision: acknowledge accepted manual collage locks before saves/reader joins; omit the badge for automatic sleep and direct shutdown/restart.
  */
 
-#include "../reader_perf.h"
+#include "../diagnostics/reader_perf.h"
 #include "app_loop.h"
 #include "app_lifecycle.h"
 #include "platform/s31_input.h"

@@ -68,9 +68,18 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `main/ui/` | `ui_kit` 排版常量与绘制原语；`ui_menu` 两层菜单。页面互不引用。/ Shared drawing; pages do not include each other. |
 | `main/font/` | stb_truetype 字形缓存。`fallback.h` 是生成位图，勿手改。/ Glyph cache. Do not edit `fallback.h` by hand. |
 | `main/image/` | 公共图像探测、解码与缩放，不依赖书籍、页面或字库。/ Shared image probing, decoding and scaling without book, page or font dependencies. |
-| `main/services/` | 跨页 USB 存储与字体上下文策略。/ Cross-page USB storage and font-context policy. |
-| `main/factory/` | 设备功能自检与出厂 VCOM 标定。/ Device self-test and factory VCOM. |
-| `main/display.*` `sleep.*` `settings.*` | 刷屏封装、睡眠/锁屏、NVS 设置。/ Present helpers, sleep/lock, NVS. |
+| `main/services/` | 跨页 USB 存储、字体上下文、文件任务交还与触摸震动。/ Cross-page USB storage, font contexts, file-worker handoff and touch haptics. |
+| `main/factory/` | 设备功能自检、出厂 VCOM 标定与 EPD 测试图案。/ Device self-test, factory VCOM and EPD test patterns. |
+| `main/boot/` | 启动保护与恢复检查点。/ Boot protection and resume checkpoints. |
+| `main/display/` | 显示出口、几何、波形与灰阶归一。/ Display entry points, geometry, waveforms and gray normalization. |
+| `main/lock/` | 自动锁屏判定、密码与锁屏图缓存。/ Idle-lock decisions, PIN and lock-frame caches. |
+| `main/power/` | 睡眠、唤醒、关机与缓存恢复。/ Sleep, wake, power-off and cache restore. |
+| `main/settings/` | NVS 设置与备份恢复。/ NVS settings and backup/restore. |
+| `main/ota/` | TF/联网升级、清单与下载校验。/ Card/online upgrades, manifests and download verification. |
+| `main/time/` | 时间服务与校时策略。/ Time services and sync policy. |
+| `main/diagnostics/` | 阅读计时与资源诊断。/ Reader timing and resource diagnostics. |
+| `main/platform/` | S31 输入适配。/ S31 input adaptation. |
+| `main/assets/` | 内置资源与生成数据。/ Bundled resources and generated assets. |
 | `components/read_pico/` | 板级 BSP：I2C、EPD 板定义与扫描时序、TF 卡、蜂鸣器、flash HPM。/ Board BSP. |
 | `components/read_pico_search/` | 离线拼音/首字母/英文书名匹配，设备和网页共用；字表由工具生成。/ Shared offline pinyin, initials and English matching with a generated table. |
 | `components/read_pico_pmu/` | CW32L010 协议主机端。线格式在 `read_pico_pmu_protocol.h`。/ PMU host. |
@@ -79,6 +88,8 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `components/e0470_epaper_waveform/` | 面板波形与裁剪。`waveforms/*.h` 是数据表。/ Panel waveforms. |
 | `components/pwm_audio/` | PWM 音频（蜂鸣器底层之一）。/ PWM audio helper. |
 | `docs/CHANGELOG.md` | 按版本简述对用户可见的功能变化与修复。/ Brief user-visible changes and fixes by version. |
+
+main 根目录仅保留启动入口与构建配置，新增功能文件按上表职责归类。/ Keep only boot assembly and build configuration at the main root; group new feature files by the ownership table above.
 
 功能操作见三份 README；页面契约以本文及 `main/app/app.h` 为准。/ See the READMEs for feature usage; this file and `main/app/app.h` define the page contract.
 

@@ -8,24 +8,24 @@ link_gc=(-Wl,--gc-sections)
 if [[ "$(uname -s)" == "Darwin" ]]; then link_gc=(-Wl,-dead_strip); fi
 cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
     -ffunction-sections -fdata-sections "${link_gc[@]}" \
-    -Itools/display_host_stubs -Icomponents/e0470_page_turn/include -Imain -Imain/app \
-    tools/display_navigation_host_test.c main/display.c main/ui/ui_image_dither.c -o build/book-tests/display-navigation
+    -Itools/display_host_stubs -Icomponents/e0470_page_turn/include -Imain -Imain/display -Imain/ota -Imain/settings -Imain/app \
+    tools/display_navigation_host_test.c main/display/display.c main/ui/ui_image_dither.c -o build/book-tests/display-navigation
 build/book-tests/display-navigation
 cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
-    -Imain -Imain/app \
+    -Imain -Imain/display -Imain/ota -Imain/settings -Imain/app \
     -Itools/waveform_host_stubs -Icomponents/epdiy/include -Icomponents/epdiy/src \
     -Icomponents/e0470_epaper_waveform/include -Icomponents/e0470_epaper_waveform/waveforms \
     tools/navigation_waveform_host_test.c \
     components/e0470_epaper_waveform/e0470_epaper_waveform.c \
     components/e0470_epaper_waveform/e0470_waveform_trim.c \
-    main/display_main_waveform.c main/ui/ui_image_dither.c -o build/book-tests/navigation-waveform
+    main/display/display_main_waveform.c main/ui/ui_image_dither.c -o build/book-tests/navigation-waveform
 build/book-tests/navigation-waveform
 
 cc -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
-    -Imain -Imain/app -Itools/waveform_host_stubs -Icomponents/epdiy/include -Icomponents/epdiy/src \
+    -Imain -Imain/display -Imain/ota -Imain/settings -Imain/app -Itools/waveform_host_stubs -Icomponents/epdiy/include -Icomponents/epdiy/src \
     -Icomponents/e0470_epaper_waveform/include -Icomponents/e0470_epaper_waveform/waveforms \
-    tools/reader_waveform_host_test.c main/display_reader_waveform.c main/display_normalize.c \
-    main/display_main_waveform.c \
+    tools/reader_waveform_host_test.c main/display/display_reader_waveform.c main/display/display_normalize.c \
+    main/display/display_main_waveform.c \
     components/e0470_epaper_waveform/e0470_epaper_waveform.c \
     components/e0470_epaper_waveform/e0470_waveform_trim.c -o build/book-tests/reader-waveform
 build/book-tests/reader-waveform

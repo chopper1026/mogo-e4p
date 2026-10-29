@@ -58,7 +58,7 @@ def main():
         flags = ['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror', '-g',
                  '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-I'+str(folder),
                  '-Itools/book_epub_stubs', '-Itools/zip_host_stubs', '-Itools/book_layout_stubs',
-                 '-Imain', '-Imain/book']
+                 '-Imain', "-Imain/diagnostics", '-Imain/book']
         objects = []
         for name in ('book_source', 'book_txt', 'gbk', 'book_epub', 'book_index_cache',
                      'book_image_header', 'zip_reader', 'html_text'):

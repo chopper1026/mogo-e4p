@@ -7,7 +7,7 @@ trap 'rm -rf "$out"' EXIT
 printf '%s\n' '#pragma once' '#include <stdbool.h>' 'bool book_cover_jobs_quiesce(unsigned);' > "$out/book_cover_jobs.h"
 printf '%s\n' '#pragma once' '#include <stdbool.h>' 'bool ui_avatar_quiesce(unsigned);' > "$out/ui_avatar.h"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
-  -I"$out" -Imain tools/storage_jobs_host_test.c main/storage_jobs.c -o "$out/test"
+  -I"$out" -Imain -Imain/services tools/storage_jobs_host_test.c main/services/storage_jobs.c -o "$out/test"
 "$out/test"
 python3 tools/test_usb_storage.py
 python3 tools/file_sd_format_host_test.py

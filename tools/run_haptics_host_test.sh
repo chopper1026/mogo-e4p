@@ -7,7 +7,7 @@ set -eu
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 cc -std=gnu11 -Wall -Wextra -Werror -g \
-  -Itools/haptics_host_stubs -Imain \
-  tools/haptics_host_test.c main/haptics.c -o "$out/haptics"
+  -Itools/haptics_host_stubs -Imain -Imain/services \
+  tools/haptics_host_test.c main/services/haptics.c -o "$out/haptics"
 "$out/haptics"
 "$out/haptics" nomotor

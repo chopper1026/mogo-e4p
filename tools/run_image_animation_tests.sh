@@ -11,8 +11,8 @@ python3 - "$root" <<'PY'
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
-source = (root / "main/settings.c").read_text()
-header = (root / "main/settings.h").read_text()
+source = (root / "main/settings/settings.c").read_text()
+header = (root / "main/settings/settings.h").read_text()
 book = (root / "main/apps/app_book.c").read_text()
 assert 'NVS_KEY_BOOK_ANIM' not in source
 assert 'app_settings_book_animation' not in header

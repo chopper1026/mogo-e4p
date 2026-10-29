@@ -8,10 +8,10 @@ bash tools/run_book_host_tests.sh
 python3 tools/test_book_epub.py
 mkdir -p build/book-tests/settings-card
 cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
-    -Icomponents/read_pico_transfer/include \
+    -Icomponents/read_pico_transfer/include -Imain -Imain/services \
     tools/settings_backup_host_test.c -o build/book-tests/settings-backup
 build/book-tests/settings-backup
-cc -std=c11 -Wall -Wextra -Werror -Imain tools/auto_lock_host_test.c -o build/book-tests/auto-lock
+cc -std=c11 -Wall -Wextra -Werror -Imain -Imain/boot -Imain/display -Imain/lock -Imain/ota -Imain/services -Imain/settings tools/auto_lock_host_test.c -o build/book-tests/auto-lock
 build/book-tests/auto-lock
 cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
     tools/book_history_backup_host_test.c -o build/book-tests/book-history-backup
@@ -32,7 +32,7 @@ python3 tools/shelf_fast_cache_host_test.py
 python3 tools/bookshelf_list_host_test.py
 python3 tools/list_cover_cache_host_test.py
 python3 tools/home_cover_cache_host_test.py
-cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain \
+cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain -Imain/boot -Imain/display -Imain/lock -Imain/ota -Imain/services -Imain/settings \
     tools/boot_state_host_test.c -o build/book-tests/boot-state
 python3 tools/boot_recovery_host_test.py
 build/book-tests/boot-state
@@ -80,8 +80,8 @@ python3 tools/test_pmu_battery.py
 python3 tools/ble_turner_host_test.py
 for test in ota_release ota_online; do
     cc -std=c11 -Wall -Wextra -Werror -Wno-deprecated-declarations -fsanitize=address,undefined \
-        -Itools/ota_stubs -Imain -Imanaged_components/espressif__cjson/cJSON \
-        "tools/${test}_host_test.c" main/ota_release.c managed_components/espressif__cjson/cJSON/cJSON.c \
+        -Itools/ota_stubs -Imain -Imain/boot -Imain/display -Imain/lock -Imain/ota -Imain/services -Imain/settings -Imanaged_components/espressif__cjson/cJSON \
+        "tools/${test}_host_test.c" main/ota/ota_release.c managed_components/espressif__cjson/cJSON/cJSON.c \
         -lm -pthread -o "build/book-tests/${test}"
     "build/book-tests/${test}"
 done

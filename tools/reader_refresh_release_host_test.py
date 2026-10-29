@@ -40,16 +40,16 @@ with tempfile.TemporaryDirectory(dir='/private/tmp') as folder:
                                     '    if (prep) xSemaphoreTake(s_prep_done, portMAX_DELAY);')
         assert current==baseline,name
     original.write_bytes(subprocess.check_output(['git','show',full_release+':main/display.c'],cwd=root))
-    current=function('update_display_full_unlocked',root/'main/display.c')
+    current=function('update_display_full_unlocked',root/'main/display/display.c')
     for line in ('    s_full_refresh_requested = false;\n','    display_main_transition_cancel();\n','    epd_hl_waveform(hl, &E0470_WAVEFORM);\n'):
         current=current.replace(line,'')
     assert current==function('update_display_full_unlocked',original)
-for rel in ('main/display_reader_waveform.c','main/display_reader_waveform.h'):
-    assert (root/rel).read_bytes()==subprocess.check_output(['git','show',release+':'+rel],cwd=root),rel
+for rel in ('main/display/display_reader_waveform.c','main/display/display_reader_waveform.h'):
+    assert (root/rel).read_bytes()==subprocess.check_output(['git','show',release+':'+rel.replace('main/display/', 'main/')],cwd=root),rel
 # rc96 给 e0470_page_turn 增加了翻页命令；波形表仍须与 rc92 基线一致。
 # rc96 added the page-turn command to e0470_page_turn; the waveform tables must still match rc92.
 assert not subprocess.check_output(['git','diff',release,'--','components/e0470_epaper_waveform'],cwd=root)
-display_source=(root/'main/display.c').read_text()
+display_source=(root/'main/display/display.c').read_text()
 assert 'update_display_reader_gc16' not in display_source
 assert 'update_display_reader_cleanup' not in display_source
 print('PASS: reader full refresh matches rc90 original GC16; turn regions, clock, manual refresh and reader waveform match rc92 (bounded overlapped-prefetch hook excepted); panel/ripple components unchanged',flush=True)

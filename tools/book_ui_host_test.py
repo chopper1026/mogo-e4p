@@ -423,7 +423,7 @@ for header in ("book_shelf_scan.h", "book_shelf_manage.h"):
     declarations = '\n'.join(line for line in declarations.splitlines()
                              if not line.startswith(("#include", "#pragma")))
     unit = unit.replace("static shelf_entry_t* s_shelf;", declarations + "\nstatic shelf_entry_t* s_shelf;", 1)
-settings=(source.parents[1]/'settings.h').read_text()
+settings=(source.parents[1]/'settings/settings.h').read_text()
 enum=settings[settings.index('typedef enum {\n    APP_READER_KEY_PREV'):settings.index('} app_reader_key_action_t;')+len('} app_reader_key_action_t;')]
 input_header=(source.parents[1]/'book/book_reader_input.h').read_text()
 input_header='\n'.join(line for line in input_header.splitlines() if not line.startswith(('#include','#pragma')))

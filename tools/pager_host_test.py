@@ -95,7 +95,7 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory() as folder:
     path=Path(folder)/'test.c';path.write_text(unit);exe=path.with_suffix('')
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main'),str(path),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(root/'main'), "-I" + str(root / "main/display"), "-I" + str(root / "main/services"), "-I" + str(root / "main/settings"),str(path),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
 
 file_source=files.read_text()

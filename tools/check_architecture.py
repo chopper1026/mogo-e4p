@@ -14,6 +14,12 @@ def check(root):
     root = root.resolve()
     main = root / "main"
     errors = []
+    # 根目录只保留启动入口和构建配置，功能代码放入职责目录。
+    # Keep only boot assembly and build configuration at the root; group feature code by owner.
+    root_files = {"app_main.c", "CMakeLists.txt", "Kconfig.projbuild", "idf_component.yml"}
+    for path in sorted(main.iterdir()):
+        if path.is_file() and not path.name.startswith(".") and path.name not in root_files:
+            errors.append(f"main/{path.name}: feature files must live in an ownership directory")
     cmake = (main / "CMakeLists.txt").read_text()
     registered = set(re.findall(r'"([^"\n]+\.c)"', cmake))
     sources = {path.relative_to(main).as_posix() for path in main.rglob("*.c")}
@@ -24,7 +30,8 @@ def check(root):
     if re.search(r"(?<![\w])INCLUDE_DIRS\b", cmake):
         errors.append("main/CMakeLists.txt: main headers must use PRIV_INCLUDE_DIRS")
 
-    include_dirs = [main] + [path for path in main.iterdir() if path.is_dir()]
+    private = re.search(r"\bPRIV_INCLUDE_DIRS\b(.*?)(?:\bEMBED_FILES\b|\))", cmake, re.S)
+    include_dirs = [main / name for name in re.findall(r'"([^"\n]+)"', private[1])] if private else []
     headers = {}
     for path in main.rglob("*.h"):
         if path.name in headers:
@@ -58,7 +65,13 @@ def check(root):
                 candidates += [component / "include" / name, component / "src" / name]
             candidates += [directory / name for directory in include_dirs]
             target = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
-            if target is None or not target.is_relative_to(main):
+            if target is None:
+                if relative.startswith("main/") and name in headers:
+                    errors.append(f"{relative}: main header is outside declared private include paths ({name})")
+                elif relative.startswith("main/") and name.startswith("."):
+                    errors.append(f"{relative}: missing relative include ({name})")
+                continue
+            if not target.is_relative_to(main):
                 continue
             target_name = target.relative_to(main).as_posix()
             target_group = target_name.split("/")[0] if "/" in target_name else "."

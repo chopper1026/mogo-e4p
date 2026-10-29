@@ -3,7 +3,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
 import subprocess,tempfile
-root=Path(__file__).resolve().parents[1];source=(root/'main/settings.c').read_text()
+root=Path(__file__).resolve().parents[1];source=(root/'main/settings/settings.c').read_text()
 functions=source[source.index('app_home_component_t app_settings_home_component'):source.index('bool app_settings_home_full_refresh')]
 backup=source[source.index('typedef struct { uint8_t component, minutes, checksum[4];'):source.index('static unsigned backup_version')]
 unit=r'''

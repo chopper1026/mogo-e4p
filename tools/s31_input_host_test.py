@@ -81,7 +81,7 @@ int main(void) {
 ''')
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
-        "-fsanitize=address,undefined", "-I" + str(work), "-Imain",
+        "-fsanitize=address,undefined", "-I" + str(work), "-Imain", "-Imain/display",
         "-Icomponents/cst836u/include", str(work / "test.c"),
         "main/platform/s31_input.c", "-o", str(work / "test"),
     ], cwd=ROOT, check=True)
@@ -92,4 +92,4 @@ int main(void) {
     (work / "epd_highlevel.h").write_text('#error "page contract must not import backend state"\n')
     (work / "contract.c").write_text('#include "app/app.h"\napp_ctx_t page;\n')
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
-                    "-I" + str(work), "-Imain", str(work / "contract.c")], cwd=ROOT, check=True)
+                    "-I" + str(work), "-Imain", "-Imain/display", str(work / "contract.c")], cwd=ROOT, check=True)

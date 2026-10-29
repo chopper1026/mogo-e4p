@@ -24,7 +24,7 @@
 
 #include "app_touch.h"
 #include "esp_err.h"
-#include "../display_types.h"
+#include "../display/display_types.h"
 #include "app_config.h"
 
 #ifdef __cplusplus

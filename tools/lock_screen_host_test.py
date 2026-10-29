@@ -106,7 +106,7 @@ static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)re
  for n in ('ui_pinpad_full','ui_pinpad_entry_area','ui_pinpad_end','ui_pinpad_reset','key_rect','joined','hit_test','ui_pinpad_handle'):
   unit+=function(n,ROOT/'main/ui/ui_pinpad.c')+'\n'
  for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','lock_screen_authenticate'):
-  unit+=function(n,ROOT/'main/lock_screen.c')+'\n'
+  unit+=function(n,ROOT/'main/lock/lock_screen.c')+'\n'
  unit+=r'''
 static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);}
 int main(void){
@@ -166,5 +166,5 @@ int main(void){
 }
 '''
  (p/'test.c').write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'),str(p/'test.c'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/platform/s31_input.c'),'-o',str(p/'test')],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main'), "-I" + str(ROOT / "main/boot"), "-I" + str(ROOT / "main/display"), "-I" + str(ROOT / "main/lock"), "-I" + str(ROOT / "main/power"), "-I" + str(ROOT / "main/settings"),str(p/'test.c'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/platform/s31_input.c'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)

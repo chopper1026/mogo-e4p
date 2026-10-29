@@ -36,7 +36,7 @@
 1. **实机 M1**：烧写后先看测试图案，确认灰阶、方向、1 px 线、边框、GC16 耗时；标定 VCOM（默认 1200 mV）。
 2. **实机 M3**：标定 FT6336U 四角/中心与盖板三键；当前映射按 Metalio 实测 raw 值写入，可能需要微调。
 3. **实机 M4**：确认 4-bit SD 在 40 MHz 下稳定；USB MSC 导出/收回。
-4. **实机 M5**：确认 BQ27220/CX25601N/PCF8563 地址与读数；软睡/关机仍走 `main/sleep.c` 的降级路径，PMU shim 的 `report_sleep` 返回不支持。
+4. **实机 M5**：确认 BQ27220/CX25601N/PCF8563 地址与读数；软睡/关机仍走 `main/power/sleep.c` 的降级路径，PMU shim 的 `report_sleep` 返回不支持。
 5. **M7**：RISC-V C stub 比 S3 PIE 慢，实测翻页/水波纹耗时后再优化热路径。
 6. 测试完成后关闭 `CONFIG_MOGO_EPD_TEST_PATTERN`。
 
@@ -69,7 +69,7 @@ Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrou
 - `components/epdiy/src/epdiy_riscv_ve_stub.c`：RISC-V 替代 Xtensa PIE 的三个热路径函数。
 - `components/cst836u/cst836u.c`：S31 下走 FT6336U，保留 CST836U API。
 - `components/read_pico_pmu/read_pico_pmu_metalio.c`：BQ27220/CX25601N/PCF8563/TCA 电源键兼容层。
-- `main/epd_test.c`：M1 面板测试图案。
+- `main/factory/epd_test.c`：M1 面板测试图案。
 
 ## 代码边界 / Code boundaries
 

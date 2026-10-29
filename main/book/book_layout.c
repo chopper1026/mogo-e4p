@@ -8,8 +8,8 @@
  * 冻结：原文由调用方持有；字体测量和绘制必须由调用方串行化。
  * Frozen: Caller owns source text and serializes all font measurement and drawing.
  */
-#include "../reader_memory.h"
-#include "../reader_perf.h"
+#include "../diagnostics/reader_memory.h"
+#include "../diagnostics/reader_perf.h"
 #include "book_layout.h"
 #include <limits.h>
 #include <stdlib.h>

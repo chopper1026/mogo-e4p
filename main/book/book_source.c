@@ -5,8 +5,8 @@
  * 冻结：TXT 保留源字节偏移，EPUB 采用累计 spine HTML 字节；兼容纯文本加载，不写文件。
  * Frozen: TXT retains source offsets; EPUB uses cumulative spine HTML bytes; retain plain-text loading and never write files.
  */
-#include "../reader_perf.h"
-#include "../reader_memory.h"
+#include "../diagnostics/reader_perf.h"
+#include "../diagnostics/reader_memory.h"
 #include "book_source_internal.h"
 #include "book_epub.h"
 #include <stdlib.h>

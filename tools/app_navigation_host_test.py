@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory(prefix="app-navigation-") as directory:
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
         "-fsanitize=address,undefined", "-I" + str(work),
-        "-Itools/app_loop_stubs", "-Imain", "-Imain/app", "-Imain/ui",
+        "-Itools/app_loop_stubs", "-Imain", "-Imain/display", "-Imain/settings", "-Imain/time", "-Imain/app", "-Imain/ui",
         "-Itools/ui_gesture_stubs", "tools/app_navigation_host_test.c",
         "main/app/app_navigation.c", "-o", str(binary),
     ], cwd=ROOT, check=True)

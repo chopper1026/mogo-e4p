@@ -67,9 +67,9 @@ void app_restart_host(void);
 void epd_poweroff(void);
 const char* app_settings_font_path(void);
 bool app_settings_reader_power_turn(void);
-// app_loop 只消费上键动作做全局前光兜底；完整动作枚举在 main/settings.h。
+// app_loop 只消费上键动作做全局前光兜底；完整动作枚举在 main/settings/settings.h。
 // / app_loop only consumes the up-key action for the global frontlight fallback;
-// the full action enum lives in main/settings.h.
+// the full action enum lives in main/settings/settings.h.
 typedef enum { APP_READER_KEY_NONE, APP_READER_KEY_FRONTLIGHT } app_reader_key_action_t;
 app_reader_key_action_t app_settings_reader_up_action(void);
 esp_err_t read_pico_read_up_key(bool* pressed);

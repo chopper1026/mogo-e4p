@@ -4,5 +4,5 @@ set -eu
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
-  -Imain tools/time_sync_host_test.c -o "$out/time_sync"
+  -Imain -Imain/time tools/time_sync_host_test.c -o "$out/time_sync"
 "$out/time_sync"

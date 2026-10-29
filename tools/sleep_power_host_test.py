@@ -10,7 +10,7 @@ from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
 board = ROOT / 'components/read_pico/read_pico_board.c'
-sleep = ROOT / 'main/sleep.c'
+sleep = ROOT / 'main/power/sleep.c'
 text = board.read_text()
 defines = '\n'.join(line for line in text.splitlines() if re.match(
     r'#define (IOE_MODE|IOE_CW_INT|IOE_CONFIG_PORT0|IOE_CONFIG_PORT0_HOST_OFF|IOE_CONFIG_PORT1_SLEEP|IOE_CONFIG_PORT1|SD_CLK_GPIO|D\d+|EPD_XCL|EPD_CKV|EPD_XLE|EPD_XSTL|EPD_SPV)\b', line))
@@ -108,7 +108,7 @@ for i in range(49):
 unit += defines + '\n'
 for name in ('sleep_pulldown_pins', 'read_pico_ioe_sleep', 'read_pico_ioe_wake'):
     unit += function(name, board) + '\n'
-unit += function('storage_jobs_quiesce', ROOT/'main/storage_jobs.c') + '\n'
+unit += function('storage_jobs_quiesce', ROOT/'main/services/storage_jobs.c') + '\n'
 unit += function('app_lifecycle_prepare_poweroff', ROOT/'main/app/app_lifecycle.c') + '\n'
 for name in ('app_sleep_bind', 'periph_suspend', 'periph_resume', 'app_enter_host_sleep'):
     unit += function(name, sleep) + '\n'

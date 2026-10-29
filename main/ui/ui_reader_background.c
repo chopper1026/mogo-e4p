@@ -12,7 +12,7 @@
  * Frozen: one selected wallpaper, never two image caches; the blend formula
  * (bg*ink+7)/15 never changes.
  */
-#include "../reader_memory.h"
+#include "../diagnostics/reader_memory.h"
 #include "ui_reader_background.h"
 #include <stdlib.h>
 #include <string.h>

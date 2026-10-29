@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory(prefix="reader-reflow-") as directory:
     subprocess.run([
         "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-g",
         "-fsanitize=address,undefined", "-Itools/book_layout_stubs", "-Itools/book_source_host_stubs",
-        "-Imain/book", "-Imain", "tools/reader_reflow_host_test.c", "main/book/reader_reflow.c",
+        "-Imain/book", "-Imain", "-Imain/settings", "tools/reader_reflow_host_test.c", "main/book/reader_reflow.c",
         "-o", str(binary),
     ], cwd=ROOT, check=True)
     subprocess.run([str(binary)], cwd=ROOT, check=True)

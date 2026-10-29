@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 source = ROOT / 'main/apps/app_book.c'
 text = source.read_text()
 
-settings = (ROOT / 'main/settings.h').read_text()
+settings = (ROOT / 'main/settings/settings.h').read_text()
 enum = settings[settings.index('typedef enum {\n    APP_READER_KEY_PREV'):
                settings.index('} app_reader_key_action_t;') + len('} app_reader_key_action_t;')]
 macros = text[text.index('#define KEY_SETTINGS_TOP'):

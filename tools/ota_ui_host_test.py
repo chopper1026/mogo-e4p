@@ -227,5 +227,5 @@ with tempfile.TemporaryDirectory() as folder:
     source, binary = Path(folder)/"test.c", Path(folder)/"test"
     source.write_text(unit)
     subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                    "-I"+str(root/"tools/ui_gesture_stubs"), "-I"+str(root/"tools/ota_stubs"), "-I"+str(root/"main"), str(source), "-o", str(binary)], check=True)
+                    "-I"+str(root/"tools/ui_gesture_stubs"), "-I"+str(root/"tools/ota_stubs"), "-I"+str(root/"main"), "-I" + str(root / "main/boot"), "-I" + str(root / "main/diagnostics"), "-I" + str(root / "main/display"), "-I" + str(root / "main/lock"), "-I" + str(root / "main/ota"), "-I" + str(root / "main/services"), "-I" + str(root / "main/settings"), "-I" + str(root / "main/time"), str(source), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

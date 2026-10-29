@@ -8,8 +8,8 @@
  * 冻结：只读文件，PSRAM 有界；拒绝加密、ZIP64、多磁盘及重复路径。
  * Frozen: read-only files and bounded PSRAM; reject encryption, ZIP64, multiple disks and duplicate paths.
  */
-#include "../reader_perf.h"
-#include "../reader_memory.h"
+#include "../diagnostics/reader_perf.h"
+#include "../diagnostics/reader_memory.h"
 #include "zip_reader.h"
 #include <limits.h>
 #include <stdbool.h>

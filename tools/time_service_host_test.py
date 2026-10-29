@@ -114,8 +114,8 @@ static const pmu_snapshot_t *read_pico_pmu_get(void){event('P');the_pmu.unix_sec
 static int pmu_battery_percent(const pmu_snapshot_t *p){(void)p;return 80;}
 static bool pmu_battery_charging(const pmu_snapshot_t *p){(void)p;return false;}
 '''
-scheduler+='\n'.join(x for x in (root/'main/time_service.h').read_text().splitlines() if not x.startswith(('#include','#pragma once')))+'\n'
-scheduler+=__import__('pathlib').Path(root/'main/time_sync_policy.h').read_text().replace('#pragma once','')+'\n'+'\n'.join(x for x in (root/'main/time_service.c').read_text().splitlines() if not x.startswith('#include'))
+scheduler+='\n'.join(x for x in (root/'main/time/time_service.h').read_text().splitlines() if not x.startswith(('#include','#pragma once')))+'\n'
+scheduler+=__import__('pathlib').Path(root/'main/time/time_sync_policy.h').read_text().replace('#pragma once','')+'\n'+'\n'.join(x for x in (root/'main/time/time_service.c').read_text().splitlines() if not x.startswith('#include'))
 scheduler+=r'''
 static void reset(void){
  manual_trace=false;manual_event_count=0;manual_events[0]=0;
