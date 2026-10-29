@@ -656,9 +656,14 @@ static void ingest_report(const uint8_t *data, size_t len) {
     const uint8_t code = extract_primary_code(data, len);
     const uint8_t mods = s_has_keyboard_page ? data[len == 9 ? 1 : 0] : 0;
 
+    // 已学习的整帧不能用来推断静止帧；重连后的首按可能不符合标准键盘布局。
+    // A learned frame cannot seed the rest state; the first press after reconnect may use a nonstandard layout.
+    const ble_pt_frame_t frame = frame_of(data, len);
+    const bool bound = frame_same(&frame, &s_bindings.frames[0]) ||
+                       frame_same(&frame, &s_bindings.frames[1]);
     // 静止帧取第一帧「什么都没按」的报告。/ The rest frame is the first report with nothing pressed.
-    if (!s_rest_known && (!code || s_has_keyboard_page)) {
-        s_rest = frame_of(data, len);
+    if (!bound && !s_rest_known && (!code || s_has_keyboard_page)) {
+        s_rest = frame;
         if (code) {
             // 标准键盘无需等待先松键，首个按下也可用于学习。/ Standard keyboards can learn their first press without a prior release.
             // 只清按键区间，报告 ID、修饰键与保留字节都留着：它们是状态，不是按键。

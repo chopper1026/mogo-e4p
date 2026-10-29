@@ -57,6 +57,8 @@ SUITES = {
     "loop": ["bash", "tools/run_app_loop_host_tests.sh"],
     "lifecycle": [sys.executable, "tools/app_lifecycle_host_test.py"],
     "platform_input": [sys.executable, "tools/s31_input_host_test.py"],
+    "ble": [sys.executable, "tools/ble_turner_host_test.py"],
+    "ble_recent": [sys.executable, "tools/ble_recent_host_test.py"],
     "pinpad": [sys.executable, "tools/ui_pinpad_host_test.py"],
     "lock": [sys.executable, "tools/lock_screen_host_test.py"],
     "input": [sys.executable, "tools/app_input_host_test.py"],

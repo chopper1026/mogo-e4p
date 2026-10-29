@@ -8,6 +8,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 阅读页和设置页的字体列表按实际数量扩容，取消原先最多收录 24 款字体的限制，继续分页显示。
   Reader and system font lists grow with the directory contents, removing the previous 24-font cap while retaining pagination.
 
+- 修复部分蓝牙翻页器锁屏重连后，已学习的按键被误判为静止帧而失效的问题。
+  Fix learned keys on some Bluetooth page turners being mistaken for idle reports after lock-screen reconnection.
+
 - 卡失效后自动重挂前，确认封面和头像后台任务已交还文件操作；仍忙时延后重试，避免卸载正在使用的旧文件系统。
   Automatic remount after media invalidation checks that cover and avatar jobs have returned file ownership, deferring while busy to avoid unmounting a filesystem still in use.
 

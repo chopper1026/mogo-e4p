@@ -90,6 +90,8 @@ static atomic_flag s_lifecycle=ATOMIC_FLAG_INIT;
 static atomic_uint s_network_users;
 static atomic_bool s_running;
 static bool s_connected=true,s_connecting,s_scanning,s_link_up;
+static char s_reconnect_addr[18];
+static uint32_t s_reconnect_at;
 static uint16_t s_conn_handle;
 #define BLE_PT_MTU_DFLT 23
 static uint16_t s_mtu = BLE_PT_MTU_DFLT;
@@ -134,6 +136,7 @@ bool ble_pt_connected(void){return s_connected;}
 static int binding_error;
 static struct {char addr[18];ble_pt_frame_t frames[BLE_PT_MAX_BINDINGS];} s_bindings;
 static ble_pt_frame_t persisted[BLE_PT_MAX_BINDINGS];
+static char persisted_key[16];
 static int binding_handles;
 typedef int nvs_handle_t;
 #define NVS_NS_BINDINGS "bindings"
@@ -144,9 +147,9 @@ typedef int nvs_handle_t;
 // Handle 1 is manual bindings; handle 2 is the decode-hint cache in the bond namespace.
 static esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){
  if(!strcmp(ns,NVS_NS_BONDS)){assert(mode==NVS_READONLY||mode==NVS_READWRITE);*h=2;return ESP_OK;}
- assert(!strcmp(ns,NVS_NS_BINDINGS)&&mode==NVS_READWRITE);if(binding_error==1)return ESP_FAIL;*h=1;binding_handles++;return ESP_OK;}
-static const char *bond_key(char*k,size_t cap,const char*addr){assert(addr[0]);snprintf(k,cap,"test");return k;}
-static esp_err_t nvs_set_blob(nvs_handle_t h,const char*k,const void*in,size_t len){assert(h==1&&!strcmp(k,"test")&&len==sizeof(persisted));if(binding_error==2)return ESP_FAIL;memcpy(persisted,in,len);return ESP_OK;}
+ assert(!strcmp(ns,NVS_NS_BINDINGS)&&(mode==NVS_READONLY||mode==NVS_READWRITE));if(binding_error==1)return ESP_FAIL;*h=1;binding_handles++;return ESP_OK;}
+static esp_err_t nvs_set_blob(nvs_handle_t h,const char*k,const void*in,size_t len){assert(h==1&&len==sizeof(persisted));if(binding_error==2)return ESP_FAIL;snprintf(persisted_key,sizeof(persisted_key),"%s",k);memcpy(persisted,in,len);return ESP_OK;}
+static esp_err_t nvs_get_blob(nvs_handle_t h,const char*k,void*out,size_t*len){assert(h==1&&*len==sizeof(persisted));if(strcmp(k,persisted_key))return ESP_FAIL;memcpy(out,persisted,*len);return ESP_OK;}
 static char hint_key_stored[16];
 static uint8_t hint_bits;
 static bool hint_stored;
@@ -157,13 +160,13 @@ static esp_err_t nvs_commit(nvs_handle_t h){assert(h==1||h==2);return binding_er
 static void nvs_close(nvs_handle_t h){if(h==1)binding_handles--;}
 
 '''
-for name in ('lifecycle_take','lifecycle_give','ble_pt_input_serial','key_push','raw_push','frame_of','frame_same',
-             'frame_idle','raw_release','raw_frame','extract_primary_code',
+for name in ('addr_hash','bond_key','bindings_load','lifecycle_take','lifecycle_give','ble_pt_input_serial','key_push','raw_push','frame_of','frame_same',
+             'frame_idle','raw_release','raw_reset','raw_frame','extract_primary_code',
              'usage_to_special','emit_usage','ingest_report','ble_pt_pop_key','ble_pt_pop_raw',
              'ble_pt_learn_begin','ble_pt_bind','ble_pt_binding','start_locked','stop_locked','ble_pt_start','ble_pt_stop',
-             'ble_pt_network_acquire','ble_pt_network_release','note_report','scan_cb','ble_pt_device_count',
+             'ble_pt_stop_for_sleep','ble_pt_network_acquire','ble_pt_network_release','note_report','scan_cb','ble_pt_device_count',
              'ble_pt_device','ble_pt_action_for_frame','ble_pt_action_for_usage',
-             'addr_hash','hint_key','hints_load','hints_save','hints_clear'):
+             'hint_key','hints_load','hints_save','hints_clear'):
     unit += '\n' + function(BLE, name)
 unit += '\n' + function(SETTINGS, 'ble_receive_feedback')
 unit += '\n' + function(SETTINGS, 'format_bound_key')
@@ -175,6 +178,7 @@ static void reset_input(void){
  memset(&s_rest,0,sizeof(s_rest));memset(&s_raw_held,0,sizeof(s_raw_held));
  memset(&s_raw_prev,0,sizeof(s_raw_prev));memset(&s_raw_base,0,sizeof(s_raw_base));
  memset(&s_bindings,0,sizeof(s_bindings));memset(persisted,0,sizeof(persisted));
+ persisted_key[0]=0;
  s_rest_known=false;s_raw_down=false;s_raw_last_ms=0;s_has_consumer_page=false;
  s_held_usage=s_held_mods=s_emit_usage=0;s_emit_ms=0;s_connected=true;
  s_ble_feedback[0]=0;s_ble_learning=0;binding_error=0;s_ble_scroll=200;
@@ -344,6 +348,38 @@ int main(void){
   ble_pt_frame_t learned_next={0};
   assert(ble_pt_binding(BLE_PT_ACTION_NEXT,&learned_next)&&learned_next.bytes[len==9?3:2]==0x4e);
  }
+ // 保存后停栈、清空内存映射，再按同地址载入：首按不能变成静止帧。
+ // Stop after saving, erase RAM bindings, and reload the peer: a first press must not become rest.
+ for(int keyboard_hint=0;keyboard_hint<2;++keyboard_hint)for(int next_first=0;next_first<2;++next_first){
+  reset_input();s_has_keyboard_page=keyboard_hint;
+  const ble_pt_frame_t prev={.len=8,.bytes={0x06,0xb1}},next={.len=8,.bytes={0x06,0xb2}};
+  assert(ble_pt_bind(BLE_PT_ACTION_PREV,&prev)==ESP_OK);
+  assert(ble_pt_bind(BLE_PT_ACTION_NEXT,&next)==ESP_OK);
+  assert(ble_pt_start()==ESP_OK);
+  snprintf(s_reconnect_addr,sizeof(s_reconnect_addr),"aa:bb:cc:dd:ee:ff");
+  assert(ble_pt_stop_for_sleep(2000)==ESP_OK&&!s_running&&s_reconnect_addr[0]);
+  raw_reset();s_rest_known=false;
+  memset(&s_bindings,0,sizeof(s_bindings));
+  bindings_load("11:22:33:44:55:66");assert(!ble_pt_binding(BLE_PT_ACTION_PREV,NULL));
+  bindings_load("AA:BB:CC:DD:EE:FF");
+  assert(ble_pt_binding(BLE_PT_ACTION_PREV,NULL)&&ble_pt_binding(BLE_PT_ACTION_NEXT,NULL)&&!binding_handles);
+  assert(ble_pt_start()==ESP_OK);s_connected=true;
+  const ble_pt_frame_t *first=next_first?&next:&prev,*second=next_first?&prev:&next;
+  const ble_pt_action_t first_action=next_first?BLE_PT_ACTION_NEXT:BLE_PT_ACTION_PREV;
+  const ble_pt_action_t second_action=next_first?BLE_PT_ACTION_PREV:BLE_PT_ACTION_NEXT;
+  ingest_report(first->bytes,first->len);
+  assert(ble_pt_pop_raw(&raw)&&raw.pressed&&ble_pt_action_for_frame(&raw.frame)==first_action);
+  assert(!s_rest_known);
+  ingest_report(first->bytes,first->len);assert(!ble_pt_pop_raw(&raw));
+  wait_ms(200);ingest_report(first->bytes,first->len);
+  assert(ble_pt_pop_raw(&raw)&&!raw.pressed);
+  assert(ble_pt_pop_raw(&raw)&&raw.pressed&&ble_pt_action_for_frame(&raw.frame)==first_action);
+  ingest_report(second->bytes,second->len);
+  assert(ble_pt_pop_raw(&raw)&&!raw.pressed);
+  assert(ble_pt_pop_raw(&raw)&&raw.pressed&&ble_pt_action_for_frame(&raw.frame)==second_action);
+  assert(ble_pt_stop(2000)==ESP_OK);
+ }
+ init_count=deinit_count=stop_count=task_count=0;
  reset_input();s_has_keyboard_page=false;
  s_ble_learning=2;binding_error=3;report(8,0,0x4e);
  assert(ble_receive_feedback()&&strstr(s_ble_feedback,"保存失败")&&!s_ble_learning);
