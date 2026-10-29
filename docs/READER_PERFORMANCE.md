@@ -10,7 +10,7 @@ Host regression entry point (retains ASan/UBSan; writes to ignored directories):
 python3 tools/run_reader_baseline.py
 python3 tools/run_reader_baseline.py perf prefetch background
 python3 tools/run_reader_baseline.py shelf management
-python3 tools/run_reader_baseline.py session chapter images book
+python3 tools/run_reader_baseline.py session chapter open images book
 python3 tools/run_reader_baseline.py controls
 python3 tools/run_reader_baseline.py present
 ```
@@ -44,6 +44,12 @@ Layout retains its singleton engine, built and released by the source-owning ses
 
 `chapter` 使用真实 HTML 解析、会话和章节事务，覆盖题头折叠、首块插图、TXT、锚点与源偏移、解析分配失败、候选与旧布局失败、失败隔离、回滚释放顺序和 100 轮退出归零；`images` 继续执行真实页面加载适配与图片缓存，并检查同章目标的目录选择及末页定位。布局与源替身控制失败时机；真实书源和排版仍由 `book` 覆盖，设备显示需实机确认。
 `chapter` runs real HTML parsing, sessions and chapter transactions for heading folding, image-first chapters, TXT, anchor/source offsets, parser allocation failures, candidate/old-layout failure, isolation, rollback release order and 100 zero-allocation exits. `images` retains actual page-load adaptation and image caches, checking same-chapter TOC selection and last-page targeting. Layout/source doubles control failures; `book` retains real source/layout coverage, and device appearance requires hardware confirmation.
+
+`reader_open` 在文件与介质检查、可重建缓存交还后同步控制开书：先预留进度，再经页面适配保存并交还旧书、激活阅读字体，随后再次预留并打开书源。第二次预留不能省略，同书重开可能已经移除干净预留。书源成功后才应用书内字体和书籍信息，优先读取尺寸匹配的待保存进度，再尝试持久进度；字号取全局设置，越界章节回到第零章，偏移沿用原有匹配规则。正文加载或隐藏图页跳过失败后交还新书，页面保留错误提示、导航及成功提交。服务不拥有页面或异步任务。
+`reader_open` synchronously controls opening after file/media validation and rebuildable-cache handoff: reserve progress, use page adapters to save/release the old book and activate reading fonts, then reserve again and open the source. The second reservation is required because same-book reopening may remove a clean reservation. Only source success applies embedded fonts and metadata. Size-matched pending progress takes priority over persisted progress; global settings select font size, out-of-range chapters fall back to chapter zero, and offsets retain the existing match rule. Failed content loading or hidden-image skipping releases the new book. The page retains notices, navigation and success commits; the service owns no page or asynchronous task.
+
+`open` 编译真实开书控制、页面适配、待保存队列、退出及会话代码，覆盖前置检查、两次预留失败、书源各类失败、干净与脏进度保留、尺寸失效、章节与偏移恢复、全局字号边界、跨书和重复退出。书源、进度存储及正文加载替身用于控制失败时机；真实解析、布局和设备字体恢复仍分别由其他宿主组及实机检查覆盖。
+`open` compiles actual opening control, page adapters, pending queues, exit and session code for preflight checks, both reservation failures, source errors, clean/dirty progress retention, size invalidation, chapter/offset recovery, global-size bounds, book switching and repeated exit. Source, progress-storage and content-load doubles control failure timing; other host suites and hardware checks retain real parsing, layout and device font-restoration coverage.
 
 `controls` 覆盖全屏/窗口化翻页、跨章边界、字号与间距重排、正文点击、缓存接管后的时钟及缩进长按。当前章和当前页属于 `reader_session.position`；解析候选失败不会替换位置，成功加载与重排仍由 UI 按原顺序提交。进度文件继续使用章节和字节偏移，布局页码不作为持久位置。
 `controls` covers full-screen/windowed turns, chapter boundaries, size/spacing reflow, body taps, cached-page clocks and indent holds. The current chapter and page belong to `reader_session.position`; failed parse candidates never replace position, and the UI commits successful loads and reflows in the existing order. Progress files retain chapter and byte offsets rather than layout page numbers.

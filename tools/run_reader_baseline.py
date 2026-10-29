@@ -29,6 +29,7 @@ SUITES = {
     "management": [sys.executable, "tools/book_ui_host_test.py"],
     "session": [sys.executable, "tools/reader_session_host_test.py"],
     "chapter": [sys.executable, "tools/reader_chapter_host_test.py"],
+    "open": [sys.executable, "tools/reader_open_host_test.py"],
     "present": [sys.executable, "tools/reader_present_host_test.py"],
     "turn": [sys.executable, "tools/reader_turn_host_test.py"],
     "reflow": [sys.executable, "tools/reader_reflow_host_test.py"],

@@ -166,6 +166,7 @@
 #include "reader_session.h"
 #include "reader_turn.h"
 #include "reader_reflow.h"
+#include "reader_open.h"
 #include "reader_session_layout.h"
 #include "reader_chapter.h"
 #include "reader_prefetch.h"
@@ -4530,6 +4531,29 @@ static void skip_hidden_image_pages(app_ctx_t *ctx, int direction) {
         } else break;
     }
 }
+static void reader_open_replace(void) {
+    save_progress();
+    free_book();
+    s_reader_fullscreen = s_requested_fullscreen;
+    app_font_activate_reading();
+}
+static void reader_open_describe(const char *path) {
+    // 书源打开后再把书内字体开关接上：EPUB 才有效，TXT 是空操作。
+    // Wire the embedded-face switch only after the source is open: it only applies to EPUB,
+    // and is a no-op for TXT.
+    s_book_fonts_applied = app_settings_book_fonts();
+    book_set_embedded_fonts(s_book_fonts_applied);
+    copy_text(s_reader_session.book.path, sizeof(s_reader_session.book.path), path);
+    const char *filename = strrchr(path, '/');
+    filename = filename ? filename + 1 : path;
+    if (!book_title_from_path(path, s_reader_session.book.title, sizeof(s_reader_session.book.title)))
+        clean_filename(s_reader_session.book.title, sizeof(s_reader_session.book.title), filename);
+}
+static bool reader_open_load(void *ctx, size_t chapter, size_t offset) {
+    if (!load_chapter(ctx, chapter, offset, false)) return false;
+    skip_hidden_image_pages(ctx, 1);
+    return s_text != NULL;
+}
 static bool open_book_impl(app_ctx_t* ctx, const char* path) {
 #if CONFIG_READER_PERF
     reader_perf_begin("open");
@@ -4590,28 +4614,24 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
              (unsigned)(reclaimed / 1024),
              (unsigned)((psram_after - psram_before) / 1024));
-    if (!pending_reserve(path)) {
+    reader_open_t open = {
+        .session = &s_reader_session, .px = &s_px,
+        .reserve = pending_reserve, .replace = reader_open_replace,
+        .describe = reader_open_describe, .pending_restore = pending_restore,
+        .load = reader_open_load, .close = free_book, .load_ctx = ctx,
+    };
+    esp_err_t err = ESP_OK;
+    reader_open_result_t result = reader_open_run(&open, path, (uint32_t)st.st_size, &err);
+    if (result == READER_OPEN_RESERVE_OLD) {
         copy_text(s_message, sizeof(s_message), "内存不足，无法保留待保存进度");
         return false;
     }
-    save_progress();
-    free_book();
-    s_reader_fullscreen = s_requested_fullscreen;
-    app_font_activate_reading();
-    if (!pending_reserve(path)) {
+    if (result == READER_OPEN_RESERVE_NEW) {
         copy_text(s_message, sizeof(s_message), "内存不足，无法打开图书");
         app_font_activate_system();
         return false;
     }
-    esp_err_t err = reader_session_open(&s_reader_session, path);
-    // 书源打开后再把书内字体开关接上：EPUB 才有效，TXT 是空操作。
-    // Wire the embedded-face switch only after the source is open: it only applies to EPUB,
-    // and is a no-op for TXT.
-    if (err == ESP_OK) {
-        s_book_fonts_applied = app_settings_book_fonts();
-        book_set_embedded_fonts(s_book_fonts_applied);
-    }
-    if (err != ESP_OK) {
+    if (result == READER_OPEN_SOURCE_FAILED) {
         pending_progress_t* pending = pending_find(path);
         if (pending && !pending->dirty) pending_discard(path);
         copy_text(s_message, sizeof(s_message),
@@ -4627,25 +4647,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
         app_font_activate_system();
         return false;
     }
-    copy_text(s_reader_session.book.path, sizeof(s_reader_session.book.path), path);
-    const char* filename = strrchr(path, '/');
-    filename = filename ? filename + 1 : path;
-    if (!book_title_from_path(path, s_reader_session.book.title, sizeof(s_reader_session.book.title)))
-        clean_filename(s_reader_session.book.title, sizeof(s_reader_session.book.title), filename);
-    s_reader_session.book.file_size = (uint32_t)st.st_size;
-    book_progress_t p = {0};
-    bool resume = pending_restore(path, s_reader_session.book.file_size, &p) || book_progress_load(path, s_reader_session.book.file_size, &p);
-    // 排版字号以全局阅读设置为准；旧书进度只决定阅读位置。
-    // Use the shared reading size for every book; per-book progress restores position only.
-    s_px = app_settings_book_px();
-    if (s_px < BOOK_PX_MIN || s_px > BOOK_PX_MAX) s_px = 48;
-    size_t chapter = resume && p.chapter < book_chapter_count() ? p.chapter : 0;
-    if (!load_chapter(ctx, chapter, resume && p.chapter == chapter ? p.byte_off : 0, false)) {
-        free_book();
-        return false;
-    }
-    skip_hidden_image_pages(ctx, 1);
-    if (!s_text) { free_book(); return false; }
+    if (result == READER_OPEN_CONTENT_FAILED) return false;
     s_view = READING;
     s_reader_entry_full = true;
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
