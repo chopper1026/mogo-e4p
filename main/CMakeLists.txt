@@ -125,6 +125,7 @@ idf_component_register(
         "services/usb_storage.c"
         "book/book_store.c"
         "book/book_shelf_model.c"
+        "book/book_shelf_category_state.c"
         "book/book_shelf_scan.c"
         "book/book_shelf_manage.c"
         "book/reader_session.c"

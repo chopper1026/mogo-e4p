@@ -24,6 +24,8 @@ The product targets Metalio E-INK4 Plus (ESP32-S31). Root/main CMakeLists.txt de
 
 - 页面通过 app 中的公开契约协作，不包含另一个页面的实现。app 的调度代码不得包含 apps 目录的头文件。跨页请求仍由对应页面消费，不能借移动头文件改变生命周期。
   Pages collaborate through app contracts without including another page implementation. App coordinators must not include apps headers. The target page still consumes each cross-page request; moving a header does not transfer lifecycle ownership.
+- `book_shelf_category_state` 独占分类表、可用性、计数、选中项、两种布局的页码记忆和分类菜单状态；页面通过接口访问，不读写内部字段。扫描仅同步借用书目，模块不访问 UI、系统设置或存储。目录更换释放旧分类，普通离页保留本次开机的分类与页码；选择分类仍先保存旧页码，再清选择、排序和恢复新页码。
+  `book_shelf_category_state` owns the category table, availability, counts, selection, page memory for both layouts and category-menu state. Pages use its API without accessing internal fields. Recounts borrow the catalog synchronously; the module has no UI, settings or storage access. Root changes release old categories, while ordinary exits retain this boot's categories and pages. Category selection still remembers the old page before clearing selections, sorting and restoring the new page.
 - 书籍封面依赖 image；壁纸、阅读背景和图片页直接依赖 image。book_cover.h 暂时转出原有图像声明以兼容既有调用方，新增通用图像调用应直接使用 image_decode.h。
   Book covers depend on image; wallpaper, reader backgrounds and image pages use image directly. book_cover.h forwards legacy image declarations for compatibility; new generic consumers should include image_decode.h.
 - main 的头文件搜索路径为组件私有。目录边界由结构检查补充约束，不表示每个目录都是独立 IDF 组件。

@@ -14,6 +14,10 @@ u=r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "book_shelf_category_state.h"
+static book_shelf_categories_t s_shelf_categories;
+void *heap_caps_calloc(size_t n,size_t size,int caps){assert(caps==3);return calloc(n,size);}
+void *heap_caps_realloc(void *p,size_t size,int caps){assert(caps==3);return realloc(p,size);}
 #define SHELF 1
 #define UI_GRAY_WHITE 255
 #define UI_KEY_1 0
@@ -24,7 +28,7 @@ typedef enum{APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL}app
 struct app_desc_s;
 typedef struct{int leaf;int64_t now_ms;bool consumed;const struct app_desc_s *request_app;uint8_t *fb;}app_ctx_t;
 typedef struct app_desc_s{int tab;bool(*on_main_key)(app_ctx_t*,int,app_redraw_t*);}app_desc_t;
-static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_category_menu,s_clear_confirm,s_batch_confirm;
+static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_clear_confirm,s_batch_confirm;
 static int s_shelf_key_pressed,s_shelf_key_delta,s_view=SHELF,s_visible_count=20;
 static int64_t s_shelf_key_until;
 static EpdRect s_area;
@@ -75,5 +79,5 @@ int main(void){app_ctx_t ctx={0};
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.c';p.write_text(u);out=p.with_suffix('')
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined',str(p),'-o',str(out)],check=True)
+ subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-I'+str(r/'main/book'),'-I'+str(r/'tools/shelf_categories_host_stubs'),str(p),str(r/'main/book/book_shelf_category_state.c'),'-o',str(out)],check=True)
  subprocess.run([str(out)],check=True)

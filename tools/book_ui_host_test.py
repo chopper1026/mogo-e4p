@@ -50,7 +50,7 @@ typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GE
 #include <unistd.h>
 #include <stdatomic.h>
 #include "ui_text_edit.h"
-#include "book_shelf_categories.h"
+#include "book_shelf_category_state.h"
 #include "book_shelf_model.h"
 #include "book_file_path.h"
 #define ESP_OK 0
@@ -178,9 +178,9 @@ static void book_progress_watch_destroy(book_progress_watch_t* w){book_progress_
 static book_store_root_t test_roots[BOOK_STORE_ROOT_MAX];
 static const char *app_settings_books_dir(void){return test_roots[0].path;}
 static int test_root_count=1;
-static void* heap_caps_realloc(void* p,size_t n,int caps){(void)caps;return test_oom?NULL:realloc(p,n);}
+void* heap_caps_realloc(void* p,size_t n,int caps){(void)caps;return test_oom?NULL:realloc(p,n);}
 static void* heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
-static void* heap_caps_calloc(size_t count,size_t n,int caps){(void)caps;return test_oom?NULL:calloc(count,n);}
+void* heap_caps_calloc(size_t count,size_t n,int caps){(void)caps;return test_oom?NULL:calloc(count,n);}
 static bool book_store_roots_degraded(void){return test_degraded;}
 static uint64_t book_store_free_bytes(const book_store_root_t* root){(void)root;return 1000000;}
 static int book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX],int* n){*n=test_root_count;memcpy(out,test_roots,sizeof(test_roots));return 0;}
@@ -455,12 +455,7 @@ static void apply_chapter_lead(const char *title, const char *label, size_t skip
 static void refresh_chapter_lead(void) { apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip, s_chapter_lead_row_height); }
 '''
 unit += r"""
-#define SHELF_CATEGORY_LIMIT 128
-typedef struct{char path[288];int pages[2],count;bool available;}shelf_category_t;
-static shelf_category_t *s_categories;
-static int s_category_count,s_category_capacity,s_category_selected,s_category_menu_page;
-static bool s_category_menu;
-static char s_category_root[288];
+static book_shelf_categories_t s_shelf_categories;
 """
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
@@ -936,7 +931,7 @@ int main(void) {
     s_reader_return_home=false;
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
-    free(s_shelf);free(s_categories);
+    free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
     puts("book_ui_host_test: PASS");
@@ -949,6 +944,6 @@ with tempfile.TemporaryDirectory() as tmp:
     exe = Path(tmp) / "test"
     c.write_text(unit, encoding="utf-8")
     subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[2] / "tools/book_source_host_stubs"), "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
-                    str(c), str(source.parents[1] / "book/book_shelf_model.c"), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
+                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[2] / "tools/shelf_categories_host_stubs"), "-I", str(source.parents[2] / "tools/book_source_host_stubs"), "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
+                    str(c), str(source.parents[1] / "book/book_shelf_category_state.c"), str(source.parents[1] / "book/book_shelf_model.c"), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -39,6 +39,12 @@ def check(root):
         # 保留行号；注释内的示例不属于实际依赖。/ Keep line numbers; examples inside comments are not dependencies.
         source = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", lambda match: "\n" * match[0].count("\n"),
                         path.read_text(errors="replace"))
+        if relative.startswith("main/") and relative != "main/book/book_shelf_category_state.c":
+            # 上下文可以由页面静态持有，内部字段只能由所属模块访问。/ Pages may store contexts, but only their owner may access internals.
+            contexts = re.findall(r"\bbook_shelf_categories_t\s+\*?\s*(\w+)", source)
+            for context in contexts:
+                if re.search(r"\b" + re.escape(context) + r"\s*(?:\.|->)", source):
+                    errors.append(f"{relative}: shelf category state must be accessed through its API")
         for match in re.finditer(r'^\s*#\s*include\s*[<"]([^>"\n]+)[>"]', source, re.M):
             name = match[1]
             candidates = [path.parent / name]
@@ -63,6 +69,8 @@ def check(root):
                 reason = "font engines must not depend on application policy"
             elif relative.startswith("main/book/") and target_group == "apps":
                 reason = "book modules must not depend on page headers"
+            elif relative == "main/book/book_shelf_category_state.c" and target_group != "book":
+                reason = "shelf category state must not depend on UI or system policy"
             if reason:
                 errors.append(f"{location}: {reason} ({target_name})")
 

@@ -13,11 +13,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="architecture-") as folder:
         root = Path(folder)
         files = {
-            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" PRIV_INCLUDE_DIRS ".")\n',
+            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" "book/book_shelf_category_state.c" PRIV_INCLUDE_DIRS ".")\n',
             "main/app/loop.c": '#include "contracts.h"\n',
             "main/app/contracts.h": "#pragma once\n",
             "main/apps/page.h": "#pragma once\n",
             "main/book/book.h": "#pragma once\n",
+            "main/book/book_shelf_category_state.c": "void categories(void) {}\n",
+            "main/settings.h": "#pragma once\n",
             "main/image/image.c": "void image(void) {}\n",
             "main/font/font.c": "void font(void) {}\n",
             "main/services/policy.h": "#pragma once\n",
@@ -35,6 +37,8 @@ def main():
             ("main/image/image.c", '#include <book.h>\n', "generic image"),
             ("main/font/font.c", '#include "policy.h"\n', "font engines"),
             ("components/driver/driver.c", '#include "contracts.h"\n', "components must not"),
+            ("main/book/book_shelf_category_state.c", '#include "settings.h"\n', "shelf category state must not"),
+            ("main/app/loop.c", 'book_shelf_categories_t state;\nvoid reset(void) { state.selected = 0; }\n', "through its API"),
             ("main/CMakeLists.txt", files["main/CMakeLists.txt"].replace("PRIV_INCLUDE_DIRS", "INCLUDE_DIRS"), "PRIV_INCLUDE_DIRS"),
             ("main/CMakeLists.txt", files["main/CMakeLists.txt"].replace('"font/font.c"', '"missing.c"'), "source is absent"),
             ("tools/run_reader_baseline.py", 'SUITES = {"missing": ["python3", "tools/missing.py"]}\n', "missing tools/missing.py"),
@@ -48,7 +52,7 @@ def main():
         # 注释示例不会变成假依赖。/ Commented examples must not become false dependencies.
         (root / "main/app/loop.c").write_text('// #include "../apps/page.h"\n/*\n#include "../apps/page.h"\n*/\n')
         assert not check(root)
-    print("architecture: PASS (real tree and seven rejecting fixtures)")
+    print("architecture: PASS (real tree and nine rejecting fixtures)")
 
 
 if __name__ == "__main__":
