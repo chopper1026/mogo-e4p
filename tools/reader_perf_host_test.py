@@ -75,6 +75,8 @@ int main(void){
 #if CONFIG_READER_MEMORY
  reader_memory_stats_t memory={.font_source=123,.chapter=456,.prefetch_worker=1,.prefetch_stack_free=789};
  reader_perf_memory("present",&memory);
+ reader_source_memory_stats_t source_memory={.txt_index=11,.epub_text=22,.zip_names=33,.open_files=1};
+ reader_perf_source_memory("present",&source_memory);
 #endif
  reader_perf_finish(true);assert(stops==1&&ends==1);
  now=90;reader_perf_begin("cancel");old=reader_perf_scope_begin(READER_PERF_LAYOUT);
@@ -116,6 +118,10 @@ def main():
         assert len(memory_rows)==1 and "id=1 event=present" in memory_rows[0]
         assert "font_source=123" in memory_rows[0] and "chapter=456" in memory_rows[0]
         assert "prefetch_stack_free=789" in memory_rows[0] and "psram_free=2000" in memory_rows[0]
+        source_rows=[line for line in output.splitlines() if line.startswith("READER_SOURCE_MEMORY ")]
+        assert len(source_rows)==1 and "id=1 event=present" in source_rows[0]
+        assert "txt_index=11" in source_rows[0] and "epub_text=22" in source_rows[0]
+        assert "zip_names=33" in source_rows[0] and "open_files=1" in source_rows[0]
         print(output, end="")
         parsed = summary.parse_samples(output)
         assert summary.summarize(parsed, 20)["turn"]["enough_samples"] is False
@@ -148,7 +154,7 @@ def main():
         assert summary.parse_samples(timing_only) == parsed
         assert "READER_MEMORY " not in timing_only
         symbols = subprocess.check_output(["nm", str(binary)], text=True)
-        assert "reader_perf_memory" not in symbols
+        assert "reader_perf_memory" not in symbols and "reader_perf_source_memory" not in symbols
         print("PASS: timing-only output equals resource-enabled timing and has no resource symbols")
         # 禁用构建不得产生测量符号。/ Disabled builds must emit no profiler symbols.
         (folder / "sdkconfig.h").write_text("#define CONFIG_READER_PERF 0\n")

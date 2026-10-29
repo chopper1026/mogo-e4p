@@ -6,6 +6,7 @@
  * Frozen: TXT retains source offsets; EPUB uses cumulative spine HTML bytes; retain plain-text loading and never write files.
  */
 #include "../reader_perf.h"
+#include "../reader_memory.h"
 #include "book_source_internal.h"
 #include "book_epub.h"
 #include <stdlib.h>
@@ -103,3 +104,12 @@ esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, si
 esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigned *width, unsigned *height) {
     return s_epub ? book_epub_image_dimensions(s_epub, chapter, src, width, height) : ESP_ERR_NOT_SUPPORTED;
 }
+
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
+void book_source_memory_stats(reader_source_memory_stats_t *stats) {
+    *stats = (reader_source_memory_stats_t){0};
+    stats->txt_index = reader_memory_owned(s_book.entries);
+    stats->open_files = s_book.file != NULL;
+    book_epub_memory_stats(s_epub, stats);
+}
+#endif

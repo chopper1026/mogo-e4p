@@ -133,3 +133,16 @@ void reader_perf_memory(const char *event, const reader_memory_stats_t *stats) {
 }
 #endif
 #endif
+
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
+void reader_perf_source_memory(const char *event, const reader_source_memory_stats_t *stats) {
+    ESP_LOGI("readerperf", "READER_SOURCE_MEMORY v=1 id=%u event=%s "
+             "txt_index=%u epub_state=%u epub_index=%u epub_text=%u epub_faces=%u "
+             "zip_state=%u zip_index=%u zip_names=%u zip_directory=%u open_files=%u",
+             s_sample.generation, event, (unsigned)stats->txt_index,
+             (unsigned)stats->epub_state, (unsigned)stats->epub_index,
+             (unsigned)stats->epub_text, (unsigned)stats->epub_faces,
+             (unsigned)stats->zip_state, (unsigned)stats->zip_index,
+             (unsigned)stats->zip_names, (unsigned)stats->zip_directory, stats->open_files);
+}
+#endif

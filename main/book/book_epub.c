@@ -13,6 +13,7 @@
  * Navigation accepts EPUB 3 type/role markers and an unmarked nav; numbered body headings take priority and are cached.
  */
 #include "book_epub.h"
+#include "../reader_memory.h"
 #include "book_cover.h"
 #include "book_index_cache.h"
 #include "zip_reader.h"
@@ -2212,3 +2213,17 @@ esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const ch
     }
     return err;
 }
+
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
+void book_epub_memory_stats(const book_epub_t *book, reader_source_memory_stats_t *stats) {
+    if (!book) return;
+    stats->epub_state = reader_memory_owned(book);
+    stats->epub_index = reader_memory_owned(book->chapters) + reader_memory_owned(book->navigation) +
+        reader_memory_owned(book->visible_index);
+    stats->epub_faces = reader_memory_owned(book->faces);
+    stats->epub_text = 0;
+    for (const text_block_t *block = book->text_blocks; block; block = block->next)
+        stats->epub_text += reader_memory_owned(block);
+    zip_reader_memory_stats(book->zip, stats);
+}
+#endif

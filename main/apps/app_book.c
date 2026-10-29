@@ -4020,6 +4020,9 @@ static void reader_memory_snapshot(const char *event) {
     for (unsigned i = 0; i < sizeof(s_covers) / sizeof(s_covers[0]); ++i)
         stats.shelf_ui += reader_memory_owned(s_covers[i].gray) + reader_memory_owned(s_covers[i].fast_bits);
     reader_perf_memory(event, &stats);
+    reader_source_memory_stats_t source = {0};
+    book_source_memory_stats(&source);
+    reader_perf_source_memory(event, &source);
 }
 #endif
 

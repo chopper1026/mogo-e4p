@@ -58,6 +58,53 @@ def summarize(samples):
     return result
 
 
+
+SOURCE_FIELDS = ('id txt_index epub_state epub_index epub_text epub_faces zip_state '
+                 'zip_index zip_names zip_directory open_files').split()
+
+
+def parse_source_samples(text):
+    samples = []
+    for number, line in enumerate(text.splitlines(), 1):
+        _, marker, payload = line.partition('READER_SOURCE_MEMORY ')
+        if not marker:
+            continue
+        try:
+            words = payload.split()
+            row = dict(word.split('=', 1) for word in words)
+            if len(row) != len(words) or row.get('v') != '1' or row.get('event') not in EVENTS:
+                raise ValueError('schema, duplicate key or event')
+            if set(row) != set(SOURCE_FIELDS) | {'v', 'event'}:
+                raise ValueError('missing or extra fields')
+            for key in SOURCE_FIELDS:
+                value = row[key]
+                if not value.isascii() or not value.isdecimal():
+                    raise ValueError('unsigned decimal required')
+                row[key] = int(value)
+            if row['open_files'] not in (0, 1):
+                raise ValueError('invalid current-source file count')
+            samples.append(row)
+        except ValueError as error:
+            raise ValueError(f'Invalid READER_SOURCE_MEMORY record on line {number}: {error}') from error
+    return samples
+
+
+def summarize_source(samples):
+    result = {}
+    for event in EVENTS:
+        rows = [row for row in samples if row['event'] == event]
+        if not rows:
+            continue
+        fields = {}
+        for key in [*SOURCE_FIELDS[1:], 'listed_capacity']:
+            values = [sum(row[field] for field in SOURCE_FIELDS[1:-1])
+                      if key == 'listed_capacity' else row[key] for row in rows]
+            fields[key] = {'first': values[0], 'last': values[-1],
+                           'min': min(values), 'max': max(values)}
+        result[event] = {'samples': len(rows), 'fields': fields}
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('log', type=Path)
@@ -67,6 +114,9 @@ def main():
     result = {'schema': 1, 'log': str(args.log.resolve()),
               'log_sha256': hashlib.sha256(raw).hexdigest(),
               'events': summarize(parse_samples(raw.decode('utf-8', errors='replace')))}
+    source_samples = parse_source_samples(raw.decode('utf-8', errors='replace'))
+    if source_samples:
+        result['source_events'] = summarize_source(source_samples)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     for event, data in result['events'].items():

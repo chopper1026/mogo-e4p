@@ -134,11 +134,17 @@ Capacity fields query live owned allocation bases and report allocator capacitie
 固定页序的旧新性能对照只开启 `CONFIG_READER_PERF`，关闭 `CONFIG_READER_MEMORY`，将串口日志配置保持一致。资源遍历虽在计时外执行，仍可能改变后续操作的缓存和调度状态，不能把资源诊断轮与纯计时轮混作同一配置。
 For fixed-page old/new comparisons, enable only `CONFIG_READER_PERF`, disable `CONFIG_READER_MEMORY`, and keep serial logging settings equivalent. Although resource walks execute outside timing, they may change caches and scheduling for subsequent operations; resource and timing-only runs are different configurations.
 
-此视图覆盖字体、布局、当前会话章节、预绘帧、背景、页内灰阶以及页面已接管的书架数据和封面。尚未按拥有者分解 EPUB 书源内部目录/缓存、排队中的封面结果、系统服务与显示后端分配，不应把已列字段之和解释为整个堆。操作期间峰值仍看 `READER_PERF` 的本地内存低水位；快照只说明采样点的存活容量。
-This view covers fonts, layout, the current session chapter, prefetch frame, background, page grayscale, and shelf data/covers already owned by the page. EPUB source directories/caches, queued cover results, system services and display-backend allocations are not decomposed by owner. The listed fields do not total the whole heap. Operation-local heap lows in `READER_PERF` still measure peaks; snapshots show live capacity only at sample points.
+此视图覆盖字体、布局、当前会话章节、预绘帧、背景、页内灰阶以及页面已接管的书架数据和封面。当前书源另用同边界的 `READER_SOURCE_MEMORY v=1` 记录 TXT 目录、EPUB 实例/spine/导航/可见索引、标题锚点池、内嵌字体描述和 ZIP 实例/索引/名称/存活中央目录缓冲；`open_files` 只记当前书源句柄数。池内标题及锚点别名不重复计数，字体槽接管的镜像仍归字体字段，已交给章节的正文不归书源。书源访问与预绘交还由 UI 串行保证；统计不打开文件、不分配或释放资源。原 `READER_MEMORY v=1` 及纯计时日志保持原协议。
+This view covers fonts, layout, the current session chapter, prefetch frame, background, page grayscale, and page-owned shelf data/covers. A separate `READER_SOURCE_MEMORY v=1` at the same boundary counts the current TXT index, EPUB instance/spine/navigation/visible index, title/anchor pools, embedded-face descriptors, and ZIP instance/index/names/live central-directory buffer; `open_files` counts only current-source file handles. Pooled aliases are not recounted, slot-owned font images remain in font fields, and transferred chapter text is excluded. UI serialization and prefetch handoff protect source access; collection opens no files and allocates or frees nothing. The original `READER_MEMORY v=1` and timing-only protocols are preserved.
+
+汇总工具保留旧日志兼容性；遇到书源记录时额外输出 `source_events`，按事件报告各字段及 `listed_capacity` 的首末值和范围。相同代次/事件的重复采样继续保留，不根据编号去重；非法、缺字段、重复键或不支持版本会报错。`source_memory` 宿主组跟踪真实 TXT/EPUB/ZIP 分配，验证容量而非内容长度、调用方章节排除、目录借用、失败交还及重复关闭归零，并检查产品和纯计时构建无书源遍历符号。
+The summarizer remains compatible with older logs, adding `source_events` when source records are present, with first/last/range for each field and `listed_capacity`. Repeated samples sharing a generation/event remain separate; malformed, missing, duplicate-key or unsupported-version records fail. The `source_memory` host suite tracks real TXT/EPUB/ZIP allocations for capacities rather than content lengths, caller-chapter exclusion, navigation borrows, failed-open cleanup and repeated zero close, checking that product/timing-only objects have no source-walk symbols.
+
+排队或解码中的封面独立书源、文件库内部缓冲、系统服务与显示后端分配仍未完整按拥有者分解，不应把已列字段之和解释为整个堆。解析/解压暂存已在采样前交还，操作期间峰值仍看 `READER_PERF` 的本地内存低水位；快照只说明采样点的存活容量。
+Independent sources in queued/decoding cover jobs, libc file buffers, system services and display-backend allocations remain outside complete owner decomposition; listed fields do not total the whole heap. Parse/inflate scratch has already been returned before sampling; operation-local heap lows in `READER_PERF` still measure peaks, while snapshots show live capacity only at sample points.
 
 ```sh
-python3 tools/run_reader_baseline.py memory perf font_faces prefetch
+python3 tools/run_reader_baseline.py memory source_memory perf font_faces prefetch
 python3 tools/summarize_reader_memory.py serial.log --output build/reader-memory.json
 ```
 

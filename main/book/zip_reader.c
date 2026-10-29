@@ -9,6 +9,7 @@
  * Frozen: read-only files and bounded PSRAM; reject encryption, ZIP64, multiple disks and duplicate paths.
  */
 #include "../reader_perf.h"
+#include "../reader_memory.h"
 #include "zip_reader.h"
 #include <limits.h>
 #include <stdbool.h>
@@ -311,3 +312,16 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
 
 esp_err_t zip_extract(zip_reader_t *z, int index, void *dst, size_t cap) { return extract_impl(z, index, dst, cap, false); }
 esp_err_t zip_extract_prefix(zip_reader_t *z, int index, void *dst, size_t cap) { return extract_impl(z, index, dst, cap, true); }
+
+#if CONFIG_READER_PERF && CONFIG_READER_MEMORY
+void zip_reader_memory_stats(const zip_reader_t *zip, reader_source_memory_stats_t *stats) {
+    if (!zip) return;
+    stats->zip_state = reader_memory_owned(zip);
+    stats->zip_index = reader_memory_owned(zip->entries) + reader_memory_owned(zip->slots);
+    stats->zip_names = 0;
+    if (zip->entries) for (unsigned i = 0; i < zip->count; ++i)
+        stats->zip_names += reader_memory_owned(zip->entries[i].name);
+    stats->zip_directory = reader_memory_owned(zip->dir_buf);
+    stats->open_files += zip->file != NULL;
+}
+#endif

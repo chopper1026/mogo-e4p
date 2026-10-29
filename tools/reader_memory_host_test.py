@@ -48,6 +48,13 @@ static unsigned queries,logs;
 static bool ready=true;
 bool reader_perf_memory_ready(void){return ready;}
 static reader_memory_stats_t captured;
+static unsigned source_snapshots,source_logs;
+void book_source_memory_stats(reader_source_memory_stats_t *stats){
+ assert(ready);*stats=(reader_source_memory_stats_t){.txt_index=123};++source_snapshots;
+}
+void reader_perf_source_memory(const char *event,const reader_source_memory_stats_t *stats){
+ assert(!strcmp(event,"test")&&stats->txt_index==123);++source_logs;
+}
 static void *own(size_t bytes){
  void *p=calloc(1,bytes);assert(p);
  for(unsigned i=0;i<64;++i)if(!allocated[i].pointer){allocated[i].pointer=p;allocated[i].bytes=bytes;live+=bytes;return p;}
@@ -109,7 +116,7 @@ int main(void){
  ch->images[0]=own(126);ch->images[1]=own(127);
  s_page_images=own(2*sizeof(*s_page_images));s_page_image_count=2;s_page_images[0].gray=own(128);
  s_shelf=own(129);s_guard_cache=own(130);s_editor_cover=own(131);s_covers[0].gray=own(132);s_covers[1].fast_bits=own(133);
- ready=false;unsigned before_queries=queries;reader_memory_snapshot("test");assert(queries==before_queries&&logs==1);ready=true;
+ ready=false;unsigned before_queries=queries;reader_memory_snapshot("test");assert(queries==before_queries&&logs==1&&source_snapshots==1&&source_logs==1);ready=true;
  reader_memory_snapshot("test");assert(listed()==live&&captured.font_source==101&&captured.font_tables==522);
  assert(captured.font_glyphs==2*sizeof(*a)+111&&captured.font_slots==2);
  assert(captured.layout==462&&captured.prefetch==118&&captured.background==119);
@@ -127,7 +134,7 @@ int main(void){
  memset(s_slots,0,sizeof(s_slots));memset(&s_reader_session,0,sizeof(s_reader_session));memset(s_covers,0,sizeof(s_covers));
  work=s_catalog=s_pages=s_line=s_images=s_page_img_start=s_shelf=s_guard_cache=s_editor_cover=NULL;
  s_page_images=NULL;s_page_image_count=0;
- reader_memory_snapshot("test");reader_memory_snapshot("test");assert(!listed()&&logs==6);
+ reader_memory_snapshot("test");reader_memory_snapshot("test");assert(!listed()&&logs==6&&source_snapshots==6&&source_logs==6);
  puts("PASS: actual owner snapshots, borrowed/static exclusion, CFF alias, glyph lists, partial allocation, retained workspaces and repeated exit");
 }
 '''
