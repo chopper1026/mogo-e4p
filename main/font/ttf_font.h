@@ -20,7 +20,6 @@
 #define TTF_SIZE_SMALL 0
 #define TTF_SIZE_LARGE 1
 
-#define TTF_FONT_MAX 24
 #define TTF_FONT_NAME_MAX 64
 #define TTF_FONT_PATH_MAX 160
 
@@ -93,6 +92,8 @@ esp_err_t ttf_font_open_builtin(void);
 bool ttf_font_is_builtin(void);
 bool ttf_font_path_is_builtin(const char* path);
 void ttf_font_unload(void);
+/// 按目录内容扩容，不限制字体数量；内存不足时保留已扫描项，可再次扫描重试。
+/// Grow to fit the directories without a font-count cap; keep collected entries on OOM and allow rescanning.
 int ttf_font_scan(void);
 int ttf_font_count(void);
 const ttf_font_item_t* ttf_font_item(int index);

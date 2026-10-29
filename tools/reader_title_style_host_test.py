@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory() as folder:
     (p / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
     (p / 'esp_log.h').write_text('#pragma once\nstatic inline void host_log(const char *t,const char *f,...){(void)t;(void)f;}\n#define ESP_LOGI(...) host_log(__VA_ARGS__)\n#define ESP_LOGW(...) host_log(__VA_ARGS__)\n#define ESP_LOGE(...) host_log(__VA_ARGS__)\n')
     (p / 'esp_timer.h').write_text('#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n')
-    (p / 'esp_heap_caps.h').write_text('#pragma once\n#include <stddef.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\nvoid *heap_caps_malloc(size_t,int);\nvoid *heap_caps_calloc(size_t,size_t,int);\nvoid heap_caps_free(void*);\nsize_t heap_caps_get_free_size(int);\nsize_t heap_caps_get_largest_free_block(int);\n')
+    (p / 'esp_heap_caps.h').write_text('#pragma once\n#include <stddef.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\nvoid *heap_caps_malloc(size_t,int);\nvoid *heap_caps_calloc(size_t,size_t,int);\nvoid *heap_caps_realloc(void*,size_t,int);\nvoid heap_caps_free(void*);\nsize_t heap_caps_get_free_size(int);\nsize_t heap_caps_get_largest_free_block(int);\n')
     (p / 'epdiy.h').write_text((ROOT / 'tools/ui_gesture_stubs/epdiy.h').read_text())
     builtin = (ROOT / 'main/assets/builtin.ttf').read_bytes()
     assets = '#include <stdint.h>\nconst uint8_t data[] asm("_binary_builtin_ttf_start")={' + ','.join(map(str, builtin)) + '};\n'

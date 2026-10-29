@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory() as folder:
 #define MALLOC_CAP_8BIT 2
 void *heap_caps_malloc(size_t,int);
 void *heap_caps_calloc(size_t,size_t,int);
+void *heap_caps_realloc(void*,size_t,int);
 void heap_caps_free(void*);
 size_t heap_caps_get_free_size(int);
 size_t heap_caps_get_largest_free_block(int);

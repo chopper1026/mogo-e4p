@@ -50,6 +50,7 @@ static inline int64_t esp_timer_get_time(void){return 0;}
 #define MALLOC_CAP_8BIT 2
 void *heap_caps_malloc(size_t n,int caps);
 void *heap_caps_calloc(size_t n,size_t s,int caps);
+void *heap_caps_realloc(void *p,size_t n,int caps);
 void heap_caps_free(void *p);
 size_t heap_caps_get_allocated_size(void *p);
 static inline size_t heap_caps_get_largest_free_block(int caps){(void)caps;return 0;}

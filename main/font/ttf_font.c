@@ -24,6 +24,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -358,30 +359,43 @@ static bool catalog_has_name(
 // 字体目录放 PSRAM，理由同文件列表。
 // The font catalogue lives in PSRAM for the same reason as the file list.
 static ttf_font_item_t *s_catalog;
+static size_t s_catalog_cap;
 
-static bool catalog_alloc(void) {
-    if (!s_catalog)
-        s_catalog = heap_caps_calloc(TTF_FONT_MAX, sizeof(ttf_font_item_t),
-                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return s_catalog != NULL;
+static bool catalog_alloc(size_t count) {
+    if (count <= s_catalog_cap) return true;
+    size_t limit = SIZE_MAX / sizeof(*s_catalog);
+    if (limit > INT_MAX) limit = INT_MAX;
+    if (count > limit) return false;
+    size_t capacity = s_catalog_cap ? s_catalog_cap : 32;
+    while (capacity < count) capacity = capacity > limit / 2 ? limit : capacity * 2;
+    ttf_font_item_t *items = heap_caps_realloc(
+        s_catalog, capacity * sizeof(*items), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+    if (!items) return false;
+    s_catalog = items;
+    s_catalog_cap = capacity;
+    return true;
 }
 static int s_catalog_n;
 
 int ttf_font_scan(void) {
-    if (!catalog_alloc()) return 0;
     s_catalog_n = 0;
     for (size_t d = 0; d < sizeof(k_font_dirs) / sizeof(k_font_dirs[0]); d++) {
         const char* font_dir = k_font_dirs[d] ? k_font_dirs[d] : app_settings_fonts_dir();
         DIR* dir = opendir(font_dir);
         if (dir == NULL) continue;
         struct dirent* ent;
-        while ((ent = readdir(dir)) != NULL && s_catalog_n < TTF_FONT_MAX) {
+        while ((ent = readdir(dir)) != NULL) {
             if (ent->d_name[0] == '.') continue; // Ignore macOS ._ font sidecars.
             if (!is_ttf_name(ent->d_name)) continue;
             char name[TTF_FONT_NAME_MAX];
             font_stem(ent->d_name, name, sizeof(name));
             if (name[0] == '\0' || catalog_has_name(s_catalog, s_catalog_n, name)) {
                 continue;
+            }
+            if (!catalog_alloc((size_t)s_catalog_n + 1)) {
+                closedir(dir);
+                goto scan_done;
             }
             snprintf(
                 s_catalog[s_catalog_n].path, sizeof(s_catalog[s_catalog_n].path),
@@ -392,6 +406,7 @@ int ttf_font_scan(void) {
         }
         closedir(dir);
     }
+scan_done:
     if (s_catalog_n > 1) {
         qsort(s_catalog, (size_t)s_catalog_n, sizeof(s_catalog[0]), font_item_cmp);
     }
