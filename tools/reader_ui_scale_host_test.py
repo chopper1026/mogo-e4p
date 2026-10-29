@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from reader_settings_test_support import declarations, implementation
 import re,subprocess,tempfile
 def function(name,path):
     text=path.read_text()
@@ -76,6 +77,7 @@ static void epd_draw_circle(int x,int y,int radius,int color,uint8_t *fb){epd_fi
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.x>=0&&r.x+r.width<=684&&r.y>=0);}
 static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int color){ui_fill_round_rect(fb,r,radius,color);}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int color){(void)fb;(void)x;(void)y;(void)px;(void)icon;(void)color;}
+static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t color){(void)fb;(void)y;(void)x;(void)w;(void)color;}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static int app_settings_book_weight_fine(void){return 2;}
 #define APP_BOOK_WEIGHT_FINE_MAX 32
@@ -104,10 +106,11 @@ static void draw_reading_font_name(uint8_t *fb,EpdRect box,const char *text){
  actual_reading_font_name(fb,box,text);assert(selected_slot==old_slot&&antialias==old_aa);
 }
 '''
+unit+=declarations()+'\n'+implementation()+'\n'
 unit+=function('draw_sheet',book)+'\n'
 for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
              'draw_pill_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
-             'draw_reading_switch','draw_reading_card','draw_reading_toggle'):
+             'draw_reading_switch'):
     unit+=function(name,book)+'\n'
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'

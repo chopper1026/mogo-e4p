@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
+from reader_settings_test_support import geometry
 
 ROOT = Path(__file__).resolve().parents[1]
 unit = r'''
@@ -29,8 +30,9 @@ static app_redraw_t apply_reader_option(app_ctx_t *ctx,int i){(void)ctx;assert(i
 static void invalidate_prep(void){++invalidates;}
 '''
 source = ROOT/'main/apps/app_book.c'
-unit+='static unsigned app_settings_system_font_size(void){return 100;}\n'
-for name in ('reader_ui_extra', 'reading_settings_top', 'reading_setting_rect', 'reading_settings_action'):
+unit+=geometry()
+unit+='static unsigned scale=100;\nstatic unsigned app_settings_system_font_size(void){return scale;}\n'
+for name in ('reading_settings_top', 'reading_setting_rect', 'reading_settings_action'):
     unit += function(name, source)+'\n'
 unit += r'''
 int main(void){
@@ -60,6 +62,21 @@ int main(void){
     reading_settings_action(&ctx,342,1170);assert(s_reader_panel==READER_PANEL_NONE);
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
     reading_settings_action(&ctx,342,579);assert(s_reader_panel==READER_PANEL_NONE);
+    for(scale=100;scale<=200;++scale)for(int i=0;i<7;++i){
+        EpdRect a=reading_setting_rect(i);
+        const int points[4][2]={{a.x,a.y},{a.x+a.width-1,a.y},{a.x,a.y+a.height-1},{a.x+a.width-1,a.y+a.height-1}};
+        for(int k=0;k<4;++k){
+            s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
+            assert(reading_settings_action(&ctx,points[k][0],points[k][1])==APP_REDRAW_PAGE);
+            if(i==2)assert(s_reader_panel==READER_PANEL_TURN_SETTINGS);
+            else if(i==3)assert(s_reader_panel==READER_PANEL_KEY_SETTINGS);
+        }
+        s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
+        int previous=invalidates;
+        assert(reading_settings_action(&ctx,a.x+a.width,a.y)==APP_REDRAW_NONE);
+        assert(reading_settings_action(&ctx,a.x,a.y+a.height)==APP_REDRAW_NONE);
+        assert(invalidates==previous&&s_reader_panel==READER_PANEL_REFRESH_SETTINGS);
+    }
     puts("PASS: approved half-sheet bounds, nonoverlapping shared hit areas, key controls beside turn mode, full-refresh/effect cycles, toggles, secondary pages, Done and inert gaps");
 }
 '''

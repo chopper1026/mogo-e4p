@@ -78,6 +78,8 @@ def check(root):
                 reason = "shelf cover state must not depend on UI or system policy"
             elif relative == "main/book/book_shelf_category_state.c" and target_group != "book":
                 reason = "shelf category state must not depend on UI or system policy"
+            if relative in {"main/ui/ui_reader_settings.c", "main/ui/ui_reader_settings.h"} and target_group != "ui":
+                reason = "reader settings view must not depend on page state or system policy"
             if reason:
                 errors.append(f"{location}: {reason} ({target_name})")
 

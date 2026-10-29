@@ -13,13 +13,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix="architecture-") as folder:
         root = Path(folder)
         files = {
-            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" "book/book_shelf_category_state.c" "book/book_shelf_covers.c" PRIV_INCLUDE_DIRS ".")\n',
+            "main/CMakeLists.txt": 'idf_component_register(SRCS "app/loop.c" "image/image.c" "font/font.c" "book/book_shelf_category_state.c" "book/book_shelf_covers.c" "ui/ui_reader_settings.c" PRIV_INCLUDE_DIRS ".")\n',
             "main/app/loop.c": '#include "contracts.h"\n',
             "main/app/contracts.h": "#pragma once\n",
             "main/apps/page.h": "#pragma once\n",
             "main/book/book.h": "#pragma once\n",
             "main/book/book_shelf_category_state.c": "void categories(void) {}\n",
             "main/book/book_shelf_covers.c": "void covers(void) {}\n",
+            "main/ui/ui_reader_settings.c": "void settings_view(void) {}\n",
             "main/settings.h": "#pragma once\n",
             "main/image/image.c": "void image(void) {}\n",
             "main/font/font.c": "void font(void) {}\n",
@@ -34,6 +35,9 @@ def main():
             path.write_text(source)
         assert not check(root)
         cases = [
+            ("main/ui/ui_reader_settings.c", '#include "settings.h"\n', "reader settings view must not"),
+            ("main/ui/ui_reader_settings.c", '#include "book.h"\n', "reader settings view must not"),
+            ("main/ui/ui_reader_settings.c", '#include "../apps/page.h"\n', "reader settings view must not"),
             ("main/app/loop.c", '#include "../apps/page.h"\n', "app coordinators"),
             ("main/image/image.c", '#include <book.h>\n', "generic image"),
             ("main/font/font.c", '#include "policy.h"\n', "font engines"),
@@ -55,7 +59,7 @@ def main():
         # 注释示例不会变成假依赖。/ Commented examples must not become false dependencies.
         (root / "main/app/loop.c").write_text('// #include "../apps/page.h"\n/*\n#include "../apps/page.h"\n*/\n')
         assert not check(root)
-    print("architecture: PASS (real tree and eleven rejecting fixtures)")
+    print("architecture: PASS (real tree and fourteen rejecting fixtures)")
 
 
 if __name__ == "__main__":

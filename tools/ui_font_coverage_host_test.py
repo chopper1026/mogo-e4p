@@ -74,11 +74,11 @@ def has_glyph(codepoint):
 
 
 source = (root / "main/apps/app_book.c").read_text(encoding="utf-8")
-first = source.index("static void draw_reading_toggle(")
+first = source.index("static const char *reader_key_label(")
 last = source.index("static void draw_font_picker(", first)
 # Covers the reading sheet, its explanations, and the horizontal/vertical page
 # diagrams. Dynamic book text and user font names intentionally use other paths.
-section = source[first:last]
+section = source[first:last] + (root / "main/ui/ui_reader_settings.c").read_text(encoding="utf-8")
 labels = re.findall(r'"([^"\n]*)"', section)
 # 本地快刷细点阵说明也必须使用完整系统字形。/ The local fine-dot mode explanation also needs complete system glyphs.
 settings = (root / "main/apps/app_device_settings.c").read_text()

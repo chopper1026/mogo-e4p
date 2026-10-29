@@ -198,6 +198,7 @@
 #include "ttf_font.h"
 #include "ui_kit.h"
 #include "ui_reader_heading.h"
+#include "ui_reader_settings.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
 #include "ui_image_dither.h"
@@ -2207,101 +2208,32 @@ static void draw_layout_settings(uint8_t* fb) {
 
 // 用户确认半屏双列布局；绘制与点击共用同一矩形，间隙不穿透。/ Approved two-column half sheet; paint and hit testing share rectangles with inert gaps.
 static EpdRect reading_setting_rect(int index) {
-    int extra=reader_ui_extra(56), footer=reader_ui_extra(36);
-    if (index < 0 || index >= 7) return (EpdRect){0, 0, 0, 0};
-    int row=index/2;
-    // 七项排成四行双列：前三行各两格，竖排单独占第四行左格；行距 104，四行底部仍留在「完成」之上。
-    // Seven items fill four two-column rows: three paired rows and a lone vertical switch in the
-    // fourth row's left cell; a 104 pitch keeps every row clear of Done.
-    return (EpdRect){36+(index%2)*314,702+row*104-(3-row)*extra-footer,298,98+extra};
+    return ui_reader_settings_rect(app_settings_system_font_size(), index);
 }
-static int reading_settings_top(void) { return 580-reader_ui_extra(204); }
+static int reading_settings_top(void) {
+    return ui_reader_settings_top(app_settings_system_font_size());
+}
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on) {
-    ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
-    int cx = track.x + (on ? 49 : 20);
-    epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
-}
-static void draw_reading_card(uint8_t *fb, int index, const char *title,
-                              const char *value, bool cycle) {
-    EpdRect card = reading_setting_rect(index);
-    ui_fill_round_rect(fb, card, 20, UI_GRAY_WHITE);
-    ui_draw_control_frame(fb, card, 20, 0x68);
-    ui_text_box(fb,(EpdRect){card.x+21,card.y+6,card.width-42,card.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
-    char shown[48]; copy_text(shown,sizeof(shown),value);
-    ui_text_box(fb,(EpdRect){card.x+21,card.y+card.height/2,222,card.height/2-8},26,shown,EPD_DRAW_ALIGN_LEFT,false);
-    ui_draw_icon(fb,card.x+272,card.y+3*card.height/4,26,
-                 cycle ? UI_ICON_ROTATE_CW : UI_ICON_CHEVRON_RIGHT, 0x38);
-}
-static void draw_reading_toggle(uint8_t *fb, int index, const char *title,
-                                const char *detail, bool on) {
-    EpdRect row = reading_setting_rect(index);
-    ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
-    ui_draw_control_frame(fb, row, 20, 0x68);
-    if (detail) {
-        // 半宽格放两行：标题与说明各降一号字，开关仍留在右端。
-        // A half-width cell carries two lines: title and detail step down a size, the switch stays right.
-        ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-40,row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){row.x+row.width-90,row.y+3*row.height/4-19,69,39},on);
-    } else {
-        ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+21,row.y+row.height/2,166,row.height/2-8},26,on?"开启":"关闭",EPD_DRAW_ALIGN_LEFT,false);
-        draw_reading_switch(fb,(EpdRect){row.x+209,row.y+3*row.height/4-19,69,39},on);
-    }
+    ui_reader_settings_switch(fb, track, on);
 }
 static void draw_reading_settings(uint8_t* fb) {
     draw_sheet(fb, reading_settings_top(), "阅读设置");
-    char interval[24];
-    unsigned pages = app_settings_reader_full_pages();
-    if (pages) snprintf(interval, sizeof(interval), "每 %u 页", pages);
-    else copy_text(interval, sizeof(interval), "不强制");
-    draw_reading_card(fb, 0, "自动全刷", interval, true);
-    draw_reading_card(fb, 1, "翻页效果", app_settings_reader_turn_effect() ? "水波纹" : "普通", true);
-    draw_reading_card(fb, 2, "翻页模式", app_settings_reader_vertical_turn() ? "上下翻页" : "左右翻页", false);
-    draw_reading_card(fb, 3, "按键控制", "自定义按键", false);
-    draw_reading_toggle(fb, 4, "状态栏", NULL, app_settings_reader_statusbar());
-    draw_reading_toggle(fb, 5, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
-    draw_reading_toggle(fb, 6, "竖排（从右到左）", NULL, app_settings_book_vertical());
-    ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
-    reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
+    const ui_reader_settings_values_t values = {
+        .system_font_size = app_settings_system_font_size(),
+        .full_pages = app_settings_reader_full_pages(),
+        .turn_effect = app_settings_reader_turn_effect(),
+        .vertical_turn = app_settings_reader_vertical_turn(),
+        .statusbar = app_settings_reader_statusbar(),
+        .hide_images = app_settings_reader_hide_images(),
+        .vertical_text = app_settings_book_vertical(),
+    };
+    ui_reader_settings_draw(fb, &values);
 }
 
 static void draw_turn_settings(uint8_t *fb) {
     draw_sheet(fb, 270, "翻页模式");
     draw_sheet_back(fb, 270);
-    bool vertical = app_settings_reader_vertical_turn();
-    for (int i = 0; i < 2; ++i) {
-        int y = 370 + i * 322;
-        bool selected = vertical == (i != 0);
-        EpdRect card = {36, y, 612, 292};
-        ui_fill_round_rect(fb, card, 22, selected ? 0xe0 : 0xf0);
-        ui_draw_control_frame(fb, card, 22, 0x50);
-        ui_draw_control_frame(fb, (EpdRect){37, y + 1, 610, 290}, 21, 0x50);
-        EpdRect diagram = {64, y + 37, 182, 220};
-        ui_fill_round_rect(fb, diagram, 12, UI_GRAY_WHITE);
-        ui_draw_control_frame(fb, diagram, 12, 0x58);
-        if (i) {
-            ui_hairline(fb, diagram.y + 73, 65, 180, 0x58);
-            reader_panel_text_vc(fb, 155, diagram.y + 36, 21, "上一页", EPD_DRAW_ALIGN_CENTER, false);
-            reader_panel_text_vc(fb, 155, diagram.y + 147, 21, "下一页", EPD_DRAW_ALIGN_CENTER, false);
-        } else {
-            ui_fill_rect_fast((EpdRect){155, diagram.y + 1, 1, 218}, 0x58, fb);
-            ui_text_box(fb,(EpdRect){110-39,diagram.y+94-15,78,30},21,"上一",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){110-39,diagram.y+126-15,78,30},21,"页",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){201-39,diagram.y+94-15,78,30},21,"下一",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){201-39,diagram.y+126-15,78,30},21,"页",EPD_DRAW_ALIGN_CENTER,false);
-        }
-        ui_text_box(fb,(EpdRect){274,y+43,350,44},32,i ? "上下翻页" : "左右翻页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+112,350,44},23,i ? "上 1/3：上一页" : "左 1/2：上一页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+158,350,44},23,i ? "下 2/3：下一页" : "右 1/2：下一页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+213,350,44},21,"左右滑动均可翻页",EPD_DRAW_ALIGN_LEFT,false);
-        epd_draw_circle(610, y + 61, 12, 0x38, fb);
-        if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
-    }
-    reader_panel_text_vc(fb, 342, 1051, 21, "工具栏「全屏」按钮切换全屏", EPD_DRAW_ALIGN_CENTER, false);
-    ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
-    reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
+    ui_reader_turn_settings_draw(fb, app_settings_reader_vertical_turn());
 }
 
 static const char *reader_key_label(app_reader_key_action_t action) {
