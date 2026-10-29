@@ -11,6 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOK = ROOT / 'main/apps/app_book.c'
+HEADING = ROOT / 'main/ui/ui_reader_heading.c'
+HEADING_HEADER = ROOT / 'main/ui/ui_reader_heading.h'
 KIT = ROOT / 'main/ui/ui_kit.c'
 FONT = ROOT / 'main/assets/builtin.ttf'
 
@@ -122,7 +124,7 @@ static void save(const char *path,uint8_t *frame){FILE *f=fopen(path,"wb");asser
 
 def geometry_slices():
     """题头带与四款样式的绘制函数：阅读页与面板预览用的是同一份。"""
-    return ''.join(function(n, BOOK) + '\n' for n in (
+    return ''.join(function(n, HEADING) + '\n' for n in (
         'copy_text', 'reader_heading_band', 'heading_len', 'heading_line', 'reader_heading_fit',
         'draw_heading_plain', 'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
         'draw_heading_single', 'heading_prefix_width', 'heading_wrap_break', 'heading_truncate_px',
@@ -181,12 +183,12 @@ def style_unit():
     unit = host_preamble() + epdiy_slices() + kit_slices()
     unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
-    unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', BOOK.read_text()).group(0) + '\n'
+    unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', HEADING_HEADER.read_text()).group(0) + '\n'
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
     # The band's top margin and the size levels come from the real source too; the geometry scales
     # with them.
     unit += ''.join(m + '\n' for m in re.findall(
-        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX|WRAP_\w+) \d+', BOOK.read_text()))
+        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX|WRAP_\w+|TITLE_BYTES|LABEL_BYTES) \d+', HEADING.read_text() + HEADING_HEADER.read_text()))
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
                                                  (ROOT / 'main/settings.h').read_text()))
     unit += geometry_slices()
@@ -246,12 +248,12 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
         unit += function(n, KIT) + '\n'
     unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
-    unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', BOOK.read_text()).group(0) + '\n'
+    unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', HEADING_HEADER.read_text()).group(0) + '\n'
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
     # The band's top margin and the size levels come from the real source too; the geometry scales
     # with them.
     unit += ''.join(m + '\n' for m in re.findall(
-        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX|WRAP_\w+) \d+', BOOK.read_text()))
+        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX|WRAP_\w+|TITLE_BYTES|LABEL_BYTES) \d+', HEADING.read_text() + HEADING_HEADER.read_text()))
     unit += string_table(BOOK, 's_title_style_names')
     unit += string_table(BOOK, 's_title_style_details')
     # 面板的几何常量从源码取，卡片与窗口位置不另抄。

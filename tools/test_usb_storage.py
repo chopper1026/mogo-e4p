@@ -161,5 +161,5 @@ with tempfile.TemporaryDirectory() as d:
         header=p/name;header.parent.mkdir(parents=True,exist_ok=True);header.write_text('#include "usb_stub.h"\n')
     (p/'test.c').write_text(UNIT)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',
-                    '-fno-omit-frame-pointer',f'-I{p}',f'-I{ROOT / "main/apps"}',f'-I{ROOT / "main"}',str(p/'test.c'),'-o',str(p/'test')],check=True)
+                    '-fno-omit-frame-pointer',f'-I{p}',f'-I{ROOT / "main/services"}',f'-I{ROOT / "main"}',str(p/'test.c'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True)

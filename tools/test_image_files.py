@@ -28,12 +28,12 @@ def main():
         (work / "sdkconfig.h").write_text("\n".join([
             "#define CONFIG_JD_SZBUF 512", "#define CONFIG_JD_FORMAT 0", "#define CONFIG_JD_USE_SCALE 1",
             "#define CONFIG_JD_TBLCLIP 1", "#define CONFIG_JD_FASTDECODE 0"]) + "\n")
-        includes = ["tools/book_epub_stubs", "main/book", "components/jpegdec/src",
+        includes = ["tools/book_epub_stubs", "main/book", "main/image", "components/jpegdec/src",
                     "managed_components/espressif__esp_jpeg/tjpgd", "managed_components/espressif__esp_jpeg/include"]
         flags = ["-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-ffunction-sections", "-fdata-sections"]
         flags += ["-I" + str(ROOT / path) for path in includes] + ["-I" + str(work)] + png_cflags
-        sources = ["tools/book_image_file_host_test.c", "main/book/book_cover.c", "main/book/book_image_header.c",
+        sources = ["tools/book_image_file_host_test.c", "main/image/image_decode.c", "main/image/book_image_header.c",
                    "managed_components/espressif__esp_jpeg/tjpgd/tjpgd.c",
                    "components/jpegdec/src/JPEGDEC.cpp", "components/jpegdec/src/jpegdec_shim.cpp"]
         objects = []

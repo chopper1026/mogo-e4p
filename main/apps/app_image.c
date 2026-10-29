@@ -15,7 +15,7 @@
 #include "app.h"
 #include "app_registry.h"
 #include "app_content_open.h"
-#include "book_cover.h"
+#include "image_decode.h"
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "read_pico_sd.h"

@@ -28,10 +28,11 @@ def function(name, path):
     return text[match.start():at]
 
 
-book = ROOT / 'main/apps/app_book.c'
+book = ROOT / 'main/ui/ui_reader_heading.c'
+heading_header = ROOT / 'main/ui/ui_reader_heading.h'
 kit = ROOT / 'main/ui/ui_kit.c'
 settings = ROOT / 'main/settings.h'
-source = book.read_text()
+source = book.read_text() + heading_header.read_text()
 
 # 样式表从真实源码取，序号与固件一致。
 # Take the style table from the real source so the indices cannot drift from the firmware.
@@ -54,9 +55,9 @@ size_min = numeric('APP_BOOK_TITLE_SIZE_MIN', settings)
 size_max = numeric('APP_BOOK_TITLE_SIZE_MAX', settings)
 size_step = numeric('APP_BOOK_TITLE_SIZE_STEP', settings)
 size_default = numeric('APP_BOOK_TITLE_SIZE_DEFAULT', settings)
-block_top = numeric('READER_HEADING_BLOCK_TOP', book)
-block_height = numeric('READER_HEADING_BLOCK_HEIGHT', book)
-bold_px = numeric('READER_HEADING_BOLD_PX', book)
+block_top = numeric('READER_HEADING_BLOCK_TOP', heading_header)
+block_height = numeric('READER_HEADING_BLOCK_HEIGHT', heading_header)
+bold_px = numeric('READER_HEADING_BOLD_PX', heading_header)
 bold_steps = numeric('UI_TITLE_BOLD_STEPS', kit)
 LEVELS = list(range(size_min, size_max + 1, size_step))
 
@@ -144,7 +145,7 @@ void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
     unit += f'#define READER_HEADING_BOLD_PX {bold_px}\n'
     # 折行参数也取真实源码：缩字号下限与两行间距不另抄。
     # Wrapping constants come from the real source too, so the floor and the gap cannot drift.
-    for macro in re.findall(r'#define READER_HEADING_WRAP_\w+ \d+', source):
+    for macro in re.findall(r'#define READER_HEADING_(?:WRAP_\w+|TITLE_BYTES|LABEL_BYTES) \d+', source):
         unit += macro + '\n'
     unit += f'#define BAND_HEIGHT_EXPECTED {band_height}\n'
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',

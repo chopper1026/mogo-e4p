@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 import re,struct,subprocess,tempfile,zlib
 root=Path(__file__).resolve().parents[1]
-source=(root/'main/book/book_cover.c').read_text()
+source=(root/'main/image/image_decode.c').read_text()
 def fn(name):
     start=re.search(r'^(?:static )?(?:inline )?[^\n]+\b'+name+r'\([^;]*?\)\s*\{',source,re.M).start()
     brace=source.index('{',start);depth=1;at=brace+1

@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
-FONT = ROOT / 'main/font/app_font_context.c'
+FONT = ROOT / 'main/services/app_font_context.c'
 unit = r'''
 #include <assert.h>
 #include <errno.h>

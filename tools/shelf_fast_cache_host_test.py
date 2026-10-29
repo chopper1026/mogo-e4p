@@ -75,7 +75,7 @@ static void* heap_caps_calloc(size_t count,size_t bytes,unsigned caps){
 static EpdRect row_rect(int row){return (EpdRect){36+(row%3)*210+phase_shift,224+(row/3)*282,192,260};}
 '''
 unit += function('ui_contrast_gray', ROOT / 'main/ui/ui_kit.c') + '\n'
-unit += function('book_cover_crop', ROOT / 'main/book/book_cover.c') + '\n'
+unit += function('book_cover_crop', ROOT / 'main/image/image_decode.c') + '\n'
 unit += function('cover_favorite_needs_white_edge', book) + '\n'
 for name in ('shelf_cover_image', 'invalidate_covers', 'release_fast_covers', 'fast_cover_matches', 'prepare_fast_covers', 'app_book_cover_mode_changed'):
     unit += function(name, book) + '\n'

@@ -65,7 +65,7 @@ def main():
             obj = folder / (name+'.o')
             subprocess.run(flags + ['-Dmalloc=tracked_malloc', '-Dcalloc=tracked_calloc',
                                    '-Drealloc=tracked_realloc', '-Dfree=tracked_free',
-                                   '-c', 'main/book/'+name+'.c', '-o', str(obj)], cwd=ROOT, check=True)
+                                   '-c', ('main/image/' if name == 'book_image_header' else 'main/book/')+name+'.c', '-o', str(obj)], cwd=ROOT, check=True)
             objects.append(str(obj))
         exe = folder / 'source-memory'
         subprocess.run(flags + ['tools/reader_source_memory_host_test.c', *objects, '-lz', '-o', str(exe)],

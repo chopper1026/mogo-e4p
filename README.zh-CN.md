@@ -1,5 +1,7 @@
 # kiikoread
 
+> 当前仓库目标为 Metalio E-INK4 Plus（ESP32-S31）。开发请读[上手指南](docs/ONBOARDING.md)、[代码结构](docs/ARCHITECTURE.md)和[测试工具](tools/README.md)；以下上游旧板介绍不作为当前硬件或构建参数。
+
 > Metalio E-INK4 Plus（ESP32-S31）移植版的硬件、构建与代码边界见根目录 [README.md](README.md)。旧演示页、示例正文和 continuous_du 已移除；现有产品功能保留。本文其余旧板说明仅作上游背景。
 > For this Metalio E-INK4 Plus (ESP32-S31) port, use the root [README.md](README.md) for hardware, builds and code boundaries. Legacy demos, sample text and continuous_du have been removed; current product features remain. The remaining old-board details are upstream background.
 

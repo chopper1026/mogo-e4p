@@ -64,7 +64,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
  for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=function('pixel',ROOT/'main/ui/ui_pinpad.c')+'\n'
  unit+='typedef struct {unsigned x,y,width,height;} book_crop_t;\n'
- unit+=function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
+ unit+=function('book_cover_crop',ROOT/'main/image/image_decode.c')+'\n'
  unit+=r'''
 #include "ui_image_dither.h"
 #define UI_GRAY_WHITE 255

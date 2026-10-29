@@ -6,7 +6,7 @@ from pathlib import Path
 import os,re,struct,subprocess,tempfile,zlib
 from home_cover_cache_host_test import function
 r=Path(__file__).resolve().parents[1]
-c=r/'main/book/book_cover.c'
+c=r/'main/image/image_decode.c'
 u=r'''
 #include <assert.h>
 #include <stdbool.h>

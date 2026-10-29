@@ -69,7 +69,7 @@ def main():
                         '-I' + str(ROOT / 'main/book'), str(ROOT / 'tools/book_epub_host_test.c'),
                         str(ROOT / 'main/book/book_epub.c'), str(ROOT / 'main/book/zip_reader.c'),
                         str(ROOT / 'main/book/html_text.c'), str(ROOT / 'main/book/book_index_cache.c'),
-                        str(ROOT / 'main/book/book_image_header.c'),
+                        str(ROOT / 'main/image/book_image_header.c'),
                         '-lz', '-o', str(exe)], check=True)
         cases = []
 
@@ -265,7 +265,7 @@ def main():
                         '-I' + str(ROOT / 'main/book'), str(ROOT / 'tools/book_epub_large_host_test.c'),
                         str(ROOT / 'main/book/book_epub.c'), str(ROOT / 'main/book/zip_reader.c'),
                         str(ROOT / 'main/book/html_text.c'), str(ROOT / 'main/book/book_index_cache.c'),
-                        str(ROOT / 'main/book/book_image_header.c'),
+                        str(ROOT / 'main/image/book_image_header.c'),
                         '-lz', '-o', str(large_exe)], check=True)
         subprocess.run([str(large_exe), str(large)], check=True)
 

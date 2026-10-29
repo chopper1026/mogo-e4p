@@ -18,7 +18,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
-#include "book_cover.h"
+#include "image_decode.h"
 #include "esp_heap_caps.h"
 #include "ui_kit.h"
 #include "ui_image_dither.h"

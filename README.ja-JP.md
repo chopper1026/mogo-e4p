@@ -1,5 +1,7 @@
 # kiikoread
 
+> このリポジトリの対象は Metalio E-INK4 Plus（ESP32-S31）です。[開発ガイド](docs/ONBOARDING.md)、[コード構造](docs/ARCHITECTURE.md)、[テストツール](tools/README.md)を参照してください。以下の旧基板情報は現在のハードウェア・ビルド設定ではありません。
+
 > Metalio E-INK4 Plus（ESP32-S31）移植版的硬件、构建与代码边界见根目录 [README.md](README.md)。旧演示页、示例正文和 continuous_du 已移除；现有产品功能保留。本文其余旧板说明仅作上游背景。
 > For this Metalio E-INK4 Plus (ESP32-S31) port, use the root [README.md](README.md) for hardware, builds and code boundaries. Legacy demos, sample text and continuous_du have been removed; current product features remain. The remaining old-board details are upstream background.
 > S31 の製品・CI・OTA ビルドは同じ `sdkconfig.defaults` を使い、CI のみ `sdkconfig.ci` の警告設定を重ねます。ESP-IDF 6.1 のコマンドには `--preview` が必要です。

@@ -12,10 +12,10 @@ This file holds **only the protocol and the template** and is safe to merge upst
 
 ## 接手方 / Taking over
 
-1. `docs/HANDOFF.local.md` **不存在** → 这台机器上没有进行中的任务，从 [ONBOARDING.md §0](ONBOARDING.md#0-阅读顺序--reading-order) 正常开始。
+1. `docs/HANDOFF.local.md` **不存在** → 这台机器上没有进行中的任务，从 [ONBOARDING.md](ONBOARDING.md) 正常开始。
 2. 存在 → 读最新条目 → `git status --short` / `git diff --stat` 对照"涉及文件" → 重读涉及文件的 Frozen 段 → 在账本顶部追加"接手"条目 → 开工。
 3. 账本最新条目明显比工作区状态（`git status`、`build/` 时间戳、终端历史）旧 → 前任没写交接。用你能拿到的证据**重建**一条，标题标注"（由 <你> 重建）"，写不出的字段填"未知"，再追加你自己的接手条目。
-4. 完整步骤与检查单：[ONBOARDING.md §12.3–12.4](ONBOARDING.md#12-agent-协作与交接约定--multi-agent-collaboration--handoff)。
+4. 交接字段使用下方模板；目录职责与硬约束分别见 [ARCHITECTURE.md](ARCHITECTURE.md) 和 [AGENTS.md](../AGENTS.md)。
 
 ## 交接方 / Handing off
 
@@ -37,7 +37,7 @@ This file holds **only the protocol and the template** and is safe to merge upst
 - **涉及文件**（新建标 N，修改标 M）：
   - M `main/apps/app_xxx.c`
 - **Frozen 触碰**：无 | `app_xxx.c` 文件头第 N 行，原因：…
-- **硬约束自检**：ONBOARDING §9 全部通过 | 例外：…
+- **硬约束自检**：AGENTS.md 硬约束全部通过 | 例外：…
 - **设备状态**：在跑 <哪个 build>；串口已释放；是否需要重新烧写。
 - **下一步（可直接执行）**：
   1. …

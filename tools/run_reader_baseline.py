@@ -17,6 +17,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "architecture": [sys.executable, "tools/architecture_host_test.py"],
+    "heading": [sys.executable, "tools/reader_title_style_host_test.py"],
+    "font_policy": [sys.executable, "tools/lock_font_host_test.py"],
     "memory": [sys.executable, "tools/reader_memory_host_test.py"],
     "source_memory": [sys.executable, "tools/reader_source_memory_host_test.py"],
     "perf": [sys.executable, "tools/reader_perf_host_test.py"],

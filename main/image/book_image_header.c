@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-#include "book_cover.h"
+#include "image_decode.h"
 #include <string.h>
 
 bool book_jpeg_frame(const uint8_t *data, size_t size, uint8_t *sof,

@@ -1,8 +1,10 @@
 # mogo-e4p
 
+> 当前开发入口：[上手指南](docs/ONBOARDING.md) · [代码结构与依赖边界](docs/ARCHITECTURE.md) · [测试与工具](tools/README.md)。下方阶段表保留移植历史；当前配置以构建清单与 sdkconfig.defaults 为准。
+
 把 **Mogo**（ESP32-S3 阅读固件）移植到 **Metalio E-INK4 Plus**（ESP32-S31，4.7" 1216×684 并口墨水屏）的工作区。
 
-当前状态：**移植工程已建立，M0–M5 的代码骨架完成，`esp32s31` 干净构建通过；等待实机验证。**
+当前产品构建仅支持 **ESP32-S31 / ESP-IDF v6.1 preview**；历史移植与设备验证记录见下文，当前目录职责见架构说明。
 
 ## 先看这个
 

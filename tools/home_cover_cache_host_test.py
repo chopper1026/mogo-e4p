@@ -89,7 +89,7 @@ ready:
 }
 """
     unit += function('ui_contrast_gray', ROOT/'main/ui/ui_kit.c')+'\n'
-    unit += function('book_cover_crop', ROOT/'main/book/book_cover.c')+'\n'
+    unit += function('book_cover_crop', ROOT/'main/image/image_decode.c')+'\n'
     for name in ('book_at','clear_cover_cache','app_home_cover_mode_changed','restore_cover_cache','load_cover'):
         unit += function(name, home)+'\n'
     unit += r'''

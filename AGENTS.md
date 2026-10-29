@@ -63,9 +63,12 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `main/app/app.h` | `app_desc_t` / `app_ctx_t` / `app_redraw_t` 契约。/ Page contract. |
 | `main/app/app_loop.c` | 与页面无关的事件循环：触摸去抖、三键与菜单把手、切页、刷屏、锁屏、SD 字体延迟加载。/ Shared event loop. |
 | `main/app/app_registry.c` | 菜单顺序。加页只改这张表。/ Menu table. |
+| `main/app/app_content_open.h` `app_transfer_mode.h` `app_device_settings_mode.h` | 跨页面请求契约，由目标页面消费。/ Cross-page request contracts consumed by target pages. |
 | `main/app/app_config.h` | 均衡 / ALL_DU 刷新档位。/ Refresh profile. |
 | `main/ui/` | `ui_kit` 排版常量与绘制原语；`ui_menu` 两层菜单。页面互不引用。/ Shared drawing; pages do not include each other. |
 | `main/font/` | stb_truetype 字形缓存。`fallback.h` 是生成位图，勿手改。/ Glyph cache. Do not edit `fallback.h` by hand. |
+| `main/image/` | 公共图像探测、解码与缩放，不依赖书籍、页面或字库。/ Shared image probing, decoding and scaling without book, page or font dependencies. |
+| `main/services/` | 跨页 USB 存储与字体上下文策略。/ Cross-page USB storage and font-context policy. |
 | `main/factory/` | 设备功能自检与出厂 VCOM 标定。/ Device self-test and factory VCOM. |
 | `main/display.*` `sleep.*` `settings.*` | 刷屏封装、睡眠/锁屏、NVS 设置。/ Present helpers, sleep/lock, NVS. |
 | `components/read_pico/` | 板级 BSP：I2C、EPD 板定义与扫描时序、TF 卡、蜂鸣器、flash HPM。/ Board BSP. |
