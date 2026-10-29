@@ -9,11 +9,12 @@
  */
 
 #pragma once
+#include "../display/display_refresh_config.h"
 
 
-// 常规页面用 GL16；阅读翻页用 DU，并在翻页当下周期性 GC16 压残影，不做延迟二次刷新。
+// 常规页面用 GL16；阅读按用户所选模式刷新，并在翻页当下周期性 GC16 压残影，不做延迟二次刷新。
 // KEY2、铺白、睡眠画面这类「清屏重来」仍直接走 GC16。
-// General pages use GL16; reading turns use DU with immediate periodic GC16 ghost cleanup and no delayed second refresh.
+// General pages use GL16; reading follows the selected mode with immediate periodic GC16 cleanup and no delayed second refresh.
 // KEY2, wipe-to-white and sleep faces still go GC16.
 #define APP_REFRESH_BALANCED 0
 #define APP_REFRESH_ALL_DU 1
@@ -44,10 +45,10 @@
 // 阅读页另有独立的可选整屏清残影周期。
 // Count only whole system-page transitions; local controls, dialogs and cover updates do not advance
 // the cleanup cadence. Reading keeps its own configurable full-screen cleanup interval.
-#define APP_UI_GC16_EVERY 40
+#define APP_UI_GC16_EVERY DISPLAY_REFRESH_SYSTEM_CLEANUP_EVERY
 // 非普通子页面的旧灰阶出口每三次做全像素整理；普通模式已改用单次柔和差分，仅保留下面的完整清残影周期。
 // Legacy nonordinary subpage output settles every third page; ordinary uses single soft differences with only the full-cleanup interval below.
-#define APP_UI_FAST_GL16_SETTLE_EVERY 3
+#define APP_UI_FAST_GL16_SETTLE_EVERY DISPLAY_REFRESH_SUBPAGE_SETTLE_EVERY
 // 全像素灰阶仍不能无限消除累积残影，达到阈值时同步做完整 GC16。
 // Full-pixel gray updates cannot remove unlimited ghosting, so periodically run a synchronous GC16.
-#define APP_UI_FAST_GC16_EVERY 12
+#define APP_UI_FAST_GC16_EVERY DISPLAY_REFRESH_MAIN_CLEANUP_EVERY

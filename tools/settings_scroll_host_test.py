@@ -3,6 +3,7 @@ English: Real discrete settings gestures, three-mode presentation and boundary r
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from refresh_test_support import area_boundary
 import re
 import subprocess
 import tempfile
@@ -85,7 +86,7 @@ static EpdRect upgrade_progress_area(void){return(EpdRect){52,468,580,64};}
 typedef struct {int content_bottom;} layout_t;
 static layout_t ble_layout(void){return(layout_t){2000-s_ble_scroll};}
 static layout_t ble_scan_layout(void){return(layout_t){2000};}
-''' + function('scroll_gesture') + '\n' + function('settings_present')
+''' + '\nenum EpdDrawError {EPD_DRAW_SUCCESS};\n' + area_boundary(root) + function('scroll_gesture') + '\n' + function('settings_present')
 unit += '\nstatic app_redraw_t event(app_ctx_t *ctx,const ui_gesture_event_t *ev){(void)ctx;'+event_block+'if(ev->type==UI_GESTURE_TAP)++row_taps;return APP_REDRAW_NONE;}\n'
 unit += r'''
 static ui_gesture_t recognizer;

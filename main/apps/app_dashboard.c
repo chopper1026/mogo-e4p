@@ -56,8 +56,7 @@
 #include "read_pico_crashlog.h"
 #include <math.h>
 #include "display.h"
-#include "display_main_waveform.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "esp_heap_caps.h"
 #include "read_pico_sd.h"
 #include "settings.h"
@@ -700,14 +699,12 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
 static enum EpdDrawError present_clock_area(app_ctx_t *ctx,EpdRect area) {
     // 脏行和脏列交集包含未变化灰底，必须使用等灰保持表，不能重刷该矩形。
     // Dirty-row/column intersections include unchanged grays; hold those pairs instead of driving the rectangle.
-    const bool binary=app_settings_main_fast_refresh();
-    return update_display_area_diff_with(ctx->hl,
-        binary?display_main_bw_waveform():display_main_gray_waveform(),binary?MODE_DU:MODE_GL16,area);
+    return display_refresh_area(ctx->hl, DISPLAY_REFRESH_MAIN_CLOCK, area, DISPLAY_REFRESH_DEFAULT);
 }
 static enum EpdDrawError present_clock_motion(app_ctx_t *ctx,EpdRect area) {
     // 秒针只扫变化圆点的短相位；灰底等值保持，不刷框、不重排整页。
     // Short phases drive only changed dot pixels, holding the gray face without a frame or whole-page paint.
-    return update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
+    return display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, area, DISPLAY_REFRESH_DEFAULT);
 }
 static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
     if(redraw==APP_REDRAW_NONE)return true;
@@ -755,7 +752,7 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
     if(redraw==APP_REDRAW_AREA&&s_clock_pending) {
         s_clock_pending=false;
         ui_fill_rect_fast((EpdRect){24,18,156,44},0xff,ctx->fb);ui_nav_clock_draw(ctx->fb);
-        enum EpdDrawError result=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){24,18,156,44});
+        enum EpdDrawError result=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, (EpdRect){24,18,156,44}, DISPLAY_REFRESH_DEFAULT);
         if(result==EPD_DRAW_SUCCESS&&s_view==HOME_ROOT&&app_settings_home_component()!=APP_HOME_FOLDER) {
             date_now(&s_date);ui_home_clock_style_t style=clock_style(app_settings_home_component());
             clock_draw_region(ctx->fb,(EpdRect){24,640,320,350},&s_date,app_settings_main_fast_refresh(),style,(EpdRect){24,640,320,326},s_widget_phase);
@@ -764,8 +761,7 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
         guard_draw_result(ctx->hl,result);if(result==EPD_DRAW_SUCCESS)s_clock_minute=minute;return true;
     }
     s_clock_pending=s_widget_pending=s_component_pending=false;render(ctx,ctx->fb);enum EpdDrawError result;
-    if(redraw==APP_REDRAW_AREA)result=update_display_area_diff_with(ctx->hl,
-        s_press_pending?&E0470_FOLLOW_WAVEFORM:&E0470_WAVEFORM,s_press_pending?MODE_DU:MODE_GL16,s_area);
+    if(redraw==APP_REDRAW_AREA)result=display_refresh_area(ctx->hl, s_press_pending ? DISPLAY_REFRESH_FEEDBACK : DISPLAY_REFRESH_DETAIL, s_area, DISPLAY_REFRESH_DEFAULT);
     else if(redraw==APP_REDRAW_FULL||s_home_force_full_once) {s_home_force_full_once=false;result=update_display_full(ctx->hl);}
     else result=update_display_fast_page(ctx->hl);
     guard_draw_result(ctx->hl,result);

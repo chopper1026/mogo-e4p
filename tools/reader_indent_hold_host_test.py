@@ -3,6 +3,7 @@
 # 中文：真实手势与缩进控件的连续调整、抬手提交、中断和边界回归。
 # English: Actual gesture/indent controls: hold repeats, release commits, interruptions and hit boundaries.
 from pathlib import Path
+from refresh_test_support import area_boundary
 import re, subprocess, tempfile
 from home_cover_cache_host_test import function
 root=Path(__file__).resolve().parents[1]
@@ -77,6 +78,7 @@ static app_redraw_t apply_reader_layout(app_ctx_t *ctx,int px,const int margin[M
 static app_redraw_t apply_reader_typography(app_ctx_t *ctx,int value){(void)ctx;(void)value;assert(false);return APP_REDRAW_NONE;}
 static void invalidate_prep(void){++invalidated;}
 '''
+unit+='enum EpdDrawError {EPD_DRAW_SUCCESS};\n'+area_boundary(root,feedback_only=True)
 header=(root/'main/ui/ui_gesture.h').read_text()
 unit+=header[header.index('typedef enum {'):header.index('/// 清除状态')]
 for name in ('ui_gesture_reset','emit','ui_gesture_feed'):

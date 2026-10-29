@@ -14,7 +14,7 @@
 #include "sleep.h"
 #include "boot_state.h"
 #include "display.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "read_pico_pmu.h"
 #include "ble_page_turner.h"
 #include "esp_timer.h"
@@ -74,14 +74,14 @@ static void restore_art(uint8_t *fb,const uint8_t *original){
     else if(!lock_screen_restore(fb)){memset(fb,255,FRAME_BYTES);(void)ui_builtin_image_draw(fb,UI_BUILTIN_IMAGE_LOCK);}
 }
 static void present(EpdiyHighlevelState *hl,EpdRect area){
-    epd_poweron();enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area);
+    epd_poweron();enum EpdDrawError result=display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, area, DISPLAY_REFRESH_DEFAULT);
     guard_draw_result(hl,result);
     // 灰阶差分失败只重建同一密码画面，绝不进入未验证的页面。
     // On a display failure rebuild this same protected screen, never an unauthenticated page.
     if(result!=EPD_DRAW_SUCCESS)guard_draw_result(hl,update_display_full(hl));
 }
 static void present_input(EpdiyHighlevelState *hl,EpdRect area){
-    enum EpdDrawError result=update_display_area_diff_with(hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
+    enum EpdDrawError result=display_refresh_area(hl, DISPLAY_REFRESH_FEEDBACK, area, DISPLAY_REFRESH_DEFAULT);
     guard_draw_result(hl,result);
     if(result!=EPD_DRAW_SUCCESS)present(hl,ui_pinpad_full());
 }

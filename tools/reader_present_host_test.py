@@ -12,6 +12,7 @@ with tempfile.TemporaryDirectory(prefix="reader-present-") as directory:
         "-fsanitize=address,undefined", "-Itools/display_host_stubs",
         "-Icomponents/e0470_page_turn/include", "-Imain", "-Imain/display", "-Imain/book",
         "tools/reader_present_host_test.c", "main/book/reader_present.c",
+        "main/display/display_refresh.c", "main/display/display_refresh_policy.c", "-Imain/app",
         "-o", str(binary),
     ], cwd=ROOT, check=True)
     subprocess.run([str(binary)], cwd=ROOT, check=True)

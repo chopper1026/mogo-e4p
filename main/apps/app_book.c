@@ -177,9 +177,7 @@
 #include "book_shelf_manage.h"
 #include "book_shelf_model.h"
 #include "display.h"
-#include "display_reader_waveform.h"
-#include "display_normalize.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -2146,7 +2144,7 @@ static app_redraw_t reader_indent_feedback(app_ctx_t *ctx) {
 static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw) {
     bool pending=s_indent_feedback_pending;s_indent_feedback_pending=false;
     if(!pending||redraw!=APP_REDRAW_AREA||s_view!=READING||s_reader_panel!=READER_PANEL_LAYOUT_SETTINGS||ctx->request_app)return false;
-    guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,s_area));
+    guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
     return true;
 }
 static void draw_layout_settings(uint8_t* fb) {
@@ -3521,7 +3519,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if(reader_indent_present(ctx,redraw))return true;
     if(s_shelf_key_paint_pending && redraw==APP_REDRAW_AREA && s_view==SHELF && !ctx->request_app){
         s_shelf_key_paint_pending=false;
-        guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,s_area));
+        guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (s_reader_clock_pending) {
@@ -3529,7 +3527,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if (redraw==APP_REDRAW_AREA && reader_status_visible()) {
             // 时钟单独短刷，不准备插图、不预排正文，也不累计正文全刷次数。
             // Update status alone, without image preparation, pagination, or reader cleanup counters.
-            enum EpdDrawError err=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,reader_status_area());
+            enum EpdDrawError err=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, reader_status_area(), DISPLAY_REFRESH_DEFAULT);
             if (err==EPD_DRAW_SUCCESS) s_reader_clock_minute=s_reader_clock_painted_minute;
             guard_draw_result(ctx->hl,err);
             return true;
@@ -3539,13 +3537,12 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // Input skips cover/body preparation; idle candidate settling affects only its strip and not whole-page cleanup counting.
     if (redraw == APP_REDRAW_AREA && (s_view == EDIT || s_view == SEARCH)) {
         if (s_input_settle) {
-            guard_draw_result(ctx->hl, update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, s_area));
+            guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_SETTLE, s_area, DISPLAY_REFRESH_DEFAULT));
             s_input_settle = false;
             s_du_count = 0;
             return true;
         }
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,
-            s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : &E0470_WAVEFORM, s_mode, s_area));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, s_mode == MODE_DU ? DISPLAY_REFRESH_FEEDBACK : DISPLAY_REFRESH_DETAIL, s_area, DISPLAY_REFRESH_DEFAULT));
         s_du_count = 0;
         return true;
     }

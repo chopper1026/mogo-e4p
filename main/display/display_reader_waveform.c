@@ -368,3 +368,7 @@ const EpdWaveform* display_reader_image_waveform(void) {
 const EpdWaveform* display_reader_water_waveform(void) {
     return app_settings_book_background_path()[0] ? display_reader_bg_waveform() : water_table();
 }
+
+const EpdWaveform* display_reader_water_base_waveform(void) {
+    return water_table();
+}

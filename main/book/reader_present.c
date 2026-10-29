@@ -7,9 +7,7 @@
  */
 #include "reader_present.h"
 #include "display.h"
-#include "display_reader_waveform.h"
-#include "display_normalize.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 
 reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
                                                const reader_present_request_t *request) {
@@ -24,31 +22,28 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
     // frames keep the derivative. The illustration table also holds equal pairs, so the
     // unchanged pixels that dilation brings along are not pushed through a white-black trip
     // that draws a thin outline.
-    const EpdWaveform* frame_waveform = request->image_page
-        ? display_reader_image_waveform() : display_reader_page_waveform();
+    const unsigned frame_flags = request->image_page ? DISPLAY_REFRESH_IMAGE : DISPLAY_REFRESH_DEFAULT;
     if (request->image_gray_refresh && request->refresh == READER_PRESENT_AREA && !request->cleanup && request->prior_reader) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
         err = request->water_effect
-            ? update_display_area_diff_with(hl, frame_waveform, MODE_GL16, request->body_area)
-            : update_display_area_with(hl, &E0470_FULL_WAVEFORM, MODE_GC16, request->body_area);
+            ? display_refresh_area(hl, DISPLAY_REFRESH_READER_BODY, request->body_area, frame_flags)
+            : display_refresh_area(hl, DISPLAY_REFRESH_READER_IMAGE, request->body_area, DISPLAY_REFRESH_DEFAULT);
         if (err == EPD_DRAW_SUCCESS && request->footer_pending)
-            err = update_display_area_diff_with(hl, &E0470_WAVEFORM, MODE_GL16, request->footer_area);
+            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->footer_area, DISPLAY_REFRESH_DEFAULT);
         if (err == EPD_DRAW_SUCCESS && request->fullscreen)
-            err = update_display_area_diff_with(hl, &E0470_WAVEFORM, MODE_GL16,
-                                                request->progress_area);
+            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
     }
     else if (request->image_gray_refresh) err = request->water_effect &&
         request->refresh != READER_PRESENT_FULL && !request->cleanup
         // 换章那一帧走整屏差分，表的选择与正文带差分一致。
         // The chapter-change frame diffs the whole screen and takes the same table.
-        ? update_display_mode_diff_with(hl, frame_waveform, MODE_GL16)
-        : update_display_with(hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+        ? display_refresh_screen(hl, DISPLAY_REFRESH_READER_BODY, frame_flags)
+        : display_refresh_screen(hl, DISPLAY_REFRESH_READER_IMAGE, DISPLAY_REFRESH_DEFAULT);
     else if (request->cleanup && request->refresh != READER_PRESENT_FULL)
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
         // Periodic cleanup retains the complete vendor settling/saturation phases in one output, without erase or text replay.
-        err = update_display_area_full_with(hl, &E0470_FULL_WAVEFORM, MODE_GC16,
-                                            request->screen_area);
+        err = display_refresh_area(hl, DISPLAY_REFRESH_READER_CLEANUP, request->screen_area, DISPLAY_REFRESH_DEFAULT);
     else if (request->refresh == READER_PRESENT_FULL) err = update_display_full(hl);
     // 工具栏开关只改底部一条带：GL16 差分只驱动带内变化像素，脏区膨胀补推进度条边缘的
     // 白色邻行/邻列，实心进度条擦除后不再留轮廓。收起帧例外：被工具栏盖过的字多走了
@@ -63,14 +58,12 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
              request->prior_reader &&
              !(request->closing_tools_to_text)) {
         result.tools_band = true;
-        err = update_display_area_diff_with(hl, display_reader_page_waveform(), MODE_GL16,
-                                            request->tools_area);
+        err = display_refresh_area(hl, DISPLAY_REFRESH_READER_BODY, request->tools_area, DISPLAY_REFRESH_DEFAULT);
     }
     else if (request->refresh == READER_PRESENT_AREA && request->feedback) {
         // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。
         // Lift and restore only changed pixels, avoiding a dark pulse over the whole cover.
-        err = update_display_area_diff_with(hl,
-            request->mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : &E0470_WAVEFORM, request->mode, request->area);
+        err = display_refresh_area(hl, request->mode == MODE_DU ? DISPLAY_REFRESH_FEEDBACK : DISPLAY_REFRESH_DETAIL, request->area, DISPLAY_REFRESH_DEFAULT);
     }
     else if (request->refresh == READER_PRESENT_AREA) {
         // 快档每次显式设置并在推屏后恢复，不能把阅读节拍带入主页水波纹。
@@ -84,24 +77,21 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
             // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (request->fullscreen || request->turn_pending) && request->mode == MODE_GL16
-                ? update_display_area_diff_with(hl,
-                    request->turn_pending ? display_reader_text_waveform() : display_reader_page_waveform(),
-                    request->mode, request->area)
-                : update_display_area_with(hl, display_reader_page_waveform(), request->mode, request->area);
+                ? display_refresh_area(hl, request->turn_pending ? DISPLAY_REFRESH_READER_TEXT : DISPLAY_REFRESH_READER_BODY, request->area, DISPLAY_REFRESH_DEFAULT)
+                : display_refresh_area(hl, DISPLAY_REFRESH_READER_LAYOUT, request->area, request->mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT);
         if (request->water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
         if (request->fullscreen && err == EPD_DRAW_SUCCESS) {
             // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
             // Skip unchanged percentages; otherwise update only the small bottom strip.
-            err = update_display_area_diff_with(hl, &E0470_WAVEFORM, MODE_GL16,
-                                                request->progress_area);
+            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
         }
         if (request->footer_pending) {
             // 普通翻页页脚只驱动变化像素；换章这一次改用 37 相 GL16 擦净标题和页码。
             // Ordinary turns drive only changed footer pixels; a chapter change uses the
             // 37-phase GL16 differential to erase the old title and page number.
             err = (enum EpdDrawError)(err | (request->footer_strong
-                ? update_display_area_diff_with(hl, &E0470_WAVEFORM, MODE_GL16, request->footer_area)
-                : update_display_area_with(hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, request->footer_area)));
+                ? display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->footer_area, DISPLAY_REFRESH_DEFAULT)
+                : display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT)));
             result.footer_updated = true;
         }
     }
@@ -112,12 +102,11 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
     // on the same ink.
     else if (request->refresh == READER_PRESENT_PAGE && request->reader_body &&
              request->closing_panel_to_text) {
-        err = update_display_area_full_with(hl, display_normalize_waveform(request->hold_gray),
-                                            MODE_GL16,
-                                            request->screen_area);
+        err = display_refresh_area(hl, DISPLAY_REFRESH_RESTORE, request->screen_area, request->hold_gray ? DISPLAY_REFRESH_HOLD_GRAY : DISPLAY_REFRESH_DEFAULT);
     }
     else err = request->reading
-        ? update_display_mode_diff_with(hl, frame_waveform, request->page_mode)
+        ? display_refresh_screen(hl, DISPLAY_REFRESH_READER_BODY, frame_flags |
+            (request->page_mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT))
         : update_display_fast_page(hl);
     result.error = err;
     return result;

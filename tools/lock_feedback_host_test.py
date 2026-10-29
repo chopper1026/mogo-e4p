@@ -17,7 +17,7 @@ unit = r'''
 #include <stdlib.h>
 #include <string.h>
 #include "ui_lock_feedback.h"
-typedef struct {int id;} EpdiyHighlevelState;
+typedef struct EpdiyHighlevelState {int id;} EpdiyHighlevelState;
 #define MODE_DU 1
 #define READ_PICO_TRANSFER_UPLOADING 3
 typedef struct {int state;} read_pico_transfer_status_t;
@@ -59,8 +59,14 @@ static int update_display_area_diff_with(EpdiyHighlevelState *h,const int *w,int
  for(size_t at=0;at<sizeof(frame);++at)assert(back[at]==255);
  ++pushes;if(!result)memcpy(back,frame,sizeof(frame));return result;
 }
+#include "display_refresh.h"
+enum EpdDrawError {EPD_GOOD=0};
+enum EpdDrawError display_refresh_area(EpdiyHighlevelState *h, display_refresh_intent_t intent, EpdRect a, unsigned flags) {
+ assert(intent==DISPLAY_REFRESH_FEEDBACK&&flags==DISPLAY_REFRESH_DEFAULT);
+ return update_display_area_diff_with(h,&E0470_FOLLOW_WAVEFORM,MODE_DU,a);
+}
 '''
-unit += function('app_lock_feedback', ROOT/'main/power/sleep.c')
+unit += function('app_lock_feedback' , ROOT/'main/power/sleep.c')
 unit += r'''
 static void reset(void){memset(frame,0x57,sizeof(frame));memcpy(original,frame,sizeof(frame));memcpy(back,original,sizeof(frame));pushes=white_pushes=cancels=touches=0;style=2;online=missing=small=s_lock_feedback_visible=false;transfer=result=white_result=0;}
 int main(int argc,char **argv){
@@ -94,6 +100,6 @@ with tempfile.TemporaryDirectory(prefix='kiikoread-lock-feedback-', dir='/privat
     work = Path(folder)
     (work/'test.c').write_text(unit)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',
-                    '-I'+str(ROOT/'tools/ui_gesture_stubs'),'-I'+str(ROOT/'main/ui'),
+                    '-I'+str(ROOT/'tools/ui_gesture_stubs'),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/display'),
                     str(work/'test.c'),str(ROOT/'main/ui/ui_lock_feedback.c'),'-o',str(work/'test')],check=True)
     subprocess.run([str(work/'test')] + sys.argv[1:],check=True)

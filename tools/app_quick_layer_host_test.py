@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(prefix="app-quick-") as directory:
         "-Itools/app_loop_stubs", "-Imain", "-Imain/display", "-Imain/ota", "-Imain/settings", "-Imain/app", "-Imain/ui",
         "-Icomponents/ble_page_turner/include", "-Itools/ui_gesture_stubs",
         "tools/app_quick_layer_host_test.c", "main/app/app_quick_layer.c",
-        "main/ui/ui_quick_menu_input.c", "-o", str(binary),
+        "main/ui/ui_quick_menu_input.c", "main/display/display_refresh.c", "main/display/display_refresh_policy.c", "-Imain/app",
+        "tools/refresh_loop_test_boundary.c", "-o", str(binary),
     ], cwd=ROOT, check=True)
     subprocess.run([str(binary)], cwd=ROOT, check=True)

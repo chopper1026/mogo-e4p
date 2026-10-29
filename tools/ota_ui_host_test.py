@@ -3,6 +3,7 @@ English: Test update cleanup, additive progress, presentation-before-download an
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from refresh_test_support import area_boundary
 import re
 import subprocess
 import tempfile
@@ -146,6 +147,7 @@ static enum EpdDrawError update_display_area_full_with(void *hl,const EpdWavefor
  ++full_pushes;return update_display_area_diff_with(hl,waveform,mode,area);
 }
 '''
+unit += area_boundary(root, detail_only=False)
 unit += "static EpdRect ui_pinpad_full(void){return (EpdRect){0,0,684,1216};}\n"
 for name in ("upgrade_percent", "upgrade_remember", "upgrade_status_redraw", "upgrade_progress_area", "draw_upgrade_percent", "draw_upgrade_progress",
              "draw_upgrade_progress_delta", "upgrade_schedule", "upgrade_start_pending", "settings_present",

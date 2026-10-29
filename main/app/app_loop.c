@@ -58,8 +58,7 @@
 #include "ble_page_turner.h"
 #include "ota_online.h"
 #include "display.h"
-#include "display_normalize.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -174,7 +173,7 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
         EpdRect area;
         if (ui_click_feedback_release(ctx->fb, &area)) {
             display_main_transition_cancel();
-            result = update_display_area_diff_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, area);
+            result = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, area, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl, result);
             if (result != EPD_DRAW_SUCCESS) redraw = APP_REDRAW_FULL;
         }
@@ -203,9 +202,7 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
             EpdRect area = app->area_hint != NULL
                 ? display_rect_to_epd(app->area_hint(ctx))
                 : ui_content_refresh_area();
-            result = update_display_area_with(
-                ctx->hl, &E0470_WAVEFORM, APP_DYNAMIC_REFRESH_MODE, area
-            );
+            result = display_refresh_area(ctx->hl, DISPLAY_REFRESH_DYNAMIC, area, DISPLAY_REFRESH_DEFAULT);
             break;
         }
         case APP_REDRAW_FULL:
@@ -277,11 +274,9 @@ static void menu_feedback(app_ctx_t* ctx, const app_desc_t* current,
     }
     feedback->updates++;
     feedback->last_ms = ctx->now_ms;
-    guard_draw_result(ctx->hl, update_display_area_with(
-        ctx->hl, &E0470_WAVEFORM, APP_DYNAMIC_REFRESH_MODE, area));
+    guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_DYNAMIC, area, DISPLAY_REFRESH_DEFAULT));
     if (feedback->updates >= UI_SETTLE_DU_MAX) {
-        guard_draw_result(ctx->hl, update_display_area_with(
-            ctx->hl, &E0470_WAVEFORM, MODE_GL16, feedback->area));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_LAYOUT, feedback->area, DISPLAY_REFRESH_DEFAULT));
         feedback->updates = 0;
     }
 }
@@ -588,8 +583,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 if (power_dialog_open && replay_power_action == UI_POWER_ACTION_NONE &&
                     replay_power_dirty.height > 0) {
                     ui_power_dialog_draw_controls(ctx.fb, &power_dialog, replay_power_dirty);
-                    enum EpdDrawError result = update_display_area_diff_with(
-                        ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, replay_power_dirty);
+                    enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, replay_power_dirty, DISPLAY_REFRESH_DEFAULT);
                     guard_draw_result(ctx.hl, result);
                     if (result != EPD_DRAW_SUCCESS) {
                         power_dialog_open = false;
@@ -725,8 +719,7 @@ void app_loop_run(const app_loop_config_t* config) {
             if (action == UI_POWER_ACTION_NONE) action = replay_power_action;
             if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
                 ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
-                enum EpdDrawError result = update_display_area_diff_with(
-                    ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
+                enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
                 guard_draw_result(ctx.hl, result);
                 if (result != EPD_DRAW_SUCCESS) {
                     power_dialog_open = false;
@@ -773,8 +766,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ui_power_dialog_cancel_input(&power_dialog, &dirty);
             if (power_dialog_open && dirty.height > 0) {
                 ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
-                guard_draw_result(ctx.hl, update_display_area_diff_with(
-                    ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty));
+                guard_draw_result(ctx.hl, display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT));
             }
             ctx.consumed = true;
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
@@ -948,8 +940,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         ui_text_set_system_scale(true);
                         ui_power_dialog_draw(ctx.fb, &power_dialog);
-                        enum EpdDrawError result = update_display_area_with(
-                            ctx.hl, &E0470_WAVEFORM, MODE_GL16, ui_power_dialog_rect());
+                        enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_LAYOUT, ui_power_dialog_rect(), DISPLAY_REFRESH_DEFAULT);
                         guard_draw_result(ctx.hl, result);
                         if (result != EPD_DRAW_SUCCESS) {
                             power_dialog_open = false;
@@ -1108,8 +1099,7 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         if (menu_open && feedback.updates > 0
             && ctx.now_ms - feedback.last_ms >= UI_SETTLE_IDLE_MS) {
-            guard_draw_result(ctx.hl, update_display_area_with(
-                ctx.hl, &E0470_WAVEFORM, MODE_GL16, feedback.area));
+            guard_draw_result(ctx.hl, display_refresh_area(ctx.hl, DISPLAY_REFRESH_LAYOUT, feedback.area, DISPLAY_REFRESH_DEFAULT));
             feedback.updates = 0;
         }
         if (!menu_open) feedback.updates = 0;

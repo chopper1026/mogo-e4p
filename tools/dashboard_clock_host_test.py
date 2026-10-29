@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from refresh_test_support import area_boundary
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[1];s=(root/'main/apps/app_dashboard.c').read_text()
 def function(name):
@@ -80,7 +81,7 @@ static void guard_draw_result(void *hl,enum EpdDrawError result){(void)hl;(void)
 static enum EpdDrawError update_display_full(void *hl){(void)hl;++fulls;return EPD_DRAW_SUCCESS;}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return EPD_DRAW_SUCCESS;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++paints;}
-'''+helpers+'\n'+present+'\n'+tick+r'''
+'''+area_boundary(root,main_clock=True)+helpers+'\n'+present+'\n'+tick+r'''
 int main(void){
  app_ctx_t ctx={0};present(&ctx,APP_REDRAW_FULL);assert(s_clock_minute==100&&paints==1&&fulls==1);
  for(int i=0;i<100;++i)assert(on_tick(&ctx)==APP_REDRAW_NONE);

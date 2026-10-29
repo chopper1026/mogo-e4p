@@ -20,7 +20,7 @@ int cst836u_read(void*, cst836u_touch_t*);
 int cst836u_get_info(void*, cst836u_info_t*);
 typedef struct EpdiyHighlevelState { int unused; } EpdiyHighlevelState;
 typedef struct { int x,y,width,height; } EpdRect;
-enum EpdDrawError { EPD_DRAW_SUCCESS };
+enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_NO_PHASES_AVAILABLE = 4, EPD_DRAW_INVALID_CROP = 64 };
 enum EpdFontFlags { EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT };
 #define MODE_DU 1
 #define MODE_GL16 2
@@ -43,6 +43,8 @@ enum EpdDrawError update_display_area_with(EpdiyHighlevelState*, const void*, in
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*, const void*, int, EpdRect);
 enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*, const void*, int, EpdRect, int, int);
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*, const void*, int, EpdRect);
+enum EpdDrawError update_display_with(EpdiyHighlevelState*, const void*, int);
+enum EpdDrawError update_display_mode_diff_with(EpdiyHighlevelState*, const void*, int);
 enum EpdDrawError update_display_full(EpdiyHighlevelState*);
 enum EpdDrawError update_display_mode(EpdiyHighlevelState*, int);
 enum EpdDrawError update_display_mode_diff(EpdiyHighlevelState*, int);

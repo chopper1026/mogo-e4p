@@ -57,6 +57,7 @@ SUITES = {
     "quick": [sys.executable, "tools/app_quick_layer_host_test.py"],
     "book": ["bash", "tools/run_book_host_tests.sh"],
     "display": ["bash", "tools/run_display_host_test.sh"],
+    "refresh": [sys.executable, "tools/display_refresh_host_test.py"],
     "display_contract": [sys.executable, "tools/display_contract_host_test.py"],
     "navigation": ["bash", "tools/run_display_navigation_tests.sh"],
     "ripple": ["bash", "tools/run_water_turn_host_test.sh"],

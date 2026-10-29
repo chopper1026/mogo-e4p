@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as folder:
 #define READ_PICO_PMU_KEY_NONE 0
 #define pdMS_TO_TICKS(x) (x)
 typedef void *cst836u_handle_t;typedef void *sc7a20h_handle_t;typedef int esp_err_t;
-typedef struct {int unused;} EpdiyHighlevelState;
+typedef struct EpdiyHighlevelState {int unused;} EpdiyHighlevelState;
 typedef int ble_pt_event_t;typedef int ble_pt_raw_t;
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static const int xs[3]={158,342,526},ys[4]={544,703,862,1021},E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1;
@@ -100,6 +100,13 @@ enum EpdDrawError {EPD_GOOD=0,EPD_BAD=1};
 static enum EpdDrawError update_display_area_diff_with(void *h,const int *w,int m,EpdRect a){(void)h;(void)w;(void)a;assert(m==MODE_GL16||m==MODE_DU);++pushes;return display_failure?EPD_BAD:EPD_GOOD;}
 static enum EpdDrawError update_display_full(void *h){(void)h;++fulls;return EPD_GOOD;}
 static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)result;}
+#include "display_refresh.h"
+enum EpdDrawError display_refresh_area(EpdiyHighlevelState *h, display_refresh_intent_t intent, EpdRect a, unsigned flags) {
+    assert(flags==DISPLAY_REFRESH_DEFAULT);
+    assert(intent==DISPLAY_REFRESH_DETAIL||intent==DISPLAY_REFRESH_FEEDBACK);
+    return update_display_area_diff_with(h, intent==DISPLAY_REFRESH_DETAIL?&E0470_WAVEFORM:&E0470_FOLLOW_WAVEFORM,
+                                         intent==DISPLAY_REFRESH_DETAIL?MODE_GL16:MODE_DU,a);
+}
 '''.replace('FOLDER',str(p))
  # Declarations precede the backdrop stub; state/hit logic comes from the production pad.
  unit=unit.replace('static void ui_pinpad_paint_input(', 'void ui_pinpad_paint_input(').replace('static void ui_pinpad_begin(', 'void ui_pinpad_begin(').replace('static void ui_pinpad_paint(', 'void ui_pinpad_paint(')

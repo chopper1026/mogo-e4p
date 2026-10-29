@@ -30,6 +30,7 @@
 #include "book_progress.h"
 #include "book_title.h"
 #include "display.h"
+#include "display_refresh.h"
 #include "file_tree.h"
 #include "read_pico_sd.h"
 #include "read_pico_search.h"
@@ -40,7 +41,6 @@
 #include "ui_kit.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
-#include "e0470_epaper_waveform.h"
 #include "esp_timer.h"
 #include "ui_nav.h"
 #include "esp_log.h"
@@ -894,18 +894,16 @@ static bool files_present(app_ctx_t *ctx, app_redraw_t redraw) {
     bool pager=s_pager_paint_pending;s_pager_paint_pending=false;
     if(pager&&redraw==APP_REDRAW_AREA&&!ctx->request_app&&
         (s_view==FILE_VIEW_LIST||s_view==FILE_VIEW_MOVE)){
-        guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,ui_pager_area()));
+        guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, ui_pager_area(), DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (redraw != APP_REDRAW_AREA || s_view != FILE_VIEW_RENAME) return false;
     if (s_input_settle) {
-        guard_draw_result(ctx->hl, update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, s_input_area));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_SETTLE, s_input_area, DISPLAY_REFRESH_DEFAULT));
         s_input_settle = false;
         return true;
     }
-    guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,
-        s_input_layout ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
-        s_input_layout ? MODE_GL16 : MODE_DU, s_input_area));
+    guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, s_input_layout ? DISPLAY_REFRESH_DETAIL : DISPLAY_REFRESH_FEEDBACK, s_input_area, DISPLAY_REFRESH_DEFAULT));
     return true;
 }
 static app_redraw_t rename_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {

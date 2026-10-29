@@ -107,13 +107,10 @@ void rails_idle_check(int64_t now_ms) {
     pico_online_display_end(held);
 }
 
-// 20 相完整/原厂 DU 按厂家时序走 FULL；触摸笔迹的 8 帧跟随 DU 和快捷栏胶囊
-// 拖动表走 FAST。胶囊的白/灰定稿表保持 FULL 时序：原厂序列按 11ms 帧周期标定，
-// FAST 的 7ms 帧会让驱动量不足、落灰不准。
-// 20-phase full / vendor DU uses FULL timing; the 8-frame FOLLOW DU for ink
-// trails and the capsule drag table use FAST. The capsule white/gray settle
-// tables keep FULL timing: the factory sequence is calibrated for the ~11 ms
-// frame period, and FAST's ~7 ms frames would under-drive the landing.
+// 完整 DU 与胶囊定稿保留 FULL 扫描档；FOLLOW 与胶囊拖动保留 FAST 扫描档。
+// 扫描档是时序配置选择，实际相周期由板级总线、像素时钟和行消隐共同求解，不能按档名推断耗时。
+// Full DU and capsule settling retain FULL scan; FOLLOW and capsule drag retain FAST scan.
+// Scan profiles select timing parameters; bus width, pclk and blanking determine phase duration, not the profile name.
 static void use_scan_for(const EpdWaveform* waveform, enum EpdDrawMode mode) {
     const bool fast = (mode & 0xF) == MODE_DU &&
         (waveform == &E0470_FOLLOW_WAVEFORM || waveform == &E0470_CAPSULE_DRAG_WAVEFORM);

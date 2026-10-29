@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from refresh_test_support import area_boundary
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
@@ -77,6 +78,7 @@ static void guard_draw_result(void *h,int e){(void)h;(void)e;}
 '''
 # &E0470_WAVEFORM requires a real object, preserving the actual refresh call.
 unit=unit.replace('#define E0470_WAVEFORM 1','static const int E0470_WAVEFORM=1;')
+unit += area_boundary(ROOT, detail_only=True)
 for name in ('reader_status_area','reader_status_visible','reader_status_paint','reader_clock_tick'):
  unit+=function(name,book)+'\n'
 present=function('present',book)

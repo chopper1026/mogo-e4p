@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "reader_present.h"
+#include "display_refresh_policy.h"
 #include "display.h"
 #include "display_reader_waveform.h"
 #include "display_normalize.h"
@@ -20,6 +21,26 @@ const EpdWaveform* display_reader_page_waveform(void) { return &page; }
 const EpdWaveform* display_reader_image_waveform(void) { return &image; }
 const EpdWaveform* display_normalize_waveform(bool gray) {
     return gray ? &normalize_gray : &normalize;
+}
+const EpdWaveform *display_waveform_get(display_waveform_id_t id) {
+    switch(id) {
+        case DISPLAY_WAVE_DEFAULT: return &E0470_WAVEFORM;
+        case DISPLAY_WAVE_FULL: return &E0470_FULL_WAVEFORM;
+        case DISPLAY_WAVE_FOLLOW: return &E0470_FOLLOW_WAVEFORM;
+        case DISPLAY_WAVE_READER_TEXT: return &text;
+        case DISPLAY_WAVE_READER_INK: return &page;
+        case DISPLAY_WAVE_READER_IMAGE: return &image;
+        case DISPLAY_WAVE_NORMALIZE: return &normalize;
+        case DISPLAY_WAVE_NORMALIZE_GRAY: return &normalize_gray;
+        default: assert(!"unexpected waveform"); return NULL;
+    }
+}
+display_refresh_context_t display_refresh_context(void) {
+    return (display_refresh_context_t){0};
+}
+enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState *s, const EpdWaveform *w,
+                                                 enum EpdDrawMode m, EpdRect a, int x, int y) {
+    (void)s;(void)w;(void)m;(void)a;(void)x;(void)y;assert(!"unexpected padded output");return EPD_DRAW_INVALID_CROP;
 }
 enum call_kind { AREA, DIFF, FULL_AREA, WHOLE, WHOLE_DIFF, FULL, FAST, WATER, TICK };
 typedef struct {

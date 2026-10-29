@@ -39,7 +39,7 @@
 #include "book_progress.h"
 #include "book_title.h"
 #include "display.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "read_pico_transfer.h"
@@ -1198,17 +1198,14 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if (redraw != APP_REDRAW_AREA) return false;
     if (s_view == TRANSFER_PASSWORD) {
         if (s_input_settle) {
-            guard_draw_result(ctx->hl, update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, s_area));
+            guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_SETTLE, s_area, DISPLAY_REFRESH_DEFAULT));
             s_input_settle = false;
             return true;
         }
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,
-            s_input_layout ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
-            s_input_layout ? MODE_GL16 : MODE_DU, s_area));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, s_input_layout ? DISPLAY_REFRESH_DETAIL : DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
-    guard_draw_result(ctx->hl, update_display_area_with(ctx->hl, s_settle ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
-                      s_settle ? MODE_GL16 : MODE_DU, s_area));
+    guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, s_settle ? DISPLAY_REFRESH_LAYOUT : DISPLAY_REFRESH_MOTION, s_area, DISPLAY_REFRESH_DEFAULT));
     s_settle = false;
     return true;
 }

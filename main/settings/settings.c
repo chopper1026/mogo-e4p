@@ -19,6 +19,7 @@
  */
 
 #include "settings.h"
+#include "../display/display_refresh_config.h"
 #include "book/book_font_size.h"
 
 #include <stdio.h>
@@ -151,7 +152,7 @@ static uint8_t s_book_weight = 2;
 static int8_t s_book_weight_fine;
 static bool s_book_antialias = true;
 static char s_book_background[288];
-static uint8_t s_reader_full_pages = 15;
+static uint8_t s_reader_full_pages = DISPLAY_REFRESH_READER_CLEANUP_DEFAULT;
 static uint8_t s_reader_turn_effect;
 static uint8_t s_book_line = 130, s_book_para = 50;
 // 四向边距默认左右 24、上下 0，与旧单一边距的横排观感一致。
@@ -358,7 +359,7 @@ void app_settings_init(void) {
     size_t background_len = sizeof(s_book_background);
     if (nvs_get_str(h, NVS_KEY_BOOK_BACKGROUND, s_book_background, &background_len) != ESP_OK ||
         (s_book_background[0] && strncmp(s_book_background, "/sdcard/pictures/", 17))) s_book_background[0] = 0;
-    uint8_t reader_full_pages = 15;
+    uint8_t reader_full_pages = DISPLAY_REFRESH_READER_CLEANUP_DEFAULT;
     if (nvs_get_u8(h, NVS_KEY_READER_FULL, &reader_full_pages) == ESP_OK &&
         (reader_full_pages == 0 || reader_full_pages == 5 || reader_full_pages == 10 ||
          reader_full_pages == 15 || reader_full_pages == 30))

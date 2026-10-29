@@ -26,6 +26,9 @@ const EpdWaveform* display_reader_ink_waveform(void);
 /// reading background is set.
 const EpdWaveform* display_reader_water_waveform(void);
 
+/// 无背景设置分支的水波纹基底，供统一目录显式选择。/ Background-independent water base for explicit catalog selection.
+const EpdWaveform* display_reader_water_base_waveform(void);
+
 /// 背景页派生表：在水波纹表上再裁擦除与白/黑饱和，to=0 增黑保留；相数更少，
 /// 深色图形上的黑闪更短。白列不跟随裁剪，改用主页水波纹已验证的 24 拍，旧字转白才擦得净。
 /// page 与 water accessor 在背景开启时都会返回这张表。

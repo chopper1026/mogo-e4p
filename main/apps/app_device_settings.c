@@ -81,8 +81,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "display.h"
-#include "display_main_waveform.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "pmu_selftest.h"
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include "soc/rtc_cntl_reg.h"
@@ -133,7 +132,7 @@ static void pin_setup_open(app_ctx_t *ctx, bool disable) {
 }
 static app_redraw_t pin_paint(app_ctx_t *ctx, EpdRect area) {
     ui_pinpad_paint(ctx->fb, &s_pinpad, area);
-    guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, area));
+    guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, area, DISPLAY_REFRESH_DEFAULT));
     return APP_REDRAW_DONE;
 }
 static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
@@ -1793,8 +1792,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             render(ctx,ctx->fb);
             EpdRect area={57,180-s_main_scroll+(settings_profile_height()-82)/2,82,82};
             if (area.y<160) { area.height-=160-area.y; area.y=160; }
-            if(area.height>0)guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
-                app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL?display_main_normal_waveform():display_main_gray_waveform(),MODE_GL16,area));
+            if(area.height>0)guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_MAIN_DETAIL, area, DISPLAY_REFRESH_DEFAULT));
             return APP_REDRAW_DONE;
         }
     }
@@ -2030,7 +2028,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (result == UI_PIN_COMPLETE) s_pin_pending = true;
         if (result == UI_PIN_NONE) return APP_REDRAW_NONE;
         ui_pinpad_paint_input(ctx->fb, &s_pinpad);
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT));
         return APP_REDRAW_DONE;
     }
     if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_available() &&
@@ -2740,18 +2738,16 @@ static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETT
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
         display_main_transition_cancel(); render(ctx, ctx->fb);
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, ui_pinpad_full()));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, ui_pinpad_full(), DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (redraw == APP_REDRAW_AREA && s_page == SETTINGS_TEXT_EDIT) {
         if (s_input_settle) {
-            guard_draw_result(ctx->hl, update_display_area_full_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, s_input_area));
+            guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_SETTLE, s_input_area, DISPLAY_REFRESH_DEFAULT));
             s_input_settle = false;
             return true;
         }
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,
-            s_input_layout ? &E0470_WAVEFORM : &E0470_FOLLOW_WAVEFORM,
-            s_input_layout ? MODE_GL16 : MODE_DU, s_input_area));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, s_input_layout ? DISPLAY_REFRESH_DETAIL : DISPLAY_REFRESH_FEEDBACK, s_input_area, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (redraw == APP_REDRAW_AREA && s_scroll_present_pending &&
@@ -2768,22 +2764,18 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
         // Dilate the dirty masks by one row/byte so skipped white neighbours run the GL16
         // white tick again and old divider residue is erased.
-        const EpdWaveform *wave=app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL
-            ? display_main_normal_waveform():&E0470_WAVEFORM;
-        guard_draw_result(ctx->hl, update_display_area_diff_padded(ctx->hl,wave,MODE_GL16,area,1,1));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_MAIN_SCROLL, area, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (s_page != SETTINGS_UPGRADE) return false;
     if (redraw == APP_REDRAW_PAGE) {
         display_main_transition_cancel();
         render(ctx, ctx->fb);
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM,
-                          MODE_GL16, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_REFRESH_END}));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, (EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_REFRESH_END}, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     if (redraw == APP_REDRAW_AREA) {
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_FOLLOW_WAVEFORM,
-                          MODE_DU, upgrade_progress_area()));
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, upgrade_progress_area(), DISPLAY_REFRESH_DEFAULT));
         return true;
     }
     return false;

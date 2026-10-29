@@ -51,7 +51,7 @@
 #include "book_ticket.h"
 #include "cache_wake_restore.h"
 #include "display.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "frontlight.h"
 #include "ota_online.h"
 #include "time_service.h"
@@ -102,8 +102,7 @@ void app_lock_feedback(EpdiyHighlevelState *hl) {
     epd_hl_set_all_white(hl);
     if (update_display_full(hl) != EPD_DRAW_SUCCESS) return;
     EpdRect area = ui_lock_feedback_draw(framebuffer);
-    s_lock_feedback_visible = update_display_area_diff_with(hl, &E0470_FOLLOW_WAVEFORM,
-        MODE_DU, area) == EPD_DRAW_SUCCESS;
+    s_lock_feedback_visible = display_refresh_area(hl, DISPLAY_REFRESH_FEEDBACK, area, DISPLAY_REFRESH_DEFAULT) == EPD_DRAW_SUCCESS;
 }
 
 static bool draw_wallpaper(uint8_t *framebuffer) {

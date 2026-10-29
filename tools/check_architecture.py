@@ -46,6 +46,15 @@ def check(root):
         # 保留行号；注释内的示例不属于实际依赖。/ Keep line numbers; examples inside comments are not dependencies.
         source = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", lambda match: "\n" * match[0].count("\n"),
                         path.read_text(errors="replace"))
+        # 出厂标定保留原低层出口；产品页面只表达意图，波形选择属于 display。
+        # Factory calibration retains its low-level exit; product pages express intent and display owns waveforms.
+        if relative.startswith("main/") and not relative.startswith("main/display/") and relative != "main/factory/vcom_setup.c":
+            raw_wave = r"\b(?:E0470_\w*WAVEFORM|display_(?:main_\w*waveform|reader_\w*waveform|normalize_waveform)|update_display_\w+_with|update_display_area_diff_padded)\b"
+            if re.search(raw_wave, source):
+                errors.append(f"{relative}: product waveform selection must stay in display")
+        if relative.startswith("main/") and not relative.startswith(("main/display/", "main/factory/")):
+            if re.search(r'#\s*include\s*[<"](?:.*/)?(?:display_waveform_catalog|display_refresh_policy|display_(?:main_waveform|reader_waveform|normalize)|e0470_epaper_waveform)\.h[>"]', source):
+                errors.append(f"{relative}: product waveform selection must stay in display")
         if relative.startswith("main/") and relative != "main/book/book_shelf_category_state.c":
             # 上下文可以由页面静态持有，内部字段只能由所属模块访问。/ Pages may store contexts, but only their owner may access internals.
             contexts = re.findall(r"\bbook_shelf_categories_t\s+\*?\s*(\w+)", source)

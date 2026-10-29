@@ -15,7 +15,7 @@ The product targets Metalio E-INK4 Plus (ESP32-S31). Root/main CMakeLists.txt de
 | `main/image/` | 通用图像探测、JPEG/PNG 解码、裁剪与缩放，包含硬件 JPEG 适配。不得依赖书籍、UI、字体或页面。/ Generic image probing, JPEG/PNG decoding, crop/scale and hardware JPEG adaptation; no book, UI, font or page dependencies. |
 | `main/ui/` | 公共绘制、控件、交互反馈及题头样式；绘制接口不承担页面状态转换。/ Shared drawing, controls, feedback and heading styles; paint APIs do not own page transitions. |
 | `main/font/` | 字体来源、加载、字形缓存与渲染。系统/阅读字体的选择策略在 services。/ Font sources, loading, glyph caches and rendering; services owns system/reader face policy. |
-| `main/display/` | 显示出口、显示类型与几何、导航和阅读波形及灰阶归一。/ Display entry points, types and geometry, navigation/reader waveforms and gray normalization. |
+| `main/display/` | 统一刷新意图、波形目录、显示出口与几何、导航/阅读波形及灰阶归一；契约见 [DISPLAY_REFRESH.md](DISPLAY_REFRESH.md)。/ Central refresh intents, waveform catalog, physical exits/geometry and navigation/reader/normalization waveforms; see the refresh contract. |
 | `main/lock/` | 自动锁屏判定、锁屏图缓存与密码凭据及验证流程；睡眠交接由 power 负责。/ Idle-lock decisions, lock-frame caches, PIN credentials and verification; power owns sleep handoff. |
 | `main/power/` | 锁屏进睡、唤醒、关机及 S31 CACHE_L1 恢复。/ Lock-to-sleep, wake, power-off and S31 CACHE_L1 restore. |
 | `main/ota/` | TF/联网升级、发布清单、下载校验与升级任务。/ Card/online upgrades, release manifests, download verification and update workers. |

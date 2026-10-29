@@ -11,8 +11,7 @@
 #include "app_transfer_mode.h"
 #include "ble_page_turner.h"
 #include "display.h"
-#include "display_normalize.h"
-#include "e0470_epaper_waveform.h"
+#include "display_refresh.h"
 #include "frontlight.h"
 #include "ota_online.h"
 #include "read_pico_transfer.h"
@@ -107,15 +106,17 @@ void app_quick_layer_present(app_ctx_t *ctx, const app_desc_t *current, bool ful
     // which a single restore cannot match. One whole-screen normalize pass puts every glyph
     // core on the same ink. Whether picture grays need protecting is the current page's call:
     // only a background reading body does, and every other page takes the full pass.
-    const void *wave = &E0470_WAVEFORM;
+    display_refresh_intent_t intent = DISPLAY_REFRESH_OVERLAY;
+    unsigned flags = DISPLAY_REFRESH_DEFAULT;
     EpdRect area = {0, 0, UI_LOCK_WIDTH, area_height};
     if (!s_quick.open) {
-        wave = display_normalize_waveform(current->normalize_hold_gray &&
-                                          current->normalize_hold_gray(ctx));
+        intent = DISPLAY_REFRESH_RESTORE;
+        if (current->normalize_hold_gray && current->normalize_hold_gray(ctx))
+            flags = DISPLAY_REFRESH_HOLD_GRAY;
         area.height = UI_LOCK_HEIGHT;
     }
     enum EpdDrawError error = full ? update_display_full(ctx->hl)
-        : update_display_area_full_with(ctx->hl, wave, MODE_GL16, area);
+        : display_refresh_area(ctx->hl, intent, area, flags);
     guard_draw_result(ctx->hl, error);
     if (error != EPD_DRAW_SUCCESS) {
         app_quick_layer_reset();
@@ -138,7 +139,7 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
         if(active==was_active&&(pressed==i)==(s_quick_pressed==i))continue;
         EpdRect dirty;
         if(ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,pressed==i,&dirty)){
-            error=update_display_area_diff_with(ctx->hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,dirty);
+            error=display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl,error);
             if(error!=EPD_DRAW_SUCCESS)break;
         }
@@ -146,7 +147,7 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
     bool network_changed=(status&5u)==5u,was_network=(s_quick_status&5u)==5u;
     if(error==EPD_DRAW_SUCCESS&&(((status^s_quick_status)&2u)||network_changed!=was_network)){
         ui_quick_menu_draw_status(ctx->fb);
-        error=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){0,0,UI_LOCK_WIDTH,76});
+        error=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, (EpdRect){0,0,UI_LOCK_WIDTH,76}, DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl,error);
     }
     if(error!=EPD_DRAW_SUCCESS){
@@ -209,8 +210,7 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
         // stays on the panel until the next layer-open GL16 or periodic GC16
         // normalizes it.
         if (ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) {
-            error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
-                                                    MODE_DU, dirty, 1, 1);
+            error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl, error);
         }
         // 提交完成，脏范围收回当前档位；跟踪保留，便于恢复定稿时直接使用。
@@ -227,8 +227,7 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
         // Drag frames are DU differentials and must dilate dirty rows/columns:
         // the capsule's top and bottom edges change by a pixel or two per frame.
         // Mid-drag and release both accept the drag table's approximation.
-        error = update_display_area_diff_padded(ctx->hl, &E0470_CAPSULE_DRAG_WAVEFORM,
-                                                MODE_DU, dirty, 1, 1);
+        error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl, error);
     }
     if (error != EPD_DRAW_SUCCESS) {

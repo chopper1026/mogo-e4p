@@ -35,6 +35,9 @@ def main():
             path.write_text(source)
         assert not check(root)
         cases = [
+            ("main/app/loop.c", 'void f(void) { update_display_area_diff_with(); }\n', "waveform selection must stay in display"),
+            ("main/app/loop.c", 'const void *w = &E0470_FULL_WAVEFORM;\n', "waveform selection must stay in display"),
+            ("main/app/loop.c", '#include "display_waveform_catalog.h"\n', "waveform selection must stay in display"),
             ("main/ui/ui_reader_settings.c", '#include "settings.h"\n', "reader settings view must not"),
             ("main/ui/ui_reader_settings.c", '#include "book.h"\n', "reader settings view must not"),
             ("main/ui/ui_reader_settings.c", '#include "../apps/page.h"\n', "reader settings view must not"),
@@ -77,7 +80,7 @@ def main():
         # 注释示例不会变成假依赖。/ Commented examples must not become false dependencies.
         (root / "main/app/loop.c").write_text('// #include "../apps/page.h"\n/*\n#include "../apps/page.h"\n*/\n')
         assert not check(root)
-    print("architecture: PASS (real tree and eighteen rejecting fixtures)")
+    print("architecture: PASS (real tree and twenty-one rejecting fixtures)")
 
 
 if __name__ == "__main__":
