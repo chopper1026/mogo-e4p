@@ -13,7 +13,6 @@ jobs:
         shell: bash
         run: |
           python3 tools/run_reader_baseline.py
-          python3 tools/pmic_gate_host_test.py
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py

@@ -23,7 +23,6 @@ SCAN_DIRS = [
     ROOT / "main/settings/settings.c",
     ROOT / "main/ota/ota_update.c",
     ROOT / "main/ota/ota_online.c",
-    ROOT / "components/sy7636a",
     ROOT / "components/sc7a20h",
     ROOT / "components/board_support",
     ROOT / "components/device_power",

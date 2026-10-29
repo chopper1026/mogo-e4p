@@ -2,14 +2,12 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * GPIO2 → AO3400A 栅极，高导通低关断。停播必须禁用 PWM 并拉低。
- * 曲谱合成是零中心 PCM；硬件占空比另经 bias/gain/min/max 映射。
- * 高频 PWM 默认不初始化、不上电自测。
+ * Metalio E-INK4 Plus 没有蜂鸣器，产品构建提供静默兼容接口。
+ * 参数和统计类型保留原契约；离线曲谱渲染由 tools/buzzer_score_wav.c 使用。
  *
- * GPIO2 drives the AO3400A gate: high on, low off. Stop must disable PWM
- * and drive the pin low. Score synthesis is zero-centered PCM; hardware
- * duty is mapped separately via bias/gain/min/max. HF PWM is off by
- * default and is not a power-on self-test.
+ * Metalio E-INK4 Plus has no buzzer; the product provides silent compatibility APIs.
+ * Parameter and statistics types retain their contracts; tools/buzzer_score_wav.c
+ * consumes the offline score renderer.
  */
 
 #pragma once

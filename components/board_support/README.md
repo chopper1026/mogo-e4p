@@ -12,12 +12,13 @@ The local component is `board_support`, derived from `mindreset/read_pico`; reta
 ## 做什么 / What it does
 
 - `board_init()`：初始化面板、探测 TF 卡、检查加速度计后使其掉电、启动 PMU 主机与触摸控制器。外设失败只清除对应的 `*_ready` 标志；仅面板失败视为致命。/ Brings up the panel, probes the card, checks the accelerometer and powers it back down, starts the PMU host and the touch controller. A failing peripheral only clears its `*_ready` flag; only the panel failing is fatal.
-- `board_get_status()` / `board_get_ioe_status()`：扩展口引脚、电源轨状态与 SY7636A 寄存器的一份快照，供电源页和 IO 页使用。/ One snapshot of expander pins, rail state and the SY7636A registers, for the power and IO pages.
+- `board_get_status()` / `board_get_ioe_status()`：TCA9555 引脚与电源轨状态快照，供出厂检查使用。/ TCA9555 pin and rail snapshots for factory checks.
 - 电源轨：`board_rails_on()`、`board_toggle_vcomctl()`，以及 epdiy 板级钩子。/ Rails: `board_rails_on()`, `board_toggle_vcomctl()`, plus the epdiy board hooks.
 - 加速度计轴映射：芯片坐标 → 设备坐标（屏朝上为 +Z）。/ Accelerometer axis mapping: chip → device coordinates (screen up is +Z).
 - `board_sd_*`：非阻塞的探卡、挂载、格式化与容量查询。/ Non-blocking card probe, mount, format, capacity.
 - `board_buzzer_tone()`：S31 使用 `board_buzzer_stub.c` 的静默实现。/ S31 selects the silent implementation in `board_buzzer_stub.c`.
-- `board_metalio_e4p.c`：产品板级实现；`board_legacy_s3.c`、`board_buzzer_legacy_s3.c` 与 `board_flash_hpm_legacy_s3.c` 保留旧硬件实现，均不参与 S31 产品构建。/ Product board implementation; the three `legacy_s3` files retain old hardware implementations outside the S31 product build.
+- `board_metalio_e4p.c`：产品板级实现，直接驱动 TPS65185 和 TCA9555。旧 S3 板级、Zbit HPM 和蜂鸣器硬件实现已移除。/ Product board implementation for TPS65185 and TCA9555; legacy S3 board, Zbit HPM and hardware buzzer implementations have been removed.
+- `buzzer_score.c` / `buzzer_duty_map.c`：仅供 `tools/buzzer_score_wav.c` 离线渲染，不参与产品构建；`buzzer_duty_map.h` 同时保留静默接口的参数类型。/ Offline rendering helpers for `tools/buzzer_score_wav.c`, outside the product build; `buzzer_duty_map.h` also retains the silent API's parameter type.
 
 ## 引脚 / Pins
 
@@ -29,9 +30,9 @@ are defined by `board_metalio_e4p.c`, `board_sd.c` and the root README.
 
 ## 依赖 / Dependencies
 
-`epdiy`、`sy7636a`、`fca9555`、`cst836u`、`sc7a20h`、`device_power`、`e0470_epaper_waveform`。
+`epdiy`、`fca9555`、`cst836u`、`sc7a20h`、`device_power`、`e0470_epaper_waveform`。
 
-`epdiy`, `sy7636a`, `fca9555`, `cst836u`, `sc7a20h`, `device_power`,
+`epdiy`, `fca9555`, `cst836u`, `sc7a20h`, `device_power`,
 `e0470_epaper_waveform`.
 
 ## 许可 / License

@@ -9,7 +9,8 @@ out = root / 'build/sd-media-test'
 out.mkdir(parents=True, exist_ok=True)
 for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h', 'esp_timer.h',
              'freertos/FreeRTOS.h', 'freertos/task.h', 'board_hardware.h',
-             'sdmmc_cmd.h', 'esp_err.h', 'esp_heap_caps.h'):
+             'sdmmc_cmd.h', 'esp_err.h', 'esp_heap_caps.h', 'esp_memory_utils.h',
+             'esp_private/esp_cache_private.h'):
     p = out / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('#pragma once\n', encoding='utf-8')
@@ -33,6 +34,13 @@ typedef int esp_err_t;
 #define ESP_ERR_NOT_FOUND 4
 #define ESP_ERR_NOT_FINISHED 5
 #define ESP_ERR_NO_MEM 6
+#define CONFIG_IDF_TARGET_ESP32S31 1
+#define GPIO_NUM_20 20
+#define GPIO_NUM_21 21
+#define GPIO_NUM_22 22
+#define GPIO_NUM_23 23
+#define GPIO_NUM_24 24
+#define GPIO_NUM_25 25
 #define GPIO_NUM_38 38
 #define GPIO_NUM_42 42
 #define GPIO_NUM_44 44
@@ -43,7 +51,13 @@ typedef int esp_err_t;
 #define SDMMC_SLOT_CONFIG_DEFAULT() ((sdmmc_slot_config_t){0})
 static esp_err_t mock_host_init(void){return ESP_OK;}
 static esp_err_t mock_host_deinit(void){return ESP_OK;}
-typedef struct { int max_freq_khz,slot; esp_err_t (*init)(void),(*deinit)(void); } sdmmc_host_t;
+typedef struct {
+    int max_freq_khz,slot;
+    esp_err_t (*init)(void),(*deinit)(void);
+    void *dma_aligned_buffer;
+    bool (*check_buffer_alignment)(int, const void *, size_t);
+    size_t unaligned_multi_block_rw_max_chunk_size;
+} sdmmc_host_t;
 typedef struct { int width,clk,cmd,d0,d1,d2,d3,cd,wp,flags; } sdmmc_slot_config_t;
 typedef struct { bool format_if_mount_failed; int max_files,allocation_unit_size; } esp_vfs_fat_sdmmc_mount_config_t;
 typedef struct { struct { char name[8]; } cid; struct { uint32_t capacity,sector_size; } csd; } sdmmc_card_t;
@@ -51,10 +65,14 @@ typedef struct { struct { char name[8]; } cid; struct { uint32_t capacity,sector
 #define MALLOC_CAP_DMA 2
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void heap_caps_free(void *p){free(p);}
+static void *heap_caps_aligned_alloc(size_t a,size_t n,int caps){(void)a;(void)caps;return malloc(n);}
+static bool esp_ptr_internal(const void *p){return p!=NULL;}
+static bool sdmmc_host_check_buffer_alignment(int slot,const void *p,size_t size){(void)slot;(void)size;return p!=NULL;}
+static esp_err_t esp_cache_get_alignment(int caps,size_t *a){(void)caps;*a=8;return ESP_OK;}
 static esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 static esp_err_t sdmmc_host_init(void){return ESP_OK;}
 static esp_err_t sdmmc_host_deinit(void){return ESP_OK;}
-static esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card){(void)host;(void)card;return ESP_ERR_TIMEOUT;}
+static esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card);
 static esp_err_t sdmmc_read_sectors(sdmmc_card_t *card,void *buffer,size_t start,size_t count){(void)card;(void)buffer;(void)start;(void)count;return ESP_ERR_TIMEOUT;}
 static esp_err_t sdmmc_get_status(sdmmc_card_t *card);
 typedef pthread_mutex_t portMUX_TYPE;
@@ -66,7 +84,9 @@ typedef int BaseType_t;
 #define pdMS_TO_TICKS(x) (x)
 #define ESP_LOGW(...) ((void)0)
 #define ESP_LOGI(...) ((void)0)
+#define ESP_LOGE(...) ((void)0)
 static bool present=true, drop_during_mount=false, unmount_fail=false, detect_fail=false;
+static bool has_cd=true, health_started;
 static int mounts, unmounts, formats;
 static bool made_books, made_fonts, made_pictures;
 static sdmmc_card_t mock_card={.cid={"MOCK"},.csd={2048,512}};
@@ -75,7 +95,9 @@ esp_err_t board_sd_detect(bool* detected);
 static void vTaskDelay(int n) {(void)n;}
 static void vTaskDelete(void* p) {(void)p;}
 static int xTaskCreate(void (*f)(void*), const char* n,int z,void* a,int pr,void* h) {
-    (void)n;(void)z;(void)a;(void)pr;(void)h;assert(!pending);pending=f;return pdPASS;
+    (void)z;(void)a;(void)pr;(void)h;
+    if(!strcmp(n,"sd_health")){assert(!has_cd);health_started=true;return pdPASS;}
+    assert(!pending);pending=f;return pdPASS;
 }
 static int esp_vfs_fat_info(const char* p,uint64_t* total,uint64_t* freeb) {(void)p;*total=1048576;*freeb=524288;return 0;}
 static int esp_vfs_fat_sdmmc_mount(const char* p,const sdmmc_host_t* h,const sdmmc_slot_config_t* s,const esp_vfs_fat_sdmmc_mount_config_t* c,sdmmc_card_t** card) {
@@ -99,24 +121,21 @@ static int64_t esp_timer_get_time(void){return mock_us;}
 #include "../../components/board_support/board_sd.c"
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。
 // This fixture checks media lifecycle; allocation counting is covered by sd_probe_host_test.
-BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return 0xff;}
+BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return has_cd?0xff:0;}
 int f_opendir(FF_DIR *root,const char *path){(void)root;(void)path;return 1;}
 int f_closedir(FF_DIR *root){(void)root;return FR_OK;}
 int ff_mutex_take(int drive){(void)drive;return 1;}
 void ff_mutex_give(int drive){(void)drive;}
-// 板级 CD 存在时软件检测不启用；这里只补链接符号。
-// Soft detect stays off while the board reports a CD pin; this only satisfies the link.
-esp_err_t sdmmc_get_status(sdmmc_card_t *c){(void)c;return ESP_OK;}
-// 测试实际板级检测函数；FCA 读错不应写出“无卡”。/ Exercise real board detect; failed FCA reads must not publish absence.
-#define IOE_SD_CD (1u << 6)
-static void* s_ioe=(void*)1;
-static esp_err_t fca9555_read_reg(void* h, uint8_t reg, uint8_t* value) {
-    (void)h; assert(reg==0);
-    if(detect_fail) return ESP_ERR_TIMEOUT;
-    *value=present ? 0 : 0xff;
-    return ESP_OK;
+// CD 故障由边界替身注入；当前 S31 无 CD 时由真实 CMD13 检测生命周期。
+// Inject CD faults at the board boundary; real CMD13 lifecycle checks cover the S31 without a CD pin.
+esp_err_t sdmmc_get_status(sdmmc_card_t *c){(void)c;return present?ESP_OK:ESP_ERR_TIMEOUT;}
+esp_err_t sdmmc_card_init(const sdmmc_host_t *h,sdmmc_card_t *c){(void)h;(void)c;return present?ESP_OK:ESP_ERR_TIMEOUT;}
+bool board_sd_has_cd(void){return has_cd;}
+esp_err_t board_sd_detect(bool *detected){
+    if(detected==NULL)return ESP_ERR_INVALID_ARG;
+    if(detect_fail)return ESP_ERR_TIMEOUT;
+    *detected=has_cd?present:true;return ESP_OK;
 }
-@BOARD_DETECT@
 static void finish_probe(void) {assert(pending);void(*f)(void*)=pending;pending=NULL;f(NULL);}
 static void* snapshot_reader(void* arg) {
     (void)arg;
@@ -131,10 +150,6 @@ int main(void) {
     board_sd_info_t info;
     assert(board_sd_detect(NULL)==ESP_ERR_INVALID_ARG);
     bool detected=true;
-    s_ioe=NULL;
-    assert(board_sd_detect(&detected)==ESP_ERR_INVALID_STATE && detected);
-    assert(!board_sd_present());
-    s_ioe=(void*)1;
     detect_fail=true;
     assert(board_sd_detect(&detected)==ESP_ERR_TIMEOUT && detected);
     assert(board_sd_get_info(&info)==ESP_ERR_TIMEOUT && !info.mounted);
@@ -234,13 +249,33 @@ int main(void) {
         finish_probe();
     }
     assert(pthread_join(reader,NULL)==0);
+    // 当前 S31：无卡座 CD，连续 CMD13 失败后失效；插回只恢复在位，须显式重挂。
+    // Current S31: repeated CMD13 failures invalidate media; reinsertion restores presence but requires explicit remount.
+    assert(board_sd_sync()==ESP_OK);
+    has_cd=false;
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);finish_probe();
+    assert(health_started && board_sd_get_info(&info)==ESP_OK);
+    present=false;
+    sd_health_tick();assert(!health_absent);
+    present=true;sd_health_tick();assert(!health_fails);
+    present=false;sd_health_tick();sd_health_tick();assert(health_absent);
+    mock_us+=60000;(void)board_sd_get_info(&info);
+    mock_us+=60000;(void)board_sd_get_info(&info);
+    mock_us+=60000;assert(board_sd_get_info(&info)==ESP_ERR_NOT_FOUND && !info.mounted);
+    present=true;sd_health_tick();assert(!health_absent);
+    assert(board_sd_get_info(&info)==ESP_ERR_INVALID_STATE && info.present && !info.mounted);
+    assert(board_sd_start_probe()==ESP_ERR_INVALID_STATE);
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);finish_probe();
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
+    assert(board_sd_sync()==ESP_OK);
+    for(int i=0;i<3;i++)sd_health_tick();
+    assert(board_sd_remount()==ESP_ERR_NOT_FINISHED);finish_probe();
+    assert(board_sd_get_info(&info)==ESP_OK && info.mounted);
     assert(formats==0);
-    puts("PASS: real checked CD/I2C faults, unknown mount, removal, stale reinsertion, busy lifecycle, mid-probe removal, explicit recovery, concurrent snapshots, no autoformat");
+    puts("PASS: real SD lifecycle, CD faults, S31 no-CD/CMD13 removal and reinsertion, explicit remount, USB handoff, concurrent snapshots, no autoformat");
 }
 '''
-board = (root / 'components/board_support/board_legacy_s3.c').read_text(encoding='utf-8')
-detect = board[board.index('esp_err_t board_sd_detect('):board.index('void board_clear_ioe_int(')]
-(out / 'test.c').write_text(source.replace('@BOARD_DETECT@', detect), encoding='utf-8')
+(out / 'test.c').write_text(source, encoding='utf-8')
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                 '-Wno-unused-variable', '-fsanitize=address,undefined', '-g', '-pthread',
                 '-I'+str(out), '-I'+str(root/'components/board_support/include'),

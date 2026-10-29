@@ -2,9 +2,9 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 小纸 Pico 板级：I2C、IOE、SY7636A、EPD 总线与电源轨。
+ * Metalio E-INK4 Plus 板级：I2C、IOE、EPD 总线与电源轨。
  *
- * Read Pico board: I2C, IO expander, SY7636A, EPD bus and rails.
+ * Metalio E-INK4 Plus board: I2C, IO expander, EPD bus and rails.
  */
 
 #pragma once
@@ -16,7 +16,6 @@
 #include "epd_board.h"
 #include "esp_err.h"
 #include "fca9555.h"
-#include "sy7636a.h"
 #include "sdkconfig.h"
 
 #ifdef __cplusplus
@@ -25,11 +24,11 @@ extern "C" {
 
 #define BOARD_I2C_PORT ((i2c_port_t)CONFIG_BOARD_I2C_PORT)
 #define BOARD_I2C_FREQ_HZ CONFIG_BOARD_I2C_FREQ_HZ
-/// FCA9555 INT#，原理图接到 ESP32-S3 IO41。GPIO41 不是 RTC 脚，只能浅睡唤醒。
-/// / FCA9555 INT# on ESP32-S3 IO41. GPIO41 is not RTC, so light-sleep wake only.
+/// TCA9555 INT#，S31 产品默认 GPIO2，用于浅睡唤醒。
+/// / TCA9555 INT#, GPIO2 by default on the S31 product, used for light-sleep wake.
 #define BOARD_IOE_INT_GPIO CONFIG_BOARD_IOE_INT_GPIO
-/// CST836U INT，原理图 TXD0 / GPIO43。开漏低有效，FPC 侧有 10k 上拉。
-/// / CST836U INT on TXD0 / GPIO43. Open-drain, active-low, 10k pull-up on the FPC.
+/// FT6336U INT，S31 产品默认 GPIO5，低有效。
+/// / FT6336U INT, GPIO5 by default on the S31 product, active low.
 #define BOARD_TP_INT_GPIO CONFIG_BOARD_TP_INT_GPIO
 
 #define BOARD_PRODUCT_NAME "kiikoread"
@@ -43,7 +42,6 @@ extern "C" {
 extern const EpdBoardDefinition epd_board_reader;
 
 i2c_master_bus_handle_t board_i2c_bus(void);
-sy7636a_handle_t board_sy7636a(void);
 fca9555_handle_t board_fca9555(void);
 
 /// 前光冷/暖 PWM 引脚；没有前光的板返回 GPIO_NUM_NC。
@@ -56,8 +54,6 @@ typedef struct {
     uint16_t ioe_invert;
     uint16_t ioe_config;
     int ioe_int_level;
-    sy7636a_status_t sy;
-    bool sy_live;
     bool rails_on;
 } board_status_t;
 
@@ -75,14 +71,14 @@ typedef struct {
     bool all_online;
 } board_i2c_census_t;
 
-/// 轨已上电后再拍。SY7636A 在 EN 低时不应答。
-/// / Take after the rails are up. SY7636A NACKs while EN is low.
+/// 板级 I2C 设备在线快照，供出厂检查使用。
+/// / Board I2C device census for factory checks.
 void board_i2c_census_take(void);
 const board_i2c_census_t* board_i2c_census(void);
 
 esp_err_t board_get_status(board_status_t* status);
-/// 只读 IN/OUT + INT#，CFG/INV 走缓存。不唤醒 SY7636A。
-/// / Read IN/OUT + INT# only; CFG/INV come from cache. Does not wake SY7636A.
+/// 只读 IN/OUT + INT#，CFG/INV 走缓存。
+/// / Read IN/OUT + INT# only; CFG/INV come from cache.
 esp_err_t board_get_ioe_status(board_status_t* status);
 /// 连读 8 寄存器，刷新 CFG/INV 缓存。底栏「读取」和进页用。
 /// / Sequential 8-register read; refreshes CFG/INV cache. Footer Read and page enter.

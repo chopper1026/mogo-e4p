@@ -2,10 +2,10 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * Metalio E-INK4 Plus 没有蜂鸣器：保留 board_support_buzzer_* API 的静默实现。
+ * Metalio E-INK4 Plus 没有蜂鸣器：保留 board_buzzer_* API 的静默实现。
  * 禁用 RMT/LEDC 提示音，避免与 EPD CKV 的 RMT 通道冲突。
  *
- * Metalio E-INK4 Plus has no buzzer: keep the board_support_buzzer_* API silent.
+ * Metalio E-INK4 Plus has no buzzer: keep the board_buzzer_* API silent.
  * This also avoids RMT/LEDC conflict with the EPD CKV RMT channel.
  */
 

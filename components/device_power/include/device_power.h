@@ -2,12 +2,12 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 小纸 Pico CW32L010 PMU 主机侧：I2C 协议、电池、软睡、闹钟、关机。
- * 总线由调用方注入，不依赖板级 BSP。
+ * 设备电源接口：电池、充电、RTC、电源键与关机。
+ * Metalio 后端提供实现，共用快照与旧协议标识保持兼容。
  *
- * Read Pico CW32L010 PMU host: I2C protocol, battery, soft sleep, alarm,
- * power-off. The caller injects the bus; this file does not depend on the
- * board BSP.
+ * Device power interfaces: battery, charging, RTC, power keys and power-off.
+ * The Metalio backend implements these APIs while retaining shared snapshot
+ * and legacy protocol identifiers.
  */
 
 #pragma once
@@ -126,8 +126,8 @@ typedef struct {
 
 } pmu_snapshot_t;
 
-/// 软件油量表：优先采用带 CRC、有效位的轻量快照；未知返回 -1。
-/// / Software fuel gauge: prefer the CRC-checked valid quick snapshot; unknown returns -1.
+/// 共用电量接口：优先采用有效的兼容轻量快照，否则读取状态快照；未知返回 -1。
+/// / Shared battery API: prefer a valid compatibility quick snapshot, then status; unknown returns -1.
 static inline int pmu_battery_percent(const pmu_snapshot_t *p) {
     if (!p || !p->present) return -1;
     uint16_t soc;
@@ -165,11 +165,11 @@ esp_err_t device_power_deinit(void);
 bool device_power_ready(void);
 const pmu_snapshot_t* device_power_get(void);
 
-/// 读 IDENTITY / STATUS / DIAG / 事件 / 配置 / 时间 / 闹钟。
-/// / Read IDENTITY / STATUS / DIAG / event / config / time / alarm.
+/// 刷新当前板状态；Metalio 后端与 poll 共用电量和电源键采样。
+/// / Refresh current-board state; the Metalio backend shares battery/key sampling with poll.
 esp_err_t device_power_refresh(void);
-/// 只刷新 STATUS / QUICK / 事件计数，给页面轮询用。
-/// / Refresh STATUS / QUICK / event count only, for page polls.
+/// 轮询电量、充电状态与待处理电源键，供页面 tick 使用。
+/// / Poll battery, charging state and pending power keys for page ticks.
 esp_err_t device_power_poll(void);
 
 /// 电池校准日志开关：打开后每分钟把 batt 行写串口与 TF 卡 `/sdcard/batt.log`，默认关闭。
@@ -186,8 +186,8 @@ esp_err_t device_power_vcom_get(int* out_mv);
 /// 出厂标定页写入。mv 须 500..2500 且整十。
 /// / Factory setup-page write. mv must be 500..2500 and a multiple of 10.
 esp_err_t device_power_vcom_set(int mv);
-/// 读 CW32 出厂 UID（10 字节）。成功过一次会缓存在 snapshot 里。
-/// / Read the CW32 factory UID (10 bytes). Cached in the snapshot after first success.
+/// 旧协议 UID 兼容接口；Metalio 后端返回 ESP_ERR_NOT_FOUND。
+/// / Legacy protocol UID compatibility API; the Metalio backend returns ESP_ERR_NOT_FOUND.
 esp_err_t device_power_uid_get(uint8_t out[PMU_CHIP_UID_LEN]);
 esp_err_t device_power_event_ack(uint16_t event_id);
 esp_err_t device_power_action(uint8_t action, uint16_t delay_ms, uint16_t reason);
@@ -211,14 +211,14 @@ bool device_power_take_key_wakeup(void);
 /// 丢弃本次唤醒按键的按下/释放动作，避免解锁后被当成新的短按或长按。
 /// / Discard the wake press/release so it cannot become a new short or long press after unlock.
 void device_power_consume_key_press(void);
-/// 保证 RUNNING 后发 HOST_SOFT_SLEEP，等到 STATUS 为 SOFT_SLEEP（随后 EN=0）。
-/// / After RUNNING, send HOST_SOFT_SLEEP and wait for STATUS SOFT_SLEEP (then EN=0).
+/// 软睡兼容入口；Metalio 返回不支持，由应用处理关机交接。
+/// / Soft-sleep compatibility entry; Metalio reports unsupported for application power-off handoff.
 esp_err_t device_power_report_sleep(void);
-/// 发 HOST_READY，等到 STATUS 为 RUNNING。
-/// / Send HOST_READY and wait for STATUS RUNNING.
+/// 将兼容快照标记为 RUNNING。
+/// / Mark the compatibility snapshot RUNNING.
 esp_err_t device_power_report_ready(void);
-/// 协作关机：REQUEST_OFF → SHUTDOWN_READY，EN 保持低。
-/// / Cooperative power-off: REQUEST_OFF → SHUTDOWN_READY; EN stays low.
+/// 当前板关机：发送电源键脉冲，耗尽重试后进入 ESP 深睡。
+/// / Current-board power-off: send power-key pulses, then enter ESP deep sleep after the retry limit.
 esp_err_t device_power_power_off(void);
 
 const char* pmu_power_name(uint8_t state);

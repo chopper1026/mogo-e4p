@@ -85,9 +85,8 @@ Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. 
 | `components/device_power/` | 电量、充电、RTC 与电源键接口；S31 选 Metalio 后端，旧 CW32 线格式在 `pmu_protocol.h`。/ Battery, charging, RTC and power keys; S31 selects Metalio, with the legacy CW32 wire format in `pmu_protocol.h`. |
 | `components/wifi_transfer/` | 热点与已有 WiFi 传书、配网和校时会话。/ AP/STA book transfer, provisioning and time-sync sessions. |
 | `components/epdiy/` | 上游裁剪 fork（LCD 路径）。改动清单在其 LICENSE。不要为注释去改它。/ Trimmed upstream fork. Leave it alone for comment work. |
-| `components/cst836u/` `sc7a20h/` `fca9555/` `sy7636a/` | 芯片驱动。/ Chip drivers. |
+| `components/cst836u/` `sc7a20h/` `fca9555/` | 当前触摸、加速度计及扩展口驱动；旧名称包含 FT6336U/TCA9555 适配。/ Current touch, accelerometer and expander drivers, including FT6336U/TCA9555 adaptations under legacy names. |
 | `components/e0470_epaper_waveform/` | 面板波形与裁剪。`waveforms/*.h` 是数据表。/ Panel waveforms. |
-| `components/pwm_audio/` | PWM 音频（蜂鸣器底层之一）。/ PWM audio helper. |
 | `docs/CHANGELOG.md` | 按版本简述对用户可见的功能变化与修复。/ Brief user-visible changes and fixes by version. |
 
 main 根目录仅保留启动入口与构建配置，新增功能文件按上表职责归类。/ Keep only boot assembly and build configuration at the main root; group new feature files by the ownership table above.

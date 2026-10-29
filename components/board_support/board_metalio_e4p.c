@@ -5,8 +5,8 @@
  * Metalio E-INK4 Plus（ESP32-S31）板级：I2C、TCA9555、TPS65185、EPD 总线与电源轨。
  *
  * Metalio E-INK4 Plus (ESP32-S31) board: I2C, TCA9555, TPS65185, EPD bus and rails.
- * 与 board_legacy_s3.c 提供同名 BSP API，main/ 不需要感知换板。
- * Provides the same BSP API as board_legacy_s3.c so main/ stays board-agnostic.
+ * 通过公共 BSP API 向 main/ 提供板级资源。
+ * Exposes board resources to main/ through the common BSP API.
  */
 
 #include "board_hardware.h"
@@ -514,7 +514,7 @@ const EpdBoardDefinition epd_board_reader = {
 };
 
 /* ------------------------------------------------------------------------- */
-/* BSP API（与 board_legacy_s3.c 同名）                                        */
+/* 板级接口 / BSP API                                                       */
 /* ------------------------------------------------------------------------- */
 
 i2c_master_bus_handle_t board_i2c_bus(void) { return s_i2c_bus; }
@@ -525,8 +525,6 @@ void board_frontlight_pins(gpio_num_t* cool, gpio_num_t* warm) {
     if (cool != NULL) *cool = GPIO_NUM_6;
     if (warm != NULL) *warm = GPIO_NUM_7;
 }
-
-sy7636a_handle_t board_sy7636a(void) { return NULL; }
 
 fca9555_handle_t board_fca9555(void) { return s_ioe; }
 
@@ -632,16 +630,6 @@ esp_err_t board_get_status(board_status_t* status) {
     (void)fill_ioe_status(status, false);
 
     status->rails_on = s_rails_on;
-    status->sy_live = s_tps_ok;
-    status->sy.on = s_tps_ok;
-    status->sy.vcom_manual = true;
-    status->sy.vcom_mv = s_vcom_mv;
-    status->sy.vldo = SY7636A_VLDO_1500;
-    status->sy.temperature_c = 25;
-    if (s_ioe_ok) {
-        uint8_t in0 = 0;
-        if (ioe_read(0, &in0) == ESP_OK) status->sy.pg = (in0 & IOE_BIT(IO_PWR_GOOD)) != 0;
-    }
     return ESP_OK;
 }
 
