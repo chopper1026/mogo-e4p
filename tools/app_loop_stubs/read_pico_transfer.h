@@ -12,3 +12,4 @@ void read_pico_transfer_get_status(read_pico_transfer_status_t *s);
 int read_pico_transfer_get_saved_wifi(char *ssid,bool *configured);
 int read_pico_transfer_start(const read_pico_transfer_cfg_t *cfg);
 bool read_pico_transfer_try_stop_if_idle(void);
+bool read_pico_transfer_pause_for_sleep(void);

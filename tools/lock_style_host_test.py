@@ -93,6 +93,7 @@ static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
 static int epd_height(void){return 1216;}
 '''
+unit += function('app_lifecycle_pause_for_lock', ROOT/'main/app/app_lifecycle.c') + '\n'
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/sleep.c') + '\n'
 unit += r'''

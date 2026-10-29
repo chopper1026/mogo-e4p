@@ -109,6 +109,7 @@ unit += defines + '\n'
 for name in ('sleep_pulldown_pins', 'read_pico_ioe_sleep', 'read_pico_ioe_wake'):
     unit += function(name, board) + '\n'
 unit += function('storage_jobs_quiesce', ROOT/'main/storage_jobs.c') + '\n'
+unit += function('app_lifecycle_prepare_poweroff', ROOT/'main/app/app_lifecycle.c') + '\n'
 for name in ('app_sleep_bind', 'periph_suspend', 'periph_resume', 'app_enter_host_sleep'):
     unit += function(name, sleep) + '\n'
 unit += r'''

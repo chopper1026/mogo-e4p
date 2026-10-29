@@ -81,6 +81,7 @@ idf_component_register(
         "settings.c"
         "haptics.c"
         "app/app_loop.c"
+        "app/app_lifecycle.c"
         "app/app_input.c"
         "app/app_media.c"
         "app/app_navigation.c"

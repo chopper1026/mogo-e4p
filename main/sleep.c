@@ -27,7 +27,7 @@
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
-#include "storage_jobs.h"
+#include "app_lifecycle.h"
 #include "ui_builtin_image.h"
 
 #include "sleep.h"
@@ -231,7 +231,8 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 }
 
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
-    if (!storage_jobs_quiesce(2000)) return APP_WAKE_KEY;
+    const app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
+    if (!handoff.jobs_ready) return APP_WAKE_KEY;
     // 蓝牙控制器不能带着活动状态进浅睡：醒来后的第一条 HCI 命令会踩到 BTDM 控制器内部的
     // 链表断言（ble_hw.c）。锁屏不是用户关蓝牙，停栈时保留重连目标，解锁后主循环重新起栈
     // 并自动连回；停不下来就不进浅睡，保持唤醒轮询，绝不把活动控制器送进浅睡。
@@ -240,7 +241,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     // explicit Bluetooth-off, so the teardown keeps the reconnect target and the main loop
     // restarts the stack after unlock. If the teardown fails, never light-sleep; keep polling
     // awake rather than handing an active controller to the sleep path.
-    const bool ble_stopped = ble_pt_stop_for_sleep(2000) == ESP_OK;
+    const bool ble_stopped = handoff.ble_stopped;
     if (!ble_stopped) ESP_LOGW(TAG, "BLE stop before light sleep failed; staying awake");
     // 首次浅睡前抓 CACHE_L1 配置快照；之后每次醒来写回，喂行产能才回得来。
     // Snapshot CACHE_L1 before the first light sleep; restore on every wake so
@@ -415,9 +416,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     // 后台对时与封面/头像任务先静默：暂停会快照会话，浅睡唤醒后把它复活，那不是对时想要的。
     // Quiesce background time sync and cover/avatar jobs first: pause snapshots sessions and the
     // light-sleep wake revives them, which a sync never wants.
-    app_time_service_cancel();
-    if (pico_online_busy() || !storage_jobs_quiesce(2000) || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
-    (void)ble_pt_stop(2000);
+    if (!app_lifecycle_prepare_poweroff()) return ESP_ERR_INVALID_STATE;
     (void)app_sync_time_to_pmu();
     // 必须先断面板轨，再拉低 MODE，避免常开逻辑仍耗电。/ Drop panel rails before parking MODE on the always-on supply.
     pmu_selftest_prepare_powerdown();
@@ -502,8 +501,7 @@ void enter_lock_and_sleep(
     // 后台对时同样先取消：它没有上传任务，锁屏不该被一次后台对时拖住。
     // A background sync hands back too: it has no upload to protect, and a lock must never
     // wait on a background sync.
-    app_time_service_cancel();
-    bool radio_paused = read_pico_transfer_pause_for_sleep();
+    bool radio_paused = app_lifecycle_pause_for_lock();
     if (!radio_paused) {
         pico_boot_clear_resume();
         ESP_LOGW(TAG, "lock postponed while transfer is busy");

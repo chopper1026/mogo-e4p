@@ -40,6 +40,7 @@
 
 #include "../reader_perf.h"
 #include "app_loop.h"
+#include "app_lifecycle.h"
 #include "platform/s31_input.h"
 #include "app_input.h"
 #include "app_media.h"
@@ -325,15 +326,7 @@ static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedbac
     // / Timers do not finish in light sleep, so cut the motor before the lock face.
     haptics_stop();
     if (feedback) app_lock_feedback(ctx->hl);
-    if (current->on_before_lock) current->on_before_lock(ctx);
-    int tab = app_index_of(current);
-    pico_resume_t resume = {.tab = tab >= 0 && tab < 4 ? (uint8_t)tab : 0};
-    bool fullscreen = false;
-    if (tab == 1 && app_book_resume_context(resume.path, sizeof(resume.path), &fullscreen)) {
-        resume.reader = 1;
-        resume.fullscreen = fullscreen;
-    }
-    (void)pico_boot_save_resume(&resume);
+    app_lifecycle_checkpoint(ctx, current);
     // 锁屏前落盘（阅读进度/票根统计/恢复点）在画面之前，单独计时。
     // Pre-lock persistence (progress, ticket stats, resume point) runs before the lock art; time it separately.
     ESP_LOGI(TAG, "lock prepare feedback=%d total=%lldms", (int)feedback,
