@@ -54,6 +54,12 @@ static int s_view=READING;
 static char *s_text="book";
 static bool s_reader_fullscreen,statusbar=true,s_reader_clock_pending,wallpaper;
 static int64_t s_reader_clock_minute=-1,s_reader_clock_painted_minute=-1,minute=100;
+static int s_reader_power=-1,s_reader_painted_power=-1;
+typedef struct {int percent;bool charging;}pmu_snapshot_t;
+static pmu_snapshot_t power={.percent=-1};
+static const pmu_snapshot_t *device_power_get(void){return &power;}
+static int pmu_battery_percent(const pmu_snapshot_t *p){return p->percent;}
+static bool pmu_battery_charging(const pmu_snapshot_t *p){return p->charging;}
 enum {READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW};
 static int s_reader_panel;
 static uint8_t fb[684*1216],next_fb[684*1216];
@@ -79,11 +85,13 @@ static void guard_draw_result(void *h,int e){(void)h;(void)e;}
 # &E0470_WAVEFORM requires a real object, preserving the actual refresh call.
 unit=unit.replace('#define E0470_WAVEFORM 1','static const int E0470_WAVEFORM=1;')
 unit += area_boundary(ROOT, detail_only=True)
-for name in ('reader_status_area','reader_status_visible','reader_status_paint','reader_clock_tick'):
+for name in ('reader_status_area','reader_status_visible','reader_status_paint','reader_status_power','reader_clock_tick'):
  unit+=function(name,book)+'\n'
 present=function('present',book)
 branch=present[present.index('    if (s_reader_clock_pending) {'):present.index('    // 输入不准备')]
 unit+='static bool clock_present(app_ctx_t *ctx,app_redraw_t redraw){\n'+branch+'\nreturn false;}\n'
+ack=present[present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()'):present.index('    const bool reader_frame_ok')]
+unit+='static bool s_reader_cleanup;\nstatic void frame_ack(int err,app_redraw_t redraw,bool tools_band,int64_t frame_minute,int frame_power){\n'+ack+'}\n'
 # Actual prefetched-page path; freshness is checked after copying, before any push.
 unit+=r'''
 static bool s_water_turn_pending,s_reader_turn_pending,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm,s_reader_footer_pending;
@@ -135,6 +143,41 @@ int main(void){
  assert(fb[159*684]==255&&fb[160*684]==77&&fb[20*684+36]==100);
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&display_calls==1&&s_reader_clock_minute==100);
  assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE&&display_calls==1);
+ // 同一分钟内电量从未知恢复、插拔线及百分比变化；只刷新状态带。
+ // Recover unknown power and track cable/percentage changes within one minute in the status band alone.
+ power.percent=67;
+ assert(pmu_battery_percent(device_power_get())==67&&!pmu_battery_charging(device_power_get()));
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==136);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ power.charging=true;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ failed=1;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==136);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ failed=0;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==137);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ power.charging=false;
+ touch_t held={true};ctx.touch=&held;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);ctx.touch=NULL;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==136);
+ power.percent=68;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ power.charging=true;
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==138);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==139);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE&&fb[160*684]==77);
+ // 正文翻页、工具带和失败推屏不确认页眉；整页成功后无需重复局刷。
+ // Body turns, tools bands and failed output leave the header pending; successful pages need no extra status push.
+ power.percent=69;
+ frame_ack(OK,APP_REDRAW_AREA,false,minute,140);assert(s_reader_power==139);
+ frame_ack(FAULT,APP_REDRAW_PAGE,false,minute,140);assert(s_reader_power==139);
+ frame_ack(OK,APP_REDRAW_PAGE,true,minute,140);assert(s_reader_power==139);
+ frame_ack(OK,APP_REDRAW_PAGE,false,minute,141);assert(s_reader_power==141);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ power.percent=68;frame_ack(OK,APP_REDRAW_FULL,false,minute,139);
+ display_calls=1;
  ++minute;touch_t touch={true};ctx.touch=&touch;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);ctx.touch=NULL;
  // 全屏无状态栏：没有时间显示，不刷新。
@@ -143,6 +186,17 @@ int main(void){
  s_reader_fullscreen=false;minute=101;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&s_reader_clock_pending&&s_reader_clock_minute==100);
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&display_calls==2&&s_reader_clock_minute==101);
+ power.charging=false;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&fb[80*684]==255);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==138);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ s_reader_fullscreen=true;
+ power.charging=true;assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ statusbar=true;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_power==139);
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
+ s_reader_fullscreen=false;
  // 窗口化状态栏开：页眉并入状态栏带，一次刷新覆盖 160px 且页眉同步重画。
  statusbar=true;wallpaper=true;header_paints=0;++minute;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==1&&fb[0]==29&&header_paints==1);

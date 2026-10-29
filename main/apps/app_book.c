@@ -182,6 +182,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "frontlight.h"
+#include "device_power.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -350,6 +351,7 @@ static bool s_shelf_key_mode,s_shelf_key_paint_pending;
 static int s_shelf_key_pressed,s_shelf_key_delta;
 static int64_t s_shelf_key_until;
 static int64_t s_reader_clock_minute = -1, s_reader_clock_painted_minute = -1;
+static int s_reader_power = -1, s_reader_painted_power = -1;
 static bool s_reader_clock_pending;
 static char s_message[128], s_storage[128];
 static char s_chapter_heading_title[READER_HEADING_TITLE_BYTES], s_chapter_heading_label[READER_HEADING_LABEL_BYTES];
@@ -3462,10 +3464,19 @@ static void reader_status_paint(uint8_t *fb) {
     if (app_settings_book_background_path()[0])
         ui_reader_background_paint(fb,area,true);
 }
+// 阅读页单独记录已推屏电量，快捷栏的绘制不能代替页眉更新。
+// Track presented reader power independently so quick-layer painting cannot acknowledge the header.
+static int reader_status_power(void) {
+    const pmu_snapshot_t *pmu = device_power_get();
+    return (pmu_battery_percent(pmu) + 1) * 2 + (pmu_battery_charging(pmu) ? 1 : 0);
+}
 static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
     if (!reader_status_visible() || (ctx->touch && ctx->touch->touched)) return APP_REDRAW_NONE;
-    if (ui_nav_clock_minute()==s_reader_clock_minute) return APP_REDRAW_NONE;
-    s_reader_clock_painted_minute=ui_nav_clock_minute();
+    const int64_t minute=ui_nav_clock_minute();
+    const int power=reader_status_power();
+    if (minute==s_reader_clock_minute && power==s_reader_power) return APP_REDRAW_NONE;
+    s_reader_clock_painted_minute=minute;
+    s_reader_painted_power=power;
     lock_draw(); reader_status_paint(ctx->fb); unlock_draw();
     s_reader_clock_pending=true;
     return APP_REDRAW_AREA;
@@ -3528,7 +3539,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // 时钟单独短刷，不准备插图、不预排正文，也不累计正文全刷次数。
             // Update status alone, without image preparation, pagination, or reader cleanup counters.
             enum EpdDrawError err=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, reader_status_area(), DISPLAY_REFRESH_DEFAULT);
-            if (err==EPD_DRAW_SUCCESS) s_reader_clock_minute=s_reader_clock_painted_minute;
+            if (err==EPD_DRAW_SUCCESS) {
+                s_reader_clock_minute=s_reader_clock_painted_minute;
+                s_reader_power=s_reader_painted_power;
+            }
             guard_draw_result(ctx->hl,err);
             return true;
         }
@@ -3569,6 +3583,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     int64_t start = esp_timer_get_time();
     const int64_t frame_minute=ui_nav_clock_minute();
+    const int frame_power=reader_status_power();
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) render(ctx, ctx->fb);
     bool prep = kick_prep();
     int64_t drawn = esp_timer_get_time();
@@ -3644,8 +3659,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) && shelf_cover_frame_ready(),
         s_cover_batch_present_pending);
     if (err==EPD_DRAW_SUCCESS && reader_status_visible() && !tools_band &&
-        (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup))
+        (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup)) {
         s_reader_clock_minute=frame_minute;
+        s_reader_power=frame_power;
+    }
     const bool reader_frame_ok = err == EPD_DRAW_SUCCESS && s_view == READING && s_text &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
         book_layout_page_image_count(s_reader_session.position.page) == 0;
