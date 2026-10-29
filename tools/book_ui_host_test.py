@@ -52,11 +52,13 @@ typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GE
 #include "ui_text_edit.h"
 #include "book_shelf_categories.h"
 #include "book_shelf_model.h"
+#include "book_file_path.h"
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NVS_NOT_FOUND -2
 #define ESP_ERR_INVALID_STATE -3
 #define ESP_ERR_NOT_FINISHED 7
+#define ESP_ERR_NO_MEM 0x101
 typedef struct {uint8_t usage,mods;} ble_pt_event_t;
 typedef struct {uint8_t len;uint8_t bytes[16];} ble_pt_frame_t;
 typedef struct {ble_pt_frame_t frame;bool pressed;} ble_pt_raw_t;
@@ -86,8 +88,6 @@ typedef book_shelf_entry_t shelf_entry_t;
 #define BOOK_GRID_ROWS 9
 #define BOOK_BULK_ROWS 6
 #define BOOKMARK_MAX 24
-#define BOOK_SCAN_DEPTH_LIMIT 12
-typedef struct {DIR* dir;char path[288];} shelf_scan_frame_t;
 typedef struct {uint16_t chapter,reserved;uint32_t byte_off,saved_s;} reader_bookmark_entry_t;
 typedef struct {uint32_t magic,file_size;uint16_t count,reserved;char path[288];reader_bookmark_entry_t entries[BOOKMARK_MAX];} reader_bookmarks_t;
 #define BOOK_STORE_PATH_MAX 288
@@ -165,7 +165,6 @@ static test_progress_t test_progress[8];
 static int test_progress_count;
 static char test_recent_path[BOOK_STORE_PATH_MAX];
 static void book_progress_bump(void);
-typedef struct {nvs_handle_t favorites,hidden;bool truncated;} shelf_backfill_t;
 static esp_err_t book_progress_list(book_progress_visit_fn visit,void* ctx){
     for(int i=0;i<test_progress_count;i++)if(!visit(test_progress[i].path,&test_progress[i].value,ctx))break;
     return ESP_OK;
@@ -195,10 +194,9 @@ static int book_epub_metadata_cached(const char* path,char* title,size_t tcap,ch
 static bool book_title_get(const char* path,char* out,size_t cap){(void)path;(void)out;(void)cap;return false;}
 static void book_title_clean_import(char* title){(void)title;}
 static bool book_title_from_path(const char* path,char* out,size_t cap){const char* name=strrchr(path,'/');name=name?name+1:path;size_t n=strlen(name);const char* dot=strrchr(name,'.');if(dot)n=(size_t)(dot-name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;return n>0;}
-static void clean_filename(char* out,size_t cap,const char* name){size_t n=strlen(name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;}
 typedef struct pending_progress {char path[288];book_progress_t value;bool dirty,progress_saved;book_progress_watch_t* watch;struct pending_progress* next;} pending_progress_t;
 static pending_progress_t* s_pending;
-typedef struct delete_retry {shelf_entry_t entry;struct delete_retry* next;} delete_retry_t;
+typedef book_shelf_retry_t delete_retry_t;
 static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
@@ -333,7 +331,6 @@ static app_redraw_t apply_reader_typography(app_ctx_t* ctx,int tracking){(void)c
 static int app_settings_book_line_spacing(void){return 130;}
 static int app_settings_book_paragraph_spacing(void){return 50;}
 static void reader_indent_hold_cancel(void){}
-static bool book_file_path_supported(const char *path){(void)path;return true;}
 #define APP_BOOK_PARAGRAPH_COUNT 11
 #define APP_BOOK_TRACK_MIN (-15)
 #define APP_BOOK_TRACK_COUNT 31
@@ -366,7 +363,11 @@ typedef struct {bool present,mounted;} read_pico_sd_info_t;
 static int read_pico_sd_get_info(read_pico_sd_info_t* out){*out=(read_pico_sd_info_t){0};return 0;}
 static bool s_shelf_cache_valid,s_cache_sd_present,s_cache_sd_mounted;
 static uint8_t s_cache_shelf_style;
-static bool app_poll_main_navigation(app_ctx_t *ctx){(void)ctx;return false;}
+static int test_open_dirs,test_nav_depth;
+static bool app_poll_main_navigation(app_ctx_t *ctx){
+    if(test_nav_depth && test_open_dirs>=test_nav_depth){ctx->request_app=(const app_desc_t*)1;return true;}
+    return false;
+}
 static void ui_reader_background_release(void){}
 static void *s_backgrounds;static int s_background_count;
 static void vTaskDelete(void* p){(void)p;}
@@ -418,6 +419,11 @@ static int ui_content_width(void){return 604;}
 static int ttf_text_width_px(int px,const char* text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=px;return width;}
 static void ui_text(uint8_t* fb,int x,int y,int px,const char* text,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)align;(void)inv;assert(strlen(test_wrapped)+strlen(text)<sizeof(test_wrapped));strcat(test_wrapped,text);}
 '''
+for header in ("book_shelf_scan.h", "book_shelf_manage.h"):
+    declarations = (source.parents[1] / "book" / header).read_text()
+    declarations = '\n'.join(line for line in declarations.splitlines()
+                             if not line.startswith(("#include", "#pragma")))
+    unit = unit.replace("static shelf_entry_t* s_shelf;", declarations + "\nstatic shelf_entry_t* s_shelf;", 1)
 settings=(source.parents[1]/'settings.h').read_text()
 enum=settings[settings.index('typedef enum {\n    APP_READER_KEY_PREV'):settings.index('} app_reader_key_action_t;')+len('} app_reader_key_action_t;')]
 input_header=(source.parents[1]/'book/book_reader_input.h').read_text()
@@ -460,8 +466,10 @@ unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 unit += f'\n#include "{source.parents[1] / "book/reader_reflow.h"}"\n'
 unit += "static const reader_reflow_t *reader_reflow_context(void);\n"
-for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+from book_shelf_test_code import shelf_hooks, service_hooks, service_unhooks, shelf_checks
+unit += shelf_hooks
+for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
@@ -470,12 +478,28 @@ from reader_reflow_test_code import reflow_code
 unit += reflow_code("layout", "option_locked")
 for name in ("apply_reader_layout", "reader_ui_extra", "reader_slider_rect", "reader_slider_map", "reader_slider_begin", "reader_slider_move", "reader_slider_commit"):
     unit += function(name) + "\n"
+scan_source = source.parents[1] / "book/book_shelf_scan.c"
+manage_source = source.parents[1] / "book/book_shelf_manage.c"
+unit += service_hooks
+import re
+unit += re.search(r"#define BOOK_SCAN_DEPTH_LIMIT [^\n]+\ntypedef struct \{[^{}]+\} shelf_scan_frame_t;", scan_source.read_text()).group(0) + "\n"
+unit += "#define copy_text shelf_service_copy_text\n#define clean_filename shelf_service_clean_filename\n"
+unit += re.search(r"typedef struct \{[^{}]+\} shelf_backfill_t;", scan_source.read_text()).group(0) + "\n"
+for name in ("copy_text", "clean_filename", "book_shelf_catalog_reserve", "book_shelf_scan_dir", "shelf_backfill_visit",
+             "book_shelf_scan_backfill", "book_shelf_scan_retries"):
+    unit += function(name, scan_source) + "\n"
+unit += "#undef copy_text\n#undef clean_filename\n"
+for name in ("book_shelf_retry_find", "delete_retry_reserve", "delete_retry_discard",
+             "book_shelf_manage_one", "book_shelf_manage_batch"):
+    unit += function(name, manage_source) + "\n"
+unit += service_unhooks + shelf_checks
 unit += r'''
 static int compare_books(const shelf_entry_t *a, const shelf_entry_t *b) {
     book_shelf_query_t query = shelf_query();
     return book_shelf_compare(&query, a, b);
 }
 int main(void) {
+    test_shelf_services();
     for(int i=0;i<3;++i){
         EpdRect r=bulk_nav_rect(i);
         assert(r.x+r.width/2==134+i*208);

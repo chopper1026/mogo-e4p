@@ -27,6 +27,15 @@ python3 tools/run_reader_baseline.py present
 `shelf` 与 `management` 编译真实的书架数据模块，分别覆盖目录/分页记忆及搜索、排序、选择和管理失败重试；保留页面适配层的回归断言。
 `shelf` and `management` compile the actual shelf data module, covering folder/page memory and search, ordering, selection and management retries while retaining page-adapter regression assertions.
 
+`book_shelf_scan` 同步借用页面持有的条目数组，沿用 PSRAM 增长策略和十二层目录深度限制；每次遍历独占有界目录栈，在导航中断、读取错误或内存不足时关闭本次打开的目录。页面负责根目录、收藏与隐藏句柄、分类、导航及缓存提交；历史补入单独打开并关闭原有 NVS 命名空间，只补入尺寸匹配的受支持书籍。旧删除清理记录优先于同路径重新出现的文件，避免后续重试误清新进度。
+`book_shelf_scan` synchronously borrows the page-owned catalog, retaining PSRAM growth and the twelve-level directory depth limit. Each traversal owns a bounded directory stack and closes its directories on navigation cancellation, read errors or allocation failure. The page retains roots, favorites/hidden handles, categories, navigation and cache commits. History backfill separately opens and closes the existing NVS namespaces and admits only supported, size-matched books. Old deletion-cleanup records override reappearing paths so later retries cannot erase new progress.
+
+`book_shelf_manage` 同步执行单本及批量操作，页面保留确认、提示、排序和导航，并持有跨页退出的重试链。修改当前书前先交还阅读资源；删除前预留重试记录，预留失败不调用删除。文件删除后先标记重试、丢弃待保存进度并通知存储版本，再交回页面更新列表；清理失败保留记录，后续只重试进度清理。批量失败项保留选择并原地压紧，移出书架仍只修改隐藏记录，不交还书源或修改文件与进度。
+`book_shelf_manage` executes single and batch actions synchronously. The page retains confirmation, notices, ordering, navigation and the retry chain across exits. Reading resources are released before modifying the current book, and deletion requires a reserved retry record; reservation failure prevents deletion. After file removal the service marks the retry, discards pending progress and notifies the store revision before returning list updates to the page. Cleanup failure retains the record, and later attempts retry only progress cleanup. Batch failures retain selection during in-place compaction. Hiding still changes only shelf records without releasing sources or changing files/progress.
+
+`management` 抽取真实页面适配及扫描/管理服务，在临时文件树上覆盖嵌套目录、深度边界、导航中断后句柄归零、目录/文件读取错误、目录栈与条目增长失败、历史与重试合并失败，以及删除双路预留失败和清理重试顺序。受控文件系统错误模拟介质失效；不能代替实际拔卡、NVS 驱动故障或设备显示验证。测试只使用电脑上的临时文件，不要求删除设备中的真实书籍。
+`management` extracts actual page adapters and scan/management services, using temporary file trees for nesting, depth bounds, zero live handles after navigation cancellation, directory/file read errors, stack/catalog allocation failure, backfill/retry merge failure, both deletion-reservation failures and cleanup retry order. Controlled filesystem errors model media loss but do not replace physical card removal, NVS-driver faults or display verification. Tests use temporary host files and require no deletion of real books on the device.
+
 `session` 使用真实 HTML 解析/释放代码并跟踪分配，检查书源排他与章节交接后回收；`images` 覆盖章节加载及排版失败回退；`book` 还验证会话与真实 TXT/EPUB 文件的联动。这些宿主检查不能替代设备上的预绘交还和资源峰值测量。
 `session` tracks allocations through real HTML parsing/cleanup to verify exclusive sources and chapter reclamation; `images` covers chapter-load and layout rollback; `book` also integrates sessions with real TXT/EPUB files. These host checks do not replace device prefetch handoff or peak-resource measurements.
 

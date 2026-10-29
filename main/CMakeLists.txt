@@ -123,6 +123,8 @@ idf_component_register(
         "apps/usb_storage.c"
         "book/book_store.c"
         "book/book_shelf_model.c"
+        "book/book_shelf_scan.c"
+        "book/book_shelf_manage.c"
         "book/reader_session.c"
         "book/reader_chapter.c"
         "book/reader_open.c"
