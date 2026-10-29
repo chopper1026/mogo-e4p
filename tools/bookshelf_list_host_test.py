@@ -4,6 +4,7 @@
 # English: Native list painting, aspect-fill covers, two-line bounds and a native preview.
 import argparse
 from pathlib import Path
+from shelf_cover_test_support import declarations, implementation
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -63,7 +64,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
  for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=function('pixel',ROOT/'main/ui/ui_pinpad.c')+'\n'
- unit+='typedef struct {unsigned x,y,width,height;} book_crop_t;\n'
+ unit+=declarations()
  unit+=function('book_cover_crop',ROOT/'main/image/image_decode.c')+'\n'
  unit+=r'''
 #include "ui_image_dither.h"
@@ -74,12 +75,11 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 #define BOOK_COVER_H 240
 static int s_view=0,style=5,s_pressed_control=-1;
 enum {SHELF,BULK};
-static unsigned s_cover_pending_mask;
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
 #define SHELF_FAST_COVER_STRIDE 21
 #define SHELF_FAST_COVER_WIDTH 164
-static struct {uint8_t *gray,*fast_bits;unsigned width,height;bool fast_white_edge;} s_covers[4];
+SHELF_CONTEXT_DECLARATIONS
 typedef struct {char name[256],author[128];bool has_progress,favorite;unsigned pct;} shelf_entry_t;
 static shelf_entry_t *s_shelf;
 static int s_visible_count=4;
@@ -99,6 +99,7 @@ static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t c){epd_draw_hline(
 static void copy_text(char *d,size_t n,const char *v){snprintf(d,n,"%s",v);}
 static void fit_text(char *v,int px,int w){while(*v&&ui_text_fixed_width_px(px,v)>w){size_t n=strlen(v)-1;while(n&&((unsigned char)v[n]&0xc0)==0x80)--n;v[n]=0;}}
 '''
+ unit=unit.replace('SHELF_CONTEXT_DECLARATIONS','')+implementation()
  for n in ('row_rect','shelf_cover_image','shelf_cover_frame_ready','draw_favorite_icon','draw_shelf_favorite_icon','cover_favorite_needs_white_edge','draw_shelf_cover','paint_list_cover_feedback','draw_list_title','draw_list_row'):
   unit+=function(n,ROOT/'main/apps/app_book.c')+'\n'
  unit+=r'''

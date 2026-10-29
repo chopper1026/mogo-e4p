@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 English: Extract real static helpers without linking hardware page dependencies.
 """
 from pathlib import Path
+from shelf_cover_test_support import declarations as cover_declarations, implementation as cover_implementation
 import subprocess
 import tempfile
 
@@ -393,9 +394,7 @@ static uint32_t s_progress_bumps;
 static void book_progress_bump(void){++s_progress_bumps;}
 static uint32_t book_progress_revision(void){return s_progress_bumps;}
 static void book_lock_collage_invalidate(void){}
-static unsigned s_cover_generation;
-static void book_cover_jobs_cancel(unsigned generation){(void)generation;s_cover_generation=0;}
-static unsigned book_cover_jobs_begin(void){return ++s_cover_generation;}
+SHELF_CONTEXT_DECLARATIONS
 static void free_book(void){s_text=NULL;s_path[0]=0;}
 static void refresh_cached_progress(app_ctx_t* ctx);
 static void return_to_cached_shelf(app_ctx_t* ctx){(void)ctx;}
@@ -942,7 +941,7 @@ unit = position_state(page=0, file_size=1000) + unit
 with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"
-    c.write_text(unit, encoding="utf-8")
+    c.write_text(unit.replace("SHELF_CONTEXT_DECLARATIONS",cover_declarations())+cover_implementation(), encoding="utf-8")
     subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
                     "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[2] / "tools/shelf_categories_host_stubs"), "-I", str(source.parents[2] / "tools/book_source_host_stubs"), "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
                     str(c), str(source.parents[1] / "book/book_shelf_category_state.c"), str(source.parents[1] / "book/book_shelf_model.c"), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)

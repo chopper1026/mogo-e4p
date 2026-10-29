@@ -9,6 +9,7 @@ Run commands from the repository root and keep outputs in ignored build director
 | 完整阅读回归 / Reader regression | `python3 tools/run_reader_baseline.py` | 统一执行阅读、字体、显示、存储、OTA 与应用循环回归，保留 ASan/UBSan。/ Run reader/font/display/storage/OTA/app-loop suites with ASan/UBSan. |
 | 指定领域 / Selected suites | `python3 tools/run_reader_baseline.py session chapter open turn reflow` | 只执行指定领域；完整列表见 `--help`。/ Run selected domains; see --help for all suites. |
 | 书架分类 / Shelf categories | `python3 tools/run_reader_baseline.py shelf management navigation` | 链接真实分类状态，检查目录、两种布局页码、菜单手势、分配失败及页面衔接。/ Link real category state to check folders, both layout pages, menu gestures, allocation failures and page integration. |
+| 书架封面 / Shelf covers | `python3 tools/run_reader_baseline.py shelf_covers` | 运行真实封面状态、工作队列和页面绘制，检查取消、整组显示、推屏失败、内存上限与缓存复用。/ Run real cover state, worker and page painting; check cancellation, grouped reveal, failed presentation, memory bounds and cache reuse. |
 | 图片文件 / Image files | `python3 tools/test_image_files.py` | 实际 JPEG/PNG 流式解码、损坏和大小边界；需要 Pillow、libpng 与 JPEG 依赖源码。/ Real streaming JPEG/PNG, corruption and size bounds; requires Pillow, libpng and JPEG sources. |
 | 题头 / Heading | `python3 tools/reader_title_style_host_test.py` | 四种样式、字号、折行、默认画面像素一致性。/ Four styles, sizes, wrapping and historical-default pixel equality. |
 | 字体上下文 / Font context | `python3 tools/lock_font_host_test.py` | 系统/阅读字体借用与睡眠恢复。/ System/reader font borrowing and wake restoration. |

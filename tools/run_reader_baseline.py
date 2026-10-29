@@ -29,6 +29,7 @@ SUITES = {
     "storage": ["bash", "tools/run_storage_host_tests.sh"],
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "board": [sys.executable, "tools/s31_board_host_test.py"],
+    "shelf_covers": ["bash", "tools/run_shelf_cover_host_tests.sh"],
     "shelf": [sys.executable, "tools/shelf_categories_host_test.py"],
     "management": [sys.executable, "tools/book_ui_host_test.py"],
     "session": [sys.executable, "tools/reader_session_host_test.py"],

@@ -45,6 +45,11 @@ def check(root):
             for context in contexts:
                 if re.search(r"\b" + re.escape(context) + r"\s*(?:\.|->)", source):
                     errors.append(f"{relative}: shelf category state must be accessed through its API")
+        if relative.startswith("main/") and relative != "main/book/book_shelf_covers.c":
+            contexts = re.findall(r"\bbook_shelf_covers_t\s+\*?\s*(\w+)", source)
+            for context in contexts:
+                if re.search(r"\b" + re.escape(context) + r"\s*(?:\.|->)", source):
+                    errors.append(f"{relative}: shelf cover state must be accessed through its API")
         for match in re.finditer(r'^\s*#\s*include\s*[<"]([^>"\n]+)[>"]', source, re.M):
             name = match[1]
             candidates = [path.parent / name]
@@ -69,6 +74,8 @@ def check(root):
                 reason = "font engines must not depend on application policy"
             elif relative.startswith("main/book/") and target_group == "apps":
                 reason = "book modules must not depend on page headers"
+            elif relative in {"main/book/book_shelf_covers.c", "main/book/book_shelf_covers.h"} and target_group != "book":
+                reason = "shelf cover state must not depend on UI or system policy"
             elif relative == "main/book/book_shelf_category_state.c" and target_group != "book":
                 reason = "shelf category state must not depend on UI or system policy"
             if reason:

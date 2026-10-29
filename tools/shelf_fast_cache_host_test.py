@@ -3,6 +3,7 @@ English: Exercise actual cover caching, its memory bound, invalidation and repea
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from shelf_cover_test_support import declarations, implementation
 import re
 import subprocess
 import tempfile
@@ -45,17 +46,14 @@ unit = r'''
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {unsigned x,y,width,height;} book_crop_t;
 enum {SHELF,MANAGE};
 static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
 static bool fast=true,alloc_fail;
 static size_t free_psram=4*1024*1024,allocated_bytes;
 static void release_guard_cache(void){}
 // 后台封面任务在此 harness 之外：只吸收代次取消调用。/ Background cover jobs live outside this harness; the stub absorbs generation cancels.
-static unsigned s_cover_generation;
-static void book_cover_jobs_cancel(unsigned generation){(void)generation;}
-static unsigned allocations,s_cover_pending_mask,s_cover_decode_mask,s_cover_warm_mask,s_cover_dirty_mask,s_cover_present_mask;
-static struct {int index;uint8_t *gray,*fast_bits;unsigned width,height;uint8_t fast_contrast,fast_phase;bool fast_white_edge;} s_covers[BOOK_ROWS];
+static unsigned allocations;
+SHELF_CONTEXT_DECLARATIONS
 static int app_settings_shelf_style(void){return style;}
 static int shelf_rows(void){return rows;}
 static bool app_settings_main_fast_refresh(void){return fast;}
@@ -74,6 +72,7 @@ static void* heap_caps_calloc(size_t count,size_t bytes,unsigned caps){
 }
 static EpdRect row_rect(int row){return (EpdRect){36+(row%3)*210+phase_shift,224+(row/3)*282,192,260};}
 '''
+unit=unit.replace('SHELF_CONTEXT_DECLARATIONS',declarations())+implementation()
 unit += function('ui_contrast_gray', ROOT / 'main/ui/ui_kit.c') + '\n'
 unit += function('book_cover_crop', ROOT / 'main/image/image_decode.c') + '\n'
 unit += function('cover_favorite_needs_white_edge', book) + '\n'

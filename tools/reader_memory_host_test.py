@@ -3,6 +3,7 @@
 English: Exercise actual snapshot functions, rejecting borrowed pointers and checking released versus retained resources.
 """
 from pathlib import Path
+from shelf_cover_test_support import declarations, implementation
 import hashlib
 import json
 import os
@@ -41,7 +42,7 @@ static const html_text_t *reader_session_content(const void *session){assert(ses
 static struct {uint8_t *gray;} *s_page_images;
 static int s_page_image_count;
 static void *s_shelf,*s_guard_cache,*s_editor_cover;
-static struct {void *gray,*fast_bits;} s_covers[2];
+SHELF_CONTEXT_DECLARATIONS
 static struct {void *pointer;size_t bytes;} allocated[64];
 static size_t live;
 static unsigned queries,logs;
@@ -78,6 +79,7 @@ static void reader_perf_memory_test(const char *event,const reader_memory_stats_
 }
 #define reader_perf_memory reader_perf_memory_test
 '''
+UNIT=UNIT.replace('SHELF_CONTEXT_DECLARATIONS',declarations())+implementation()
 for path, name in [
     ('main/font/ttf_font.c', 'ttf_font_memory_stats'),
     ('main/book/book_layout.c', 'book_layout_memory_stats'),

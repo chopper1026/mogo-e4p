@@ -150,7 +150,7 @@
 #include "ble_page_turner.h"
 #include "book_layout.h"
 #include "book_cover.h"
-#include "book_cover_jobs.h"
+#include "book_shelf_covers.h"
 #include "book_lock_collage.h"
 #include "book_epub.h"
 #include "book_policy.h"
@@ -281,16 +281,8 @@ static bool s_requested_fullscreen = true;
 static bool s_reader_return_home;
 static bool s_requested_manage;
 static shelf_entry_t* s_shelf;
-static struct {
-    int index;
-    uint8_t *gray, *fast_bits;
-    unsigned width, height;
-    uint8_t fast_contrast, fast_phase;
-    bool fast_white_edge;
-} s_covers[BOOK_ROWS];
-static unsigned s_cover_pending_mask, s_cover_decode_mask, s_cover_warm_mask;
-static unsigned s_cover_dirty_mask, s_cover_present_mask;
-static int64_t s_cover_warm_after_ms;
+static book_shelf_covers_t s_shelf_covers;
+_Static_assert(BOOK_ROWS == BOOK_SHELF_COVER_SLOTS, "shelf cover slots");
 static size_t s_shelf_capacity;
 static int s_count, s_visible_count, s_filter;
 static bool s_recent_sort;
@@ -676,29 +668,17 @@ static EpdRect shelf_cover_image(int row) {
     // 列表所有封面统一尺寸；原图按比例铺满并居中裁切。/ Uniform list boxes use aspect fill and center crop.
     return (EpdRect){71, card.y + (197-156)/2, 120, 156};
 }
-static unsigned s_cover_generation;
 static void invalidate_covers(void) {
-    book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;
+    book_shelf_covers_cancel(&s_shelf_covers);
     release_guard_cache();
-    s_cover_pending_mask = s_cover_decode_mask = s_cover_warm_mask = 0;
-    s_cover_dirty_mask = s_cover_present_mask = 0;
-    for (int i = 0; i < BOOK_ROWS; ++i) {
-        free(s_covers[i].gray);
-        free(s_covers[i].fast_bits);
-        s_covers[i].gray = NULL;
-        s_covers[i].fast_bits = NULL;
-        s_covers[i].index = -1;
-    }
+    book_shelf_covers_release(&s_shelf_covers);
 }
 static void release_fast_covers(void) {
-    for (int i=0;i<BOOK_ROWS;++i) {
-        free(s_covers[i].fast_bits);
-        s_covers[i].fast_bits=NULL;
-    }
+    for (int row = 0; row < BOOK_ROWS; ++row) book_shelf_covers_drop_fast(&s_shelf_covers, row);
 }
 static bool fast_cover_matches(int row, EpdRect image) {
-    return s_covers[row].fast_bits && s_covers[row].fast_contrast==app_settings_system_contrast() &&
-        s_covers[row].fast_phase==((image.x&3)|((image.y&3)<<2));
+    return book_shelf_covers_fast_matches(&s_shelf_covers, row, app_settings_system_contrast(),
+                                          (image.x & 3) | ((image.y & 3) << 2));
 }
 static bool cover_favorite_needs_white_edge(const uint8_t *gray, EpdRect image, unsigned sw, unsigned sh);
 static void prepare_fast_covers(void) {
@@ -706,18 +686,19 @@ static void prepare_fast_covers(void) {
     // Release gray immediately after conversion, retaining valid packed artwork across tab changes.
     if (s_view != SHELF || !app_settings_main_fast_refresh()) { release_fast_covers(); return; }
     for (int row = 0; row < BOOK_ROWS; ++row) {
-        if (!s_covers[row].gray) continue;
+        const book_shelf_cover_t *cover = book_shelf_covers_slot(&s_shelf_covers, row);
+        if (!cover->gray) continue;
         EpdRect image = shelf_cover_image(row);
         if (row < shelf_rows() && row < BOOK_GRID_ROWS && !fast_cover_matches(row, image)) {
-            free(s_covers[row].fast_bits); s_covers[row].fast_bits = NULL;
+            book_shelf_covers_drop_fast(&s_shelf_covers, row);
             // 转换后回收的灰阶空间也计入保留量；内存不足时显示标题，不长期保留灰阶副本。
             // Count reclaimed gray toward the reserve; on OOM show a title rather than retain a gray duplicate.
             size_t free_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) + BOOK_COVER_W * BOOK_COVER_H;
             uint8_t *bits = free_after >= SHELF_FAST_CACHE_RESERVE + SHELF_FAST_COVER_BYTES
                 ? heap_caps_calloc(1, SHELF_FAST_COVER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
             if (bits) {
-                unsigned sw = app_settings_shelf_style() == 5 ? s_covers[row].width : BOOK_COVER_W;
-                unsigned sh = app_settings_shelf_style() == 5 ? s_covers[row].height : BOOK_COVER_H;
+                unsigned sw = app_settings_shelf_style() == 5 ? cover->width : BOOK_COVER_W;
+                unsigned sh = app_settings_shelf_style() == 5 ? cover->height : BOOK_COVER_H;
                 book_crop_t crop = book_cover_crop(sw, sh, image.width, image.height);
                 unsigned sample_x[SHELF_FAST_COVER_WIDTH];
                 uint8_t tones[256];
@@ -727,18 +708,17 @@ static void prepare_fast_covers(void) {
                     const unsigned sy = crop.y + (uint64_t)(unsigned)y * crop.height / (unsigned)image.height;
                     for (int x = 0; x < image.width; ++x) {
                         const unsigned sx = sample_x[x];
-                        uint8_t tone = tones[s_covers[row].gray[sy * sw + sx]];
+                        uint8_t tone = tones[cover->gray[sy * sw + sx]];
                         if (ui_image_dither_cover_bw(tone, image.x + x, image.y + y))
                             bits[y * SHELF_FAST_COVER_STRIDE + x / 8] |= (uint8_t)(1u << (x & 7));
                     }
                 }
-                s_covers[row].fast_white_edge = cover_favorite_needs_white_edge(s_covers[row].gray, image, sw, sh);
-                s_covers[row].fast_bits = bits;
-                s_covers[row].fast_contrast = app_settings_system_contrast();
-                s_covers[row].fast_phase = (image.x & 3) | ((image.y & 3) << 2);
+                book_shelf_covers_set_fast(&s_shelf_covers, row, bits,
+                    cover_favorite_needs_white_edge(cover->gray, image, sw, sh),
+                    app_settings_system_contrast(), (image.x & 3) | ((image.y & 3) << 2));
             }
         }
-        free(s_covers[row].gray); s_covers[row].gray = NULL;
+        book_shelf_covers_drop_gray(&s_shelf_covers, row);
     }
 }
 void app_book_cover_mode_changed(void) { invalidate_covers(); }
@@ -769,27 +749,27 @@ static bool load_shelf_cover_fast(int row, int index) {
     bool edge;
     if (!book_cover_fast_cache_read(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
                                    key, bits, &edge)) { free(bits); return false; }
-    s_covers[row].fast_bits = bits; s_covers[row].fast_white_edge = edge;
-    s_covers[row].fast_contrast = key.contrast; s_covers[row].fast_phase = key.phase;
+    book_shelf_covers_set_fast(&s_shelf_covers, row, bits, edge, key.contrast, key.phase);
     return true;
 }
 static void save_shelf_cover_fast(int row, int index) {
-    if (!s_covers[row].fast_bits) return;
+    const book_shelf_cover_t *cover = book_shelf_covers_slot(&s_shelf_covers, row);
+    if (!cover->fast_bits) return;
     EpdRect image = shelf_cover_image(row);
     book_fast_cover_key_t key = {(unsigned)image.width, (unsigned)image.height, SHELF_FAST_COVER_STRIDE,
-        s_covers[row].fast_contrast, s_covers[row].fast_phase};
+        cover->fast_contrast, cover->fast_phase};
     book_cover_fast_cache_write(s_shelf[index].path, s_shelf[index].name, s_shelf[index].author,
-                                key, s_covers[row].fast_bits, s_covers[row].fast_white_edge);
+                                key, cover->fast_bits, cover->fast_white_edge);
 }
 
 static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
     if((s_view!=SHELF&&s_view!=MANAGE)||(!cache_only&&ctx->touch&&ctx->touch->touched))return 0;
     unsigned changed=0;
     for(int row=0;row<shelf_rows();++row){
-        unsigned bit=1u<<row;if(!(s_cover_pending_mask&bit))continue;
+        unsigned bit=1u<<row;if(!(book_shelf_covers_pending(&s_shelf_covers)&bit))continue;
         if(s_view==SHELF&&app_poll_main_navigation(ctx))return changed;
         int index=ctx->leaf*shelf_rows()+row;
-        if(index<0||index>=s_visible_count||s_covers[row].index!=index||s_shelf[index].removed){s_cover_pending_mask&=~bit;continue;}
+        if(index<0||index>=s_visible_count||book_shelf_covers_slot(&s_shelf_covers, row)->index!=index||s_shelf[index].removed){book_shelf_covers_skip(&s_shelf_covers, row);continue;}
         EpdRect image=shelf_cover_image(row);
         book_cover_job_t request={.list=s_view==SHELF&&app_settings_shelf_style()==5,
             .fast=s_view==SHELF&&app_settings_main_fast_refresh(),.width=image.width,.height=image.height,
@@ -798,22 +778,7 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
         copy_text(request.path,sizeof(request.path),s_shelf[index].path);
         copy_text(request.title,sizeof(request.title),s_shelf[index].name);
         copy_text(request.author,sizeof(request.author),s_shelf[index].author);
-        if(!s_cover_generation)s_cover_generation=book_cover_jobs_begin();
-        if(!book_cover_jobs_submit(s_cover_generation,row,&request)){
-            s_cover_generation=book_cover_jobs_begin();
-            if(!book_cover_jobs_submit(s_cover_generation,row,&request)){s_cover_pending_mask&=~bit;continue;}
-        }
-        book_cover_result_t result={0};int state=book_cover_jobs_take(s_cover_generation,row,&result);
-        if(!state)continue;
-        s_cover_pending_mask&=~bit;s_cover_decode_mask&=~bit;
-        if(state<0)continue;
-        free(s_covers[row].gray);free(s_covers[row].fast_bits);
-        s_covers[row].gray=result.fast?NULL:result.pixels;
-        s_covers[row].fast_bits=result.fast?result.pixels:NULL;
-        s_covers[row].width=result.width;s_covers[row].height=result.height;
-        s_covers[row].fast_white_edge=result.white_edge;
-        s_covers[row].fast_contrast=request.contrast;s_covers[row].fast_phase=request.phase;
-        changed|=bit;s_cover_dirty_mask|=bit;
+        if (book_shelf_covers_collect(&s_shelf_covers, row, &request)) changed |= bit;
     }
     return changed;
 }
@@ -821,36 +786,23 @@ static unsigned prepare_cover_batch(app_ctx_t *ctx,bool cache_only) {
 // 分批只用于准备，不能让几张已解码封面先出现在屏幕或点击反馈中。
 // Chunk preparation only: neither page painting nor press feedback reveals an incomplete cover group.
 static bool shelf_cover_frame_ready(void) {
-    return s_view != SHELF || s_cover_pending_mask == 0;
+    return s_view != SHELF || book_shelf_covers_pending(&s_shelf_covers) == 0;
 }
 static unsigned shelf_cover_reveal_mask(void) {
-    return shelf_cover_frame_ready() ? s_cover_dirty_mask : 0;
+    return book_shelf_covers_reveal(&s_shelf_covers, s_view == SHELF);
 }
 
 static void prepare_covers(app_ctx_t* ctx) {
     if (s_view != SHELF && s_view != MANAGE) return;
     int rows = shelf_rows();
-    if (s_covers[0].index != ctx->leaf * rows) {
-        book_cover_jobs_cancel(s_cover_generation);s_cover_generation=book_cover_jobs_begin();
-        s_cover_pending_mask = s_cover_decode_mask = s_cover_warm_mask = 0;
-        s_cover_dirty_mask = s_cover_present_mask = 0;
-    }
+    book_shelf_covers_page(&s_shelf_covers, ctx->leaf * rows);
     for (int row = 0; row < rows; ++row) {
         int index = ctx->leaf * rows + row;
         EpdRect image = shelf_cover_image(row);
-        bool packed = s_view == SHELF && app_settings_main_fast_refresh();
-        if (s_covers[row].index == index &&
-            (packed ? fast_cover_matches(row, image) : s_covers[row].gray != NULL)) continue;
-        if (s_covers[row].index == index && !s_covers[row].gray && !s_covers[row].fast_bits) continue;
-        free(s_covers[row].gray); free(s_covers[row].fast_bits);
-        s_covers[row].gray = s_covers[row].fast_bits = NULL;
-        s_covers[row].index = index;
-        s_cover_dirty_mask &= ~(1u<<row);
-        if (index >= s_visible_count || index < 0 || s_shelf[index].removed) continue;
-        // Queue each slot, then gather cheap disk-cache hits before painting; decode misses later.
-        s_cover_pending_mask |= 1u << row;
-        s_cover_warm_mask |= 1u << row;
-        s_cover_warm_after_ms = ctx->now_ms + 1500;
+        book_shelf_covers_prepare(&s_shelf_covers, row, index,
+            index >= 0 && index < s_visible_count && !s_shelf[index].removed,
+            s_view == SHELF && app_settings_main_fast_refresh(), app_settings_system_contrast(),
+            (image.x & 3) | ((image.y & 3) << 2), ctx->now_ms);
     }
     prepare_fast_covers();
     (void)prepare_cover_batch(ctx, true);
@@ -859,10 +811,10 @@ static void prepare_covers(app_ctx_t* ctx) {
 // 首帧短暂汇合TF缓存命中，让题头、书架和封面一起显示；冷解码不无限阻塞。
 // Briefly gather warm TF hits for a complete first frame; never wait indefinitely for cold decoding.
 static void gather_cover_entry(app_ctx_t *ctx) {
-    if(s_view!=SHELF||!s_cover_pending_mask||ctx->request_app||
+    if(s_view!=SHELF||!book_shelf_covers_pending(&s_shelf_covers)||ctx->request_app||
        (s_presented_view==(int)SHELF&&!s_shelf_page_pending))return;
     const int64_t deadline=esp_timer_get_time()+60000;
-    while(s_cover_pending_mask&&esp_timer_get_time()<deadline){
+    while(book_shelf_covers_pending(&s_shelf_covers)&&esp_timer_get_time()<deadline){
         if(app_poll_main_navigation(ctx))return;
         vTaskDelay(1);
         (void)prepare_cover_batch(ctx,true);
@@ -874,19 +826,15 @@ static void gather_cover_entry(app_ctx_t *ctx) {
 // Present and input take priority; warm one cover only on an idle shelf after visible loading completes.
 static void warm_shelf_lock_cover(app_ctx_t *ctx) {
     if (s_view != SHELF || app_settings_lock_style() != 2 || s_clear_confirm || s_batch_confirm ||
-        s_cover_pending_mask || !s_cover_warm_mask || ctx->now_ms < s_cover_warm_after_ms ||
+        !book_shelf_covers_warm_due(&s_shelf_covers, ctx->now_ms) ||
         (ctx->touch && ctx->touch->touched) || ctx->request_app || ctx->request_return || ctx->request_menu) return;
     if (app_poll_main_navigation(ctx)) return;
-    for (int row = 0; row < shelf_rows(); ++row) {
-        const unsigned bit = 1u << row;
-        if (!(s_cover_warm_mask & bit)) continue;
-        s_cover_warm_mask &= ~bit; s_cover_warm_after_ms = ctx->now_ms + 1000;
-        int index = ctx->leaf * shelf_rows() + row;
-        if (index >= 0 && index < s_visible_count && s_covers[row].index == index && !s_shelf[index].removed)
-            (void)book_lock_collage_warm_cover(s_shelf[index].path);
-        (void)app_poll_main_navigation(ctx);
-        break;
-    }
+    int row = book_shelf_covers_warm_take(&s_shelf_covers, shelf_rows(), ctx->now_ms);
+    if (row < 0) return;
+    int index = ctx->leaf * shelf_rows() + row;
+    if (index >= 0 && index < s_visible_count && book_shelf_covers_slot(&s_shelf_covers, row)->index == index && !s_shelf[index].removed)
+        (void)book_lock_collage_warm_cover(s_shelf[index].path);
+    (void)app_poll_main_navigation(ctx);
 }
 
 static void draw_favorite_icon(uint8_t *fb, int x, int y, int w, int h, bool filled, uint8_t ink) {
@@ -944,21 +892,22 @@ static bool cover_favorite_needs_white_edge(const uint8_t *gray, EpdRect image, 
     return sum < count * 145;
 }
 static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* name, bool favorite) {
+    const book_shelf_cover_t *cover = book_shelf_covers_slot(&s_shelf_covers, row);
     EpdRect image = shelf_cover_image(row);
     image.y += card.y - row_rect(row).y;
     const bool artwork = shelf_cover_frame_ready();
     ui_fill_rect_fast(image, UI_GRAY_LIGHT, fb);
     if (artwork && app_settings_main_fast_refresh() && s_view==SHELF && fast_cover_matches(row,image)) {
-        ui_blit_mono_bitmap(fb,image,s_covers[row].fast_bits,SHELF_FAST_COVER_STRIDE);
-    } else if (artwork && s_covers[row].gray) {
+        ui_blit_mono_bitmap(fb,image,cover->fast_bits,SHELF_FAST_COVER_STRIDE);
+    } else if (artwork && cover->gray) {
 
-        const uint8_t *gray = s_covers[row].gray;
+        const uint8_t *gray = cover->gray;
         // 封面缓冲是 176×240、这一格是 164×214；按长边铺满 + 居中裁剪，避免被压扁。
         // The cover buffer is 176x240 and this frame is 164x214; fill by the longer side and
         // centre-crop so the artwork is not squashed.
         const unsigned frame_width = (unsigned)image.width, frame_height = (unsigned)image.height;
-        unsigned sw = s_view == SHELF && app_settings_shelf_style() == 5 ? s_covers[row].width : BOOK_COVER_W;
-        unsigned sh = s_view == SHELF && app_settings_shelf_style() == 5 ? s_covers[row].height : BOOK_COVER_H;
+        unsigned sw = s_view == SHELF && app_settings_shelf_style() == 5 ? cover->width : BOOK_COVER_W;
+        unsigned sh = s_view == SHELF && app_settings_shelf_style() == 5 ? cover->height : BOOK_COVER_H;
         const book_crop_t crop = book_cover_crop(sw, sh, frame_width, frame_height);
         unsigned sample_x[SHELF_FAST_COVER_WIDTH];
         uint8_t tones[256];
@@ -988,9 +937,9 @@ static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* nam
     if (favorite && image.width >= 28 && image.height >= 42) {
         draw_shelf_favorite_icon(fb, image.x + 10, image.y + 8, 24, 31,
                                  artwork && ((app_settings_main_fast_refresh() && s_view == SHELF && fast_cover_matches(row, image))
-                                     ? s_covers[row].fast_white_edge : cover_favorite_needs_white_edge(s_covers[row].gray, image,
-                                         app_settings_shelf_style() == 5 ? s_covers[row].width : BOOK_COVER_W,
-                                         app_settings_shelf_style() == 5 ? s_covers[row].height : BOOK_COVER_H)));
+                                     ? cover->fast_white_edge : cover_favorite_needs_white_edge(cover->gray, image,
+                                         app_settings_shelf_style() == 5 ? cover->width : BOOK_COVER_W,
+                                         app_settings_shelf_style() == 5 ? cover->height : BOOK_COVER_H)));
     }
 }
 static EpdRect paint_list_cover_feedback(app_ctx_t *ctx, int row) {
@@ -3620,8 +3569,10 @@ static void reader_memory_snapshot(const char *event) {
         stats.page_images += reader_memory_owned(s_page_images[i].gray);
     stats.shelf_ui = reader_memory_owned(s_shelf) + reader_memory_owned(s_guard_cache) +
         reader_memory_owned(s_editor_cover);
-    for (unsigned i = 0; i < sizeof(s_covers) / sizeof(s_covers[0]); ++i)
-        stats.shelf_ui += reader_memory_owned(s_covers[i].gray) + reader_memory_owned(s_covers[i].fast_bits);
+    for (unsigned i = 0; i < BOOK_SHELF_COVER_SLOTS; ++i) {
+        const book_shelf_cover_t *cover = book_shelf_covers_slot(&s_shelf_covers, i);
+        stats.shelf_ui += reader_memory_owned(cover->gray) + reader_memory_owned(cover->fast_bits);
+    }
     reader_perf_memory(event, &stats);
     reader_source_memory_stats_t source = {0};
     book_source_memory_stats(&source);
@@ -3759,11 +3710,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
 #if CONFIG_READER_PERF && CONFIG_READER_MEMORY
     reader_memory_snapshot("present");
 #endif
-    if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {
-        if ((redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL) && shelf_cover_frame_ready()) s_cover_dirty_mask=0;
-        else if (s_cover_batch_present_pending) s_cover_dirty_mask &= ~s_cover_present_mask;
-    }
-    s_cover_present_mask=0;
+    book_shelf_covers_ack(&s_shelf_covers,
+        (s_view == SHELF || s_view == MANAGE) && err == EPD_DRAW_SUCCESS,
+        (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) && shelf_cover_frame_ready(),
+        s_cover_batch_present_pending);
     if (err==EPD_DRAW_SUCCESS && reader_status_visible() && !tools_band &&
         (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup))
         s_reader_clock_minute=frame_minute;
@@ -5880,7 +5830,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     middle_pending_clear();
     reader_indent_hold_cancel();
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
-    book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;
+    book_shelf_covers_cancel(&s_shelf_covers);
     shelf_category_remember(ctx);
     book_shelf_categories_menu_close(&s_shelf_categories);
     s_shelf_page_pending = false;
@@ -6692,7 +6642,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             s_mode = s_view == SHELF && app_settings_main_fast_refresh() ? MODE_DU : MODE_GL16;
             s_shelf_feedback_pending = s_view == SHELF;
             s_cover_batch_present_pending = true;
-            s_cover_present_mask=changed;
+            book_shelf_covers_presenting(&s_shelf_covers, changed);
             return APP_REDRAW_AREA;
         }
     }

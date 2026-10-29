@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from shelf_cover_test_support import declarations, implementation
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1]
@@ -33,7 +34,6 @@ static int mapped_remove(const char *p){char a[1024];map(p,a);return remove(a);}
 #define rename mapped_rename
 #define remove mapped_remove
 static bool book_title_from_path(const char *p,char *out,size_t cap){(void)p;snprintf(out,cap,"canonical");return true;}
-typedef struct {unsigned width,height,stride,contrast,phase;} book_fast_cover_key_t;
 '''
 unit+=s[s.index('#define COVER_CACHE_MAGIC'):s.index('static uint64_t cover_hash')]
 unit+=s[s.index('#define FAST_COVER_REVISION'):s.index('static uint64_t fast_cover_checksum')]
@@ -52,7 +52,7 @@ static int s_view=SHELF,style=2,contrast=100;
 static bool fast=true,allowed=true,oom;
 static size_t psram=4*1024*1024,live;
 static struct {char path[288],name[32],author[32];} s_shelf[9];
-static struct {uint8_t *fast_bits;uint8_t fast_contrast,fast_phase;bool fast_white_edge;} s_covers[9];
+SHELF_CONTEXT_DECLARATIONS
 static bool app_settings_main_fast_refresh(void){return fast;}
 static bool pico_boot_asset_allowed(const char *p){(void)p;return allowed;}
 static unsigned app_settings_system_contrast(void){return contrast;}
@@ -62,6 +62,7 @@ static void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3
 static void tracked_free(void *p){if(p){assert(live>=4494);live-=4494;}free(p);}
 #define free tracked_free
 '''
+unit=declarations()+unit.replace('SHELF_CONTEXT_DECLARATIONS','')+implementation()
 for n in ('load_shelf_cover_fast','save_shelf_cover_fast'):unit+=function(n,book)+'\n'
 unit+=r'''
 int main(int argc,char **argv){

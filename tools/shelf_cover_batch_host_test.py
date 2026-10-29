@@ -3,6 +3,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+from shelf_cover_test_support import declarations, implementation
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1];book=ROOT/'main/apps/app_book.c'
@@ -21,9 +22,7 @@ typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now
 #define UI_LOCK_WIDTH 684
 #define SHELF_FAST_COVER_STRIDE 21
 static int s_view=SHELF,s_visible_count=9,rows=9,nav_stop=-1;
-static unsigned s_cover_generation,s_cover_pending_mask,s_cover_decode_mask,s_cover_dirty_mask,s_cover_present_mask;
-static unsigned ready_mask,failed_mask,nav_polls,queued,warm_calls,s_cover_warm_mask;
-static int64_t s_cover_warm_after_ms;
+static unsigned ready_mask,failed_mask,nav_polls,queued,warm_calls;
 static bool fast,s_clear_confirm,s_batch_confirm,s_cover_batch_present_pending;
 static int lock_style=2,s_presented_view=-1;
 static bool s_shelf_page_pending;
@@ -31,7 +30,7 @@ static int64_t fake_us;static unsigned ready_after;
 static int64_t esp_timer_get_time(void){return fake_us;}
 static void vTaskDelay(unsigned ticks){assert(ticks==1);fake_us+=1000;if(ready_after&&fake_us>=(int64_t)ready_after*1000)ready_mask=511;}
 
-static struct{int index;uint8_t *gray,*fast_bits;unsigned width,height,fast_contrast,fast_phase;bool fast_white_edge;}s_covers[9];
+SHELF_CONTEXT_DECLARATIONS
 static struct{char path[32],name[32],author[32];bool removed;}s_shelf[9];
 static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}
@@ -43,19 +42,21 @@ static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static bool app_poll_main_navigation(app_ctx_t *ctx){++nav_polls;if(nav_stop>=0&&(int)nav_polls>=nav_stop){ctx->request_app=true;return true;}return false;}
 unsigned book_cover_jobs_begin(void){return 1;}
+void book_cover_jobs_cancel(unsigned generation){(void)generation;}
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *q){assert(generation==1&&slot<9&&q->fast==fast);queued|=1u<<slot;return true;}
 int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result){assert(generation==1);
  if(failed_mask&(1u<<slot))return -1;if(!(ready_mask&(1u<<slot)))return 0;
  *result=(book_cover_result_t){.pixels=malloc(1),.width=164,.height=214,.fast=fast};assert(result->pixels);return 1;}
 '''
+unit=unit.replace('SHELF_CONTEXT_DECLARATIONS',declarations())+implementation(jobs=False)
 for name in ['prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask','warm_shelf_lock_cover','gather_cover_entry']:
  unit+=function(name,book)+'\n'
 present=function('present',book)
-ack=present[present.index('    if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {'):present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()')]
+ack=present[present.index('    book_shelf_covers_ack('):present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()')]
 unit+='enum{EPD_DRAW_SUCCESS,EPD_DRAW_FAULT};enum{APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL};\nstatic void ack_present(int redraw,int err){'+ack+'}\n'
 unit+=r'''
 static void reset(app_ctx_t *ctx){for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);memset(&s_covers[i],0,sizeof(s_covers[i]));s_covers[i].index=i;snprintf(s_shelf[i].path,32,"book%u",i);}
- s_cover_generation=0;s_cover_pending_mask=511;s_cover_decode_mask=s_cover_dirty_mask=s_cover_present_mask=0;
+ s_cover_generation=0;s_cover_pending_mask=511;s_cover_dirty_mask=s_cover_present_mask=0;
  ready_mask=failed_mask=queued=nav_polls=0;ctx->request_app=false;nav_stop=-1;
 }
 int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
@@ -85,5 +86,5 @@ assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
 assert 's_cover_batch_present_pending = false;' in function('present',book)
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:
     d=Path(directory);c=d/'batch.c';exe=d/'batch';c.write_text(unit)
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-fsanitize=address,undefined','-Wall','-Wextra','-Werror','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

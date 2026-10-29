@@ -150,6 +150,7 @@ idf_component_register(
         "image/image_decode.c"
         "image/book_jpeg_hw.c"
         "book/book_cover_jobs.c"
+        "book/book_shelf_covers.c"
         "image/book_image_header.c"
         "book/book_cover_auto.c"
         "book/zip_reader.c"
