@@ -30,13 +30,24 @@ are defined by `board_metalio_e4p.c`, `board_sd.c` and the root README.
 
 ## 依赖 / Dependencies
 
-`epdiy`、`fca9555`、`cst836u`、`sc7a20h`、`device_power`、`e0470_epaper_waveform`。
+`board_i2c`、`epdiy`、`fca9555`、`cst836u`、`sc7a20h`、`device_power`、`e0470_epaper_waveform`。
 
-`epdiy`, `fca9555`, `cst836u`, `sc7a20h`, `device_power`,
+`board_i2c`, `epdiy`, `fca9555`, `cst836u`, `sc7a20h`, `device_power`,
 `e0470_epaper_waveform`.
+
+## 原厂驱动契约 / Vendor driver contract
+
+屏幕上电按原厂先等待 standby 和 PWRUP，再检查外部 PGOOD、ENABLE、VCOM 与芯片 PG；全部成功才开放 XOE。初次加三次完整掉电重试后仍失败会重启。VCOM setter 仅缓存，下一次完整上电按 VCOM2→VCOM1 写入；刷新收尾仍只撤驱动脚，真正关电才撤 VCOM。
+Panel power follows vendor standby/PWRUP delays, external PGOOD, ENABLE, VCOM and chip PG checks; XOE opens only on complete success. Four failed full power-cycle attempts trigger a restart. VCOM setters cache requests for VCOM2→VCOM1 writes on the next full power-on. Scan completion releases drive pins; VCOM drops on real power-off.
+
+SC7A20H 和 TCA9555 共用 GPIO2，采用原厂开漏低有效拾起配置和上拉。睡眠前须稳定为高，醒后先消费按键和加速度计源寄存器，再处理共享线；拾起配置失败时静默加速度计并回退低有效按键唤醒。
+SC7A20H and TCA9555 share GPIO2 with vendor open-drain active-low pickup and a pull-up. The line must settle high before sleep. Wake checks consume key and accelerometer source events before shared-line handling; failed pickup setup silences the sensor and falls back to active-low key wake.
+
+总线、芯片原厂来源和适配边界见 [board_i2c](../board_i2c/README.md)。FT6336U 的触点编号、盖板键范围和模式初始化由 `cst836u` 兼容接口处理。
+See board_i2c for vendor provenance and adaptation boundaries. The cst836u compatibility API handles FT6336U tracking IDs, cover-key bounds and mode startup.
 
 ## 许可 / License
 
-Apache-2.0，见 [LICENSE](LICENSE)。
+原有部分为 Apache-2.0，见 [LICENSE](LICENSE)；移植原厂部分同时保留 [MIT 声明](../board_i2c/LICENSE.Metalio)。
 
-Apache-2.0, see [LICENSE](LICENSE).
+Existing portions use Apache-2.0; adapted vendor material retains its MIT notice linked above.

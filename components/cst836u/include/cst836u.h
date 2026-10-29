@@ -36,7 +36,7 @@ typedef struct cst836u_dev_t* cst836u_handle_t;
 #endif
 #define CST836U_MAX_POINTS 2
 #define CST836U_RAW_LEN 15
-#define CST836U_I2C_HZ_DEFAULT 400000
+#define CST836U_I2C_HZ_DEFAULT 100000
 
 /// 动态上报（约 5 mA）或深睡（约 10 µA，RST 唤醒）。
 /// / Dynamic report (~5 mA) or deep sleep (~10 µA, RST to wake).
@@ -72,7 +72,7 @@ typedef struct {
 
 typedef struct {
     uint8_t i2c_addr;
-    uint32_t scl_speed_hz;
+    uint32_t scl_speed_hz; ///< 保留配置字段；板级固定 100 kHz。/ Retained field; board fixes 100 kHz.
     gpio_num_t int_gpio;
     gpio_num_t rst_gpio;
     /// rst_gpio 为 GPIO_NUM_NC 时用（IO 扩展口等）。

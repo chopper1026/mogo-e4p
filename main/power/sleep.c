@@ -211,18 +211,19 @@ static bool pickup_ia(sc7a20h_handle_t acc) {
     return aoi.ia;
 }
 
-// 第一次低电平不够：高通余波还会再拉高。要连续安静一段时间才进浅睡。
-// A first low is not enough: high-pass ringing can rise again. Wait for a quiet stretch before light sleep.
+// 共线高电平稳定一段时间后才进浅睡。
+// Wait for a stable high level on the shared line before light sleep.
 static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms) {
     int64_t start = esp_timer_get_time() / 1000;
-    int64_t low_from = 0;
+    int64_t high_from = 0;
     while (esp_timer_get_time() / 1000 - start < timeout_ms) {
-        if (sc7a20h_int1_level(acc) == 0) {
-            if (low_from == 0) low_from = esp_timer_get_time() / 1000;
-            if (esp_timer_get_time() / 1000 - low_from >= quiet_ms) return true;
+        if (sc7a20h_int1_level(acc) > 0) {
+            if (high_from == 0) high_from = esp_timer_get_time() / 1000;
+            if (esp_timer_get_time() / 1000 - high_from >= quiet_ms) return true;
         } else {
             pickup_ack(acc);
-            low_from = 0;
+            board_clear_ioe_int();
+            high_from = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -251,30 +252,28 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     periph_suspend(false);
     lock_arm_ioe_wakeup();
     if (pickup) {
-        sc7a20h_motion_cfg_t motion = SC7A20H_MOTION_DEFAULT();
-        motion.ths_mg = 350;
-        motion.duration = 3;
-        sc7a20h_arm_pickup_wake(acc, &motion);
-        acc_armed = true;
+        const esp_err_t arm_error = sc7a20h_arm_pickup_wake(acc, NULL);
+        acc_armed = arm_error == ESP_OK;
+        if (!acc_armed) pickup = false;
         pickup_ack(acc);
-        if (!pickup_wait_quiet(acc, 400, 2000)) {
+        if (!pickup || !pickup_wait_quiet(acc, 400, 2000)) {
             pickup = false;
-            ESP_LOGW(TAG, "pickup INT1 stuck high, key only");
+            ESP_LOGW(TAG, "pickup INT1 unavailable or stuck low, key only");
         } else {
-            sc7a20h_config_light_sleep_wakeup(acc);
-            if (!pickup_wait_quiet(acc, 400, 1500)) {
+            const esp_err_t wake_error = sc7a20h_config_light_sleep_wakeup(acc);
+            if (wake_error != ESP_OK || !pickup_wait_quiet(acc, 400, 1500)) {
                 gpio_wakeup_disable(sc7a20h_int1_gpio(acc));
                 pickup = false;
                 ESP_LOGW(TAG, "pickup INT1 re-asserted, key only");
             } else {
-                // 安静窗口里若 INT1 闪过，ESP 会留下高电平唤醒挂起，关掉再打开清掉。
-                // If INT1 glitched in the quiet window, ESP keeps a high-level wake pending; disable then re-enable to clear it.
+                // 安静窗口里若 INT1 闪过，重新设置低电平唤醒。
+                // Re-arm active-low wake after an INT1 glitch in the quiet window.
                 gpio_wakeup_disable(sc7a20h_int1_gpio(acc));
-                sc7a20h_config_light_sleep_wakeup(acc);
-                if (sc7a20h_int1_level(acc) > 0) {
+                if (sc7a20h_config_light_sleep_wakeup(acc) != ESP_OK ||
+                    sc7a20h_int1_level(acc) <= 0) {
                     gpio_wakeup_disable(sc7a20h_int1_gpio(acc));
                     pickup = false;
-                    ESP_LOGW(TAG, "pickup INT1 high at sleep, key only");
+                    ESP_LOGW(TAG, "pickup INT1 low at sleep, key only");
                 } else {
                     ESP_LOGI(
                         TAG, "wait key GPIO%d or pickup GPIO%d",
@@ -285,6 +284,11 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         }
     } else {
         ESP_LOGI(TAG, "wait key on IOE_INT GPIO%d", BOARD_IOE_INT_GPIO);
+    }
+
+    if (!pickup) {
+        if (acc_armed) (void)sc7a20h_power_down(acc);
+        lock_arm_ioe_wakeup();
     }
 
     app_wake_source_t wake = APP_WAKE_NONE;
@@ -299,6 +303,11 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         // 即使漏掉 IOE 中断，也由定时唤醒轮询 PMU 按键事件。
         if (device_power_take_key_wakeup()) {
             wake = APP_WAKE_KEY;
+            break;
+        }
+        if (pickup && pickup_ia(acc)) {
+            wake = APP_WAKE_PICKUP;
+            ESP_LOGI(TAG, "pickup wake");
             break;
         }
         board_clear_ioe_int();
@@ -316,12 +325,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             continue;
         }
         ioe_low_since_us = 0;
-        if (pickup && sc7a20h_int1_level(acc) > 0 && pickup_ia(acc)) {
-            wake = APP_WAKE_PICKUP;
-            ESP_LOGI(TAG, "pickup wake");
-            break;
-        }
-        if (pickup && sc7a20h_int1_level(acc) > 0) {
+        if (pickup && sc7a20h_int1_level(acc) == 0) {
             pickup_ack(acc);
             pickup_wait_quiet(acc, 400, 1500);
             continue;
@@ -357,7 +361,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             wake = APP_WAKE_KEY;
             break;
         }
-        if (pickup && sc7a20h_int1_level(acc) > 0 && pickup_ia(acc)) {
+        if (pickup && pickup_ia(acc)) {
             if (dt_ms < 80) {
                 ESP_LOGW(TAG, "pickup ignored, sleep %lld ms", (long long)dt_ms);
                 pickup_ack(acc);
@@ -368,7 +372,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             ESP_LOGI(TAG, "pickup wake");
             break;
         }
-        if (pickup && sc7a20h_int1_level(acc) > 0) {
+        if (pickup && sc7a20h_int1_level(acc) == 0) {
             pickup_ack(acc);
             pickup_wait_quiet(acc, 400, 1500);
         }

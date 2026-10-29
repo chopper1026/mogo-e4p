@@ -193,6 +193,8 @@ typedef int esp_err_t;
 #define pdMS_TO_TICKS(n) (n)
 #define ESP_LOGW(...) ((void)0)
 static unsigned edges, fail_edge, delays, elapsed, deep_sleeps;
+static bool charger_fault;
+static esp_err_t cx_charger_park(void){return charger_fault ? ESP_FAIL : ESP_OK;}
 static bool level;
 static esp_err_t board_pwr_pulse(bool high) {
     ++edges;
@@ -210,6 +212,8 @@ for name in ('device_power_report_sleep', 'device_power_power_off'):
 shutdown_unit += r'''
 int main(void) {
     assert(device_power_report_sleep() == ESP_ERR_NOT_SUPPORTED && !edges);
+    charger_fault=true;assert(device_power_power_off()==ESP_FAIL && !edges && !deep_sleeps);
+    charger_fault=false;
     for (unsigned fault = 1; fault <= 9; ++fault) {
         edges = delays = elapsed = deep_sleeps = 0; level = false; fail_edge = fault;
         assert(device_power_power_off() == ESP_FAIL);

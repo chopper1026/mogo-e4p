@@ -44,6 +44,10 @@ static int16_t raw_ma;
 static uint8_t charger_state;
 static bool voltage_fail, current_fail, charger_fail;
 static unsigned saves, soc_reads;
+static void cx_charger_poll(int64_t now, bool have_v, uint16_t mv, bool have_i, int16_t ma,
+                            bool have_status, uint8_t status) {
+    (void)now; (void)have_v; (void)mv; (void)have_i; (void)ma; (void)have_status; (void)status;
+}
 static int64_t esp_timer_get_time(void) { return now_us; }
 static void batt_save(int32_t value) { assert(value >= 0 && value <= 1000); ++saves; }
 static int bq_read_soc(void) { ++soc_reads; return 63; }

@@ -5,6 +5,11 @@
  * SC7A20H 主机：读数、电源、拿起唤醒，以及实验室助手。
  *
  * SC7A20H host: read, power, pickup-to-wake, plus lab helpers.
+ *
+ * 共享中断与拾起寄存器参考 Metalio 原厂 sensor/sc7a20h.cc。
+ * Shared IRQ and pickup registers follow Metalio vendor sensor/sc7a20h.cc.
+ * 原厂来源版本和 MIT 许可见 components/board_i2c/README.md 与 LICENSE.Metalio。
+ * Vendor revision and MIT notice: components/board_i2c/README.md and LICENSE.Metalio.
  */
 
 #include "sc7a20h_lab.h"
@@ -16,6 +21,7 @@
 #include "driver/rtc_io.h"
 #include "esp_attr.h"
 #include "esp_log.h"
+#include "board_i2c.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -97,8 +103,8 @@ static esp_err_t int1_as_input(sc7a20h_handle_t h) {
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << h->int1_gpio,
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     return gpio_config(&io);
@@ -106,12 +112,12 @@ static esp_err_t int1_as_input(sc7a20h_handle_t h) {
 
 static esp_err_t write_reg(sc7a20h_handle_t h, uint8_t reg, uint8_t value) {
     const uint8_t data[] = { reg, value };
-    return i2c_master_transmit(h->dev, data, sizeof(data), I2C_TIMEOUT_MS);
+    return board_i2c_transmit(h->dev, data, sizeof(data), I2C_TIMEOUT_MS);
 }
 
 static esp_err_t read_regs(sc7a20h_handle_t h, uint8_t reg, uint8_t* data, size_t length) {
     if (length > 1) reg |= 0x80;
-    return i2c_master_transmit_receive(h->dev, &reg, 1, data, length, I2C_TIMEOUT_MS);
+    return board_i2c_read(h->dev, reg, data, length, I2C_TIMEOUT_MS);
 }
 
 static bool odr_ok(sc7a20h_odr_t odr) {
@@ -225,10 +231,22 @@ esp_err_t sc7a20h_apply_config(sc7a20h_handle_t h, const sc7a20h_sensor_config_t
 
 esp_err_t sc7a20h_power_down(sc7a20h_handle_t h) {
     if (h == NULL || h->dev == NULL) return ESP_ERR_INVALID_STATE;
-    esp_err_t err = write_reg(h, SC7A20H_REG_CTRL1, 0x00);
-    if (err != ESP_OK) return err;
-    h->powered = false;
-    return ESP_OK;
+    // 原厂共享 INT 静默顺序；不用 PD，避免钳住 TCA 共线。
+    // Vendor shared-INT silence sequence; avoid PD clamping the TCA line.
+    esp_err_t err = write_reg(h, SC7A20H_REG_AOI1_CFG, 0x00);
+    esp_err_t step = write_reg(h, SC7A20H_REG_CTRL3, 0x00);
+    if (step == ESP_OK) h->ctrl3 = 0;
+    if (err == ESP_OK) err = step;
+    step = write_ctrl5(h, 0x00);
+    if (err == ESP_OK) err = step;
+    step = sc7a20h_ack_int(h);
+    if (err == ESP_OK) err = step;
+    step = write_reg(h, SC7A20H_REG_CTRL1, 0x10);
+    if (err == ESP_OK) err = step;
+    step = write_reg(h, SC7A20H_REG_CTRL6, 0x00);
+    if (err == ESP_OK) err = step;
+    if (err == ESP_OK) h->powered = false;
+    return err;
 }
 
 esp_err_t sc7a20h_power_up(sc7a20h_handle_t h) {
@@ -295,12 +313,7 @@ esp_err_t sc7a20h_init(i2c_master_bus_handle_t bus_handle, const sc7a20h_config_
     h->mg_lsb = 1;
 
     uint8_t addr = config->i2c_addr ? config->i2c_addr : SC7A20H_ADDR_DEFAULT;
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = addr,
-        .scl_speed_hz = I2C_HZ,
-    };
-    esp_err_t err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &h->dev);
+    esp_err_t err = board_i2c_add_device(bus_handle, addr, &h->dev);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2C device add failed: %s", esp_err_to_name(err));
         free(h);
@@ -309,6 +322,7 @@ esp_err_t sc7a20h_init(i2c_master_bus_handle_t bus_handle, const sc7a20h_config_
 
     err = bring_up(h, &cfg);
     if (err != ESP_OK) {
+        (void)sc7a20h_power_down(h);
         i2c_master_bus_rm_device(h->dev);
         free(h);
         return err;
@@ -328,12 +342,13 @@ esp_err_t sc7a20h_init(i2c_master_bus_handle_t bus_handle, const sc7a20h_config_
 esp_err_t sc7a20h_deinit(sc7a20h_handle_t h) {
     if (h == NULL) return ESP_OK;
     int1_detach_isr(h);
+    esp_err_t err = ESP_OK;
     if (h->dev) {
-        write_reg(h, SC7A20H_REG_CTRL1, 0x00);
+        err = sc7a20h_power_down(h);
         i2c_master_bus_rm_device(h->dev);
     }
     free(h);
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t sc7a20h_read(sc7a20h_handle_t h, sc7a20h_sample_t* sample) {
@@ -419,33 +434,35 @@ esp_err_t sc7a20h_enable_motion(sc7a20h_handle_t h, const sc7a20h_motion_cfg_t* 
 }
 
 esp_err_t sc7a20h_arm_pickup_wake(sc7a20h_handle_t h, const sc7a20h_motion_cfg_t* cfg) {
-    if (h == NULL) return ESP_ERR_INVALID_STATE;
-    sc7a20h_sensor_config_t saved = h->cfg;
-    sc7a20h_sensor_config_t idle = SC7A20H_CONFIG_IDLE;
-    idle.fs = saved.fs;
-    idle.axis_mask = saved.axis_mask ? saved.axis_mask : SC7A20H_AXIS_XYZ;
-    // 先断开 INT1，等高通复位完成再接到脚上，避免上电第一次把重力锁到引脚。
-    // / Detach INT1 until HPF reset finishes, so the first gravity latch does not
-    // stick on the pin.
+    if (h == NULL || h->dev == NULL) return ESP_ERR_INVALID_STATE;
+    // 与原厂 Configure 一致：100 Hz、±2g、HR、高通 AOI1、开漏低有效。
+    // Match vendor Configure: 100 Hz, +/-2g, HR, high-pass AOI1, open-drain active-low.
+    uint8_t axes = cfg ? (cfg->axis_mask & SC7A20H_AXIS_XYZ) : SC7A20H_AXIS_XYZ;
+    if (!axes) axes = SC7A20H_AXIS_XYZ;
+    const uint8_t aoi = ((axes & SC7A20H_AXIS_X) ? SC7A20H_AOI_XH : 0) |
+                        ((axes & SC7A20H_AXIS_Y) ? SC7A20H_AOI_YH : 0) |
+                        ((axes & SC7A20H_AXIS_Z) ? SC7A20H_AOI_ZH : 0);
     esp_err_t err = sc7a20h_int_route(h, 0);
-    if (err != ESP_OK) return err;
-    err = sc7a20h_apply_config(h, &idle);
-    if (err != ESP_OK) return err;
-    h->cfg = saved;
-    err = sc7a20h_enable_motion(h, cfg);
-    if (err != ESP_OK) return err;
-    err = sc7a20h_ack_int(h);
-    if (err != ESP_OK) return err;
-    err = sc7a20h_int_route(h, SC7A20H_INT1_AOI1);
-    if (err != ESP_OK) return err;
-    return sc7a20h_ack_int(h);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_CTRL1, 0x57);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_CTRL2, 0x01);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_CTRL4, 0x88);
+    if (err == ESP_OK) err = write_ctrl5(h, CTRL5_LIR_INT1);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_AOI1_CFG + 2,
+                                               cfg ? sc7a20h_ths_lsb_fs(SC7A20H_FS_2G, cfg->ths_mg) : 0x10);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_AOI1_CFG + 3, cfg ? (cfg->duration & 0x7F) : 0x00);
+    if (err == ESP_OK) err = write_reg(h, SC7A20H_REG_AOI1_CFG, aoi);
+    if (err == ESP_OK) err = sc7a20h_ack_int(h);
+    if (err == ESP_OK) err = sc7a20h_int_route(h, SC7A20H_INT1_AOI1);
+    if (err == ESP_OK) { h->mg_lsb = 1; h->powered = true; }
+    if (err != ESP_OK) (void)sc7a20h_power_down(h);
+    return err;
 }
 
 esp_err_t sc7a20h_config_light_sleep_wakeup(sc7a20h_handle_t h) {
     if (h == NULL || !gpio_ok(h->int1_gpio)) return ESP_ERR_INVALID_ARG;
     esp_err_t err = int1_as_input(h);
     if (err != ESP_OK) return err;
-    err = gpio_wakeup_enable(h->int1_gpio, GPIO_INTR_HIGH_LEVEL);
+    err = gpio_wakeup_enable(h->int1_gpio, GPIO_INTR_LOW_LEVEL);
     if (err != ESP_OK) return err;
     return esp_sleep_enable_gpio_wakeup();
 }
@@ -463,12 +480,12 @@ esp_err_t sc7a20h_ack_int(sc7a20h_handle_t h) {
 esp_err_t sc7a20h_config_ext1_wakeup(sc7a20h_handle_t h) {
     if (h == NULL || !gpio_ok(h->int1_gpio)) return ESP_ERR_INVALID_ARG;
     if (!rtc_gpio_is_valid_gpio(h->int1_gpio)) return ESP_ERR_NOT_SUPPORTED;
-    esp_err_t err = rtc_gpio_pulldown_en(h->int1_gpio);
+    esp_err_t err = rtc_gpio_pullup_en(h->int1_gpio);
     if (err != ESP_OK) return err;
-    err = rtc_gpio_pullup_dis(h->int1_gpio);
+    err = rtc_gpio_pulldown_dis(h->int1_gpio);
     if (err != ESP_OK) return err;
     return esp_sleep_enable_ext1_wakeup_io(
-        1ULL << h->int1_gpio, ESP_EXT1_WAKEUP_ANY_HIGH
+        1ULL << h->int1_gpio, ESP_EXT1_WAKEUP_ANY_LOW
     );
 }
 
@@ -869,7 +886,7 @@ esp_err_t sc7a20h_int_route(sc7a20h_handle_t h, uint8_t mask) {
     h->ctrl3 = (uint8_t)((mask & 0xF6) | (h->fifo_8bit ? CTRL3_FIFO_8BIT : 0));
     esp_err_t err = write_reg(h, SC7A20H_REG_CTRL3, h->ctrl3);
     if (err != ESP_OK) return err;
-    return write_reg(h, SC7A20H_REG_CTRL6, 0x00);
+    return write_reg(h, SC7A20H_REG_CTRL6, 0x03);
 }
 
 static void IRAM_ATTR int1_isr(void* arg) {
@@ -883,9 +900,9 @@ esp_err_t sc7a20h_int1_begin(sc7a20h_handle_t h) {
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << h->int1_gpio,
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
-        .intr_type = GPIO_INTR_POSEDGE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
     };
     esp_err_t err = gpio_config(&io);
     if (err != ESP_OK) return err;

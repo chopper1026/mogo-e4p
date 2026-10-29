@@ -7,6 +7,11 @@
  * Metalio E-INK4 Plus (ESP32-S31) board: I2C, TCA9555, TPS65185, EPD bus and rails.
  * 通过公共 BSP API 向 main/ 提供板级资源。
  * Exposes board resources to main/ through the common BSP API.
+ *
+ * TPS65185 上电、VCOM 与重试参考原厂 display/epd_board_metalio_eink4_plus.c。
+ * TPS65185 power, VCOM and retries follow vendor display/epd_board_metalio_eink4_plus.c.
+ * 原厂来源版本和 MIT 许可见 components/board_i2c/README.md 与 LICENSE.Metalio。
+ * Vendor revision and MIT notice: components/board_i2c/README.md and LICENSE.Metalio.
  */
 
 #include "board_hardware.h"
@@ -16,6 +21,8 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "board_i2c.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -236,26 +243,21 @@ static esp_err_t ioe_init(void) {
 static esp_err_t tps_write(uint8_t reg, uint8_t value) {
     if (s_tps == NULL) return ESP_ERR_INVALID_STATE;
     const uint8_t buf[2] = {reg, value};
-    return i2c_master_transmit(s_tps, buf, sizeof(buf), 50);
+    return board_i2c_transmit(s_tps, buf, sizeof(buf), 50);
 }
 
 static esp_err_t tps_read(uint8_t reg, uint8_t* value) {
     if (s_tps == NULL || value == NULL) return ESP_ERR_INVALID_STATE;
-    return i2c_master_transmit_receive(s_tps, &reg, 1, value, 1, 50);
+    return board_i2c_read_stop(s_tps, reg, value, 1, 50);
 }
 
 static esp_err_t tps_probe(void) {
     if (s_i2c_bus == NULL) return ESP_ERR_INVALID_STATE;
-    return i2c_master_probe(s_i2c_bus, BOARD_TPS_ADDR, 50);
+    return board_i2c_probe(s_i2c_bus, BOARD_TPS_ADDR, 50);
 }
 
 static esp_err_t tps_init(void) {
-    i2c_device_config_t cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = BOARD_TPS_ADDR,
-        .scl_speed_hz = BOARD_TPS_I2C_HZ,
-    };
-    esp_err_t err = i2c_master_bus_add_device(s_i2c_bus, &cfg, &s_tps);
+    esp_err_t err = board_i2c_add_device(s_i2c_bus, BOARD_TPS_ADDR, &s_tps);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "TPS device add: %s", esp_err_to_name(err));
         s_tps = NULL;
@@ -268,15 +270,13 @@ static esp_err_t tps_init(void) {
     return ESP_OK;
 }
 
-static void tps_set_vcom_mv(int mv) {
+static esp_err_t tps_set_vcom_mv(int mv) {
     if (mv < 0) mv = -mv;
     if (mv > 5000) mv = 5000;
-    s_vcom_mv = mv;
-    // datasheet: VCOM = -(VCOM1 + VCOM2 * 2) * 10 mV
-    // 取 VCOM1 = (mv/10) & 0xFF，VCOM2 = (mv/10) >> 8。
-    const int steps = mv / 10;
-    (void)tps_write(TPS_REG_VCOM1, (uint8_t)(steps & 0xFF));
-    (void)tps_write(TPS_REG_VCOM2, (uint8_t)((steps >> 8) & 0x01));
+    const unsigned steps = (unsigned)mv / 10;
+    esp_err_t err = tps_write(TPS_REG_VCOM2, (uint8_t)((steps >> 8) & 0x01));
+    if (err == ESP_OK) err = tps_write(TPS_REG_VCOM1, (uint8_t)(steps & 0xFF));
+    return err;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -383,6 +383,60 @@ static void power_diag_failed(void) {
 }
 #endif
 
+static void board_poweroff(epd_ctrl_state_t* state);
+
+static bool board_poweron_once(epd_ctrl_state_t* state) {
+    s_tps_ok = false;
+    s_rails_on = false;
+    state->ep_output_enable = false;
+    state->ep_mode = false;
+    gpio_set_level(EPD_PIN_XOE, 0);
+    gpio_set_level(EPD_PIN_MODE, 0);
+    if (!s_ioe_ok || s_tps == NULL) return false;
+    state->ep_stv = true;
+    s_pwrup = false;
+    s_vcom_ctrl = false;
+    s_wakeup = true;
+    if (p0_write() != ESP_OK) return false;
+    vTaskDelay(pdMS_TO_TICKS(50));
+    uint8_t revid = 0;
+    if (tps_probe() != ESP_OK || tps_read(TPS_REG_REVID, &revid) != ESP_OK ||
+        tps_write(TPS_REG_UPSEQ0, 0xE4) != ESP_OK ||
+        tps_write(TPS_REG_UPSEQ1, 0x55) != ESP_OK) return false;
+    s_pwrup = true;
+    s_vcom_ctrl = true;
+    if (p0_write() != ESP_OK) return false;
+    vTaskDelay(pdMS_TO_TICKS(50));
+    bool pgood = false;
+    for (int i = 0; i < 200; ++i) {
+        uint8_t in0 = 0;
+        if (ioe_read(0, &in0) == ESP_OK && (in0 & IOE_BIT(IO_PWR_GOOD))) {
+            pgood = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!pgood) return false;
+    if (tps_write(TPS_REG_ENABLE, 0x3F) != ESP_OK ||
+        tps_set_vcom_mv(s_vcom_mv) != ESP_OK) return false;
+    bool pg_ready = false;
+    for (int i = 0; i < 200; ++i) {
+        uint8_t pg = 0;
+        if (tps_read(TPS_REG_PG, &pg) == ESP_OK && (pg & 0xFA) == 0xFA) {
+            pg_ready = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!pg_ready || p0_write() != ESP_OK) return false;
+    state->ep_output_enable = true;
+    gpio_set_level(EPD_PIN_XOE, 1);
+    s_rails_on = true;
+    s_tps_ok = true;
+    ESP_LOGI(TAG, "EPD rails on, VCOM=-%d mV", s_vcom_mv);
+    return true;
+}
+
 static void board_poweron(epd_ctrl_state_t* state) {
     if (s_rails_on) return;
 #if CONFIG_DISPLAY_POWER_DIAG
@@ -391,75 +445,26 @@ static void board_poweron(epd_ctrl_state_t* state) {
              (long long)(s_diag_power_off_us ? (started_us - s_diag_power_off_us) / 1000 : -1),
              p0_value(), state->ep_output_enable, state->ep_mode);
 #endif
-
-    state->ep_output_enable = false;
-    state->ep_stv = true;
-    state->ep_mode = false;
-    s_pwrup = false;
-    s_vcom_ctrl = false;
-    s_wakeup = true;
-    p0_write();
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    if (s_tps != NULL) {
-        esp_err_t probe = ESP_FAIL;
-        for (int i = 0; i < 3 && probe != ESP_OK; i++) {
-            probe = tps_probe();
-            if (probe != ESP_OK) vTaskDelay(pdMS_TO_TICKS(10));
+    // 原厂初次尝试加三次完整掉电重试；持续失败时重启，避免错误供电下继续扫描。
+    // Vendor initial attempt plus three complete power-cycle retries; restart instead of scanning on failed rails.
+    for (unsigned attempt = 0; attempt < 4; ++attempt) {
+        if (board_poweron_once(state)) {
+#if CONFIG_DISPLAY_POWER_DIAG
+            s_diag_power_on_us = esp_timer_get_time();
+            ESP_LOGI(TAG, "POWER_DIAG event=ready elapsed_ms=%lld request=0x%02x oe=%d mode=%d",
+                     (long long)((s_diag_power_on_us - started_us) / 1000),
+                     p0_value(), state->ep_output_enable, state->ep_mode);
+#endif
+            return;
         }
-        uint8_t revid = 0;
-        (void)tps_read(TPS_REG_REVID, &revid);
-        (void)tps_write(TPS_REG_UPSEQ0, 0xE4);
-        (void)tps_write(TPS_REG_UPSEQ1, 0x55);
-        ESP_LOGI(TAG, "TPS REVID=0x%02X probe=%s", revid, esp_err_to_name(probe));
-    }
-
-    s_pwrup = true;
-    s_vcom_ctrl = true;
-    p0_write();
-    vTaskDelay(pdMS_TO_TICKS(20));
-
-    bool pgood = false;
-    for (int i = 0; i < 600 && !pgood; i++) {
-        uint8_t in0 = 0;
-        if (ioe_read(0, &in0) == ESP_OK && (in0 & IOE_BIT(IO_PWR_GOOD))) {
-            pgood = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-
-    if (!pgood) {
-        ESP_LOGE(TAG, "TPS PWR_GOOD timeout");
 #if CONFIG_DISPLAY_POWER_DIAG
         power_diag_failed();
 #endif
-        s_tps_ok = false;
-        return;
+        board_poweroff(state);
+        if (attempt < 3) vTaskDelay(pdMS_TO_TICKS(100));
     }
-
-    if (s_tps != NULL) {
-        (void)tps_write(TPS_REG_ENABLE, 0x3F);
-        tps_set_vcom_mv(s_vcom_mv);
-        for (int i = 0; i < 200; i++) {
-            uint8_t pg = 0;
-            if (tps_read(TPS_REG_PG, &pg) == ESP_OK && (pg & 0xFA) == 0xFA) break;
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
-    }
-
-    state->ep_output_enable = true;
-    epd_ctrl_state_t out_mask = {.ep_output_enable = true};
-    board_set_ctrl(state, &out_mask);
-    s_rails_on = true;
-    s_tps_ok = true;
-    ESP_LOGI(TAG, "EPD rails on, VCOM=-%d mV", s_vcom_mv);
-#if CONFIG_DISPLAY_POWER_DIAG
-    s_diag_power_on_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "POWER_DIAG event=ready elapsed_ms=%lld request=0x%02x oe=%d mode=%d",
-             (long long)((s_diag_power_on_us - started_us) / 1000),
-             p0_value(), state->ep_output_enable, state->ep_mode);
-#endif
+    ESP_LOGE(TAG, "TPS PWR_GOOD timeout");
+    esp_restart();
 }
 
 static void board_poweroff(epd_ctrl_state_t* state) {
@@ -497,7 +502,10 @@ static void board_measure_vcom(epd_ctrl_state_t* state) { (void)state; }
 
 static float board_temperature(void) { return 25.0f; }
 
-static void board_set_vcom(int value) { tps_set_vcom_mv(value); }
+static void board_set_vcom(int value) {
+    if (value < 0) value = -value;
+    s_vcom_mv = value > 5000 ? 5000 : value;
+}
 
 const EpdBoardDefinition epd_board_reader = {
     .init = board_init,
@@ -548,7 +556,7 @@ void board_i2c_census_take(void) {
         s_census.dev[i].name = map[i].name;
         s_census.dev[i].addr = map[i].addr;
         s_census.dev[i].online =
-            s_i2c_bus != NULL && i2c_master_probe(s_i2c_bus, map[i].addr, 50) == ESP_OK;
+            s_i2c_bus != NULL && board_i2c_probe(s_i2c_bus, map[i].addr, 50) == ESP_OK;
         if (!s_census.dev[i].online) {
             s_census.offline_n++;
             s_census.all_online = false;

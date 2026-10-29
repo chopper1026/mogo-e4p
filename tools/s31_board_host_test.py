@@ -35,9 +35,12 @@ typedef struct { int i2c_addr, scl_speed_hz, int_gpio; } fca9555_config_t;
 #define GPIO_NUM_19 19
 #define GPIO_NUM_2 2
 #define pdMS_TO_TICKS(n) (n)
-#define ESP_LOGW(...) ((void)0)
-#define ESP_LOGE(...) ((void)0)
-#define ESP_LOGI(...) ((void)0)
+static const char *esp_err_to_name(int value){(void)value;return "test";}
+static void test_log(const char *tag,const char *fmt,...) {(void)tag;(void)fmt;}
+#define ESP_LOGW(...) test_log(__VA_ARGS__)
+#define ESP_LOGE(...) test_log(__VA_ARGS__)
+#define ESP_LOGI(...) test_log(__VA_ARGS__)
+static int64_t s_diag_power_on_us, s_diag_power_off_us;
 static void *s_ioe = (void *)1, *s_tps = (void *)2;
 static void *s_i2c_bus = (void *)3;
 static bool s_ioe_ok, s_tps_ok, s_rails_on, s_pwrup, s_vcom_ctrl, s_wakeup;
@@ -45,7 +48,10 @@ static uint8_t s_p0_extra, s_p1_out, output[2], config[2], inversion[2];
 static int s_vcom_mv = 1200;
 static unsigned writes, reads, clears, waits, probes, tps_writes;
 static int fail_config = -1;
-static bool failed_output, pgood, failed_probe;
+static bool failed_output, pgood, failed_probe, chip_pgood;
+static int fail_tps_read = -1, fail_tps_write = -1;
+static unsigned restarts, xoe_on, order_count, transient_probes;
+static uint8_t order[32];
 static int init_fault_reg = -1, init_failures;
 static unsigned init_allocations, bus_resets;
 static bool allocation_failure;
@@ -80,20 +86,31 @@ static int fca9555_set_inversion(void *h, int port, uint8_t value) {
     inversion[port] = value; return ESP_OK;
 }
 static int fca9555_read_reg(void *h, uint8_t reg, uint8_t *value) {
-    assert(h == s_ioe && reg == 0 && value); ++reads;
-    *value = pgood ? 0x80 : 0; return ESP_OK;
+    assert(h == s_ioe && (reg == 0 || reg == 2) && value); if(reg==0)++reads;
+    *value = reg==2 ? output[0] : (pgood ? 0x80 : 0); return ESP_OK;
 }
 static int fca9555_clear_int(void *h) { assert(h == s_ioe); ++clears; return ESP_OK; }
-static void gpio_set_level(int pin, int level) { assert(pin >= 0 && pin < 64); pins[pin] = level; }
+static void gpio_set_level(int pin, int level) { assert(pin >= 0 && pin < 64); pins[pin] = level; if (pin == 18 && level) ++xoe_on; }
 static void vTaskDelay(unsigned ms) { waits += ms; }
-static int tps_probe(void) { ++probes; return failed_probe ? ESP_FAIL : ESP_OK; }
-static int tps_read(uint8_t reg, uint8_t *value) { (void)reg; *value = 0xfa; return ESP_OK; }
-static int tps_write(uint8_t reg, uint8_t value) { (void)reg; (void)value; ++tps_writes; return ESP_OK; }
-static void tps_set_vcom_mv(int mv) { assert(mv == s_vcom_mv); }
+static int64_t esp_timer_get_time(void){return (int64_t)waits*1000;}
+static int tps_probe(void) {
+    ++probes; if(transient_probes){--transient_probes;return ESP_FAIL;}
+    return failed_probe ? ESP_FAIL : ESP_OK;
+}
+static int tps_read(uint8_t reg, uint8_t *value) {
+    if (reg == fail_tps_read) return ESP_FAIL;
+    *value = chip_pgood ? 0xfa : 0; return ESP_OK;
+}
+static int tps_write(uint8_t reg, uint8_t value) {
+    (void)value; ++tps_writes; if (order_count < sizeof(order)) order[order_count++]=reg;
+    return reg == fail_tps_write ? ESP_FAIL : ESP_OK;
+}
+static void esp_restart(void) { ++restarts; }
+static void board_poweroff(epd_ctrl_state_t*);
 '''
 unit += defines + "\n"
 for name in ("ioe_write", "ioe_read", "p0_value", "p0_write", "p1_write", "ioe_init",
-             "board_set_ctrl", "board_poweron", "board_poweroff",
+             "power_diag_failed", "board_set_ctrl", "tps_set_vcom_mv", "board_poweron_once", "board_poweron", "board_poweroff", "board_set_vcom",
              "board_epd_release_drive", "board_sd_detect",
              "board_sd_present", "board_sd_has_cd", "board_ioe_sleep",
              "board_ioe_wake", "board_tp_rst", "board_touch_reset",
@@ -108,11 +125,13 @@ static void reset(void) {
     memset(output, 0, sizeof(output)); memset(config, 0, sizeof(config));
     memset(inversion, 0, sizeof(inversion)); memset(pins, 0, sizeof(pins));
     writes = reads = clears = waits = probes = tps_writes = 0;
-    fail_config = -1; failed_output = failed_probe = false; pgood = true;
+    fail_config = fail_tps_read = fail_tps_write = -1;
+    failed_output = failed_probe = false; pgood = chip_pgood = true;
+    restarts = xoe_on = order_count = transient_probes = 0; s_diag_power_on_us = s_diag_power_off_us = 0; s_vcom_mv = 1200;
     init_fault_reg = -1; init_failures = 0;
     init_allocations = bus_resets = 0; allocation_failure = false;
     s_ioe = (void *)1;
-    state = (epd_ctrl_state_t){0};
+    s_tps=(void*)2; state = (epd_ctrl_state_t){0};
 }
 int main(void) {
     (void)i2c_master_bus_reset;
@@ -143,8 +162,11 @@ int main(void) {
     board_poweron(&state);
     assert(s_rails_on && s_tps_ok && s_pwrup && s_vcom_ctrl && s_wakeup);
     assert((output[0] & P0_TPS_MASK) == P0_TPS_MASK && pins[EPD_PIN_XOE]);
-    assert(probes == 1 && waits == 70);
+    assert(probes == 1 && waits == 100 && !restarts && xoe_on == 1);
+    assert(order_count == 5 && order[0] == TPS_REG_UPSEQ0 && order[1] == TPS_REG_UPSEQ1 &&
+           order[2] == TPS_REG_ENABLE && order[3] == TPS_REG_VCOM2 && order[4] == TPS_REG_VCOM1);
     unsigned before = writes, tps_before = tps_writes;
+    board_set_vcom(-1300); assert(s_vcom_mv == 1300 && tps_writes == tps_before);
     board_poweron(&state); assert(writes == before && tps_writes == tps_before);
     // S31 扫描收尾只撤 MODE/XOE，VCOM 与其他锁存保持到真正关电。
     // S31 output completion clears MODE/XOE while VCOM and other latches remain until power-off.
@@ -165,9 +187,32 @@ int main(void) {
     assert((output[0] & P0_OUTPUT_MASK) == s_p0_extra && !pins[EPD_PIN_XOE] && !pins[EPD_PIN_MODE]);
     // PGOOD 失效的等待有上界；不上报轨已就绪，且关电仍能撤掉请求。
     // Bound failed PGOOD waits; never publish ready rails, and power-off still clears requests.
-    reset(); pgood = false; failed_probe = true; board_poweron(&state);
-    assert(!s_rails_on && !s_tps_ok && probes == 3 && reads == 600 && waits == 700);
-    board_poweroff(&state); assert(!(output[0] & P0_TPS_MASK));
+    for (int fault=0; fault<12; ++fault) {
+        reset();
+        switch(fault) {
+            case 0: failed_probe=true; break;
+            case 1: pgood=false; break;
+            case 2: chip_pgood=false; break;
+            case 3: fail_tps_read=TPS_REG_REVID; break;
+            case 4: fail_tps_read=TPS_REG_PG; break;
+            case 5: fail_tps_write=TPS_REG_UPSEQ0; break;
+            case 6: fail_tps_write=TPS_REG_UPSEQ1; break;
+            case 7: fail_tps_write=TPS_REG_ENABLE; break;
+            case 8: fail_tps_write=TPS_REG_VCOM2; break;
+            case 9: fail_tps_write=TPS_REG_VCOM1; break;
+            case 10: failed_output=true; break;
+            case 11: s_tps=NULL; break;
+        }
+        board_poweron(&state);
+        assert(!s_rails_on && !s_tps_ok && !pins[EPD_PIN_XOE] && !xoe_on && restarts==1);
+        assert(!state.ep_output_enable && !state.ep_mode && !s_pwrup && !s_wakeup && !s_vcom_ctrl);
+        if (fault==0 || fault==3 || (fault>=5 && fault<=9)) assert(probes==4);
+        if (fault==1) assert(reads==800+4*CONFIG_DISPLAY_POWER_DIAG && waits==1508);
+        if (fault==2 || fault==4) assert(waits==1508);
+        s_tps=(void*)2;
+    }
+    reset();transient_probes=2;board_poweron(&state);
+    assert(s_rails_on && s_tps_ok && probes==3 && !restarts && xoe_on==1 && waits==404);
     for (int host_off = 0; host_off < 2; ++host_off) {
         reset(); board_poweron(&state); assert(board_motor(true) == ESP_OK);
         s_p1_out |= IOE_BIT(IO_PWR_PULSE);
@@ -212,6 +257,8 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix="s31-board-") as folder:
     c, binary = Path(folder) / "test.c", Path(folder) / "test"
     c.write_text(unit)
-    subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                    "-fsanitize=address,undefined", str(c), "-o", str(binary)], check=True)
-    subprocess.run([str(binary)], check=True)
+    for diag in (0,1):
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                        "-Wno-unused-function", "-Wno-unused-variable", f"-DCONFIG_DISPLAY_POWER_DIAG={diag}",
+                        "-fsanitize=address,undefined", str(c), "-o", str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)

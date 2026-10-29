@@ -170,15 +170,15 @@ esp_err_t sc7a20h_read(sc7a20h_handle_t h, sc7a20h_sample_t* sample);
 /// AOI1 高事件 + HPIS1，桌上静止不会被重力误触发。
 /// / AOI1 high-event + HPIS1 so gravity does not trip a table-resting part.
 esp_err_t sc7a20h_enable_motion(sc7a20h_handle_t h, const sc7a20h_motion_cfg_t* cfg);
-/// LP 采样 + 运动 + INT1 路由 + 锁存。cfg 为 NULL 用 SC7A20H_MOTION_DEFAULT。
-/// / LP sample + motion + INT1 route + latch. NULL cfg uses SC7A20H_MOTION_DEFAULT.
+/// 原厂 100 Hz 拾起配置；NULL 使用阈值 0x10、时长 0、XYZ 高事件。
+/// Vendor 100 Hz pickup; NULL selects threshold 0x10, duration 0 and XYZ high events.
 esp_err_t sc7a20h_arm_pickup_wake(sc7a20h_handle_t h, const sc7a20h_motion_cfg_t* cfg);
-/// 输入 + 下拉 + 高电平 GPIO 唤醒。先拆掉 INT1 ISR。
-/// / Input + pulldown + high-level GPIO wakeup. Detaches any INT1 ISR first.
+/// 输入上拉、开漏低有效 GPIO 唤醒；先拆掉 INT1 ISR。
+/// Input pull-up and open-drain active-low GPIO wake; detach any INT1 ISR first.
 esp_err_t sc7a20h_config_light_sleep_wakeup(sc7a20h_handle_t h);
 esp_err_t sc7a20h_config_ext1_wakeup(sc7a20h_handle_t h);
-/// 读锁存的 INT 源，好让 INT1 落下。
-/// / Read latched INT sources so INT1 can fall.
+/// 读锁存的 INT 源，让 INT1 释放为高。
+/// Read latched INT sources to release INT1 high.
 esp_err_t sc7a20h_ack_int(sc7a20h_handle_t h);
 
 esp_err_t sc7a20h_soft_reset(sc7a20h_handle_t h);

@@ -5,6 +5,11 @@
  * CST836U 主机：I2C 读点、动态上报 / 深睡、RST 唤醒。
  *
  * CST836U host: I2C point read, dynamic report / deep sleep, RST wake.
+ *
+ * S31 触摸复位、模式与坐标参考 Metalio 原厂 display/metalio_touch.c。
+ * S31 touch reset, mode and coordinates follow Metalio vendor display/metalio_touch.c.
+ * 原厂来源版本和 MIT 许可见 components/board_i2c/README.md 与 LICENSE.Metalio。
+ * Vendor revision and MIT notice: components/board_i2c/README.md and LICENSE.Metalio.
  */
 
 #include "cst836u.h"
@@ -14,6 +19,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "board_i2c.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,13 +37,15 @@
 #define FT6336U_REG_TD_STATUS 0x02
 #define FT6336U_REG_CHIP_ID 0xA3
 #define FT6336U_REG_FW_VER 0xA6
+#define FT6336U_REG_INT_MODE 0xA4
 #define FT6336U_CHIP_ID 0x64
 #define FT6336U_FRAME_LEN 13
 
 // 盖板三键在屏外：FT 原始 y≈1600，x≈100/200/300。
 // Cover keys sit outside the panel: raw y≈1600, x≈100/200/300.
-#define FT6336U_VK_RAW_Y_MIN 1300
-#define FT6336U_VK_X_BASE 50
+#define FT6336U_VK_RAW_Y 1600
+#define FT6336U_VK_TOL 30
+#define FT6336U_VK_X_BASE 100
 #define FT6336U_VK_PITCH 100
 #define FT6336U_LOGICAL_W 684
 #define FT6336U_LOGICAL_H 1216
@@ -65,16 +73,13 @@ static bool gpio_ok(gpio_num_t gpio) {
 }
 
 static esp_err_t read_regs(cst836u_handle_t h, uint8_t reg, uint8_t* data, size_t length) {
-    esp_err_t err = i2c_master_transmit(h->dev, &reg, 1, I2C_TIMEOUT_MS);
-    if (err != ESP_OK) return err;
-    esp_rom_delay_us(5);
-    return i2c_master_receive(h->dev, data, length, I2C_TIMEOUT_MS);
+    return board_i2c_read(h->dev, reg, data, length, I2C_TIMEOUT_MS);
 }
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S31)
 static esp_err_t write_cmd(cst836u_handle_t h, uint16_t cmd) {
     uint8_t buf[2] = { (uint8_t)(cmd >> 8), (uint8_t)(cmd & 0xFF) };
-    return i2c_master_transmit(h->dev, buf, sizeof(buf), I2C_TIMEOUT_MS);
+    return board_i2c_transmit(h->dev, buf, sizeof(buf), I2C_TIMEOUT_MS);
 }
 #endif
 
@@ -147,13 +152,7 @@ esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_
     h->mode = CST836U_MODE_NORMAL;
 
     uint8_t addr = config->i2c_addr ? config->i2c_addr : CST836U_ADDR_DEFAULT;
-    uint32_t hz = config->scl_speed_hz ? config->scl_speed_hz : CST836U_I2C_HZ_DEFAULT;
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = addr,
-        .scl_speed_hz = hz,
-    };
-    esp_err_t err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &h->dev);
+    esp_err_t err = board_i2c_add_device(bus_handle, addr, &h->dev);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2C device add failed: %s", esp_err_to_name(err));
         free(h);
@@ -167,6 +166,18 @@ esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_
         }
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    err = cst836u_reset(h);
+    if (err == ESP_OK) {
+        const uint8_t command[] = {FT6336U_REG_INT_MODE, 0};
+        err = board_i2c_transmit(h->dev, command, sizeof(command), I2C_TIMEOUT_MS);
+    }
+    if (err != ESP_OK) {
+        i2c_master_bus_rm_device(h->dev);
+        free(h);
+        return err;
+    }
+#endif
     err = load_info(h);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Chip information read failed: %s", esp_err_to_name(err));
@@ -210,31 +221,32 @@ esp_err_t cst836u_get_info(cst836u_handle_t h, cst836u_info_t* info) {
 #if defined(CONFIG_IDF_TARGET_ESP32S31)
 // FT 原始坐标 → Mogo 逻辑坐标；盖板三键归一化到 x=80/240/400、y=1500。
 // FT raw coordinates -> Mogo logical coordinates; cover keys normalise to x=80/240/400, y=1500.
-static void ft6336u_map_point(int raw_x, int raw_y, uint16_t* lx, uint16_t* ly) {
-    int x;
-    int y;
-    if (raw_y >= FT6336U_VK_RAW_Y_MIN) {
-        int idx = (raw_x - FT6336U_VK_X_BASE) / FT6336U_VK_PITCH;
-        if (idx < 0) idx = 0;
-        if (idx > 2) idx = 2;
-        // raw 100/200/300 = HOME/PREV/NEXT → UI_KEY_2/1/3。
-        // raw 100/200/300 = HOME/PREV/NEXT -> UI_KEY_2/1/3.
-        static const int key_x[3] = { 240, 80, 400 };
-        x = key_x[idx];
-        y = 1500;
-    } else {
-        // FT6336U 在本板已按竖屏方向上报：raw_x = 逻辑 x，raw_y = 逻辑 y。
-        // The FT6336U already reports in portrait orientation on this board:
-        // raw_x = logical x, raw_y = logical y.
-        x = raw_x;
-        y = raw_y;
-        if (x < 0) x = 0;
-        if (x >= FT6336U_LOGICAL_W) x = FT6336U_LOGICAL_W - 1;
-        if (y < 0) y = 0;
-        if (y >= FT6336U_LOGICAL_H) y = FT6336U_LOGICAL_H - 1;
+static bool ft6336u_map_point(int raw_x, int raw_y, uint16_t* lx, uint16_t* ly) {
+    if (raw_y >= FT6336U_VK_RAW_Y - FT6336U_VK_TOL &&
+        raw_y <= FT6336U_VK_RAW_Y + FT6336U_VK_TOL) {
+        static const uint16_t key_x[] = {240, 80, 400};
+        for (int i = 0; i < 3; ++i) {
+            const int center = FT6336U_VK_X_BASE + i * FT6336U_VK_PITCH;
+            if (raw_x >= center - FT6336U_VK_TOL && raw_x <= center + FT6336U_VK_TOL) {
+                *lx = key_x[i];
+                *ly = 1500;
+                return true;
+            }
+        }
+        return false;
     }
+    int x = raw_x, y = raw_y;
+    // 原厂横屏坐标转换；屏外非盖板区域不生成触摸。
+    // Vendor landscape-coordinate mapping; off-panel non-key samples produce no touch.
+    if (raw_x >= FT6336U_LOGICAL_W && raw_x < FT6336U_LOGICAL_H &&
+        raw_y < FT6336U_LOGICAL_W) {
+        x = FT6336U_LOGICAL_W - 1 - raw_y;
+        y = raw_x;
+    }
+    if (x < 0 || x >= FT6336U_LOGICAL_W || y < 0 || y >= FT6336U_LOGICAL_H) return false;
     *lx = (uint16_t)x;
     *ly = (uint16_t)y;
+    return true;
 }
 
 static esp_err_t ft6336u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
@@ -251,7 +263,7 @@ static esp_err_t ft6336u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
     memset(touch, 0, sizeof(*touch));
     memcpy(touch->raw, data, CST836U_RAW_LEN < sizeof(data) ? CST836U_RAW_LEN : sizeof(data));
     uint8_t n = data[0] & 0x0F;
-    if (n > CST836U_MAX_POINTS) n = CST836U_MAX_POINTS;
+    if (n > CST836U_MAX_POINTS) return ESP_OK;
     touch->count = n;
 
     // 触摸诊断：按下/移动/抬起时打一行原始与映射坐标。
@@ -285,7 +297,7 @@ static esp_err_t ft6336u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
     for (int i = 0; i < CST836U_MAX_POINTS; i++) {
         cst836u_point_t* pt = &touch->points[i];
         const uint8_t* src = &data[1 + i * 6];
-        pt->id = (uint8_t)i;
+        pt->id = (uint8_t)(src[2] >> 4);
         pt->event = (uint8_t)((src[0] >> 6) & 0x03);
         const int raw_x = ((src[0] & 0x0F) << 8) | src[1];
         const int raw_y = ((src[2] & 0x0F) << 8) | src[3];
@@ -293,8 +305,9 @@ static esp_err_t ft6336u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
             pt->active = false;
             continue;
         }
-        pt->active = pt->event != 1; // 1 = up; 0/2 = down/contact
-        ft6336u_map_point(raw_x, raw_y, &pt->x, &pt->y);
+        const bool mapped = ft6336u_map_point(raw_x, raw_y, &pt->x, &pt->y);
+        pt->active = mapped && pt->event != 1;
+        if (!mapped) continue;
         if (!have_primary) {
             touch->x = pt->x;
             touch->y = pt->y;
@@ -415,6 +428,9 @@ esp_err_t cst836u_reset(cst836u_handle_t h) {
         gpio_set_level(h->rst_gpio, 0);
         vTaskDelay(pdMS_TO_TICKS(RST_HOLD_MS));
         gpio_set_level(h->rst_gpio, 1);
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+        vTaskDelay(pdMS_TO_TICKS(300));
+#endif
         return ESP_OK;
     }
     if (h->reset_fn != NULL) return h->reset_fn();
@@ -428,7 +444,15 @@ esp_err_t cst836u_wake(cst836u_handle_t h) {
         ESP_LOGE(TAG, "Touch reset failed: %s", esp_err_to_name(err));
         return err;
     }
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    const uint8_t command[] = {FT6336U_REG_INT_MODE, 0};
+    err = board_i2c_transmit(h->dev, command, sizeof(command), I2C_TIMEOUT_MS);
+    if (err != ESP_OK) return err;
+    err = load_info(h);
+    if (err != ESP_OK) return err;
+#else
     vTaskDelay(pdMS_TO_TICKS(RST_BOOT_MS));
+#endif
     h->mode = CST836U_MODE_NORMAL;
     return cst836u_set_mode(h, CST836U_MODE_NORMAL);
 }

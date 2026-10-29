@@ -2,14 +2,10 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * FCA9555 / xCA9555 16 位 I2C GPIO 扩展（Nyfea，兼容 PCA9555）。
- * 总线由调用方持有。读走写指针 + Repeated START（手册图 5/6）。
- * INT# 开漏、不锁存；读 Input 就松开。
- *
- * FCA9555 / xCA9555 16-bit I2C GPIO expander (Nyfea, PCA9555-compatible).
- * Caller owns the i2c_master bus. Read uses write pointer + Repeated START
- * (datasheet Figure 5/6). INT# is open-drain, not latched; reading Input
- * releases it.
+ * S31 的 TCA9555 兼容接口；总线由调用方持有，锁内按原厂 STOP 分段读取。
+ * 寄存器对内地址翻转，完整映射按单寄存器读取；两口 Input 分别清中断。
+ * TCA9555 compatibility API for S31; caller owns the bus, with locked vendor STOP reads.
+ * Addresses toggle within a register pair; full maps address each register and both Inputs clear IRQs.
  */
 
 #pragma once
@@ -30,7 +26,7 @@ typedef struct fca9555_dev_t* fca9555_handle_t;
 
 #define FCA9555_ADDR_BASE 0x20
 #define FCA9555_ADDR_DEFAULT 0x24
-#define FCA9555_I2C_HZ_DEFAULT 400000
+#define FCA9555_I2C_HZ_DEFAULT 100000
 
 #define FCA9555_I2C_TIMEOUT_MS_DEFAULT 100
 
@@ -78,7 +74,7 @@ _Static_assert(sizeof(fca9555_map_t) == 8, "FCA9555 map must be 8 bytes");
 
 typedef struct {
     uint8_t i2c_addr;
-    uint32_t scl_speed_hz;
+    uint32_t scl_speed_hz; ///< 保留配置字段；板级固定 100 kHz。/ Retained field; board fixes 100 kHz.
     gpio_num_t int_gpio;
     uint16_t i2c_timeout_ms;
 } fca9555_config_t;
@@ -97,11 +93,11 @@ esp_err_t fca9555_deinit(fca9555_handle_t handle);
 
 esp_err_t fca9555_read_reg(fca9555_handle_t h, uint8_t reg, uint8_t* value);
 esp_err_t fca9555_read_n(fca9555_handle_t h, uint8_t start, uint8_t* data, size_t n);
-/// 连读全部 8 寄存器。刷新 CFG/INV 缓存。
-/// / Sequential read of all 8 registers. Refreshes CFG/INV cache.
+/// 逐个读取全部 8 寄存器。成功后刷新 CFG/INV 缓存。
+/// Read all 8 registers individually; refresh CFG/INV cache on success.
 esp_err_t fca9555_read_all(fca9555_handle_t h, fca9555_map_t* map);
-/// 连读 IN/OUT。CFG/INV 走缓存。
-/// / Sequential read of IN/OUT. CFG/INV come from cache.
+/// 逐个读取 IN/OUT。CFG/INV 走缓存。
+/// Read IN/OUT individually; CFG/INV come from cache.
 esp_err_t fca9555_read_io(fca9555_handle_t h, fca9555_map_t* map);
 esp_err_t fca9555_read_input(fca9555_handle_t h, int port, uint8_t* value);
 esp_err_t fca9555_set_output(fca9555_handle_t h, int port, uint8_t value);

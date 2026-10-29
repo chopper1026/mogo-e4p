@@ -19,6 +19,20 @@ The local component is `device_power`, derived from `mindreset/read_pico_pmu`; r
 - 电源交接：`device_power_report_sleep()` 返回不支持，由应用按当前板路径转入关机；`device_power_power_off()` 发送关机脉冲，耗尽重试后进入 ESP 深睡。/ Soft sleep reports not supported so the application escalates along the current board's power-off path; power-off sends the pulse train and falls back to ESP deep sleep after its retry limit.
 - 面板 VCOM：启动读取已有标定值，写入接口仅供出厂流程使用。/ Reads existing calibration at boot; the write API is reserved for factory setup.
 
+## 充电与 RTC / Charging and RTC
+
+CX25601N 请求 1 A，经原厂 80 mA 档位量化为 960 mA，输入限流跟随量化值；VREG 为 4.4 V。轮询按有效电压切换终止，输入存在且空闲/近零电流时补充充电，无输入且有效电压 ≤3.1 V 时按原厂关 BATFET。配置不完整时报告失败，并尽力恢复硬件终止与停充。
+CX25601N quantizes the 1 A request to 960 mA using vendor 80 mA steps; the input limit follows that value and VREG is 4.4 V. Polling controls termination from valid voltage, kicks recharge on input-present idle/near-zero-current status and shuts BATFET on valid no-input voltage at or below 3.1 V. Incomplete configuration reports failure and attempts to restore hardware termination and disable charging.
+
+维护使用现有轮询上的非阻塞状态机，恢复充电最早在 200 ms 后的下一次轮询执行，失败继续重试；不更改电量曲线、补偿与滤波。PCF8563 启动清 STOP 和 AF/TF，寄存器存 UTC，非法 BCD、日期和电压失效标志不用于系统校时。
+Maintenance uses a nonblocking state machine on existing polling, resuming recharge on the next poll at least 200 ms later and retrying failed restoration. Battery curves, compensation and filtering remain unchanged. PCF8563 startup clears STOP and AF/TF, stores UTC and rejects invalid BCD/calendar dates or voltage-loss flags for system clock updates.
+
+关机与反初始化前恢复硬件充电终止，并完成待恢复的充电使能；失败则交还调用方，不带着临时停充状态断电。
+Before power-off or deinit, restore hardware termination and pending charge enable; failure returns to the caller instead of powering off with a temporary charge disable.
+
+原厂来源与调度差异见 [board_i2c](../board_i2c/README.md)。
+See board_i2c for vendor provenance and scheduling differences.
+
 ## 兼容边界 / Compatibility boundary
 
 `include/pmu_protocol.h` 保留原 CW32 线格式常量、命令码与共用数据结构；`device_power.h` 保留应用正在使用的快照和 API。删除旧硬件后端不代表这些兼容标识也能删除。
@@ -34,7 +48,7 @@ historical CW32 protocol references, not current Metalio hardware specifications
 ## 验证 / Validation
 
 ```sh
-python3 tools/run_reader_baseline.py battery battery_filter storage
+python3 tools/run_reader_baseline.py metalio_drivers battery battery_filter storage
 ```
 
 采样与滤波测试执行当前 Metalio 实现；存储组同时覆盖 S31 外设睡眠恢复和应用下电交接。宿主测试不能替代真机电压、充电和关机验证。
@@ -44,5 +58,5 @@ handoff. Host tests do not replace device voltage, charging or power-off validat
 
 ## 许可 / License
 
-Apache-2.0，见 [LICENSE](LICENSE)。
-Apache-2.0, see [LICENSE](LICENSE).
+原有部分为 Apache-2.0，见 [LICENSE](LICENSE)；移植原厂部分保留 [MIT 声明](../board_i2c/LICENSE.Metalio)。
+Existing portions use Apache-2.0; adapted vendor material retains the MIT notice linked above.

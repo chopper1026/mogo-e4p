@@ -3,7 +3,7 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## v1.0.2 · 本地测试 / Local testing · 2026-10-28
+## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 
 - 卡失效后自动重挂前，确认封面和头像后台任务已交还文件操作；仍忙时延后重试，避免卸载正在使用的旧文件系统。
   Automatic remount after media invalidation checks that cover and avatar jobs have returned file ownership, deferring while busy to avoid unmounting a filesystem still in use.
@@ -11,8 +11,14 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 屏幕电源扩展器初始化遇到暂时通信错误时，最多恢复总线并重试两次；检查最终输出写入结果，避免一次失败后屏幕一直无法更新。
   Screen power-expander initialization recovers the bus and retries up to twice after transient communication failures, checking the final output write so one failure does not permanently disable presentation.
 
-- 屏幕供电未就绪时停止推屏，连续输入最多每秒重试一次；供电恢复后的下一次输出从白底重建整屏，避免将失败画面当作已显示内容继续差分刷新。
-  Stop presentation when panel power is not ready and retry at most once per second under queued input. The next output after power recovers rebuilds the whole screen from white instead of treating failed output as an actual differential baseline.
+- 按原厂驱动对齐屏幕上电检查、VCOM 写入顺序和完整掉电重试；四次尝试仍失败时重启，供电就绪后才允许扫描。
+  Align panel checks, VCOM write order and full power-cycle retries with the vendor driver; restart after four failed attempts and enable scanning only on ready rails.
+
+- 修复扩展器寄存器快照与双口清中断，将拾起唤醒改为原厂共线低有效配置；共享 I2C 增加完整事务保护与读取回退。
+  Fix expander snapshots and dual-port IRQ clearing, use vendor active-low shared pickup wake, and protect complete I2C transactions with read fallback.
+
+- 补齐充电终止、补充充电和欠压维护；保留电量显示算法，修复触摸异常帧、盖板键范围和 RTC 的启动及 UTC 读写。
+  Add termination, recharge and undervoltage maintenance while retaining the battery display algorithm; fix invalid touch frames, cover-key bounds and RTC startup/UTC handling.
 
 ## v1.0.0 · 本地测试 / Local testing · 2026-10-27
 

@@ -12,6 +12,11 @@
  * curve and one-direction rate limiting, persisted to NVS.
  * 没有 CW32 PMU，因此软睡/关机按新板电源路径实现或降级。
  * There is no CW32 PMU; soft sleep / power-off follow the new board's rails.
+ *
+ * 充电与 RTC 参考 Metalio 原厂 power/cx25601n.cc 和 sensor/pcf8563.cc。
+ * Charging and RTC follow Metalio vendor power/cx25601n.cc and sensor/pcf8563.cc.
+ * 原厂来源版本和 MIT 许可见 components/board_i2c/README.md 与 LICENSE.Metalio。
+ * Vendor revision and MIT notice: components/board_i2c/README.md and LICENSE.Metalio.
  */
 
 #include "device_power.h"
@@ -23,6 +28,7 @@
 
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "board_i2c.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "fca9555.h"
@@ -118,9 +124,7 @@ static uint8_t dec_to_bcd(uint8_t v) { return (uint8_t)(((v / 10) << 4) | (v % 1
 
 static esp_err_t dev_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* data, size_t len) {
     if (dev == NULL || data == NULL) return ESP_ERR_INVALID_STATE;
-    esp_err_t err = i2c_master_transmit(dev, &reg, 1, I2C_TIMEOUT_MS);
-    if (err != ESP_OK) return err;
-    return i2c_master_receive(dev, data, len, I2C_TIMEOUT_MS);
+    return board_i2c_read(dev, reg, data, len, I2C_TIMEOUT_MS);
 }
 
 static esp_err_t dev_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8_t* data,
@@ -130,18 +134,14 @@ static esp_err_t dev_write(i2c_master_dev_handle_t dev, uint8_t reg, const uint8
     if (len + 1 > sizeof(buf)) return ESP_ERR_INVALID_ARG;
     buf[0] = reg;
     memcpy(&buf[1], data, len);
-    return i2c_master_transmit(dev, buf, len + 1, I2C_TIMEOUT_MS);
+    return board_i2c_transmit(dev, buf, len + 1, I2C_TIMEOUT_MS);
 }
 
 static esp_err_t add_dev(uint8_t addr, i2c_master_dev_handle_t* out) {
     *out = NULL;
-    if (i2c_master_probe(s_bus, addr, I2C_TIMEOUT_MS) != ESP_OK) return ESP_ERR_NOT_FOUND;
-    i2c_device_config_t cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = addr,
-        .scl_speed_hz = 100000,
-    };
-    return i2c_master_bus_add_device(s_bus, &cfg, out);
+    esp_err_t err = board_i2c_probe(s_bus, addr, I2C_TIMEOUT_MS);
+    if (err != ESP_OK) return err;
+    return board_i2c_add_device(s_bus, addr, out);
 }
 
 /* ---- CX25601N 充电配置 / CX25601N charger setup ---- */
@@ -149,13 +149,16 @@ static esp_err_t add_dev(uint8_t addr, i2c_master_dev_handle_t* out) {
 // 位域更新沿用原厂驱动的语义：mask 是字段宽度，shift 是字段起始位。
 // Field update with the vendor driver's semantics: mask is the field width, shift its start bit.
 static esp_err_t cx_update_bits(uint8_t reg, uint8_t mask, uint8_t shift, uint8_t field) {
-    if (s_cx == NULL) return ESP_ERR_INVALID_STATE;
-    uint8_t cur = 0;
-    esp_err_t err = dev_read(s_cx, reg, &cur, 1);
+    esp_err_t err = board_i2c_lock(I2C_TIMEOUT_MS);
     if (err != ESP_OK) return err;
-    const uint8_t m = (uint8_t)(mask << shift);
-    cur = (uint8_t)((cur & (uint8_t)~m) | ((field << shift) & m));
-    return dev_write(s_cx, reg, &cur, 1);
+    uint8_t cur = 0;
+    err = dev_read(s_cx, reg, &cur, 1);
+    if (err == ESP_OK) {
+        cur = (uint8_t)((cur & ~(mask << shift)) | ((field & mask) << shift));
+        err = dev_write(s_cx, reg, &cur, 1);
+    }
+    board_i2c_unlock();
+    return err;
 }
 
 // 充电截止电压，10 mV 一档：低 5 位在 0x04[7:3]，高 4 位在 0x05[3:0]。
@@ -174,8 +177,9 @@ static esp_err_t cx_set_vreg_mv(uint32_t mv) {
 static esp_err_t cx_set_ichg_ma(uint32_t ma) {
     if (ma < 80) ma = 80;
     if (ma > 3040) ma = 3040;
-    const uint32_t in_ma = ma < 100 ? 100 : (ma > 3000 ? 3000 : ma);
     const uint32_t icode = ma / 80;
+    const uint32_t applied_ma = icode * 80;
+    const uint32_t in_ma = applied_ma < 100 ? 100 : (applied_ma > 3000 ? 3000 : applied_ma);
     const uint32_t pcode = in_ma / 20;
     esp_err_t err = cx_update_bits(CX_REG_ICHG_LO, 0x03, 6, (uint8_t)(icode & 0x03));
     if (err == ESP_OK) err = cx_update_bits(CX_REG_ICHG_HI, 0x0F, 0, (uint8_t)((icode >> 2) & 0x0F));
@@ -186,29 +190,34 @@ static esp_err_t cx_set_ichg_ma(uint32_t ma) {
 
 // 私有寄存器区：按原厂顺序解锁（0x70 写 00/50/57/44，直到读回 0x03）。
 // Private block: unlock in the vendor's order (0x70 = 00/50/57/44 until it reads back 0x03).
-static void cx_unlock_private(void) {
+static esp_err_t cx_unlock_private(void) {
     for (int i = 0; i < 10; i++) {
         static const uint8_t seq[] = {0x00, 0x50, 0x57, 0x44};
         for (size_t k = 0; k < sizeof(seq); k++) {
-            dev_write(s_cx, CX_REG_UNLOCK, &seq[k], 1);
+            esp_err_t err = dev_write(s_cx, CX_REG_UNLOCK, &seq[k], 1);
+            if (err != ESP_OK) return err;
         }
         uint8_t v = 0;
-        if (dev_read(s_cx, CX_REG_UNLOCK, &v, 1) == ESP_OK && v == 0x03) return;
+        esp_err_t err = dev_read(s_cx, CX_REG_UNLOCK, &v, 1);
+        if (err != ESP_OK) return err;
+        if (v == 0x03) return ESP_OK;
     }
     ESP_LOGW(TAG, "CX25601N private unlock failed");
+    return ESP_ERR_INVALID_STATE;
 }
 
 // 照搬原厂 hw_init_defaults()：关 DPDM 探测和看门狗，预充/终止用原厂码值，VREG 4.4 V，
-// 充电与输入限流 1 A，充电期间不自动终止（原厂监控任务在 VBAT<VREG 时的稳态），最后开 EN_CHG。
+// 充电与输入限流 1 A，充电期间由轮询服务按原厂 VBAT/VREG 策略控制终止，最后开 EN_CHG。
 // Mirrors the vendor hw_init_defaults(): DPDM probing and the watchdog stay off, precharge and
 // termination keep the vendor codes, VREG is 4.4 V, charge and input limit are 1 A, termination
-// stays disabled (the vendor monitor's steady state while VBAT < VREG), then EN_CHG is set.
+// follows the vendor VBAT/VREG policy through polling, then EN_CHG is set.
 static esp_err_t cx_charger_setup(void) {
     if (s_cx == NULL) return ESP_ERR_INVALID_STATE;
     uint8_t part = 0;
     esp_err_t err = dev_read(s_cx, CX_REG_PART_INFO, &part, 1);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) goto failed;
 
+    err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 0);
     if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_TMR, 0x01, 6, 0);
     if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 4, 0);
     if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x03, 0, 0);
@@ -220,16 +229,18 @@ static esp_err_t cx_charger_setup(void) {
     if (err == ESP_OK) err = cx_update_bits(CX_REG_ITERM_HI, 0x01, 0, 0x00);
     if (err == ESP_OK) err = cx_set_vreg_mv(CX_CHG_VREG_MV);
     if (err == ESP_OK) err = cx_set_ichg_ma(CX_CHG_ICHG_MA);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) goto failed;
 
     // 私有区三个值只由原厂驱动写入，含义未公开，照抄。
     // The three private values are written only by the vendor driver; their meaning is undocumented.
-    cx_unlock_private();
+    err = cx_unlock_private();
     const uint8_t v86 = 0x06, v3a = 0x10, v46 = 0x20, zero = 0x00;
-    dev_write(s_cx, 0x86, &v86, 1);
-    dev_write(s_cx, 0x3A, &v3a, 1);
-    dev_write(s_cx, 0x46, &v46, 1);
-    dev_write(s_cx, CX_REG_UNLOCK, &zero, 1);
+    if (err == ESP_OK) err = dev_write(s_cx, 0x86, &v86, 1);
+    if (err == ESP_OK) err = dev_write(s_cx, 0x3A, &v3a, 1);
+    if (err == ESP_OK) err = dev_write(s_cx, 0x46, &v46, 1);
+    const esp_err_t relock = dev_write(s_cx, CX_REG_UNLOCK, &zero, 1);
+    if (err == ESP_OK) err = relock;
+    if (err != ESP_OK) goto failed;
 
     if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 0, 1);
     if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 2, 0);
@@ -257,7 +268,77 @@ static esp_err_t cx_charger_setup(void) {
     }
     ESP_LOGI(TAG, "CX25601N part=0x%02X ichg=%ldmA iindpm=%ldmA vreg=%ldmV (%s)", part,
              ichg_ma, iindpm_ma, vreg_mv, err == ESP_OK ? "ok" : esp_err_to_name(err));
+    if (err == ESP_OK) return ESP_OK;
+failed:
+    // 部分初始化失败时尽力恢复硬件终止并停充，避免无维护的半配置状态。
+    // On partial setup failure, restore hardware termination and disable charging where communication permits.
+    (void)cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 2, 1);
+    (void)cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 0);
     return err;
+}
+
+
+static bool s_charger_configured, s_charger_uv_shutdown;
+static int64_t s_charger_next_us, s_charger_resume_us;
+
+// 主机停止维护前恢复硬件终止，不能把补充充电的暂时停充阶段留给断电后的芯片。
+// Restore hardware termination before host maintenance stops; never leave a recharge disable pending after power-off.
+static esp_err_t cx_charger_park(void) {
+    if (!s_charger_configured || s_cx == NULL) return ESP_OK;
+    esp_err_t err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 2, 1);
+    if (s_charger_resume_us != 0) {
+        esp_err_t resume = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 4, 0);
+        if (resume == ESP_OK) resume = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 1);
+        if (resume == ESP_OK) s_charger_resume_us = 0;
+        if (err == ESP_OK) err = resume;
+    }
+    return err;
+}
+
+// 原厂 charger_vreg_task 的寄存器策略，转为已有轮询上的非阻塞步骤。
+// Vendor charger_vreg_task register policy expressed as nonblocking steps on existing polling.
+static void cx_charger_poll(int64_t now, bool have_v, uint16_t mv,
+                            bool have_i, int16_t ma, bool have_status, uint8_t status) {
+    if (!s_charger_configured) return;
+    if (s_charger_resume_us != 0) {
+        if (now < s_charger_resume_us) return;
+        esp_err_t err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 4, 0);
+        if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 1);
+        if (err != ESP_OK) return;
+        s_charger_resume_us = 0;
+        s_charger_next_us = now + 500000;
+        return;
+    }
+    if (now < s_charger_next_us) return;
+    s_charger_next_us = now + 2000000;
+    // 无有效电压时不作充电终止或欠压判断；通信失败会在下轮重试。
+    // Invalid voltage never drives termination or undervoltage decisions; retry communication next time.
+    if (!have_v) return;
+    const bool below = mv < CX_CHG_VREG_MV;
+    const uint8_t vbus = status & 0x07;
+    if (!s_charger_uv_shutdown && mv <= 3100 && have_status && vbus == 0) {
+        const uint8_t shutdown = 0x01;
+        if (dev_write(s_cx, CX_REG_CHG_CTRL3, &shutdown, 1) == ESP_OK) {
+            s_charger_uv_shutdown = true;
+        }
+        return;
+    }
+    if (mv > 3200) s_charger_uv_shutdown = false;
+    if (s_charger_uv_shutdown && (!have_status || vbus == 0)) return;
+    esp_err_t err = cx_set_vreg_mv(CX_CHG_VREG_MV);
+    if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL0, 0x01, 2, !below);
+    if (err != ESP_OK) return;
+    s_charger_next_us = now + (below ? 2000000 : 10000000);
+    // 补充充电只接受有效且确有输入的状态，负向电流按原厂折为零。
+    // Recharge requires valid input-present status; negative current is clamped to zero as in the vendor.
+    const int32_t charge_ma = ma > 0 ? ma : 0;
+    if (below && have_i && have_status && vbus != 0 && ((status >> 3) & 3) == 0 && charge_ma < 5) {
+        err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 5, 0);
+        if (err == ESP_OK) err = cx_update_bits(CX_REG_CHG_CTRL1, 0x01, 4, 0);
+        // 禁止充电的写入即使返回失败也可能已生效，必须安排恢复。
+        // Even a failed disable write may have reached the chip; always schedule restoration.
+        s_charger_resume_us = now + 200000;
+    }
 }
 
 
@@ -549,11 +630,42 @@ static int8_t s_batt_ic_soc = -1;
 // confirmation window (µs; -1 when outside the window).
 static int64_t s_batt_full_since_us = -1;
 
+static esp_err_t rtc_init(void) {
+    uint8_t ctrl[2] = {0};
+    esp_err_t err = dev_read(s_rtc, 0x00, ctrl, sizeof(ctrl));
+    const uint8_t run = 0;
+    if (err == ESP_OK) err = dev_write(s_rtc, 0x00, &run, 1);
+    // 清原厂支持的 alarm/timer 锁存，避免遗留中断占住共享线路。
+    // Clear vendor-supported alarm/timer latches so inherited flags do not hold the shared line.
+    if (err == ESP_OK) {
+        ctrl[1] &= (uint8_t)~0x0C;
+        err = dev_write(s_rtc, 0x01, &ctrl[1], 1);
+    }
+    return err;
+}
+
+static uint32_t rtc_unix_utc(const struct tm* tm) {
+    uint32_t days = 0;
+    const int year = tm->tm_year + 1900;
+    for (int y = 1970; y < year; ++y) {
+        days += 365 + ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
+    }
+    static const uint16_t before_month[] = {0,31,59,90,120,151,181,212,243,273,304,334};
+    days += before_month[tm->tm_mon] + (uint32_t)tm->tm_mday - 1;
+    if (tm->tm_mon > 1 && year % 4 == 0) ++days;
+    return ((days * 24 + (uint32_t)tm->tm_hour) * 60 + (uint32_t)tm->tm_min) * 60 + (uint32_t)tm->tm_sec;
+}
+
 static esp_err_t rtc_read(struct tm* out, bool* valid) {
     uint8_t r[7] = {0};
     esp_err_t err = dev_read(s_rtc, PCF_REG_SECONDS, r, sizeof(r));
     if (err != ESP_OK) return err;
     *valid = (r[0] & PCF_BIT_VL) == 0;
+    static const uint8_t masks[] = {0x7F,0x7F,0x3F,0x3F,0x07,0x1F,0xFF};
+    for (unsigned i = 0; i < sizeof(r); ++i) {
+        const uint8_t value = r[i] & masks[i];
+        if ((value & 0x0F) > 9 || (value >> 4) > 9) *valid = false;
+    }
     memset(out, 0, sizeof(*out));
     out->tm_sec = bcd_to_dec(r[0] & 0x7F);
     out->tm_min = bcd_to_dec(r[1] & 0x7F);
@@ -566,6 +678,12 @@ static esp_err_t rtc_read(struct tm* out, bool* valid) {
     if (out->tm_mon < 0 || out->tm_mon > 11 || out->tm_mday < 1 || out->tm_mday > 31 ||
         out->tm_hour > 23 || out->tm_min > 59 || out->tm_sec > 59) {
         *valid = false;
+    }
+    if (*valid) {
+        static const uint8_t month_days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        const int max_day = month_days[out->tm_mon] +
+                            (out->tm_mon == 1 && (out->tm_year + 1900) % 4 == 0);
+        if (out->tm_mday > max_day || out->tm_wday > 6) *valid = false;
     }
     return ESP_OK;
 }
@@ -630,15 +748,17 @@ static void poll_battery(void) {
 
     // 充电检测照旧：CX STATUS1 优先，电流作兜底。
     // Charger detection unchanged: CX STATUS1 first, current as the fallback.
-    uint8_t chg_stat = 0;
+    uint8_t chg_stat = 0, charger_status = 0;
     bool have_chg = false;
     if (s_cx != NULL) {
         uint8_t st = 0;
         if (dev_read(s_cx, CX_REG_STATUS1, &st, 1) == ESP_OK) {
+            charger_status = st;
             chg_stat = (uint8_t)((st >> 3) & 0x03);
             have_chg = true;
         }
     }
+    cx_charger_poll(now, have_v, mv, have_i, ma, have_chg, charger_status);
     bool charging;
     if (have_chg) {
         charging = chg_stat != 0;
@@ -716,6 +836,7 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
                              const device_power_config_t* config) {
     (void)config;
     if (bus_handle == NULL) return ESP_ERR_INVALID_ARG;
+    if (s_ready) return ESP_OK;
     s_bus = bus_handle;
     memset(&s_snap, 0, sizeof(s_snap));
 
@@ -723,17 +844,21 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
     (void)add_dev(CX25601N_ADDR, &s_cx);
     (void)add_dev(PCF8563_ADDR, &s_rtc);
 
-    // 充电芯片按原厂配置写一次（1 A 快充、4.4 V 截止）；失败不阻塞 PMU，充电按遗留值继续。
-    // Configure the charger once with the vendor defaults (1 A fast charge, 4.4 V regulation);
-    // a failure never blocks the PMU and charging continues on whatever the chip holds.
-    if (s_cx != NULL && cx_charger_setup() != ESP_OK) {
-        ESP_LOGW(TAG, "CX25601N setup incomplete; charge registers keep previous values");
+    // 充电芯片按原厂配置写一次（1 A 请求、4.4 V 截止）；失败不阻塞 PMU，并尽力停充。
+    // Configure the charger once with vendor defaults (1 A requested, 4.4 V regulation);
+    // a failure never blocks the PMU and attempts to disable incomplete charging.
+    s_charger_next_us = s_charger_resume_us = 0;
+    s_charger_uv_shutdown = false;
+    s_charger_configured = s_cx != NULL && cx_charger_setup() == ESP_OK;
+    const bool rtc_ready = s_rtc != NULL && rtc_init() == ESP_OK;
+    if (s_cx != NULL && !s_charger_configured) {
+        ESP_LOGW(TAG, "CX25601N setup incomplete; charge disable attempted");
     }
 
     s_snap.present = s_bq != NULL || s_cx != NULL || s_rtc != NULL;
     s_snap.identity_ok = s_snap.present;
-    s_snap.config_ok = true;
-    s_snap.time_ok = s_rtc != NULL;
+    s_snap.config_ok = (s_cx == NULL || s_charger_configured) && (s_rtc == NULL || rtc_ready);
+    s_snap.time_ok = rtc_ready;
     s_snap.alarm_ok = false;
     s_snap.power_state = PMU_PWR_RUNNING;
     s_snap.config.key_long_ms = KEY_LONG_MS;
@@ -769,6 +894,10 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
 }
 
 esp_err_t device_power_deinit(void) {
+    const esp_err_t parked = cx_charger_park();
+    if (parked != ESP_OK) return parked;
+    s_charger_configured = false;
+    s_charger_next_us = s_charger_resume_us = 0;
     if (s_batt_log_task != NULL) {
         vTaskDelete(s_batt_log_task);
         s_batt_log_task = NULL;
@@ -804,7 +933,8 @@ esp_err_t device_power_cmd(uint16_t code, const uint8_t* payload, uint8_t plen) 
         bool valid = false;
         esp_err_t err = rtc_read(&tm, &valid);
         if (err != ESP_OK) return err;
-        const time_t t = mktime(&tm);
+        if (!valid) { s_snap.time_ok = false; s_snap.time_synced = 0; return ESP_ERR_INVALID_STATE; }
+        const time_t t = (time_t)rtc_unix_utc(&tm);
         s_snap.unix_sec = (uint32_t)t;
         s_snap.unix_millis = 0;
         s_snap.time_synced = valid ? 1 : 0;
@@ -925,6 +1055,8 @@ esp_err_t device_power_report_ready(void) {
 }
 
 esp_err_t device_power_power_off(void) {
+    const esp_err_t parked = cx_charger_park();
+    if (parked != ESP_OK) return parked;
     // 每轮 train 打 PWR_PULSE_COUNT 次；PMU 不掉电就按原厂反复打，打满才进深睡兜底。
     // Each train fires PWR_PULSE_COUNT pulses; repeat factory-style while the host lives on
     // and fall back to ESP deep sleep only after the trains are exhausted.

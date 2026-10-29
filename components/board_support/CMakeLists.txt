@@ -1,4 +1,4 @@
-set(board_support_requires epdiy e0470_epaper_waveform sc7a20h cst836u device_power fatfs fca9555 frontlight
+set(board_support_requires board_i2c epdiy e0470_epaper_waveform sc7a20h cst836u device_power fatfs fca9555 frontlight
                    esp_driver_gpio esp_driver_i2c esp_driver_ledc esp_driver_rmt esp_driver_sdmmc)
 
 set(board_support_sources

@@ -2,9 +2,14 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * FCA9555 主机：写指针 + Repeated START 读，INT# 读 Input 松开。
+ * TCA9555 主机适配：锁内 STOP 分段读取；两口 Input 分别清中断。
  *
- * FCA9555 host: pointer write + Repeated START read; reading Input releases INT#.
+ * TCA9555 host adaptation: locked STOP-separated reads; clear each port through its Input.
+ *
+ * S31 使用 TCA9555；事务参考 Metalio 原厂 bus/pca9555.c。
+ * S31 uses TCA9555; transactions follow Metalio vendor bus/pca9555.c.
+ * 原厂来源版本和 MIT 许可见 components/board_i2c/README.md 与 LICENSE.Metalio。
+ * Vendor revision and MIT notice: components/board_i2c/README.md and LICENSE.Metalio.
  */
 
 #include "fca9555.h"
@@ -12,6 +17,7 @@
 #include <stdlib.h>
 
 #include "esp_log.h"
+#include "board_i2c.h"
 #include "sdkconfig.h"
 
 #ifndef CONFIG_FCA9555_I2C_TIMEOUT_MS
@@ -64,14 +70,12 @@ static esp_err_t cfg_int_gpio(gpio_num_t gpio) {
 }
 
 static esp_err_t xfer_read(fca9555_handle_t h, uint8_t start, uint8_t* data, size_t n) {
-    // 先写指针再 Repeated START（手册图 5/6）。
-    // / Pointer write then Repeated START (datasheet Figure 5/6).
-    return i2c_master_transmit_receive(h->dev, &start, 1, data, n, h->timeout_ms);
+    return board_i2c_read_stop(h->dev, start, data, n, h->timeout_ms);
 }
 
 static esp_err_t xfer_write(fca9555_handle_t h, uint8_t reg, uint8_t value) {
     uint8_t data[2] = { reg, value };
-    return i2c_master_transmit(h->dev, data, sizeof(data), h->timeout_ms);
+    return board_i2c_transmit(h->dev, data, sizeof(data), h->timeout_ms);
 }
 
 esp_err_t fca9555_init(i2c_master_bus_handle_t bus_handle, const fca9555_config_t* config,
@@ -93,12 +97,9 @@ esp_err_t fca9555_init(i2c_master_bus_handle_t bus_handle, const fca9555_config_
         return err;
     }
 
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = config->i2c_addr ? config->i2c_addr : FCA9555_ADDR_DEFAULT,
-        .scl_speed_hz = config->scl_speed_hz ? config->scl_speed_hz : FCA9555_I2C_HZ_DEFAULT,
-    };
-    err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &h->dev);
+    err = board_i2c_add_device(bus_handle,
+                              config->i2c_addr ? config->i2c_addr : FCA9555_ADDR_DEFAULT,
+                              &h->dev);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2C add failed: %s", esp_err_to_name(err));
         free(h);
@@ -124,26 +125,60 @@ esp_err_t fca9555_read_reg(fca9555_handle_t h, uint8_t reg, uint8_t* value) {
 }
 
 esp_err_t fca9555_read_n(fca9555_handle_t h, uint8_t start, uint8_t* data, size_t n) {
-    if (h == NULL || data == NULL || n == 0 || start > FCA9555_REG_CFG1) {
+    if (h == NULL || data == NULL || n == 0 || start > FCA9555_REG_CFG1 ||
+        n > (size_t)(FCA9555_REG_CFG1 - start + 1)) {
         return ESP_ERR_INVALID_ARG;
     }
-    return xfer_read(h, start, data, n);
+    uint8_t snapshot[8];
+    esp_err_t err = board_i2c_lock(h->timeout_ms);
+    if (err != ESP_OK) return err;
+    for (size_t i = 0; i < n; ++i) {
+        err = xfer_read(h, (uint8_t)(start + i), &snapshot[i], 1);
+        if (err != ESP_OK) break;
+    }
+    if (err == ESP_OK) for (size_t i = 0; i < n; ++i) data[i] = snapshot[i];
+    board_i2c_unlock();
+    return err;
 }
 
 esp_err_t fca9555_read_all(fca9555_handle_t h, fca9555_map_t* map) {
     if (h == NULL || map == NULL) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = xfer_read(h, FCA9555_REG_IN0, (uint8_t*)map, sizeof(*map));
-    if (err == ESP_OK) cache_dir(h, map->invert, map->config);
+    uint8_t data[8];
+    esp_err_t err = board_i2c_lock(h->timeout_ms);
+    if (err != ESP_OK) return err;
+    // TCA 连读仅在寄存器对内翻转；逐寄存器读取才是完整映射。
+    // TCA sequential reads alternate within a pair; address each register for the full map.
+    for (uint8_t reg = 0; reg < sizeof(data); ++reg) {
+        err = xfer_read(h, reg, &data[reg], 1);
+        if (err != ESP_OK) break;
+    }
+    if (err == ESP_OK) {
+        map->input = (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
+        map->output = (uint16_t)(data[2] | ((uint16_t)data[3] << 8));
+        map->invert = (uint16_t)(data[4] | ((uint16_t)data[5] << 8));
+        map->config = (uint16_t)(data[6] | ((uint16_t)data[7] << 8));
+        cache_dir(h, map->invert, map->config);
+    }
+    board_i2c_unlock();
     return err;
 }
 
 esp_err_t fca9555_read_io(fca9555_handle_t h, fca9555_map_t* map) {
     if (h == NULL || map == NULL) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = xfer_read(h, FCA9555_REG_IN0, (uint8_t*)map, 4);
+    uint8_t data[4];
+    esp_err_t err = board_i2c_lock(h->timeout_ms);
+    if (err != ESP_OK) return err;
+    for (uint8_t reg = 0; reg < sizeof(data); ++reg) {
+        err = xfer_read(h, reg, &data[reg], 1);
+        if (err != ESP_OK) break;
+    }
     if (err == ESP_OK) {
+        map->input = (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
+        map->output = (uint16_t)(data[2] | ((uint16_t)data[3] << 8));
         map->invert = h->invert;
         map->config = h->config;
     }
+    board_i2c_unlock();
     return err;
 }
 
@@ -158,8 +193,10 @@ esp_err_t fca9555_set_output(fca9555_handle_t h, int port, uint8_t value) {
 }
 
 esp_err_t fca9555_clear_int(fca9555_handle_t h) {
-    uint8_t in0 = 0;
-    return fca9555_read_input(h, 0, &in0);
+    uint8_t value = 0;
+    esp_err_t first = fca9555_read_input(h, 0, &value);
+    esp_err_t second = fca9555_read_input(h, 1, &value);
+    return first != ESP_OK ? first : second;
 }
 
 int fca9555_int_level(fca9555_handle_t h) {
