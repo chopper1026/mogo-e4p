@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 
+- TXT 目录支持较长的篇卷与章节复合标题、全角缩进和连续重复题头合并；旧目录缓存自动重建，无有效章节时继续按 Part 分段。
+  TXT indexes recognize longer volume/chapter headings and full-width indentation, merge consecutive repeated headings, and rebuild old caches; texts without usable headings retain Part segmentation.
+
 - 阅读页和设置页的字体列表按实际数量扩容，取消原先最多收录 24 款字体的限制，继续分页显示。
   Reader and system font lists grow with the directory contents, removing the previous 24-font cap while retaining pagination.
 

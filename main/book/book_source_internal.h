@@ -13,7 +13,7 @@
 #define BOOK_CHAPTER_BYTES_MAX (96 * 1024)
 typedef struct {
     uint32_t offset; ///< 原文件偏移 / Original file offset
-    char title[41]; ///< UTF-8 标题 / UTF-8 title
+    char title[128]; ///< UTF-8 标题，长标题按字符边界截断 / UTF-8 title, truncated at a character boundary
 } book_entry_t;
 typedef struct {
     FILE *file; ///< 文件句柄 / File handle

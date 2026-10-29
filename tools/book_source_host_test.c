@@ -66,7 +66,53 @@ static void session_roundtrip(const char *source) {
     assert(!reader_session_has_source(&session));
     assert(book_kind() == BOOK_KIND_TXT && book_chapter_count() == 0);
 }
+// 长标题、缩进和连续重复题头不能使整本书退回 Part。/ Long, indented and repeated headings must not force a whole-book Part fallback.
+static void txt_heading_regressions(void) {
+    const char *first = "第二十九篇 第三十五章 原始宇宙的末期";
+    const char *last = "第二十九篇 第三十六章 超脱轮回（大结局）下";
+    FILE *f = fopen(path, "wb"); assert(f);
+    fprintf(f, "书前说明\r\n\t%s  \r\n", first);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 20000; ++j) fputc('x', f);
+        fprintf(f, "\r\n　　第%d章 中间章节\r\n　　第%d章 中间章节\r\n正文\r\n", i + 1, i + 1);
+    }
+    fprintf(f, "　%s\r\n正文", last); fclose(f);
+    assert(book_open(path) == ESP_OK);
+    assert(book_chapter_count() == 5);
+    char title[256];
+    assert(book_chapter_title(0, title, sizeof(title)) == ESP_OK && !strcmp(title, first));
+    assert(book_chapter_title(4, title, sizeof(title)) == ESP_OK && !strcmp(title, last));
+    assert(book_chapter_byte_offset(0) == 0);
+    book_close();
+    const char *s = "第1章 择徒\n　　第1章 择徒\n正文\n第2章 火虎牙\n　　第2章 火虎牙\n正文\n";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 2); book_close();
+    s = "第一章 单章\n正文\n";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK);
+    assert(book_chapter_title(0, title, sizeof(title)) == ESP_OK && !strcmp(title, "第一章 单章"));
+    book_close();
+    s = "第1章 开始\n正文\n第1章 开始\n另一段正文\n第2章 结束";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 3); book_close();
+    s = "第一章 开始\n正文\n第一部分乃是修行之法。\n第九集团军，很强。\n第一章到！今天继续更新。\n第二章 结束\n正文";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 2); book_close();
+    s = "第一篇 一夜觉醒 第一集 深夜觉醒\n第一章 罗峰\n正文\n第二篇 战神罗峰 第一章 三个月的修炼\n　　第二篇战神罗峰第一章三个月的修炼\n　　第一章 三个月的修炼\n正文";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 3); book_close();
+    s = "  chapter 1 Start\rtext\r\tCHAPTER 2 End\rtext";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 2); book_close();
+    s = "第〇一章 开始\n正文\n第１２章结束\n正文\n第十三章 末尾";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 3); book_close();
+    s = "第1卷 第1章 开始\n第2卷 第1章 新卷\n正文";
+    write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
+    assert(book_open(path) == ESP_OK && book_chapter_count() == 2); book_close();
+}
 int main(int argc, char **argv) {
+    txt_heading_regressions();
     const char *s = "Chapter 1 Start\nhello\nChapter 2 End\nworld\n";
     write_bytes(s, strlen(s)); assert(book_open(path) == ESP_OK);
     assert(book_chapter_count() == 2); char title[256];

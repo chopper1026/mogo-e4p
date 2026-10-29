@@ -13,11 +13,13 @@
 #include "esp_heap_caps.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <limits.h>
 #define READ_BLOCK (64 * 1024)
 #define PART_TARGET (48 * 1024)
-#define TXT_CACHE_VERSION 1u
+#define HEADING_LINE_BYTES 256
+#define TXT_CACHE_VERSION 2u
 typedef struct {
     uint32_t total;
     uint32_t bom;
@@ -77,45 +79,129 @@ static esp_err_t reset(reader_t *r, book_txt_t *b, uint32_t offset) {
     clearerr(b->file);
     return fseek(b->file, (long)offset, SEEK_SET) ? ESP_FAIL : ESP_OK;
 }
-static bool heading(const char *s) {
-    if (!strncmp(s, "Chapter", 7)) {
-        s += 7; while (*s == ' ' || *s == '\t') ++s;
-        return isdigit((unsigned char)*s) != 0;
-    }
-    if (strncmp(s, "第", 3)) return false;
-    s += 3; bool number = false;
+static bool heading_number(uint32_t cp) {
+    return (cp >= '0' && cp <= '9') || (cp >= 0xff10 && cp <= 0xff19) ||
+        cp == 0x3007 || cp == 0x96f6 || cp == 0x4e00 || cp == 0x4e8c ||
+        cp == 0x4e09 || cp == 0x56db || cp == 0x4e94 || cp == 0x516d ||
+        cp == 0x4e03 || cp == 0x516b || cp == 0x4e5d || cp == 0x5341 ||
+        cp == 0x767e || cp == 0x5343 || cp == 0x4e07 || cp == 0x4e24;
+}
+// 只消费编号和单位，卷名、篇名与正文标题不参与重复题头判断。
+// Consume only the number and unit; volume names and chapter titles do not identify duplicates.
+static size_t heading_marker(const char *s, uint32_t *unit) {
+    if (strncmp(s, "第", 3)) return 0;
+    const char *begin = s; s += 3; size_t digits = 0;
     while (*s) {
         uint32_t cp; size_t n = utf8_one((const unsigned char *)s, strlen(s), &cp);
-        char token[5] = {0}; memcpy(token, s, n);
-        if ((cp >= '0' && cp <= '9') || (n == 3 && strstr("零一二三四五六七八九十百千万两", token))) { number = true; s += n; }
-        else return number && n == 3 && strstr("章节卷回集部篇", token);
+        if (heading_number(cp) && ++digits <= 16) { s += n; continue; }
+        if (digits && (cp == 0x7ae0 || cp == 0x8282 || cp == 0x5377 || cp == 0x56de ||
+                       cp == 0x96c6 || cp == 0x90e8 || cp == 0x7bc7)) {
+            *unit = cp; return (size_t)(s + n - begin);
+        }
+        break;
     }
-    return false;
+    return 0;
+}
+static bool heading(const char *s, char key[HEADING_LINE_BYTES + 1]) {
+    if (!strncasecmp(s, "Chapter", 7)) {
+        const char *number = s + 7;
+        while (*number == ' ') ++number;
+        const char *end = number;
+        while (isdigit((unsigned char)*end)) ++end;
+        size_t digits = (size_t)(end - number);
+        if (!digits || digits > 16 || (*end && *end != ' ' && *end != '.' && *end != ':')) return false;
+        memcpy(key, number, digits); key[digits] = 0; return true;
+    }
+    uint32_t unit;
+    size_t n = heading_marker(s, &unit);
+    if (!n || strstr(s, "。")) return false;
+    // 无空格的卷/篇前缀必须含后续章号，避免把“第九集团军”等正文当成目录。
+    // Unspaced volume prefixes need a later chapter marker, excluding prose such as army names.
+    bool boundary = !s[n] || s[n] == ' ';
+    bool chapter = unit == 0x7ae0 || unit == 0x56de || unit == 0x8282;
+    if (chapter && !boundary && strlen(s + n) > 40) return false;
+    if (chapter && !boundary && !strncmp(s + n, "到", 3) &&
+        (!s[n + 3] || strchr("!,~", s[n + 3]) || !strncmp(s + n + 3, "！", 3) ||
+         !strncmp(s + n + 3, "，", 3) || !strncmp(s + n + 3, "～", 3))) return false;
+    memcpy(key, s, n); size_t used = n;
+    for (const char *p = strstr(s + n, "第"); p; p = strstr(p + 3, "第")) {
+        uint32_t nested; size_t bytes = heading_marker(p, &nested);
+        if (!bytes) continue;
+        memcpy(key + used, p, bytes); used += bytes;
+        if (nested == 0x7ae0 || nested == 0x56de || nested == 0x8282) chapter = true;
+    }
+    key[used] = 0;
+    return boundary || chapter;
 }
 static bool add(book_txt_t *b, uint32_t offset, const char *title) {
     if (b->count == BOOK_CHAPTER_MAX) return false;
     book_entry_t *e = &b->entries[b->count++]; e->offset = offset;
-    if (title) memcpy(e->title, title, strlen(title) + 1);
+    if (title) {
+        size_t used = 0, bytes = strlen(title);
+        while (used < bytes) {
+            uint32_t cp; size_t n = utf8_one((const unsigned char *)title + used, bytes - used, &cp);
+            if (used + n >= sizeof(e->title)) break;
+            used += n;
+        }
+        memcpy(e->title, title, used); e->title[used] = 0;
+    }
     else snprintf(e->title, sizeof(e->title), "Part %u", (unsigned)b->count);
+    return true;
+}
+typedef struct {
+    char key[HEADING_LINE_BYTES + 1]; ///< 上个题头的编号序列 / Previous heading's numbered markers
+    bool before_body; ///< 尚未遇到正文 / No body text encountered yet
+} heading_state_t;
+
+static bool index_line(book_txt_t *b, uint32_t start, char *line, bool overflow, heading_state_t *state) {
+    char key[HEADING_LINE_BYTES + 1];
+    size_t len = strlen(line);
+    if (len && line[len - 1] == ' ') line[len - 1] = 0;
+    if (!overflow && heading(line, key)) {
+        if (state->before_body) {
+            if (!strcmp(key, state->key)) return true;
+            // 重复题头可省略篇卷前缀；两边都带前缀时仍须区分篇卷。
+            // Repeated headings may omit a volume prefix; retain distinct volumes when both specify one.
+            const char *last = strstr(key, "第"), *previous = strstr(state->key, "第");
+            if (last && previous) {
+                const char *next;
+                while ((next = strstr(last + 3, "第"))) last = next;
+                while ((next = strstr(previous + 3, "第"))) previous = next;
+                if ((last == key || previous == state->key) && !strcmp(last, previous)) return true;
+            }
+        }
+        if (!add(b, start, line)) return false;
+        strcpy(state->key, key); state->before_body = true;
+    } else if (overflow || *line) state->before_body = false;
     return true;
 }
 static esp_err_t index_book(reader_t *r, book_txt_t *b) {
     esp_err_t err = reset(r, b, b->bom); if (err) return err;
-    char line[41] = {0}; size_t len = 0; bool overflow = false, too_many = false;
+    char line[HEADING_LINE_BYTES + 1] = {0}; size_t len = 0;
+    bool overflow = false, too_many = false, cr = false;
+    heading_state_t state = {0};
     uint32_t start = b->bom, cp;
     while (next(r, &cp)) {
-        if (cp == '\n') {
-            if (!overflow && heading(line) && !add(b, start, line)) too_many = true;
+        if (cp == '\n' && cr) { start = r->offset; cr = false; continue; }
+        cr = cp == '\r';
+        if (cp == '\n' || cr) {
+            if (!index_line(b, start, line, overflow, &state)) too_many = true;
             start = r->offset; len = 0; line[0] = 0; overflow = false;
-        } else if (cp != '\r') {
+        } else {
+            // 缩进不占题头预算，内部空白折成一个空格；原文件与偏移不变。
+            // Indentation uses no heading budget; fold internal whitespace while preserving source offsets.
+            if (cp == ' ' || cp == '\t' || cp == 0x3000 || cp == 0xa0) {
+                if (!len || line[len - 1] == ' ') continue;
+                cp = ' ';
+            }
             char bytes[4]; size_t n = encode(cp, bytes);
-            if (len + n <= 40 && !overflow) { memcpy(line + len, bytes, n); len += n; line[len] = 0; }
+            if (len + n <= HEADING_LINE_BYTES && !overflow) { memcpy(line + len, bytes, n); len += n; line[len] = 0; }
             else overflow = true;
         }
     }
     if (ferror(b->file)) return ESP_FAIL;
-    if (!overflow && heading(line) && !add(b, start, line)) too_many = true;
-    bool fallback = b->count < 2 || too_many;
+    if (!index_line(b, start, line, overflow, &state)) too_many = true;
+    bool fallback = !b->count || too_many;
     if (b->count) b->entries[0].offset = 0;
     for (size_t i = 0; i < b->count; ++i) {
         uint32_t end = i + 1 < b->count ? b->entries[i + 1].offset : b->total;
