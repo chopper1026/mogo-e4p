@@ -113,6 +113,12 @@ By default the collector stops with a nonzero status on disconnect, preserving r
 `manifest.json` 必须记录 `book_sha256`、`font_sha256`、`firmware_sha256` 和 `settings`；设置应包含字号、字重、行段距、边距、背景、全屏/状态栏、阅读刷新模式及周期全刷页数。另记录提交、配置校验值、书籍章节与起始位置、电量/充电和温度条件。不要混合普通/跨章、冷/热缓存、图片、背景、水波纹或重排场景。每个场景每种操作默认至少 20 个成功样本；不足时汇总退出码为 2。固定测试文件仅保留在本地，不加入仓库。
 The manifest must contain `book_sha256`, `font_sha256`, `firmware_sha256` and `settings`; settings should include font size/weight, spacing, margins, background, full-screen/status-bar state, reader refresh mode and cleanup interval. Also record commit, config checksum, chapter/start location, battery/charging and temperature conditions. Keep ordinary/cross-chapter, cold/warm, image, background, ripple and reflow scenarios separate. Each operation needs at least 20 successful samples per scenario by default; insufficient samples return exit code 2. Keep test books/fonts local.
 
+固定页序还需记录翻页节奏：逐条配对章节、页码和操作记录，保留准备阶段的全部操作及排除理由，不能按代次编号去重。比较前一条操作完成到下一次翻页入口的间隔；即使每次等屏幕完成，等待时长和此前操作仍会改变预绘、缓存及调度状态。`paint cached=1` 不能证明绘制耗时相同，字体计数也可能包含并发预绘。
+Fixed-page runs must also record input cadence. Pair chapter/page and operation records in order, retaining all preparation operations and exclusion reasons rather than deduplicating generation IDs. Compare the interval from the previous operation's completion to the next turn entry: even when each turn waits for the screen, pauses and earlier operations can change prefetch, cache and scheduling state. `paint cached=1` does not establish equal painting cost, and font counters may include concurrent prefetch.
+
+旧版重复轮分别报告 P50/P95 与准备条件，不把少量样本的最大波动事后用作通过门槛。相对百分比与绝对耗时差一起列示；完整翻页接近也须保留软件或绘制阶段的增加。明确区分观测相关性和已隔离的原因；仅测普通翻页时，开书、跨章、重排和图文的功能验证不构成这些场景的性能对照。
+Report baseline repeats separately with their P50/P95 values and preparation conditions; do not turn the largest variation from a few runs into a retrospective pass threshold. Show absolute differences alongside percentages, retaining software or painting increases even when total turn times are close. Distinguish observed associations from isolated causes. Measuring ordinary turns does not turn functional checks of opening, chapter transitions, reflow or illustrated books into performance comparisons of those paths.
+
 | 字段 / Field | 定义 / Meaning |
 | --- | --- |
 | `complete` | 推屏成功为 1；失败、无推屏、被新操作替换为 0。/ 1 after successful presentation; 0 on failure, no presentation or replacement. |
