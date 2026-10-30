@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.1 · 2026-10-30
 
+- 本地调整（未发布）：高压改为真实扫描前上电、完整显示组结束即关电，组内仍由独立任务执行扫描后100ms空闲关断；关电先撤MODE/XOE并等待至少12µs，再关闭供电。设置保存与OTA写入前确认关电并阻止扫描，保留通信失败重试及马达共享扩展口并发保护。实际电压时序与光学效果需真机验证。
+  Local change (unpublished): power on immediately before physical scans and shut down when a complete display group ends, retaining independent 100 ms idle shutdown within groups. Lower MODE/XOE and wait at least 12 µs before disabling power. Settings and OTA writes confirm shutdown and exclude scanning, retaining communication retries and concurrent motor/expander protection. Actual voltage timing and optical behavior require device verification.
+
 - 本地调整（未发布）：阅读页眉恢复默认裁剪 GL16，普通页脚恢复短 DU，换章和插图页脚保留默认 GL16 清理，全屏进度恢复默认 GL16；保留正文优先与状态随翻页更新。实际速度、墨度和残影待实屏验证。
   Local change (unpublished): restore trimmed default GL16 for reader headers and full-screen progress, short DU for ordinary footers, and default GL16 cleanup for chapter/illustration footers. Keep body-first presentation and status updates with turns. Actual latency, ink density and ghosting await panel verification.
 

@@ -22,6 +22,7 @@ unit = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdatomic.h>
 typedef int esp_err_t;
 typedef struct { bool ep_mode, ep_output_enable, ep_stv; } epd_ctrl_state_t;
 typedef struct { int i2c_addr, scl_speed_hz, int_gpio; } fca9555_config_t;
@@ -43,8 +44,10 @@ static void test_log(const char *tag,const char *fmt,...) {(void)tag;(void)fmt;}
 static int64_t s_diag_power_on_us, s_diag_power_off_us;
 static void *s_ioe = (void *)1, *s_tps = (void *)2;
 static void *s_i2c_bus = (void *)3;
-static bool s_ioe_ok, s_tps_ok, s_rails_on, s_pwrup, s_vcom_ctrl, s_wakeup;
-static uint8_t s_p0_extra, s_p1_out, output[2], config[2], inversion[2];
+static bool s_ioe_ok;
+static atomic_bool s_tps_ok, s_rails_on, s_pwrup, s_vcom_ctrl, s_wakeup;
+static atomic_uchar s_p0_extra;
+static uint8_t s_p1_out, output[2], config[2], inversion[2];
 static int s_vcom_mv = 1200;
 static unsigned writes, reads, clears, waits, probes, tps_writes;
 static int fail_config = -1;
@@ -68,11 +71,15 @@ static int i2c_master_bus_reset(void *bus) {
     assert(bus == s_i2c_bus && !s_ioe_ok); ++bus_resets; return ESP_OK;
 }
 static int pins[64];
+static unsigned shutdown_us;
+static bool checking_shutdown;
+static void esp_rom_delay_us(unsigned us) { if (checking_shutdown) { assert(!pins[18] && !pins[19]); assert(s_pwrup && s_vcom_ctrl); shutdown_us += us; } }
 static epd_ctrl_state_t state;
 static epd_ctrl_state_t *epd_ctrl_state(void) { return &state; }
 static int fca9555_set_output(void *h, int port, uint8_t value) {
     assert(h == s_ioe && port >= 0 && port < 2); ++writes;
     if (failed_output || init_write_fails(2 + port)) return ESP_FAIL;
+    if (checking_shutdown && port == 0 && !(value & 2)) assert(shutdown_us >= 12);
     output[port] = value; return ESP_OK;
 }
 static int fca9555_set_config(void *h, int port, uint8_t value) {
@@ -106,11 +113,13 @@ static int tps_write(uint8_t reg, uint8_t value) {
     return reg == fail_tps_write ? ESP_FAIL : ESP_OK;
 }
 static void esp_restart(void) { ++restarts; }
+static int board_i2c_lock(int timeout) {(void)timeout; return ESP_OK;}
+static void board_i2c_unlock(void) {}
 static void board_poweroff(epd_ctrl_state_t*);
 '''
 unit += defines + "\n"
 for name in ("ioe_write", "ioe_read", "p0_value", "p0_write", "p1_write", "ioe_init",
-             "power_diag_failed", "board_set_ctrl", "tps_set_vcom_mv", "board_poweron_once", "board_poweron", "board_poweroff", "board_set_vcom",
+             "power_diag_failed", "board_set_ctrl", "tps_set_vcom_mv", "board_poweron_once", "board_poweron", "board_poweroff_checked", "board_poweroff", "board_set_vcom",
              "board_epd_release_drive", "board_sd_detect",
              "board_sd_present", "board_sd_has_cd", "board_ioe_sleep",
              "board_ioe_wake", "board_tp_rst", "board_touch_reset",
@@ -182,9 +191,18 @@ int main(void) {
     state.ep_mode = state.ep_output_enable = true;
     board_set_ctrl(&state, &(epd_ctrl_state_t){.ep_mode = true});
     assert(pins[EPD_PIN_MODE] && !pins[EPD_PIN_XOE]);
+    checking_shutdown = true; shutdown_us = 0;
     board_poweroff(&state);
+    checking_shutdown = false; assert(shutdown_us >= 12);
     assert(!s_rails_on && !s_tps_ok && !(output[0] & P0_TPS_MASK));
     assert((output[0] & P0_OUTPUT_MASK) == s_p0_extra && !pins[EPD_PIN_XOE] && !pins[EPD_PIN_MODE]);
+    // 关断失败不能谎报关闭；后续马达写入也只能提交最新的关断位。
+    // Failed shutdown cannot claim power-off; later motor writes must use the latest cleared power bits.
+    reset(); board_poweron(&state); failed_output = true;
+    assert(!board_poweroff_checked(&state) && s_rails_on && !s_tps_ok);
+    failed_output = false;
+    assert(board_motor(true) == ESP_OK && !(output[0] & P0_TPS_MASK));
+    assert(board_poweroff_checked(&state) && !s_rails_on);
     // PGOOD 失效的等待有上界；不上报轨已就绪，且关电仍能撤掉请求。
     // Bound failed PGOOD waits; never publish ready rails, and power-off still clears requests.
     for (int fault=0; fault<12; ++fault) {
@@ -204,7 +222,7 @@ int main(void) {
             case 11: s_tps=NULL; break;
         }
         board_poweron(&state);
-        assert(!s_rails_on && !s_tps_ok && !pins[EPD_PIN_XOE] && !xoe_on && restarts==1);
+        assert(s_rails_on == (fault==10) && !s_tps_ok && !pins[EPD_PIN_XOE] && !xoe_on && restarts==1);
         assert(!state.ep_output_enable && !state.ep_mode && !s_pwrup && !s_wakeup && !s_vcom_ctrl);
         if (fault==0 || fault==3 || (fault>=5 && fault<=9)) assert(probes==4);
         if (fault==1) assert(reads==800+4*CONFIG_DISPLAY_POWER_DIAG && waits==1508);

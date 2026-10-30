@@ -94,8 +94,15 @@ enum EpdDrawError e0470_page_turn_with_waveform_compact(EpdiyHighlevelState* hl,
 void board_epd_set_pclk(int mhz) { ++clocks; safe_clock = mhz; }
 void board_epd_use_scan(board_epd_scan_t scan) { last_scan = scan; }
 void epd_lcd_set_prefill_lines(int lines) { prefill = lines; }
-void epd_poweron(void) { ++powerons; drive_active = !power_failure; }
+void epd_poweron(void) { ++powerons; drive_active = false; }
 bool board_rails_on(void) { return !power_failure; }
+bool epd_power_scan_allowed(void) { return board_rails_on(); }
+static unsigned power_session_depth;
+static bool actual_power;
+void epd_power_session_begin(void) { ++power_session_depth; }
+void epd_power_session_end(void) { assert(power_session_depth); if (!--power_session_depth) actual_power = false; }
+static void physical_scan_power(void) { assert(power_session_depth); if (!actual_power) { epd_poweron(); actual_power = true; } }
+
 bool board_epd_release_drive(void) {
     assert(ota_display_depth);
     ++drive_releases;
@@ -103,7 +110,7 @@ bool board_epd_release_drive(void) {
     drive_active = false;
     return true;
 }
-void epd_poweroff(void) { if (checking_repair) assert(ota_display_depth); ++poweroffs; drive_active = false; }
+void epd_poweroff(void) { if (checking_repair) assert(ota_display_depth); ++poweroffs; actual_power = false; drive_active = false; }
 EpdRect epd_full_screen(void) { return (EpdRect){0,0,1216,684}; }
 void vTaskDelay(uint32_t ticks) {
     assert(checking_repair && ota_display_depth);
@@ -111,13 +118,14 @@ void vTaskDelay(uint32_t ticks) {
     ++repair_delays;
 }
 void epd_push_pixels(EpdRect area, short time, int color) {
+    physical_scan_power();
     assert(checking_repair && ota_display_depth && poweroffs && powerons);
     assert(area.x == 0 && area.y == 0 && area.width == 1216 && area.height == 684 && time == 15);
     const unsigned phase = blind_pushes % 26;
     assert(color == (phase < 10 ? 0 : phase < 23 ? 1 : 2));
     ++blind_pushes;
 }
-void epd_clear(void) { assert(ota_display_depth); assert(powerons > 0); ++clears; }
+void epd_clear(void) { physical_scan_power(); assert(ota_display_depth); assert(powerons > 0); ++clears; }
 int64_t esp_timer_get_time(void) { return now_us; }
 
 // 与 highlevel.c:307 相同：该 API 清前缓冲，而不是参考后缓冲。
@@ -131,6 +139,7 @@ static enum EpdDrawError draw(EpdiyHighlevelState* hl, enum EpdDrawMode mode, in
         assert(!memcmp(hl->front_fb, hl->back_fb, FB_BYTES));
         return EPD_DRAW_SUCCESS;
     }
+    physical_scan_power();
     ++draws;
     full_draws += full;
     last_mode = mode;
@@ -343,34 +352,6 @@ int main(void) {
     assert(display_panel_repair(NULL) == EPD_DRAW_INVALID_CROP && blind_pushes == prior_pushes);
     checking_repair = false;
     assert(!ota_display_depth);
-    // 无变化刷新刚上电也必须中性；静置和重试不能新增任何像素扫描。
-    // A no-change update must release a freshly powered drive; idle and retries must add no scans.
-    no_change = true;
-    memcpy(front, target, FB_BYTES); memcpy(back, target, FB_BYTES);
-    unsigned old_releases = drive_releases;
-    int old_draws = draws, old_clears = clears;
-    now_us = 10000000;
-    assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
-                                        (EpdRect){0,160,16,16}) == EPD_DRAW_SUCCESS);
-    assert(!drive_active && drive_releases == old_releases + 1);
-    for (int i = 10000; i < 18000; i += 10) rails_idle_check(i);
-    assert(!drive_active && drive_releases == old_releases + 1);
-    assert(draws == old_draws && clears == old_clears);
-    now_us = 20000000;
-    release_failures = 2;
-    assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
-                                        (EpdRect){0,160,16,16}) == EPD_DRAW_SUCCESS);
-    old_releases = drive_releases;
-    unsigned old_offs = poweroffs;
-    assert(drive_active);
-    rails_idle_check(20049); assert(drive_releases == old_releases && poweroffs == old_offs);
-    rails_idle_check(20050); assert(drive_active && drive_releases == old_releases + 1 && poweroffs == old_offs);
-    rails_idle_check(20099); assert(drive_releases == old_releases + 1 && poweroffs == old_offs);
-    rails_idle_check(20100); assert(!drive_active && drive_releases == old_releases + 2 && poweroffs == old_offs + 1);
-    rails_idle_check(20101); assert(poweroffs == old_offs + 1);
-    assert(draws == old_draws && clears == old_clears);
-    assert(!memcmp(front, target, FB_BYTES) && !memcmp(back, target, FB_BYTES));
-    puts("idle drive release: no-change output, bounded I2C retry, no extra scans and unchanged 100 ms HV timeout passed");
     puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
     // 每个输出出口都必须拒绝未就绪的供电；连续输入不重复等待，恢复失败继续要求整屏重建。
     // Every output must reject unready power; queued input cannot repeat the wait, and failed recovery retains the full-screen rebuild request.

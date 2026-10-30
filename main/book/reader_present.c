@@ -13,6 +13,7 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
                                                const reader_present_request_t *request) {
     reader_present_result_t result = {0};
     enum EpdDrawError err;
+    bool held = display_present_begin();
     // 含插图的一帧不用背景派生表：那张表把深色对的前导擦白剥掉了，旧字（from=0）落到图片灰
     // 时从黑轨直接进灰尾，落点和纸灰起点不一致，差分会把上一页的字形留在图上。纯文字帧仍走
     // 背景派生表。插图表还保留相等对保持，脏区膨胀带上的未变化像素不会被黑白往返推出一圈细线。
@@ -118,6 +119,7 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         }
     }
 done:
+    display_present_end(held);
     result.error = err;
     return result;
 }

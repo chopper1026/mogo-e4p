@@ -1,5 +1,6 @@
 #include "epdiy.h"
 #include "epd_board.h"
+#include "epd_power_guard.h"
 #include "epd_display.h"
 #include "output_common/render_method.h"
 #include "render.h"
@@ -477,20 +478,28 @@ void epd_draw_rotated_image(EpdRect image_area, const uint8_t* image_buffer, uin
 }
 
 void epd_poweron() {
-    epd_current_board()->poweron(epd_ctrl_state());
+    epd_power_guard_on();
 }
 
 void epd_poweroff() {
-    epd_current_board()->poweroff(epd_ctrl_state());
+    epd_power_guard_off();
 }
+
+bool epd_power_scan_allowed(void) { return epd_power_guard_scan_allowed(); }
+void epd_power_session_begin(void) { epd_power_guard_session_begin(); }
+void epd_power_session_end(void) { epd_power_guard_session_end(); }
+bool epd_flash_begin(void) { return epd_power_guard_flash_begin(); }
+void epd_flash_end(void) { epd_power_guard_flash_end(); }
 
 void epd_init(const EpdBoardDefinition* board, const EpdDisplay_t* disp, enum EpdInitOptions options) {
     display = disp;
     epd_set_board(board);
     epd_renderer_init(options);
+    epd_power_guard_init();
 }
 
 void epd_deinit() {
+    epd_power_guard_deinit();
     epd_renderer_deinit();
 }
 

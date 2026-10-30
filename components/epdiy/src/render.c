@@ -1,6 +1,7 @@
 #include "render.h"
 
 #include "epd_board.h"
+#include "epd_power_guard.h"
 #include "epd_internals.h"
 #include "epdiy.h"
 
@@ -75,8 +76,10 @@ void epd_set_col_phase_luts(const uint8_t* const* phase_luts, const int* x0, con
 }
 
 void epd_push_pixels(EpdRect area, short time, int color) {
+    epd_power_guard_scan_begin();
     render_context.area = area;
     epd_push_pixels_lcd(&render_context, time, color);
+    epd_power_guard_scan_end();
 }
 
 ///////////////////////////// Coordination ///////////////////////////////
@@ -325,7 +328,9 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
         render_context.line_mask, drawn_columns, render_context.display_width / 4
     );
 
+    epd_power_guard_scan_begin();
     lcd_do_update(&render_context);
+    epd_power_guard_scan_end();
     render_context.phase_luts = NULL;
     render_context.line_phase = NULL;
     render_context.col_band_x0 = NULL;

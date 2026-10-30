@@ -43,12 +43,15 @@ extern "C" {
 /// Board power is not ready; no scan or differential baseline commit occurred, and a later successful output rebuilds the screen.
 #define DISPLAY_DRAW_POWER_NOT_READY ((enum EpdDrawError)0x800)
 
-/// 保留高压轨并释放像素驱动，包括无变化刷新；不增加扫描。/ Retain HV rails and release pixel drive, including no-change updates, without another scan.
-void rails_keepalive(void);
-void rails_idle_check(int64_t now_ms);
-
 /// 大量文件I/O期间增加扫描预填，调用方离开时恢复。/ Increase scan prefill during bulk file I/O; caller restores on exit.
 void display_set_bulk_io(bool active);
+
+/// 将正文、顶底栏与动画包成一次完整显示；不持供电锁或提前上电，支持同任务嵌套。
+/// Group body, chrome and animation into one complete presentation without holding the power lock or powering early; same-task nesting is supported.
+bool display_present_begin(void);
+/// 结束完整显示并主动关电，再释放显示/OTA锁。/ Complete presentation and shut down before releasing the display/OTA lock.
+void display_present_end(bool held);
+
 
 /// 请求下一张完成绘制的画面整屏清理一次，用于解锁。/ Clean the next completed frame once after unlock.
 void display_request_full_refresh(void);

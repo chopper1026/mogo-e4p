@@ -895,7 +895,6 @@ void app_loop_run(const app_loop_config_t* config) {
                                power_input_owned || quick_input_owned || menu_open, present_page);
 
         ctx.now_ms = esp_timer_get_time() / 1000;
-        rails_idle_check(ctx.now_ms);
 
         // 电源键短按默认锁屏；阅读正文可选择将它用于下一页。
         // A short power press normally locks; the reader body may use it for the next page.

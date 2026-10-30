@@ -39,18 +39,19 @@ static epd_ctrl_state_t state;
 
 static void p0_write(void) { ++p0_writes; }
 static epd_ctrl_state_t *epd_ctrl_state(void) { return &state; }
-static void board_set_ctrl(epd_ctrl_state_t *st, const epd_ctrl_state_t *mask) {
-    (void)st;
-    (void)mask;
-    ++ctrl_calls;
+#define EPD_PIN_MODE 19
+#define EPD_PIN_XOE 18
+static void gpio_set_level(int pin, int level) {
+    assert((pin==18 || pin==19) && !level); ++ctrl_calls;
 }
+
 """
 unit += function('board_epd_release_drive') + '\n'
 unit += r"""
 int main(void) {
     (void)p0_write;
     assert(board_epd_release_drive());
-    assert(ctrl_calls == 1);
+    assert(ctrl_calls == 2);
     assert(!state.ep_mode && !state.ep_output_enable);
     // 释放像素驱动不能撤掉 VCOM_CTRL，否则同一 burst 内后续扫描没有公共电压。
     // Releasing pixel drive must not drop VCOM_CTRL, or later scans in the same burst lose the common voltage.
@@ -58,7 +59,7 @@ int main(void) {
     assert(p0_writes == 0);
     s_rails_on = false;
     assert(board_epd_release_drive());
-    assert(ctrl_calls == 1);
+    assert(ctrl_calls == 2);
     puts("PASS: E4P release_drive keeps VCOM_CTRL on while the rails are powered");
 }
 """

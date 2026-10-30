@@ -14,6 +14,10 @@
 
 const EpdWaveform E0470_WAVEFORM = {1}, E0470_FULL_WAVEFORM = {2},
     E0470_FOLLOW_WAVEFORM = {3};
+static unsigned present_depth, completed_presentations;
+bool display_present_begin(void) { ++present_depth; return true; }
+void display_present_end(bool held) { assert(held && present_depth == 1); --present_depth; ++completed_presentations; }
+
 static const EpdWaveform text = {4}, page = {5}, image = {6},
     normalize = {7}, normalize_gray = {8}, background = {9};
 static bool use_background;
@@ -63,6 +67,7 @@ static const EpdRect none = {0};
 static enum EpdDrawError record(EpdiyHighlevelState *state, enum call_kind kind,
                                 const EpdWaveform *wave, int mode, EpdRect area) {
     assert(state == &hl && state->front_fb == front && state->back_fb == back);
+    assert(present_depth == 1);
     assert(count < 16 && outputs < 16);
     calls[count++] = (call_t){kind, wave, mode, area, tick};
     return errors[outputs++];
@@ -230,6 +235,7 @@ int main(void) {
         expect(0, DIFF, du ? &E0470_FOLLOW_WAVEFORM : &E0470_WAVEFORM, r.mode, r.area);
     }
     assert(front[0] == 1 && back[0] == 4);
+    assert(!present_depth && completed_presentations);
     puts("reader present routing: PASS");
     return 0;
 }

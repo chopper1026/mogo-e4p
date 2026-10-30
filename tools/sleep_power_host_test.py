@@ -15,6 +15,8 @@ text = board.read_text()
 defines = '\n'.join(line for line in text.replace('\\\n', '').splitlines()
                     if re.match(r'#define (?:IOE_|IO_|P0_|P1_)', line))
 unit = r'''
+static int board_i2c_lock(int timeout) {(void)timeout; return 0;}
+static void board_i2c_unlock(void) {}
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>

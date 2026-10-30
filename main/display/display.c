@@ -23,6 +23,10 @@
  * User revision: pure-text ripple returns to the vendor GL16 table with each transition's leading erase; the text table serves ordinary text turns only, retaining eight bands/11090us, target grays and recovery.
  * 用户修订：高压轨不再保留8秒，前后光场景统一在每次刷新后只保留100ms，空闲即断VCOM/VSH。
  * User revision: drop the eight-second rail hold; with the light on or off, keep VCOM/VSH only 100 ms after each output and release them on idle.
+ * 用户修订：100ms空闲关断由底层独立任务执行，扫描结束计时，不依赖主循环或开书特判。
+ * User revision: a low-level independent task owns the 100 ms idle shutdown from scan completion, without app-loop polling or book-open special cases.
+ * 用户修订：完整显示组结束主动关电，100ms保留为空闲兜底；只在真实扫描前上电。
+ * User revision: shut down at the end of complete display groups; retain 100 ms idle fallback and power on only for physical scans.
 
  */
 
@@ -55,56 +59,6 @@ static int s_pclk_mhz = DISPLAY_PCLK_DEFAULT_MHZ;
 void display_set_bulk_io(bool active) {
     s_bulk_io = active;
     ESP_LOGI(TAG, "bulk I/O scan margin %s", active ? "on" : "off");
-}
-
-// 高压轨在每次刷新后只保留100ms：够跨过一手势内的连续帧，空闲时不再长时间挂着VCOM/VSH；像素驱动在每轮结束时立即释放。
-// Keep HV rails for only 100 ms after each output: enough to bridge consecutive frames of one gesture without
-// holding VCOM/VSH while idle; release pixel drive after every output.
-#define RAILS_IDLE_TIMEOUT_MS 100
-
-// 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
-// 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
-static int64_t rails_deadline_ms;
-static int64_t drive_release_retry_ms;
-
-void rails_keepalive(void) {
-    bool held = pico_online_display_begin();
-    const int64_t now_ms = esp_timer_get_time() / 1000;
-    // 包括无变化和失败返回：释放像素驱动，不增加扫描或全刷。
-    // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
-    drive_release_retry_ms = board_epd_release_drive() ? 0 : now_ms + 50;
-    rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
-#if CONFIG_DISPLAY_POWER_DIAG
-    ESP_LOGI(TAG, "RAIL_DIAG event=release now_ms=%lld deadline_ms=%lld retry_ms=%lld on=%d",
-             (long long)now_ms, (long long)rails_deadline_ms,
-             (long long)drive_release_retry_ms, board_rails_on());
-#endif
-    pico_online_display_end(held);
-}
-
-void rails_idle_check(int64_t now_ms) {
-    if (!(drive_release_retry_ms && now_ms >= drive_release_retry_ms) &&
-        !(rails_deadline_ms && now_ms >= rails_deadline_ms)) return;
-    // 和实际推屏共用递归锁，不能在另一轮扫描中途释放驱动。
-    // Share the scan's recursive lock; never release drive during another output.
-    bool held = pico_online_display_begin();
-    // 短暂 I2C 故障按50ms重试；成功后不再访问总线，也不重画页面。
-    // Retry a transient I2C failure at 50ms intervals; stop bus access on success without repainting.
-    if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
-        drive_release_retry_ms = board_epd_release_drive() ? 0 : now_ms + 50;
-    if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
-#if CONFIG_DISPLAY_POWER_DIAG
-        // 同时记录真实时钟与循环快照，区分阻塞等待和采样回放的旧时间。
-        // Record the real clock and loop snapshot to distinguish blocking from stale replay time.
-        ESP_LOGI(TAG, "RAIL_DIAG event=idle_off loop_ms=%lld late_ms=%lld on=%d",
-                 (long long)now_ms,
-                 (long long)(esp_timer_get_time() / 1000 - rails_deadline_ms), board_rails_on());
-#endif
-        rails_deadline_ms = 0;
-        drive_release_retry_ms = 0;
-        epd_poweroff();
-    }
-    pico_online_display_end(held);
 }
 
 // 完整 DU 与胶囊定稿保留 FULL 扫描档；FOLLOW 与胶囊拖动保留 FAST 扫描档。
@@ -272,13 +226,11 @@ static bool s_power_fault;
 
 static bool display_power_ready(void) {
     if (s_power_retry_ms && esp_timer_get_time() / 1000 < s_power_retry_ms) return false;
-    epd_poweron();
-    if (board_rails_on()) {
+    if (epd_power_scan_allowed()) {
         s_power_retry_ms = 0;
         return true;
     }
     epd_poweroff();
-    rails_deadline_ms = drive_release_retry_ms = 0;
     s_power_retry_ms = esp_timer_get_time() / 1000 + POWER_RETRY_INTERVAL_MS;
     s_power_fault = s_main_fault = s_full_refresh_requested = true;
     return false;
@@ -307,7 +259,6 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
     enum EpdDrawError result = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
     s_main_fault = result != EPD_DRAW_SUCCESS;
     s_page_refreshes = 0;
-    rails_keepalive();
     ESP_LOGW(TAG, "main transition recovery error=%d result=%d", error, result);
     return result;
 }
@@ -448,7 +399,6 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     if (*result != EPD_DRAW_SUCCESS) *result = main_recover(hl, *result);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
-    rails_keepalive();
     ESP_LOGI(TAG, "main refresh mode=%d shelf_exit=%d draw=%lldms result=%d", app_settings_main_refresh_mode(), shelf_exit, (esp_timer_get_time() - start) / 1000, *result);
     (void)start;
     return true;
@@ -555,7 +505,6 @@ static enum EpdDrawError update_display_mode_unlocked(
 ) {
     if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     enum EpdDrawError result = hl_update(hl, &E0470_WAVEFORM, mode, false, NULL, false);
-    rails_keepalive();
     return result;
 }
 
@@ -564,7 +513,6 @@ static enum EpdDrawError update_display_mode_diff_unlocked(
 ) {
     if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
     enum EpdDrawError result = hl_update(hl, &E0470_WAVEFORM, mode, false, NULL, true);
-    rails_keepalive();
     return result;
 }
 
@@ -578,7 +526,6 @@ static enum EpdDrawError update_display_mode_diff_with_unlocked(
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, NULL, true);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -615,7 +562,6 @@ static enum EpdDrawError update_display_white_restore_unlocked(EpdiyHighlevelSta
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     if (area.x == 0 && area.y == 0 && area.width == epd_rotated_display_width() &&
         area.height == epd_rotated_display_height()) s_page_refreshes = 0;
-    rails_keepalive();
     return result;
 }
 
@@ -631,7 +577,6 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
         epd_hl_waveform(hl, &E0470_WAVEFORM);
         enum EpdDrawError result = epd_hl_update_screen_full(hl, MODE_GC16, 25);
 
-        rails_keepalive();
         ESP_LOGI(TAG, "fast navigation cleanup after %d transitions", APP_UI_FAST_GC16_EVERY);
         return result;
     }
@@ -647,7 +592,6 @@ static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* 
     enum EpdDrawError result = settle ? epd_hl_update_screen_full(hl, MODE_GL16, 25)
                                       : epd_hl_update_screen_padded(hl, MODE_GL16, 25, 1, 1);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -663,7 +607,6 @@ static enum EpdDrawError update_display_from_white_with_unlocked(
 
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     s_page_refreshes = 0;
-    rails_keepalive();
     return result;
 }
 
@@ -703,7 +646,6 @@ static enum EpdDrawError update_display_full_unlocked(EpdiyHighlevelState* hl) {
         s_page_refreshes = 0;
         display_power_recovered(result);
     } else result = hl_update(hl, &E0470_WAVEFORM, MODE_GC16, true, NULL, false);
-    rails_keepalive();
     return result;
 }
 
@@ -724,7 +666,6 @@ static enum EpdDrawError update_display_image_gray_unlocked(EpdiyHighlevelState*
     display_power_recovered(result);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
     s_page_refreshes = 0;
-    rails_keepalive();
     return result;
 }
 
@@ -737,7 +678,6 @@ static enum EpdDrawError update_display_with_unlocked(
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, NULL, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -749,7 +689,6 @@ static enum EpdDrawError update_display_area_with_unlocked(
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -768,7 +707,6 @@ static enum EpdDrawError update_display_area_diff_with_unlocked(
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, false, &area, true);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -781,7 +719,6 @@ static enum EpdDrawError update_display_area_diff_padded_unlocked(
     enum EpdDrawError result = hl_update_padded(hl, waveform, mode, false, &area, true,
                                                 pad_lines, pad_col_bytes);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -793,7 +730,6 @@ static enum EpdDrawError update_display_area_full_with_unlocked(
     epd_hl_waveform(hl, waveform);
     enum EpdDrawError result = hl_update(hl, waveform, mode, true, &area, false);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
-    rails_keepalive();
     return result;
 }
 
@@ -814,7 +750,6 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     enum EpdDrawError result = e0470_page_turn_with_waveform_compact(hl, area, dir,
         display_reader_water_waveform(), E0470_TURN_FAST_BANDS);
     use_scan_for(&E0470_WAVEFORM, MODE_GL16);
-    rails_keepalive();
     if (result == EPD_DRAW_SUCCESS) return result;
     if (result == EPD_DRAW_NO_PHASES_AVAILABLE) {
         ESP_LOGW(TAG, "water turn phases unavailable; use regular GL16");
@@ -831,7 +766,6 @@ static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState*
     enum EpdDrawError recovered = epd_hl_update_screen_from_white(hl, MODE_GC16, 25);
 
     s_page_refreshes = 0;
-    rails_keepalive();
     ESP_LOGW(TAG, "water turn failed (%d), recovery=%d", result, recovered);
     return recovered;
 }
@@ -856,7 +790,6 @@ static void guard_draw_result_unlocked(EpdiyHighlevelState* hl, enum EpdDrawErro
 
     if (recovered != EPD_DRAW_SUCCESS) ESP_LOGW(TAG, "underrun recovery failed (%d)", recovered);
     s_page_refreshes = 0;
-    rails_keepalive();
     ESP_LOGW(TAG, "line queue underrun, pclk back to %d MHz, recovery=%d", DISPLAY_PCLK_SAFE_MHZ, recovered);
 }
 
@@ -869,16 +802,28 @@ int64_t local_display_elapsed_us;
 #define LATENCY_DISPLAY_END() do {} while(0)
 #endif
 
+// 固定锁顺序：显示/OTA锁→供电锁→I2C；组内保留独立空闲期限，最外层结束即关电。
+// Lock order is display/OTA -> power -> I2C; groups retain independent idle deadlines and shut down at their outermost end.
+bool display_present_begin(void) {
+    bool held = pico_online_display_begin();
+    epd_power_session_begin();
+    return held;
+}
+void display_present_end(bool held) {
+    epd_power_session_end();
+    pico_online_display_end(held);
+}
+
 // 连续相位全部完成后，back已是真实黑白画面；不因尚未补灰阶而多做一次整屏GC16。
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
 static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
 
 enum EpdDrawError update_display_white_restore(EpdiyHighlevelState* hl, EpdRect area) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_white_restore_unlocked(hl, area);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -888,10 +833,10 @@ enum EpdDrawError update_display_mode(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_unlocked(hl, mode);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -900,10 +845,10 @@ enum EpdDrawError update_display_mode_diff(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_diff_unlocked(hl, mode);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -912,20 +857,20 @@ enum EpdDrawError update_display_mode_diff_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_diff_with_unlocked(hl, waveform, mode);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_fast_page_unlocked(hl);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -934,39 +879,39 @@ enum EpdDrawError update_display_from_white_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_from_white_with_unlocked(hl, waveform, mode);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_from_white(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_from_white_unlocked(hl);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_white(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     s_full_refresh_requested = false;
     enum EpdDrawError result = update_display_white_unlocked(hl);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = update_display_full_unlocked(hl);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -991,7 +936,7 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
 enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if (!hl || !hl->front_fb || !hl->back_fb) return EPD_DRAW_INVALID_CROP;
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     s_full_refresh_requested = false;
     display_main_transition_cancel();
     // 先真掉一次电：VCOM/VGH/VGL 重新建立，停在半路的像素失去保持电压。
@@ -1000,7 +945,7 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     if (!display_power_ready()) {
-        pico_online_display_end(held);
+        display_present_end(held);
         LATENCY_DISPLAY_END();
         return DISPLAY_DRAW_POWER_NOT_READY;
     }
@@ -1029,18 +974,17 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     s_main_fault = result != EPD_DRAW_SUCCESS;
     if (s_main_fault) s_full_refresh_requested = true;
     display_power_recovered(result);
-    rails_keepalive();
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     s_full_refresh_requested = false;
     enum EpdDrawError result = update_display_image_gray_unlocked(hl);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1049,10 +993,10 @@ enum EpdDrawError update_display_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_with_unlocked(hl, waveform, mode);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1062,10 +1006,10 @@ enum EpdDrawError update_display_area_with(
     EpdRect area
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_with_unlocked(hl, waveform, mode, area);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1075,10 +1019,10 @@ enum EpdDrawError update_display_area_diff_with(
     EpdRect area
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_diff_with_unlocked(hl, waveform, mode, area);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1088,18 +1032,18 @@ enum EpdDrawError update_display_area_diff_padded(
     EpdRect area, int pad_lines, int pad_col_bytes
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl)
         : update_display_area_diff_padded_unlocked(hl, waveform, mode, area, pad_lines, pad_col_bytes);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area) {
     LATENCY_DISPLAY_BEGIN();
-    bool held=pico_online_display_begin();
+    bool held=display_present_begin();
     // 控件只扫自身；显示成功后还原未消费的主页许可，不缓存或回放页面像素。
     // Scan only the control, then restore the unused main permission without caching or replaying page pixels.
     const void* owner=s_main_armed;
@@ -1114,7 +1058,7 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
         s_main_armed=owner;s_main_shelf_page=shelf;s_main_shelf_exit=exit;
         s_main_changing_page=changing;s_main_band_count=count;memcpy(s_main_bands,bands,sizeof(bands));
     }
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1124,10 +1068,10 @@ enum EpdDrawError update_display_area_full_with(
     EpdRect area
 ) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_full_with_unlocked(hl, waveform, mode, area);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
@@ -1135,18 +1079,18 @@ enum EpdDrawError update_display_area_full_with(
 enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_water_turn_unlocked(hl, area, dir);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
     return result;
 }
 
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result) {
     LATENCY_DISPLAY_BEGIN();
-    bool held = pico_online_display_begin();
+    bool held = display_present_begin();
     guard_draw_result_unlocked(hl, result);
-    pico_online_display_end(held);
+    display_present_end(held);
     LATENCY_DISPLAY_END();
 }

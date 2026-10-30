@@ -83,6 +83,10 @@ void board_epd_use_scan(board_epd_scan_t mode) {scan = mode;}
 void epd_lcd_set_prefill_lines(int lines) {prefill = lines;}
 void epd_poweron(void) {}
 bool board_rails_on(void) { return !power_failure; }
+bool epd_power_scan_allowed(void) { return board_rails_on(); }
+void epd_power_session_begin(void) {}
+void epd_power_session_end(void) {}
+
 bool board_epd_release_drive(void) {return true;}
 void epd_poweroff(void) {}
 void epd_clear(void) { assert(ota_display_depth);++clears; memset(panel, 255, BYTES);}
@@ -303,7 +307,7 @@ int main(void) {
         assert(!gray_calls && !full_calls && !gc_calls && !clears && !nav_draws && !allocations);
         assert(hl.waveform == &E0470_WAVEFORM && scan == BOARD_EPD_SCAN_FULL);
     }
-    now_us += 200000; rails_idle_check(now_us / 1000);
+    now_us += 200000;
     display_main_transition_cancel(); assert(calls == 200); assert_final();
     begin(&owner_a); assert(calls == 200); assert_final();
 

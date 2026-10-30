@@ -317,7 +317,6 @@ enum EpdDrawError update_display_white_restore(EpdiyHighlevelState *h,EpdRect ar
 void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
-void rails_idle_check(int64_t n) {(void)n;}
 bool device_power_ready(void) {return battery_test||lock_due||step==power_trigger_step;}
 static bool key_sampling, key_sampler_started;
 static unsigned key_sampler_starts, key_sampler_enables;

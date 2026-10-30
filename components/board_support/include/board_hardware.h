@@ -101,9 +101,10 @@ bool board_sd_present(void);
 /// 板子是否真的接了卡座 CD 脚；没有时由存储层用 CMD13 软件检测拔卡。
 /// / Whether the board wires a slot CD pin; without one the storage layer soft-detects removal with CMD13.
 bool board_sd_has_cd(void);
+/// 供电可能仍开启；关断命令失败时不能当作已关闭。/ Power may still be on; a failed shutdown command cannot count as off.
 bool board_rails_on(void);
-/// 刷新结束后释放 MODE/XOE/VCOM_EN，保留高压轨与原电压；已经中性时不访问 I2C，失败返回 false 供重试。
-/// Release MODE/XOE/VCOM_EN after output, retaining HV rails and voltage settings; neutral state does no I2C, false requests a retry.
+/// 底层持供电锁后通过GPIO撤MODE/XOE，保留VCOM和高压，不访问I2C或扫描。
+/// With the low-level power lock held, lower MODE/XOE through GPIO while retaining VCOM and HV, without I2C or scanning.
 bool board_epd_release_drive(void);
 
 /// 翻转 VCOMCTL：1=外部 VCOM_EN，0=自动时序。

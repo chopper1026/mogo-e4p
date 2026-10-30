@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
+#include "epdiy.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "wifi_transfer.h"
@@ -58,19 +59,34 @@ static bool memory_available(size_t internal_min, size_t internal_block, size_t 
 // Lock flash operations only, excluding network waits, status locks and joins to avoid cancellation/display deadlocks.
 static esp_err_t flash_begin(const esp_partition_t *target, esp_ota_handle_t *handle) {
     bool held = pico_online_display_begin();
+    if (!epd_flash_begin()) {
+        pico_online_display_end(held);
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t error = esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, handle);
+    epd_flash_end();
     pico_online_display_end(held);
     return error;
 }
 static esp_err_t flash_write(esp_ota_handle_t handle, const void *data, size_t size) {
     bool held = pico_online_display_begin();
+    if (!epd_flash_begin()) {
+        pico_online_display_end(held);
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t error = esp_ota_write(handle, data, size);
+    epd_flash_end();
     pico_online_display_end(held);
     return error;
 }
 static esp_err_t flash_finish(esp_ota_handle_t handle, bool aborting) {
     bool held = pico_online_display_begin();
+    if (!epd_flash_begin()) {
+        pico_online_display_end(held);
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t error = aborting ? esp_ota_abort(handle) : esp_ota_end(handle);
+    epd_flash_end();
     pico_online_display_end(held);
     return error;
 }
@@ -439,7 +455,12 @@ esp_err_t pico_online_commit(void) {
     if (s_joinable) { xSemaphoreTake(s_done, portMAX_DELAY); s_joinable = false; }
     if (!s_verified || atomic_load(&s_cancel)) return ESP_ERR_INVALID_STATE;
     bool held = pico_online_display_begin();
+    if (!epd_flash_begin()) {
+        pico_online_display_end(held);
+        return ESP_ERR_INVALID_STATE;
+    }
     esp_err_t error = esp_ota_set_boot_partition(s_verified);
+    epd_flash_end();
     pico_online_display_end(held);
     s_verified = NULL;
     if (error != ESP_OK) state(PICO_UPDATE_FAILED, "启动切换失败，当前版本保持不变");

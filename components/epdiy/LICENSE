@@ -25,3 +25,6 @@ directory unless a file states otherwise. 上游文件头部的版权声明保�
 
 - src/epd_highlevel.h：为既有显示状态补充结构体标签，支持页面使用不透明前置声明，不改变字段和布局。
   Tag the existing display-state struct for opaque page declarations without changing fields or layout.
+
+- src/epd_power_guard.{c,h}、epdiy.{c,h}、render.c、epd_board.h：独立任务执行扫描后100ms空闲关电，扫描互斥，关断失败重试；增加嵌套显示组结束关电、扫描准入检查及确认关电后排斥扫描的Flash保护接口。
+  Independent task for 100 ms idle shutdown after scanning, scan serialization and retries on unconfirmed shutdown; add nested display-group shutdown, scan admission checks and flash protection that confirms power-off and excludes scans.

@@ -17,6 +17,7 @@
 #include "board_hardware.h"
 
 #include <string.h>
+#include <stdatomic.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -124,18 +125,18 @@ static fca9555_handle_t s_ioe;
 static i2c_master_dev_handle_t s_tps;
 
 static bool s_ioe_ok;
-static bool s_tps_ok;
-static bool s_rails_on;
+static atomic_bool s_tps_ok;
+static atomic_bool s_rails_on;
 
-static bool s_pwrup;
-static bool s_vcom_ctrl;
-static bool s_wakeup;
+static atomic_bool s_pwrup;
+static atomic_bool s_vcom_ctrl;
+static atomic_bool s_wakeup;
 #if CONFIG_DISPLAY_POWER_DIAG
 // 仅记录请求时序；软件锁存不能替代实际轨电压测量。
 // Record request timing only; software latches do not measure rail voltages.
 static int64_t s_diag_power_on_us, s_diag_power_off_us;
 #endif
-static uint8_t s_p0_extra; // Motor / PA / CAM 锁存
+static atomic_uchar s_p0_extra; // Motor / PA / CAM 锁存
 static uint8_t s_p1_out = (uint8_t)(IOE_BIT(IO_TP_RST) | IOE_BIT(IO_BT_PA_PWR));
 static int s_vcom_mv = EPD_VCOM_MV;
 
@@ -184,7 +185,12 @@ static uint8_t p0_value(void) {
 }
 
 static esp_err_t p0_write(void) {
+    // 获得总线锁后才读取供电位，防止并发马达写回过期的上电快照。
+    // Read power bits only after acquiring the bus lock so concurrent motor writes cannot restore a stale powered snapshot.
+    esp_err_t lock_err = board_i2c_lock(50);
+    if (lock_err != ESP_OK) return lock_err;
     esp_err_t err = ioe_write(2, p0_value()); // OUT0
+    board_i2c_unlock();
     if (err != ESP_OK) ESP_LOGW(TAG, "TCA OUT0 write: %s", esp_err_to_name(err));
     return err;
 }
@@ -467,27 +473,29 @@ static void board_poweron(epd_ctrl_state_t* state) {
     esp_restart();
 }
 
-static void board_poweroff(epd_ctrl_state_t* state) {
+static bool board_poweroff_checked(epd_ctrl_state_t* state) {
 #if CONFIG_DISPLAY_POWER_DIAG
     const bool was_on = s_rails_on;
 #endif
-    epd_ctrl_state_t mask = {
-        .ep_stv = true,
-        .ep_output_enable = true,
-        .ep_mode = true,
-    };
     // 只有真正关电才撤 VCOM；release_drive 不碰它。
     // VCOM drops only on real power-off; release_drive never touches it.
-    s_vcom_ctrl = false;
-    s_pwrup = false;
     state->ep_stv = false;
     state->ep_output_enable = false;
     state->ep_mode = false;
-    board_set_ctrl(state, &mask);
+    gpio_set_level(EPD_PIN_XOE, 0);
+    gpio_set_level(EPD_PIN_MODE, 0);
+    // 先撤像素驱动至少12us，再公开撤电状态，防止并发马达写提前关闭电源。
+    // Lower pixel drive for at least 12 us before publishing off bits, including concurrent motor writes.
+    esp_rom_delay_us(12);
+    s_vcom_ctrl = false;
+    s_pwrup = false;
+    (void)p0_write();
     vTaskDelay(pdMS_TO_TICKS(2));
     s_wakeup = false;
-    p0_write();
-    s_rails_on = false;
+    const bool confirmed = p0_write() == ESP_OK;
+    // 最后一次成功写入包含全部关断位；失败不能把软件状态伪装成已关电。
+    // The final successful write contains all shutdown bits; never report power-off after a failed command.
+    s_rails_on = !confirmed;
     s_tps_ok = false;
 #if CONFIG_DISPLAY_POWER_DIAG
     s_diag_power_off_us = esp_timer_get_time();
@@ -496,7 +504,12 @@ static void board_poweroff(epd_ctrl_state_t* state) {
                  (s_diag_power_off_us - s_diag_power_on_us) / 1000 : -1),
              p0_value(), state->ep_output_enable, state->ep_mode);
 #endif
+    return confirmed;
 }
+
+static void board_poweroff(epd_ctrl_state_t* state) { (void)board_poweroff_checked(state); }
+
+static void board_release_drive(void) { (void)board_epd_release_drive(); }
 
 static void board_measure_vcom(epd_ctrl_state_t* state) { (void)state; }
 
@@ -508,6 +521,8 @@ static void board_set_vcom(int value) {
 }
 
 const EpdBoardDefinition epd_board_reader = {
+    .poweroff_checked = board_poweroff_checked,
+    .release_drive = board_release_drive,
     .init = board_init,
     .deinit = board_deinit,
     .set_ctrl = board_set_ctrl,
@@ -655,8 +670,8 @@ bool board_epd_release_drive(void) {
     epd_ctrl_state_t* state = epd_ctrl_state();
     state->ep_mode = false;
     state->ep_output_enable = false;
-    epd_ctrl_state_t mask = {.ep_mode = true, .ep_output_enable = true};
-    board_set_ctrl(state, &mask);
+    gpio_set_level(EPD_PIN_MODE, 0);
+    gpio_set_level(EPD_PIN_XOE, 0);
     // VCOM_CTRL 保持到板级关电；每次推屏后拉低会让同一 burst 内后续扫描失去公共电压。
     // Keep VCOM_CTRL until board power-off; dropping it after each output leaves later scans in the same burst without a common voltage.
     return true;

@@ -8,6 +8,10 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sched.h>
+static unsigned hv_flash_depth;
+static bool hv_flash_failure;
+bool epd_flash_begin(void) { if (hv_flash_failure) return false; ++hv_flash_depth; return true; }
+void epd_flash_end(void) { assert(hv_flash_depth); --hv_flash_depth; }
 #include "../main/ota/ota_online.c"
 // 与 partitions_16M.csv 的 5 MB 双槽一致；本用例按 CONFIG_IDF_TARGET_ESP32S31 编译。
 // Matches the 5 MB dual slots in partitions_16M.csv; this case builds with CONFIG_IDF_TARGET_ESP32S31.
@@ -31,7 +35,7 @@ static size_t failed_allocation;
 static pthread_mutex_t flash_display_mutex;
 static _Thread_local unsigned lock_depth;
 static atomic_bool display_active;
-static void assert_flash_locked(void) {assert(lock_depth && !atomic_load(&display_active));}
+static void assert_flash_locked(void) {assert(lock_depth && hv_flash_depth && !atomic_load(&display_active));}
 
 struct FakeHttp {const uint8_t *data;size_t size,at,offset;bool firmware,primary;int (*event_handler)(esp_http_client_event_t*);void *user_data;};
 void *heap_caps_malloc(size_t n,int c){(void)c;return n==failed_allocation?NULL:malloc(n);}
@@ -104,6 +108,10 @@ static void *display_thread(void *arg){(void)arg;for(unsigned i=0;i<1000;++i){
 }return NULL;}
 static void *flash_thread(void *arg){(void)arg;for(unsigned i=0;i<1000;++i){assert(flash_write(7,firmware,0)==ESP_OK);assert(!lock_depth);}return NULL;}
 int main(void){
+ hv_flash_failure=true;
+ assert(flash_write(7,firmware,1)==ESP_ERR_INVALID_STATE && !hv_flash_depth && !written_size && !lock_depth);
+ hv_flash_failure=false;
+
  _Static_assert(sizeof(esp_image_header_t)==24&&sizeof(esp_app_desc_t)==256,"real header sizes");
  fixture();primary_down=true;wifi_ps=WIFI_PS_MIN_MODEM;assert(pico_online_check()==ESP_OK);run();assert(s_status->state==PICO_UPDATE_AVAILABLE&&primary_feeds==2&&fallback_feeds==1);primary_down=false;
  fixture();again=true;check_download();assert(s_status->state==PICO_UPDATE_READY&&written_size==4096&&!memcmp(firmware,written,4096)&&!boot_calls);assert(pico_online_commit()==ESP_OK&&boot_calls==1);

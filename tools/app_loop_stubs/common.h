@@ -56,7 +56,6 @@ enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 int app_settings_main_refresh_mode(void);
 void display_main_transition_disarm(void);
 void display_main_transition_cancel(void);
-void rails_idle_check(int64_t);
 bool device_power_ready(void);
 bool device_power_key_sampler_start(void);
 bool device_power_key_sampler_enable(bool);

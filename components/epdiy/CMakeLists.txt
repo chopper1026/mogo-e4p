@@ -2,6 +2,7 @@
 # LCD 外设输出路径：ESP32-S3（Xtensa SIMD 汇编）与 ESP32-S31（RISC-V C stub）。
 # LCD output path: ESP32-S3 (Xtensa SIMD assembly) and ESP32-S31 (RISC-V C stubs).
 set(app_sources "src/epdiy.c"
+                "src/epd_power_guard.c"
                 "src/render.c"
                 "src/output_lcd/render_lcd.c"
                 "src/output_lcd/lcd_driver.c"

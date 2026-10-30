@@ -30,6 +30,8 @@ SUITES = {
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "metalio_drivers": [sys.executable, "tools/metalio_drivers_host_test.py"],
     "board": [sys.executable, "tools/s31_board_host_test.py"],
+    "hv_guard": [sys.executable, "tools/epd_power_guard_host_test.py"],
+    "hv_bus": [sys.executable, "tools/board_hv_concurrency_host_test.py"],
     "power_gate": [sys.executable, "tools/e4p_vcom_gate_host_test.py"],
     "battery": [sys.executable, "tools/test_pmu_battery.py"],
     "battery_filter": [sys.executable, "tools/test_pmu_soc_filter.py"],

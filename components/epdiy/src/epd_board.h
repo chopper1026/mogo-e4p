@@ -55,6 +55,11 @@ typedef struct {
      */
     void (*poweroff)(epd_ctrl_state_t*);
 
+    /// 确认关断命令成功；失败保留可能带电状态并重试。/ Confirm shutdown command success; retain possible power and retry on failure.
+    bool (*poweroff_checked)(epd_ctrl_state_t*);
+    /// 立即中性化像素驱动，不扫描或撤销VCOM。/ Neutralize pixel drive immediately without scanning or dropping VCOM.
+    void (*release_drive)(void);
+
     /**
      * Set the display common voltage if supported.
      *

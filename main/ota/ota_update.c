@@ -8,6 +8,7 @@
  * 冻结：不得覆盖当前运行分区，不在校验结束前切换启动分区。
  * Frozen: never overwrite the running partition or switch boot slots before validation completes.
  */
+#include "epdiy.h"
 #include "ota_update.h"
 
 #include <stdio.h>
@@ -127,12 +128,17 @@ esp_err_t pico_ota_install(const char *path, char *message, size_t message_size)
         set_message(message, message_size, "升级包无法读取");
         return ESP_FAIL;
     }
+    if (!epd_flash_begin()) {
+        fclose(file);
+        return ESP_ERR_INVALID_STATE;
+    }
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     esp_ota_handle_t handle = 0;
     err = target ? esp_ota_begin(target, info.image_size, &handle) : ESP_ERR_NOT_FOUND;
     if (err != ESP_OK) {
         fclose(file);
         set_message(message, message_size, "无法准备空闲固件分区");
+        epd_flash_end();
         return err;
     }
 
@@ -144,6 +150,7 @@ esp_err_t pico_ota_install(const char *path, char *message, size_t message_size)
         esp_ota_abort(handle);
         fclose(file);
         set_message(message, message_size, "内存不足，无法开始升级");
+        epd_flash_end();
         return ESP_ERR_NO_MEM;
     }
     size_t total = 0;
@@ -165,22 +172,26 @@ esp_err_t pico_ota_install(const char *path, char *message, size_t message_size)
     if (err != ESP_OK) {
         esp_ota_abort(handle);
         set_message(message, message_size, "写入中断，当前版本保持不变");
+        epd_flash_end();
         return err;
     }
 
     err = esp_ota_end(handle);
     if (err != ESP_OK) {
         set_message(message, message_size, "固件完整性校验失败");
+        epd_flash_end();
         return err;
     }
     err = esp_ota_set_boot_partition(target);
     if (err != ESP_OK) {
         set_message(message, message_size, "无法切换到新固件");
+        epd_flash_end();
         return err;
     }
     set_message(message, message_size, "安装完成，即将重新启动");
     ESP_LOGI(TAG, "OTA image %s (%u bytes) written to %s", info.candidate_version,
              (unsigned)info.image_size, target->label);
+    epd_flash_end();
     return ESP_OK;
 }
 
@@ -189,7 +200,9 @@ void pico_ota_confirm_running(void) {
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
     if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK ||
         state != ESP_OTA_IMG_PENDING_VERIFY) return;
+    if (!epd_flash_begin()) return;
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    epd_flash_end();
     if (err == ESP_OK) ESP_LOGI(TAG, "running OTA slot confirmed: %s", running->label);
     else ESP_LOGE(TAG, "failed to confirm OTA slot: %s", esp_err_to_name(err));
 }

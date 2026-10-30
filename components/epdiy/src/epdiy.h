@@ -255,6 +255,20 @@ void epd_poweron();
 /** Disable display power supply. */
 void epd_poweroff();
 
+/// 检查扫描准入，不提前上电；真实扫描在底层确认供电。/ Check admission without early power-on; physical scans ensure power below.
+bool epd_power_scan_allowed(void);
+/// 嵌套显示组开始；不延长100ms空闲期限。/ Start a nested display group without extending the 100 ms idle deadline.
+void epd_power_session_begin(void);
+/// 最外层完整显示结束即关电，通信失败仍重试。/ Shut down at the outermost display end, retaining retries on communication failure.
+void epd_power_session_end(void);
+/// 确认高压关断并阻止扫描；失败不得执行Flash操作；成功须同任务配对end。
+/// Confirm HV off and prevent scanning; failure forbids flash access; pair a successful begin with end on the same task.
+/// 初始化/销毁须与写入互斥；初始化前可用。/ Serialize initialization/teardown with writes; available before initialization.
+bool epd_flash_begin(void);
+/// 结束受保护的Flash操作。/ End protected flash access.
+void epd_flash_end(void);
+
+
 /** Clear the whole screen by flashing it. */
 void epd_clear();
 

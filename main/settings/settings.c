@@ -33,6 +33,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "epdiy.h"
 #include "haptics.h"
 #include "device_power.h"
 #include "board_sd.h"
@@ -41,6 +42,19 @@
 
 #define TAG "settings"
 #define NVS_NS "read_pico"
+// NVS open也可能创建命名空间；保护覆盖整个写事务，失败不进入NVS。
+// NVS open may create a namespace, so protect the whole write transaction and skip NVS after failed shutdown.
+static esp_err_t settings_write_open(nvs_handle_t *handle) {
+    if (!epd_flash_begin()) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, handle);
+    if (err != ESP_OK) epd_flash_end();
+    return err;
+}
+static void settings_write_close(nvs_handle_t handle) {
+    nvs_close(handle);
+    epd_flash_end();
+}
+
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_HOME_FULL "home_full"
@@ -488,20 +502,20 @@ void app_settings_init(void) {
     if (migrate_shelf) s_shelf_style = 2;
     // 固定媒体根目录；忽略旧版自定义目录键。/ Fixed media roots ignore retired custom-directory keys.
     nvs_close(h);
-    if ((migrate_shelf || retired_shelf) && nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+    if ((migrate_shelf || retired_shelf) && settings_write_open(&h) == ESP_OK) {
         // 首次刷入此版只切换书架外观；随后尊重用户手动选择。/ Set acrylic once on upgrade, then preserve manual choices.
         esp_err_t saved = nvs_set_u8(h, NVS_KEY_SHELF_STYLE, 2);
         if (saved == ESP_OK) saved = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
         if (saved == ESP_OK) (void)nvs_commit(h);
-        nvs_close(h);
+        settings_write_close(h);
     }
     // Migrate only the former default preset once; keep all other user mappings.
     // Committed marker makes a later explicit full-refresh choice remain untouched.
-    if (migrate_reader_defaults && nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+    if (migrate_reader_defaults && settings_write_open(&h) == ESP_OK) {
         esp_err_t saved = old_default_hold ? nvs_set_u8(h, NVS_KEY_HOLD_ACTION, APP_READER_KEY_HOME) : ESP_OK;
         if (saved == ESP_OK) saved = nvs_set_u8(h, NVS_KEY_READER_KEYS_V2, 1);
         if (saved == ESP_OK) saved = nvs_commit(h);
-        nvs_close(h);
+        settings_write_close(h);
         if (saved == ESP_OK && old_default_hold) s_reader_hold_action = APP_READER_KEY_HOME;
     }
     ESP_LOGI(
@@ -529,10 +543,10 @@ void app_settings_set_sleep_mode(app_sleep_mode_t mode) {
     if (mode > APP_SLEEP_OFF) mode = APP_SLEEP_DEEP;
     s_sleep = mode;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (settings_write_open(&h) != ESP_OK) return;
     nvs_set_u8(h, NVS_KEY_SLEEP, (uint8_t)mode);
     nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
 }
 
 app_shutdown_style_t app_settings_shutdown_style(void) { return s_shutdown_style; }
@@ -548,11 +562,11 @@ app_home_component_t app_settings_home_component(void) { return s_home_component
 uint8_t app_settings_home_goal_minutes(void) { return s_home_goal_minutes; }
 static esp_err_t home_preference_save(const char *key, uint8_t value) {
     nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return err;
     err = nvs_set_u8(h, key, value);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     return err;
 }
 esp_err_t app_settings_set_home_component(app_home_component_t component) {
@@ -642,11 +656,11 @@ void app_settings_set_haptic_intensity(uint8_t intensity) {
 
 static bool nvs_put_str(const char *key, const char *value) {
     nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) { ESP_LOGE(TAG, "save %s open: %s", key, esp_err_to_name(err)); return false; }
     err = nvs_set_str(h, key, value);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err != ESP_OK) ESP_LOGE(TAG, "save %s: %s", key, esp_err_to_name(err));
     return err == ESP_OK;
 }
@@ -684,10 +698,10 @@ uint8_t app_settings_system_font_size(void) { return s_system_size; }
 void app_settings_set_system_font_size(uint8_t percent) {
     if (percent < 100 || percent > 200 || percent % 10 || percent == s_system_size) return;
     nvs_handle_t h;
-    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return;
+    if(settings_write_open(&h)!=ESP_OK)return;
     esp_err_t err=nvs_set_u8(h,NVS_KEY_SYS_SIZE,percent);
     if(err==ESP_OK)err=nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if(err==ESP_OK)s_system_size=percent;
 }
 uint8_t app_settings_system_contrast(void) { return s_system_contrast; }
@@ -708,10 +722,10 @@ void app_settings_set_bookmark_path(const char *path) {
     if(!path || (path[0] && (strncmp(path,"/sdcard/",8)||!ext||strcasecmp(ext,".png"))) ||
         strnlen(path,sizeof(s_bookmark))>=sizeof(s_bookmark)) return;
     nvs_handle_t h;
-    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return;
+    if(settings_write_open(&h)!=ESP_OK)return;
     esp_err_t err=nvs_set_str(h,NVS_KEY_BOOKMARK,path);
     if(err==ESP_OK)err=nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if(err==ESP_OK)strlcpy(s_bookmark,path,sizeof(s_bookmark));
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
@@ -720,26 +734,26 @@ void app_settings_set_wallpaper_path(const char* path) {
         strnlen(path, sizeof(s_wallpaper)) >= sizeof(s_wallpaper)) return;
     strlcpy(s_wallpaper, path, sizeof(s_wallpaper));
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (settings_write_open(&h) != ESP_OK) return;
     nvs_set_str(h, NVS_KEY_WALLPAPER, s_wallpaper);
     nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
 }
 
 static void nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (settings_write_open(&h) != ESP_OK) return;
     nvs_set_u8(h, key, value);
     nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
 }
 
 static void nvs_put_u32(const char* key, uint32_t value) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (settings_write_open(&h) != ESP_OK) return;
     nvs_set_u32(h, key, value);
     nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
 }
 
 uint8_t app_settings_last_wake(void) {
@@ -783,10 +797,10 @@ bool app_settings_book_antialias(void) { return s_book_antialias; }
 bool app_settings_set_book_antialias(bool enabled) {
     if (enabled == s_book_antialias) return true;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_u8(h, NVS_KEY_BOOK_AA, enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) s_book_antialias = enabled;
     return err == ESP_OK;
 }
@@ -796,11 +810,11 @@ bool app_settings_set_book_weight_fine(int8_t steps) {
     if(steps==s_book_weight_fine)return true;
     uint8_t legacy=(uint8_t)(steps/APP_BOOK_WEIGHT_SUBSTEPS+2);
     nvs_handle_t h;
-    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return false;
+    if(settings_write_open(&h)!=ESP_OK)return false;
     esp_err_t err=nvs_set_u8(h,NVS_KEY_BOOK_WEIGHT_FINE,steps+APP_BOOK_WEIGHT_FINE_MAX);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_WEIGHT,legacy);
     if(err==ESP_OK)err=nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if(err==ESP_OK){s_book_weight=legacy;s_book_weight_fine=steps;}
     return err==ESP_OK;
 }
@@ -824,10 +838,10 @@ bool app_settings_set_book_background_path(const char *path) {
     if (!path || (path[0] && strncmp(path, "/sdcard/pictures/", 17)) ||
         strnlen(path, sizeof(s_book_background)) >= sizeof(s_book_background) || strstr(path, "/../")) return false;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_str(h, NVS_KEY_BOOK_BACKGROUND, path);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err != ESP_OK) return false;
     strlcpy(s_book_background, path, sizeof(s_book_background));
     return true;
@@ -916,10 +930,10 @@ bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t ac
     if (key >= 3 || !app_settings_reader_key_action_allowed(key, action)) return false;
     if (s_reader_keys[key] == action) return true;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_u8(h, s_reader_key_names[key], action);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) s_reader_keys[key] = action;
     return err == ESP_OK;
 }
@@ -928,10 +942,10 @@ bool app_settings_set_reader_hold_action(app_reader_key_action_t action) {
     if (!app_settings_reader_key_action_allowed(3, action)) return false;
     if (s_reader_hold_action == action) return true;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, action);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) s_reader_hold_action = action;
     return err == ESP_OK;
 }
@@ -940,10 +954,10 @@ bool app_settings_set_reader_double_action(app_reader_key_action_t action) {
     if (!app_settings_reader_key_action_allowed(4, action)) return false;
     if (s_reader_double_action == action) return true;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_u8(h, NVS_KEY_DOUBLE_ACTION, action);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) s_reader_double_action = action;
     return err == ESP_OK;
 }
@@ -952,10 +966,10 @@ bool app_settings_set_reader_up_action(app_reader_key_action_t action) {
     if (!app_settings_reader_key_action_allowed(5, action)) return false;
     if (s_reader_up_action == action) return true;
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    if (settings_write_open(&h) != ESP_OK) return false;
     esp_err_t err = nvs_set_u8(h, NVS_KEY_UP_ACTION, action);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) s_reader_up_action = action;
     return err == ESP_OK;
 }
@@ -966,12 +980,12 @@ void app_settings_set_reader_key_preset(unsigned preset) {
     };
     if (preset < 1 || preset > 2) return;
     nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return;
     for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = nvs_set_u8(h, s_reader_key_names[i], values[preset - 1][i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, preset == 1 ? APP_READER_KEY_HOME : APP_READER_KEY_REFRESH);
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err == ESP_OK) {
         memcpy(s_reader_keys, values[preset - 1], sizeof(s_reader_keys));
         s_reader_hold_action = preset == 1 ? APP_READER_KEY_HOME : APP_READER_KEY_REFRESH;
@@ -1831,7 +1845,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (shutdown_mode != APP_SHUTDOWN_LIGHT) shutdown_mode = APP_SHUTDOWN_STAGED;
 
     nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
 #define BACKUP_SET_U8(key, index) do { if (err == ESP_OK) err = nvs_set_u8(h, key, backup.flags[index]); } while (0)
 #define BACKUP_SET_STR(key, value) do { if (err == ESP_OK) err = nvs_set_str(h, key, value); } while (0)
@@ -1914,7 +1928,7 @@ esp_err_t app_settings_backup_restore(void) {
 #undef BACKUP_SET_U8
 #undef BACKUP_SET_STR
     if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    settings_write_close(h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
 
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));

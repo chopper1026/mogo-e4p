@@ -26,3 +26,9 @@ int epd_width(void);
 int epd_height(void);
 
 void epd_fill_rect(EpdRect area, uint8_t color, uint8_t *fb);
+
+bool epd_power_scan_allowed(void);
+void epd_power_session_begin(void);
+void epd_power_session_end(void);
+bool epd_flash_begin(void);
+void epd_flash_end(void);
