@@ -212,7 +212,7 @@ static void paint_syllables(uint8_t *fb, int top) {
 }
 void ui_keyboard_draw(uint8_t *fb, int top) {
     if (!s_probe && !s_keys_only) {
-    ui_fill_round_rect(fb, rect(16, -12, 652, 534, top), 26, 0xe8);
+    ui_fill_round_rect(fb, rect(16, -12, 652, 534, top), 26, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, rect(16, -12, 652, 534, top), 26, 0x60);
     }
     key_paint(fb, rect(24, 0, 144, 44, top), "九宫格", 24, s_nine, s_ascii || !s_candidates);
@@ -457,14 +457,14 @@ ui_keyboard_update_t ui_keyboard_update(uint8_t *fb, int top, EpdRect field, int
     } else {
         if (s_dirty & (DIRTY_WORDS | DIRTY_WORDS_SETTLE)) {
             EpdRect area = rect(24, 52, 636, 114, top);
-            epd_fill_rect(area, 0xe8, fb); paint_words(fb, top); include(&update, area);
+            epd_fill_rect(area, UI_GRAY_WHITE, fb); paint_words(fb, top); include(&update, area);
             if (update.settle) s_word_updates = 0;
             else if ((s_dirty & DIRTY_WORDS) && s_word_updates < WORDS_SETTLE_CHANGES) ++s_word_updates;
             s_words_idle_since = -1;
         }
         if (s_dirty & DIRTY_SYLLABLES) {
             EpdRect area = rect(24, 180, 82, 224, top);
-            epd_fill_rect(area, 0xe8, fb); paint_syllables(fb, top); include(&update, area);
+            epd_fill_rect(area, UI_GRAY_WHITE, fb); paint_syllables(fb, top); include(&update, area);
         }
         if (s_dirty & DIRTY_SPACE) {
             EpdRect area = rect(206, 430, 220, 72, top);

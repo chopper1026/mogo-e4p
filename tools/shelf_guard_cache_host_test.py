@@ -13,7 +13,7 @@ def function(file,name):
  return t[m.start():i]+'\n'
 quick=(r/'tools/quick_layer_raster_host_test.py').read_text()
 a=quick.index("code=r'"+"''")+len("code=r'"+"''");b=quick.index("'"+"''",a)
-code=quick[a:b].split('static uint8_t ui_contrast_gray')[0]
+code=quick[a:b].split('static void ui_nav_status')[0]
 code=code.replace('assert(x==xx);for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);','if(x==xx){for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}else{assert(y==yy);for(;x<=xx;++x)epd_draw_pixel(x,y,gray,fb);}')
 code+=r"""
 static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}
@@ -26,7 +26,7 @@ static int app_settings_system_contrast(void){return contrast;}
 static size_t heap_caps_get_free_size(unsigned caps){assert(caps==3);return free_psram;}
 static void *heap_caps_malloc(size_t bytes,unsigned caps){assert(caps==3);++allocs;if(oom)return NULL;return malloc(bytes);}
 """
-for n in ('ui_contrast_gray','ui_read_pixel','ui_acrylic_bw_rect','ui_hairline','draw_frosted'):
+for n in ('ui_contrast_gray','ui_read_pixel','ui_acrylic_bw_rect','draw_frosted'):
  code+=function('main/ui/ui_kit.c',n)
 code+='static void ui_draw_acrylic_guard(uint8_t *fb,EpdRect r){++guard_draws;draw_frosted(fb,r,false); }\n'
 code+=function('main/ui/ui_kit.c','ui_rotate_rect_to_fb')

@@ -236,6 +236,15 @@ int main(void) {
     assert(fb_level(fb,9,30) == UI_GRAY_WHITE);
     // 按压底图之后绘制黑字像素，文字不反色。/ Draw black text pixels after the pressed background, without inversion.
     epd_draw_pixel(40,30,UI_GRAY_BLACK,fb); assert(fb_level(fb,40,30) == UI_GRAY_BLACK);
+    // 控件使用三色，原始绘图仍保留每档灰阶。/ Controls use three targets while raw drawing retains every gray level.
+    for (unsigned tone=0;tone<256;++tone) {
+        const uint8_t expected=tone<128?0:tone>=240?255:192;
+        assert(ui_control_gray((uint8_t)tone)==expected);
+        ui_fill_round_rect(fb,(EpdRect){10,10,60,40},8,(uint8_t)tone);
+        assert(fb_level(fb,40,30)==(uint8_t)((expected>>4)*17));
+        ui_fill_round_rect_raw(fb,(EpdRect){10,10,60,40},8,(uint8_t)tone);
+        assert(fb_level(fb,40,30)==(uint8_t)((tone>>4)*17));
+    }
     test_icons();
     test_font_context();
     test_native_titles();

@@ -46,6 +46,17 @@ AUTO retains the old exit behavior: area GL16 drives all pixels, DU uses the ori
 仅 READER_BODY 接受 QUICK/IMAGE，READER_LAYOUT 接受 QUICK，RESTORE 接受 HOLD_GRAY；其余意图只接受 DEFAULT。无效意图、无效标志或整屏组合返回 `EPD_DRAW_INVALID_CROP`，缺表返回 `EPD_DRAW_NO_PHASES_AVAILABLE`；都不扫描。
 Only READER_BODY accepts QUICK/IMAGE, READER_LAYOUT accepts QUICK, and RESTORE accepts HOLD_GRAY. Other intents accept DEFAULT only. Invalid intents, flags or screen combinations return EPD_DRAW_INVALID_CROP; missing tables return EPD_DRAW_NO_PHASES_AVAILABLE. Neither scans.
 
+## 界面三色 / UI palette
+
+界面底色和控件目标统一为白、黑及固定灰（`UI_GRAY_LIGHT=0xC0`，4 位灰阶第 12 档），不随系统对比度漂移。卡片和导航以白底为主，文字使用黑色或明确的反白；固定灰用于进度底槽、未启用控件及活动状态。边框和结构分隔线使用黑色，布局及触控范围保持原有定义。
+UI surfaces and controls target white, black and one fixed gray (`UI_GRAY_LIGHT=0xC0`, level 12 in the 4-bit framebuffer), independent of system contrast. Cards and navigation favor white, text uses black or explicit white, and fixed gray marks tracks, disabled controls and active states. Frames and structural separators are black; existing layout and hit bounds remain.
+
+三色约束发生在控件绘制入口，不对整帧量化。封面、图片、头像、时钟图像、阅读正文背景及字体和图标抗锯齿保留原路径；书架亚克力挡板保留原来的模糊、灰阶与透明合成，快刷模式原有的点阵处理继续生效。需要保留灰阶的绘制使用原始接口，不能经过控件调色板。
+Apply the palette at control drawing entry points rather than quantizing the finished frame. Covers, artwork, avatars, clock artwork, reading backgrounds and font/icon antialiasing retain their existing paths. Acrylic shelf guards retain blur, tones and translucency, including the existing fast-mode dither. Drawing that must retain gray uses raw interfaces rather than the control palette.
+
+快捷栏使用不透明白底；前光胶囊为黑底白填充，图标位于固定白色圆盘内。拖动和松手走 FEEDBACK 的短 DU 差分，只有黑白边界变化，不追加松手定稿。开合及整屏归一继续使用现有流程；CAPSULE 意图和相关表保留供维护对照。三色设计本身不保证清除物理残影，须实屏验证累计拖动及面板开合。
+The quick layer uses opaque white; frontlight capsules use black tracks, white fills and icons on fixed white disks. Dragging and release use FEEDBACK short DU differences, changing binary boundaries without a release settle pass. Opening, closing and screen normalization retain existing flows; CAPSULE and its tables remain available for maintenance comparisons. The palette alone does not guarantee optical ghost removal; repeated drags and overlay transitions require panel validation.
+
 ## 波形目录与依赖 / Catalog and dependencies
 
 | 组 / Group | 编号对应的诊断名 / Diagnostic names |

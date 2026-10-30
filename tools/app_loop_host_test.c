@@ -194,6 +194,9 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
         if(m==MODE_GL16)++fl_key_gl;
         else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     }
+    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+        assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++fl_drag_pushes;
+    }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
     if (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
     if (a.y==1120) assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU&&a.height==48&&a.width==50);
@@ -201,16 +204,10 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
 }
 enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const void*w,int m,EpdRect a,
                                                   int pad_lines,int pad_col_bytes) {
+    (void)pad_lines;(void)pad_col_bytes;
     if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
-        // 胶囊行只允许三张专用表：拖动近似、定稿洗白、定稿落灰；阈值 DU 把 to=9
-        // 当纯白，绝不能出现。
-        // Capsule rows only allow the three dedicated tables: approximate drag,
-        // settle whitening and settle gray; the threshold DU treats to=9 as pure
-        // white and must never appear.
-        assert(m==MODE_DU&&pad_lines==1&&pad_col_bytes==1);
-        if(w==&E0470_CAPSULE_DRAG_WAVEFORM)++fl_drag_pushes;
-        else if(w==&E0470_CAPSULE_WHITE_WAVEFORM)++fl_white_pushes;
-        else {assert(w==&E0470_CAPSULE_GRAY_WAVEFORM&&m==MODE_DU);++fl_gray_pushes;}
+        // 黑白胶囊使用短差分，不能再进入灰阶专用表。/ Binary capsules use short differences, never gray-only tables.
+        assert(!"binary capsules must use unpadded FOLLOW DU");
     }
     return update_display_area_diff_with(h,w,m,a);
 }
@@ -816,11 +813,11 @@ int main(void) {
            reader_return_fullscreen&&enters==2);
     puts("quick layer return: leaving the reading body restores the same book and full-screen state");
     // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
-    // 提交都走胶囊拖动表（不再两段定稿，白表/灰表零推送），熄灯收回 264，收层
+    // 提交都走黑白短差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
     // 按 480 高度擦除；开关点按不再单独重画圆钮。
     // The fourth circle is the frontlight switch: the capsules expand with a
     // whole-layer re-composite to 480, drag frames and the release commit both
-    // use the capsule drag table (no two-stage settle; zero white/gray pushes),
+    // use FOLLOW DU (no two-stage settle; zero white/gray pushes),
     // switching off returns to 264 and closing erases by 480px; the switch tap
     // no longer repaints its circle alone.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
@@ -840,7 +837,7 @@ int main(void) {
     // Opening and the switch tap each re-composite and redraw the layer; on close the
     // layer is already gone, so only the underlay page is re-rendered.
     assert(quick_draws==2&&quick_gl==3&&base_renders==4);
-    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag, drag-table commit on release and a whole-screen close normalize passed");
+    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag and release commit and a whole-screen close normalize passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.

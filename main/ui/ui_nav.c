@@ -144,9 +144,9 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 }
 
 void ui_nav_draw(uint8_t *fb, int active) {
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, 0xe0, fb);
+    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
     ui_hairline(fb, UI_NAV_TOP, 0, UI_LOCK_WIDTH, UI_GRAY_LIGHT);
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, 0xf0, fb);
+    ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, UI_GRAY_WHITE, fb);
     if (app_settings_main_refresh_mode() != APP_MAIN_REFRESH_NORMAL) {
         // 快刷内容边界预留空白；横条在白底上单独短刷，图标和文字保持固定。
         // Reserve a blank fast-refresh boundary; short-update the marker on white while retaining icons and text.

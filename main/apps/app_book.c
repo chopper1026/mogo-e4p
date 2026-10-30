@@ -1004,7 +1004,7 @@ static void draw_shelf_furniture(uint8_t* fb) {
     for (int row = 0; row < 3; ++row) {
         int top = (s_view == SHELF ? 192 : 224) + row * 282;
         if (style == 1) {
-            ui_fill_rect_fast((EpdRect){36, top + 214, 612, 12}, 0x30, fb);
+            ui_fill_rect_fast((EpdRect){36, top + 214, 612, 12}, UI_GRAY_BLACK, fb);
             ui_hairline(fb, top + 214, 36, 612, 0x58);
             ui_hairline(fb, top + 225, 36, 612, 0x10);
         } else if (style == 2) {
@@ -1522,8 +1522,8 @@ static void draw_bulk(uint8_t* fb, int leaf) {
         snprintf(detail, sizeof(detail), "%s · %s", s_shelf[index].is_flash ? "内置" : "TF 卡",
                  s_shelf[index].has_progress ? "已有阅读进度" : "未开始阅读");
         ui_text_vc(fb, r.x + 22, r.y + 62, 20, detail, EPD_DRAW_ALIGN_LEFT, false);
-        epd_draw_circle(r.x + r.width - 37, r.y + 42, 12, 0x58, fb);
-        if (selected) epd_fill_circle(r.x + r.width - 37, r.y + 42, 7, 0x38, fb);
+        epd_draw_circle(r.x + r.width - 37, r.y + 42, 12, UI_GRAY_BLACK, fb);
+        if (selected) epd_fill_circle(r.x + r.width - 37, r.y + 42, 7, UI_GRAY_BLACK, fb);
     }
     if (!s_visible_count)
         ui_text_vc(fb, 342, 570, 26, s_message[0] ? s_message : "当前筛选没有图书", EPD_DRAW_ALIGN_CENTER, false);
@@ -1894,7 +1894,7 @@ static void draw_pill_slider(uint8_t* fb, EpdRect r, const char* left, const cha
     track.width = cx - track.x;
     if (track.width > 0) ui_fill_round_rect(fb, track, 3, 0x40);
     epd_fill_circle(cx, cy, 37, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, cy, 37, 0x48, fb);
+    epd_draw_circle(cx, cy, 37, UI_GRAY_BLACK, fb);
     ui_text_box(fb,(EpdRect){cx-31,cy-28,62,56},22,value,EPD_DRAW_ALIGN_CENTER,false);
 }
 
@@ -2010,7 +2010,7 @@ static void draw_font_settings(uint8_t* fb) {
     ui_fill_round_rect(fb, toggle, 19, book_fonts ? 0x38 : 0xd0);
     int knob = toggle.x + (book_fonts ? 49 : 20);
     epd_fill_circle(knob, toggle.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(knob, toggle.y + 19, 16, 0x78, fb);
+    epd_draw_circle(knob, toggle.y + 19, 16, UI_GRAY_BLACK, fb);
     EpdRect rule = s_rule_card;
     ui_fill_round_rect(fb, rule, 20, UI_GRAY_WHITE); ui_draw_control_frame(fb, rule, 20, 0x70);
     static const char *const rule_names[] = {"无", "虚线", "点线"};
@@ -2045,9 +2045,9 @@ static void draw_weight_settings(uint8_t *fb) {
     ui_fill_round_rect(fb,(EpdRect){36,895,612,114},57,0xe0);
     ui_draw_control_frame(fb,(EpdRect){36,895,612,114},57,0x30);
     for(int i=0;i<2;++i){EpdRect control=reader_weight_rect(i);epd_fill_circle(control.x+43,952,43,UI_GRAY_WHITE,fb);ui_draw_control_frame(fb,control,43,0x30);}
-    ui_fill_rect_fast((EpdRect){87,951,24,3},weight<=-APP_BOOK_WEIGHT_FINE_MAX?0xa0:0x20,fb);
-    ui_fill_rect_fast((EpdRect){573,951,24,3},weight>=APP_BOOK_WEIGHT_FINE_MAX?0xa0:0x20,fb);
-    ui_fill_rect_fast((EpdRect){584,941,3,24},weight>=APP_BOOK_WEIGHT_FINE_MAX?0xa0:0x20,fb);
+    ui_fill_rect_fast((EpdRect){87,951,24,3},weight<=-APP_BOOK_WEIGHT_FINE_MAX?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){573,951,24,3},weight>=APP_BOOK_WEIGHT_FINE_MAX?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){584,941,3,24},weight>=APP_BOOK_WEIGHT_FINE_MAX?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
     char value[20];reader_weight_value(value,sizeof(value),weight);
     reader_panel_text_vc(fb,342,936,44,value,EPD_DRAW_ALIGN_CENTER,false);
     reader_panel_text_vc(fb,342,975,20,"像素 · 每次 1/16",EPD_DRAW_ALIGN_CENTER,false);
@@ -2077,7 +2077,7 @@ static void draw_rule_settings(uint8_t *fb) {
             int span = i == 1 ? 14 : 3, step = i == 1 ? 24 : 13;
             int start = card.x + 25, end = card.x + card.width - 25;
             for (int x = start; x < end; x += step)
-                ui_fill_rect_fast((EpdRect){x, card.y + 83, x + span <= end ? span : end - x, 2}, 0x48, fb);
+                ui_fill_rect_fast((EpdRect){x, card.y + 83, x + span <= end ? span : end - x, 2}, UI_GRAY_BLACK, fb);
         } else reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 83, 17, "不显示", EPD_DRAW_ALIGN_CENTER, false);
     }
     char offset[36];
@@ -2366,7 +2366,7 @@ static void draw_key_picker(uint8_t *fb) {
         ui_fill_round_rect(fb, card, 20, current == action ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
         reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_key_label(action), EPD_DRAW_ALIGN_LEFT, false);
-        epd_draw_circle(608, card.y + 39, 11, 0x38, fb);
+        epd_draw_circle(608, card.y + 39, 11, UI_GRAY_BLACK, fb);
         if (current == action) epd_fill_circle(608, card.y + 39, 6, UI_GRAY_BLACK, fb);
     }
     reader_panel_text_vc(fb, 342, 1112, 20, s_reader_key_error[0] ? s_reader_key_error : "从底部上滑可随时打开阅读工具栏", EPD_DRAW_ALIGN_CENTER, false);
@@ -2617,7 +2617,7 @@ static void draw_reader_stats(uint8_t* fb) {
         int cx = 114 + i * 228;
         ui_text_box(fb,(EpdRect){cx-100,top+100,200,48},33,values[i],EPD_DRAW_ALIGN_CENTER,false);
         ui_text_box(fb,(EpdRect){cx-100,top+154,200,36},20,labels[i],EPD_DRAW_ALIGN_CENTER,false);
-        if (i < 2) ui_fill_rect_fast((EpdRect){228 + i * 228, top + 99, 1, 74}, 0x98, fb);
+        if (i < 2) ui_fill_rect_fast((EpdRect){228 + i * 228, top + 99, 1, 74}, UI_GRAY_LIGHT, fb);
     }
     ui_text_box(fb,(EpdRect){54,top+192,576,42},21,"本书进度",EPD_DRAW_ALIGN_LEFT,false);
     EpdRect track = {54, top + 245, 576, 12};
@@ -2688,8 +2688,8 @@ static void draw_reader_bookmarks(uint8_t* fb) {
         ui_text_box(fb,(EpdRect){item.x+18,item.y+item.height/2,item.width-90,item.height/2-5},18,
                     s_bookmark_edit?"点按选择":current?"当前阅读位置":"点按跳转到此处",EPD_DRAW_ALIGN_LEFT,false);
         if (s_bookmark_edit) {
-            epd_draw_circle(item.x + item.width - 35, item.y + 36, 12, 0x48, fb);
-            if (selected) epd_fill_circle(item.x + item.width - 35, item.y + 36, 7, 0x38, fb);
+            epd_draw_circle(item.x + item.width - 35, item.y + 36, 12, UI_GRAY_BLACK, fb);
+            if (selected) epd_fill_circle(item.x + item.width - 35, item.y + 36, 7, UI_GRAY_BLACK, fb);
         }
     }
     if (s_bookmark_edit) {

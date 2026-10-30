@@ -18,8 +18,8 @@
  * Latest user revision: resume titles reuse the loaded system face at the original 40px, without loading the reader face or adding built-in fonts.
  * 用户修订：首页静止时按分钟局部更新时间，不扫描图书或重画整页；保留快刷白底。
  * User revision: locally advance the idle clock by minute without scanning books or repainting the page; retain the fast white background.
- * 用户修订：普通/水波纹续读卡有浅灰底，三模式结构边线加粗；快刷组件预先二值化且不增加补刷。
- * User revision: ordinary/water resume cards have a light-gray fill and thicker rules in all modes; fast widgets are pre-binarized without an extra refresh.
+ * 用户修订：界面底色与控件统一黑、白和固定灰，续读卡改白底；封面、头像和时钟图像保留原灰阶。
+ * User revision: UI surfaces and controls use black, white and one fixed gray; resume cards are white, while covers, avatars and clock artwork retain their tones.
  * 用户修订：Kehai秒针保持未变化的表盘像素，避免灰底形成矩形黑闪；快刷只驱动黑白圆点差分。
  * User revision: Kehai seconds hold unchanged face pixels to avoid rectangular gray-background flashes; fast mode drives binary dot differences only.
  * 用户修订：首页题头与书架、文件和设置共用左侧起点、顶边及52px名义字号，仍使用当前系统字体。
@@ -378,7 +378,7 @@ static void home_frame(uint8_t *fb,EpdRect box,int radius) {
     for(int i=0;i<3;++i)ui_draw_round_rect(fb,ui_inset_rect(box,i),radius>i?radius-i:0,0x30);
 }
 static void circle_frame(uint8_t *fb,int x,int y,int radius) {
-    for(int i=0;i<3&&i<radius;++i)epd_draw_circle(x,y,radius-i,0x30,fb);
+    for(int i=0;i<3&&i<radius;++i)epd_draw_circle(x,y,radius-i,UI_GRAY_BLACK,fb);
 }
 static bool date_now(struct tm *out) {
     time_t now=time(NULL);
@@ -439,12 +439,12 @@ static void ring(uint8_t *fb,int cx,int cy,int radius,int thick,uint32_t seconds
     for(int y=-radius;y<=radius;++y)for(int x=-radius;x<=radius;++x) {
         float r=hypotf(x,y);if(r>radius||r<radius-thick)continue;
         float a=atan2f(x,-y);if(a<0)a+=6.2831853f;
-        epd_draw_pixel(cx+x,cy+y,a<=fraction*6.2831853f?0x20:0xe0,fb);
+        epd_draw_pixel(cx+x,cy+y,a<=fraction*6.2831853f?UI_GRAY_BLACK:UI_GRAY_LIGHT,fb);
     }
     if(fraction>0&&fraction<1) {
         float angle=fraction*6.2831853f;int r=radius-thick/2;
-        epd_fill_circle(cx,cy-r,thick/2,0x20,fb);
-        epd_fill_circle(cx+lroundf(sinf(angle)*r),cy-lroundf(cosf(angle)*r),thick/2,0x20,fb);
+        epd_fill_circle(cx,cy-r,thick/2,UI_GRAY_BLACK,fb);
+        epd_fill_circle(cx+lroundf(sinf(angle)*r),cy-lroundf(cosf(angle)*r),thick/2,UI_GRAY_BLACK,fb);
     }
 }
 static void calendar(uint8_t *fb,int x,int y,int step_x,int step_y,int px,unsigned goal) {
@@ -455,9 +455,9 @@ static void calendar(uint8_t *fb,int x,int y,int step_x,int step_y,int px,unsign
     for(unsigned day=1;day<=month_length(&s_date);++day) {
         unsigned cell=start+day-1;int cx=x+(cell%7)*step_x,cy=y+(cell/7)*step_y;
         bool today=day==(unsigned)s_date.tm_mday;char value[4];snprintf(value,sizeof(value),"%u",day);
-        if(today)epd_fill_circle(cx,cy,px/2+3,0x20,fb);
+        if(today)epd_fill_circle(cx,cy,px/2+3,UI_GRAY_BLACK,fb);
         label(fb,cx,cy,px,value,EPD_DRAW_ALIGN_CENTER,today?0xff:day>(unsigned)s_date.tm_mday?0x90:0x20);
-        if(s_reading_days[day-1]>=goal && goal)ui_fill_rect_fast((EpdRect){cx-10,cy+px/2+9,20,2},0x30,fb);
+        if(s_reading_days[day-1]>=goal && goal)ui_fill_rect_fast((EpdRect){cx-10,cy+px/2+9,20,2},UI_GRAY_BLACK,fb);
     }
 }
 static home_book_t *featured(void) {return s_current.path[0]?&s_current:&s_recent[0];}
@@ -566,9 +566,9 @@ static void render_root(uint8_t *fb) {
     snprintf(value,sizeof(value),"%u 分钟",seconds/60);fit(value,24,180);label(fb,490,118,24,value,EPD_DRAW_ALIGN_RIGHT,0x30);
     ring(fb,540,118,30,7,seconds,app_settings_home_goal_minutes()*60);
     if(s_avatar_ready)ui_wallpaper_draw_avatar(fb,s_avatar,(EpdRect){588,88,60,60},30);
-    else {epd_fill_circle(618,118,30,0x30,fb);label(fb,618,118,30,"K",EPD_DRAW_ALIGN_CENTER,0xff);}
+    else {epd_fill_circle(618,118,30,UI_GRAY_BLACK,fb);label(fb,618,118,30,"K",EPD_DRAW_ALIGN_CENTER,0xff);}
     HOME_STAGE("header");
-    const uint8_t card_gray=app_settings_main_fast_refresh()?0xff:0xee;
+    const uint8_t card_gray=UI_GRAY_WHITE;
     ui_fill_round_rect(fb,(EpdRect){36,184,612,378},28,card_gray);
     home_frame(fb,(EpdRect){36,184,612,378},28);
     for(int side=0;side<2;++side) {
@@ -635,9 +635,9 @@ static void render_goal(uint8_t *fb) {
     home_frame(fb,(EpdRect){36,820,612,114},57);
     epd_fill_circle(99,877,43,0xff,fb);epd_fill_circle(585,877,43,0xff,fb);
     circle_frame(fb,99,877,43);circle_frame(fb,585,877,43);
-    ui_fill_rect_fast((EpdRect){87,876,24,3},s_goal_draft==5?0xa0:0x30,fb);
-    ui_fill_rect_fast((EpdRect){573,876,24,3},s_goal_draft==180?0xa0:0x30,fb);
-    ui_fill_rect_fast((EpdRect){584,866,3,24},s_goal_draft==180?0xa0:0x30,fb);
+    ui_fill_rect_fast((EpdRect){87,876,24,3},s_goal_draft==5?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){573,876,24,3},s_goal_draft==180?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){584,866,3,24},s_goal_draft==180?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
     snprintf(value,sizeof(value),"%u",s_goal_draft);label(fb,342,861,46,value,EPD_DRAW_ALIGN_CENTER,0);
     label(fb,342,902,20,"分钟",EPD_DRAW_ALIGN_CENTER,0x50);
     const unsigned presets[]={15,30,60};
@@ -663,7 +663,7 @@ static void render_components_body(uint8_t *fb) {
     unsigned selected=component_index(s_component_browse);
     static const char *const details[]={"圆形表盘，十二个月相刻度","圆滑短底座，清晰数字表盘","短时针、长分针，圆点为秒针","猫眼左右转动，没有尾巴","柔软轮廓，弯曲的罗马数字","深灰放射图案，白色指针配细描边","尖屋顶、圆形开口，四个数字刻度","三本最近阅读，透过磨砂书夹显示"};
     label(fb,342,838,23,details[selected],EPD_DRAW_ALIGN_CENTER,0x60);
-    for(unsigned i=0;i<HOME_COMPONENT_OPTIONS;++i)epd_fill_circle(342-(HOME_COMPONENT_OPTIONS-1)*12+i*24,909,i==selected?6:4,i==selected?0x20:app_settings_main_fast_refresh()?0x60:0xc0,fb);
+    for(unsigned i=0;i<HOME_COMPONENT_OPTIONS;++i)epd_fill_circle(342-(HOME_COMPONENT_OPTIONS-1)*12+i*24,909,i==selected?6:4,i==selected?UI_GRAY_BLACK:app_settings_main_fast_refresh()?UI_GRAY_BLACK:UI_GRAY_LIGHT,fb);
     char value[24];snprintf(value,sizeof(value),"%u / %u",selected+1,(unsigned)HOME_COMPONENT_OPTIONS);label(fb,342,953,23,value,EPD_DRAW_ALIGN_CENTER,0x60);
     bool current=s_component_browse==app_settings_home_component();
     if(s_save_error)label(fb,342,1008,23,"保存未完成，请再试一次",EPD_DRAW_ALIGN_CENTER,0x30);

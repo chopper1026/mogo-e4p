@@ -93,10 +93,16 @@ extern "C" {
 // epdiy 图形接口取 8 位灰度（仅高 4 位有效），字体属性取 4 位灰度，两者不可混用。
 // epdiy graphics uses 8-bit gray (high nibble only); font attrs use 4-bit gray. Do not mix them.
 #define UI_GRAY_WHITE 0xFF
-#define UI_GRAY_LIGHT 0x90
+#define UI_GRAY_LIGHT 0xC0
 #define UI_GRAY_BLACK 0x00
 #define UI_INK_WHITE 15
 #define UI_INK_BLACK 0
+
+/// 控件目标仅用黑、固定灰和白；图片、亚克力与抗锯齿不作最终量化。
+/// Controls target black, one fixed gray and white; never quantize final artwork, acrylic or antialiasing.
+static inline uint8_t ui_control_gray(uint8_t gray) {
+    return gray < 0x80 ? UI_GRAY_BLACK : gray >= 0xF0 ? UI_GRAY_WHITE : UI_GRAY_LIGHT;
+}
 
 /// 在现有画面上绘制半透明、轻度模糊的灰阶挡板。/ Draw a translucent, softly blurred grayscale guard over the existing image.
 void ui_draw_acrylic_guard(uint8_t *framebuffer, EpdRect rect);
@@ -144,7 +150,7 @@ void ui_text_fixed_vc(
     uint8_t* framebuffer, int x, int center_y, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 );
-/// 固定字号文字使用指定灰阶墨色，复用活动字体。/ Fixed-size text with a chosen gray ink, reusing the active face.
+/// 固定字号界面文字使用黑色或显式反白，复用活动字体。/ Fixed-size UI text uses black or explicit white ink in the active face.
 void ui_text_fixed_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                           enum EpdFontFlags align, uint8_t gray);
 /// 原字号灰阶抗锯齿，边缘混合到实际底色；暂时启用后恢复正文开关，不加载另一份字体。
@@ -229,21 +235,17 @@ int ui_pager_hit(int x,int y);
 int ui_pager_target(int action,int page,int pages);
 void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mode,int pressed);
 
-/// 圆角矩形描边；颜色经系统对比度重映射。/ Rounded-rect outline; the color passes the system-contrast remap.
+/// 圆角矩形描边，目标颜色归入控件调色板。/ Rounded-rect outlines target the control palette.
 void ui_draw_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );
-/// 同上但灰阶直写，不过对比度重映射；波形锚点灰阶（前光胶囊的 0x30/0x38/白）
-/// 必须用它，否则档位随对比度漂出拖动表的 (3↔15) 格子，差分刷新静默跳过。
-/// Same outline painting the gray verbatim without the remap; waveform-anchored
-/// grays (the capsule 0x30/0x38/white) must use it, or contrast drifts the level
-/// out of the drag table's (3↔15) cells and differential pushes skip silently.
+/// 原始灰阶直写，供图片与需要保留灰阶的绘制使用。/ Paint raw gray for artwork and drawing that must retain its tones.
 void ui_draw_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );
-/// 控件外框用深色双像素线，黑白快刷后不消失；封面及图标仍用原绘图接口。/ Use a dark two-pixel control frame that survives BW refresh; covers and icons retain the original primitives.
+/// 控件外框用双像素线及固定调色板，保持原边界。/ Two-pixel control frames use the fixed palette within the original bounds.
 void ui_draw_control_frame(uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color);
-/// 深色双像素结构分隔线；装饰性细线仍用ui_hairline。/ Dark two-pixel structural separator; retain ui_hairline for decorative rules.
+/// 双像素结构分隔线使用控件调色板。/ Two-pixel structural separators use the control palette.
 void ui_draw_separator(uint8_t* framebuffer, int y, int x, int width, uint8_t color);
 /// 选中：外框保留，内缩一圈加粗，不整块填黑，减轻残影。
 /// Selected: keep the outer frame and thicken an inset ring; do not fill solid black, which ghosts.
@@ -254,13 +256,12 @@ void ui_draw_pressed_round_rect(uint8_t* framebuffer, EpdRect rect, int radius);
 void ui_draw_choice_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, bool on
 );
-/// 圆角矩形填充：中间矩形 + 左右两侧半圆帽（epdiy 无原生圆角接口）；颜色经系统对比度重映射。
-/// Filled rounded rect: center rectangle plus left/right caps (epdiy has no native rounded fill); the color passes the contrast remap.
+/// 圆角矩形填充使用控件调色板，由矩形与半圆帽组成。
+/// Fill rounded rectangles with the control palette, using a body and semicircular caps.
 void ui_fill_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );
-/// 同上但灰阶直写，不过对比度重映射；用途见 ui_draw_round_rect_raw。
-/// Same fill painting the gray verbatim without the remap; see ui_draw_round_rect_raw.
+/// 原始灰阶填充，不经过控件调色板。/ Fill raw gray without the control palette.
 void ui_fill_round_rect_raw(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 );

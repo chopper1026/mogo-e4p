@@ -59,8 +59,12 @@ int epd_rotated_display_width(void){return 684;}int epd_rotated_display_height(v
 enum EpdRotation epd_get_rotation(void){return display_rotation;}
 typedef struct {uint16_t x,y;} Coord_xy;
 #define _swap_int(a,b) {int temp=a;a=b;b=temp;}
+#define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
+#define UI_GRAY_LIGHT 192
 static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
+ unit+=function('ui_control_gray',ROOT/'main/ui/ui_kit.h')+'\n'
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle','epd_write_line','epd_draw_line'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
  for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
@@ -69,9 +73,6 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
  unit+=function('book_cover_crop',ROOT/'main/image/image_decode.c')+'\n'
  unit+=r'''
 #include "ui_image_dither.h"
-#define UI_GRAY_WHITE 255
-#define UI_GRAY_BLACK 0
-#define UI_GRAY_LIGHT 224
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
 static int s_view=0,style=5,s_pressed_control=-1;

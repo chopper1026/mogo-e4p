@@ -128,9 +128,9 @@ EpdRect ui_power_dialog_rect(void) { return (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LO
 
 static void draw_circle_button(uint8_t *fb, const ui_power_dialog_t *dialog, int hit, int cx) {
     epd_fill_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R,
-        dialog->pressed && dialog->hit == hit ? 0xd0 : UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R, 0x60, fb);
-    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R - 1, 0x60, fb);
+        dialog->pressed && dialog->hit == hit ? UI_GRAY_LIGHT : UI_GRAY_WHITE, fb);
+    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R, UI_GRAY_BLACK, fb);
+    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R - 1, UI_GRAY_BLACK, fb);
     if (hit == HIT_RESTART) ui_draw_icon(fb, cx, UI_POWER_BUTTON_Y, 46, UI_ICON_ROTATE_CW, UI_GRAY_BLACK);
     else {
         // 圆帽取消符号，圆钮外部保持原白底。/ Round-ended cancel mark; preserve the white outside the circle.
@@ -153,8 +153,8 @@ void ui_power_dialog_draw_controls(uint8_t *fb, const ui_power_dialog_t *dialog,
         "滑动关机", EPD_DRAW_ALIGN_CENTER, false);
     int cx = UI_POWER_THUMB_X + dialog->position;
     epd_fill_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R, 0x60, fb);
-    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R - 1, 0x60, fb);
+    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R, UI_GRAY_BLACK, fb);
+    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R - 1, UI_GRAY_BLACK, fb);
     ui_draw_icon(fb, cx, UI_POWER_THUMB_Y, 46, UI_ICON_POWER, UI_GRAY_BLACK);
     draw_circle_button(fb, dialog, HIT_RESTART, UI_POWER_RESTART_X);
     draw_circle_button(fb, dialog, HIT_CANCEL, UI_POWER_CANCEL_X);

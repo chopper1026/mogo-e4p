@@ -32,6 +32,7 @@ unit = r'''
 #include <string.h>
 #include <limits.h>
 #include "ui_image_dither.h"
+#define UI_GRAY_BLACK 0
 #define W 1216
 #define H 684
 #define BYTES (W*H/2)
@@ -67,6 +68,8 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t* fb){
 static void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t* fb){
     for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)epd_draw_pixel(x,y,gray,fb);
 }
+static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
+static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}
 static void ui_hairline(uint8_t* fb,int y,int x,int width,uint8_t gray){epd_fill_rect((EpdRect){x,y,width,1},gray,fb);}
 static void epd_draw_line(int x0,int y0,int x1,int y1,uint8_t gray,uint8_t* fb){
     assert(x0==x1||y0==y1);
@@ -86,18 +89,16 @@ static void* heap_caps_malloc(size_t bytes,unsigned caps){
 for name in ('ui_read_pixel', 'ui_acrylic_bw_rect', 'draw_frosted',
              'ui_draw_acrylic_guard', 'ui_draw_frosted_pocket'):
     unit += function('main/ui/ui_kit.c', name) + '\n'
+unit += '''static void draw_shelf_guard(uint8_t *fb,EpdRect r,int slot){(void)slot;ui_draw_acrylic_guard(fb,r);if(s_view==SHELF&&app_settings_main_fast_refresh())ui_acrylic_bw_rect(fb,r);}
+'''
 unit += function('main/apps/app_book.c', 'draw_shelf_furniture') + '\n'
 unit += r'''
 static uint8_t original[BYTES],gray[BYTES],dots[BYTES],again[BYTES];
 static bool inside(int x,int y){
-    if(style!=2&&style!=3)return false;
+    if(style!=2||s_view!=SHELF)return false;
     for(int row=0;row<3;++row){
-        int top=224+row*282;
-        if(style==2&&x>=20&&x<664&&y>=top+136&&y<top+226)return true;
-        if(style==3)for(int col=0;col<3;++col){
-            int left=40+col*205;
-            if(x>=left&&x<left+180&&y>=top+92&&y<top+220)return true;
-        }
+        int top=192+row*282;
+        if(x>=20&&x<664&&y>=top+136&&y<top+226)return true;
     }
     return false;
 }
@@ -138,7 +139,7 @@ int main(void){
     rotation=EPD_ROT_INVERTED_PORTRAIT;
     for(int y=0;y<W;++y)for(int x=0;x<H;++x)
         epd_draw_pixel(x,y,((x/7+y/11)%2)?255:0,original);
-    for(style=0;style<5;++style)for(oom=false;;oom=true){
+    for(s_view=SHELF;s_view<=MANAGE;++s_view)for(style=0;style<6;++style)for(oom=false;;oom=true){
         memcpy(gray,original,BYTES);fast=false;draw_shelf_furniture(gray);
         memcpy(dots,original,BYTES);fast=true;draw_shelf_furniture(dots);
         for(int y=0;y<W;++y)for(int x=0;x<H;++x){
@@ -146,13 +147,11 @@ int main(void){
             if(inside(x,y))assert(actual==0||actual==15);
             else assert(actual==ui_read_pixel(gray,x,y));
         }
-        memcpy(again,original,BYTES);s_view=MANAGE;draw_shelf_furniture(again);s_view=SHELF;
-        assert(!memcmp(again,gray,BYTES));
         memcpy(again,original,BYTES);draw_shelf_furniture(again);
         assert(!memcmp(dots,again,BYTES));
         if(oom)break;
     }
-    puts("PASS: one-pixel dots; all 256 tone means; stable phase/monotonic density; 4 rotations/overflow clips; actual 5 shelf styles; ordinary and detail isolation; OOM composition fallback; navigation outside guards untouched");
+    puts("PASS: one-pixel dots; all 256 tone means; stable phase/monotonic density; 4 rotations/overflow clips; actual 6 shelf modes; ordinary and detail isolation; OOM composition fallback; navigation outside guards untouched");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:

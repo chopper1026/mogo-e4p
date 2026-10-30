@@ -18,6 +18,8 @@
  * the user's reference the card was dropped for control-centre style horizontal
  * capsules; brightness uses the half-filled circle and colour temperature the
  * thermometer; a fill narrower than one cap tucks into the left cap row by row.
+ * 用户修订：面板用不透明白底，圆键仅黑白及固定灰；滑杆使用黑白填充与固定白底图标。
+ * User revision: opaque white panels, black/white/fixed-gray keys, and binary sliders with fixed white icon disks.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -32,19 +34,6 @@ static EpdRect key_rect(int button) {
                      2*UI_QUICK_RADIUS,2*UI_QUICK_RADIUS};
 }
 static const ui_icon_t s_icons[]={UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_REFRESH_CW};
-
-// 根据当前旋转读取逻辑像素；和图形接口相同，画点保持半字节邻居。
-// Read logical pixels using the current rotation; drawing preserves the neighboring nibble like the graphics API.
-static uint8_t pixel(uint8_t *fb, int x, int y) {
-    int px, py;
-    switch (epd_get_rotation()) {
-        case EPD_ROT_PORTRAIT: px = epd_width() - y - 1; py = x; break;
-        case EPD_ROT_INVERTED_LANDSCAPE: px = epd_width() - x - 1; py = epd_height() - y - 1; break;
-        case EPD_ROT_INVERTED_PORTRAIT: px = y; py = epd_height() - x - 1; break;
-        default: px = x; py = y; break;
-    }
-    return (epd_get_pixel(px, py, epd_width(), epd_height(), fb) >> 4) * 17u;
-}
 
 static bool layer_pixel(int x, int y, int width, int height) {
     const int r = 56;
@@ -77,20 +66,17 @@ static void draw_badge(uint8_t *fb,int button,bool active) {
     if(button>1||!active)return;
     int cx=center_x(button);
     epd_fill_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,UI_GRAY_WHITE,fb);
-    epd_draw_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,0x50,fb);
+    epd_draw_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,UI_GRAY_BLACK,fb);
 }
 
-// 实心圆键：活动态沿用原176灰，其余为244灰；按压只加内圈。前光开关与旁边圆钮
-// 共用同一套灰阶，开灯是活动灰底黑太阳，熄灭是浅底黑太阳。
-// Solid key: active uses the original 176 gray, others 244; a press only adds the
-// inner ring. The frontlight switch shares the same grays as its neighbours, with a
-// black sun on both the active gray and the light face.
+// 圆键只用固定灰活动态和白色普通态，按压增加黑色内圈。
+// Keys use fixed gray when active and white otherwise; pressing adds a black inner ring.
 static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool active,bool pressed) {
     int cx=center_x(button);
     const bool frontlight_key=button==3&&menu!=NULL&&menu->frontlight;
-    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,active?0xb0:0xf4,fb);
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,0x38,fb);
-    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,0x38,fb);
+    epd_fill_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,active?UI_GRAY_LIGHT:UI_GRAY_WHITE,fb);
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS,UI_GRAY_BLACK,fb);
+    epd_draw_circle(cx,UI_QUICK_CIRCLE_Y,UI_QUICK_RADIUS-1,UI_GRAY_BLACK,fb);
     if(button<3) ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,s_icons[button],UI_GRAY_BLACK);
     else if(frontlight_key) ui_draw_icon(fb,cx,UI_QUICK_CIRCLE_Y,44,UI_ICON_SUN,UI_GRAY_BLACK);
     else lock_icon(fb,cx,UI_QUICK_CIRCLE_Y);
@@ -133,24 +119,12 @@ static int cap_inset(int offset) {
     return r - chord;
 }
 
-// 控制中心式胶囊滑杆：活动灰胶囊为空档，白色填充从左缘生长，图标常驻左端，
-// 无旋钮无文字无档位线。整片自绘，局部行刷不需要还原遮罩底色。
-// 胶囊灰阶全部直写不过对比度重映射：拖动表只有 (3↔15) 两格，重映射会把
-// 0x30/0x38 挪到 level 1–2，拖动差分就静默跳过整条填充边界。
-// Control-centre style capsule slider: the active-gray capsule is the empty
-// track, a white fill grows from the left edge, and the icon stays at the left
-// end with no knob, text or level line. The whole body repaints, so a local row
-// refresh never needs the shade restored underneath. Every capsule gray paints
-// verbatim, bypassing the contrast remap: the drag table holds only the (3↔15)
-// cells, and the remap moved 0x30/0x38 to levels 1-2, so drag differentials
-// silently skipped the whole fill edge.
+// 胶囊使用黑底白色填充与固定白底图标，移动时只有黑白像素改变。
+// Capsules use black tracks, white fills and fixed white icon disks; motion changes black/white pixels only.
 static void draw_capsule(uint8_t *fb, int cy, ui_icon_t icon, uint8_t value) {
     const int r = UI_QUICK_FL_TRACK_H / 2;
     const EpdRect track = {UI_QUICK_FL_TRACK_X, cy - r, UI_QUICK_FL_TRACK_W, UI_QUICK_FL_TRACK_H};
-    // 底灰与首页最近阅读进度条已读段同用 0x30：拖动表的近似落点就在这附近，残影随底色隐没。
-    // The track gray matches the dashboard reading-progress read fill (0x30):
-    // the drag table's approximate landing sits nearby, so residue blends in.
-    ui_fill_round_rect_raw(fb, track, r, 0x30);
+    ui_fill_round_rect_raw(fb, track, r, UI_GRAY_BLACK);
     const int width = fl_thumb_x(value) - track.x;
     if (width >= UI_QUICK_FL_TRACK_H) {
         ui_fill_round_rect_raw(fb, (EpdRect){track.x, cy - r, width, UI_QUICK_FL_TRACK_H}, r, UI_GRAY_WHITE);
@@ -164,14 +138,10 @@ static void draw_capsule(uint8_t *fb, int cy, ui_icon_t icon, uint8_t value) {
                              UI_GRAY_WHITE, fb);
         }
     }
-    // 图标恒黑：黑↔白翻转的 (0,15)/(15,0) 单元不在拖动表里，真驱动需 18 相
-    // 满梯子并把拖动表拉长一倍以上；低档位的对比度损失是接受的取舍。
-    // The icon stays black: its black↔white flip has no (0,15)/(15,0) cells in
-    // the drag table, and real driving needs the 18-push ladder plus a table
-    // over twice as long; the low-level contrast loss is an accepted trade-off.
+    epd_fill_circle(UI_QUICK_FL_ICON_CX, cy, UI_QUICK_FL_ICON_SIZE / 2 + 8, UI_GRAY_WHITE, fb);
     ui_draw_icon(fb, UI_QUICK_FL_ICON_CX, cy, UI_QUICK_FL_ICON_SIZE, icon, UI_GRAY_BLACK);
-    ui_draw_round_rect_raw(fb, track, r, 0x38);
-    ui_draw_round_rect_raw(fb, ui_inset_rect(track, 1), r - 1, 0x38);
+    ui_draw_round_rect_raw(fb, track, r, UI_GRAY_BLACK);
+    ui_draw_round_rect_raw(fb, ui_inset_rect(track, 1), r - 1, UI_GRAY_BLACK);
 }
 
 static void draw_fl_row_at(uint8_t *fb, ui_quick_control_t control, uint8_t value) {
@@ -239,23 +209,10 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
     const int height = epd_rotated_display_height();
     const int layer_height = fl_rows_visible(menu)
         ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT;
-    // 每个像素只采一次原图，直接合成灰阶，不让主页快刷模式把菜单变成点阵。
-    // Sample each underlay pixel once and compose grays directly, independently of fast main-page rendering.
-    for (int y = 0; y < layer_height && y < height; ++y) for (int x = 0; x < width; ++x) {
-        if (!layer_pixel(x, y, width, layer_height)) continue;
-        unsigned tint = 238;
-        for (int i = 0; i < 4; ++i) {
-            int dx = x - center_x(i), dy = y - UI_QUICK_CIRCLE_Y;
-            if (dx * dx + dy * dy <= UI_QUICK_RADIUS * UI_QUICK_RADIUS) {
-                const bool active = (i == 0 && wifi) || (i == 1 && bluetooth) ||
-                    (i == 3 && menu != NULL && menu->frontlight && menu->fl_on);
-                tint = active ? 176 : 244;
-                break;
-            }
-        }
-        uint8_t tone = (uint8_t)((pixel(fb, x, y) * 40u + tint * 216u + 128u) / 256u);
-        epd_draw_pixel(x, y, tone, fb);
-    }
+    // 不透明白底不混合底页，避免叠层产生额外灰阶。
+    // Opaque white never blends the underlay into additional gray levels.
+    for (int y = 0; y < layer_height && y < height; ++y) for (int x = 0; x < width; ++x)
+        if (layer_pixel(x, y, width, layer_height)) epd_draw_pixel(x, y, UI_GRAY_WHITE, fb);
     // 状态栏留清晰白底，沿用系统时间/签名/电池；四图标与底栏共用Lucide细线44px。
     // Keep the system time/signature/battery legible on white; share navigation's 44px Lucide line icons.
     ui_quick_menu_draw_status(fb);
@@ -274,13 +231,13 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
         draw_fl_row(fb, menu, UI_QUICK_CTL_BRIGHTNESS);
         draw_fl_row(fb, menu, UI_QUICK_CTL_CCT);
     }
-    ui_fill_round_rect(fb, (EpdRect){width / 2 - 26, layer_height - 24, 52, 6}, 3, 0x70);
+    ui_fill_round_rect(fb, (EpdRect){width / 2 - 26, layer_height - 24, 52, 6}, 3, UI_GRAY_BLACK);
     // 只画遮罩内的双像素轮廓，顶部直角、底部圆角，不越过下层边界。
     // Draw a two-pixel outline within the mask: square top, rounded bottom, no underlay leakage.
     for (int y = 0; y < layer_height && y < height; ++y) for (int x = 0; x < width; ++x) {
         if (layer_pixel(x, y, width, layer_height) && (x < 2 || x >= width - 2 || y < 2 ||
             y >= layer_height - 2 || !layer_pixel(x - 2, y, width, layer_height) ||
             !layer_pixel(x + 2, y, width, layer_height) || !layer_pixel(x, y + 2, width, layer_height)))
-            epd_draw_pixel(x, y, 0x38, fb);
+            epd_draw_pixel(x, y, UI_GRAY_BLACK, fb);
     }
 }

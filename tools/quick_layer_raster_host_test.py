@@ -34,6 +34,7 @@ code=r'''
 #define UI_TOUCH_SLOP_PX 24
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_BLACK 0
+#define UI_GRAY_LIGHT 0xc0
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
@@ -63,9 +64,6 @@ static void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t *fb){for(int y=0;y<r.he
 static void epd_draw_line(int x,int y,int xx,int yy,uint8_t gray,uint8_t *fb){assert(x==xx);for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}
 static void epd_draw_circle(int cx,int cy,int r,uint8_t gray,uint8_t *fb){for(int y=-r;y<=r;++y)for(int x=-r;x<=r;++x)if(x*x+y*y<=r*r&&x*x+y*y>(r-1)*(r-1))epd_draw_pixel(cx+x,cy+y,gray,fb);}
 static void epd_fill_circle(int cx,int cy,int r,uint8_t gray,uint8_t *fb){for(int y=-r;y<=r;++y)for(int x=-r;x<=r;++x)if(x*x+y*y<=r*r)epd_draw_pixel(cx+x,cy+y,gray,fb);}
-static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(void)radius;epd_fill_rect(r,gray,fb);}
-static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){(void)radius;for(int x=0;x<r.width;++x){epd_draw_pixel(r.x+x,r.y,gray,fb);epd_draw_pixel(r.x+x,r.y+r.height-1,gray,fb);}for(int y=0;y<r.height;++y){epd_draw_pixel(r.x,r.y+y,gray,fb);epd_draw_pixel(r.x+r.width-1,r.y+y,gray,fb);}}
-static uint8_t ui_contrast_gray(uint8_t v){return v;}
 static void ui_nav_status(uint8_t *fb){epd_fill_rect((EpdRect){36,29,52,16},0,fb);}
 enum {EPD_DRAW_ALIGN_LEFT=0x2,EPD_DRAW_ALIGN_RIGHT=0x4,EPD_DRAW_ALIGN_CENTER=0x8};
 static bool app_settings_main_fast_refresh(void){return fast;}
@@ -77,10 +75,21 @@ header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
 code+=re.search(r'typedef enum \{\s*UI_QUICK_CTL_NONE.*?\} ui_quick_control_t;',header,re.S).group(0)+'\n'
 code+=re.search(r'typedef struct \{.*?\} ui_quick_menu_t;',header,re.S).group(0)+'\n'
-for name in ('ui_read_pixel','ui_image_bw_rect','icon_nibble','ui_draw_icon','ui_inset_rect'):
+code+='static void epd_draw_vline(int x,int y,int n,uint8_t c,uint8_t *fb){for(int i=0;i<n;++i)epd_draw_pixel(x,y+i,c,fb);}'
+code+=function('components/epdiy/src/epdiy.c','epd_fill_circle_helper')
+code+=function('main/ui/ui_kit.h','ui_control_gray')
+for name in ('ui_read_pixel','ui_image_bw_rect','icon_nibble','ui_draw_icon','ui_inset_rect',
+             'clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect',
+             'ui_fill_round_rect_raw','ui_fill_round_rect'):
     code+=function('main/ui/ui_kit.c',name)
 code+=body('main/ui/ui_quick_menu.c')+body('main/ui/ui_click_feedback.c')
 code+=r'''
+static uint8_t pixel(uint8_t *fb,int x,int y){return ui_read_pixel(fb,x,y)*17u;}
+static bool icon_edge(int x,int y){
+ for(int i=0;i<4;++i)if(abs(x-center_x(i))<=22&&abs(y-UI_QUICK_CIRCLE_Y)<=22)return true;
+ return abs(x-UI_QUICK_FL_ICON_CX)<=UI_QUICK_FL_ICON_SIZE/2&&
+  (abs(y-UI_QUICK_FL_BRI_CY)<=UI_QUICK_FL_ICON_SIZE/2||abs(y-UI_QUICK_FL_CCT_CY)<=UI_QUICK_FL_ICON_SIZE/2);
+}
 static void patterned(void){for(size_t i=0;i<BYTES;++i)frame[i]=(uint8_t)(i*13u+7u);memcpy(saved,frame,BYTES);}
 int main(void){
  for(rotation=0;rotation<4;++rotation){
@@ -96,12 +105,29 @@ int main(void){
      bool mask=y<layer_height&&layer_pixel(x,y,epd_rotated_display_width(),layer_height);
      uint8_t p=pixel(frame,x,y);
      if(!mask)assert(p==pixel(saved,x,y));
-     else grays+=p!=0&&p!=255;
+     else {if(!icon_edge(x,y))assert(p==0||p==204||p==255);grays+=p==204;}
     }
     assert(grays>1000);
     assert(ui_quick_menu_rect(&menu).height==layer_height);
-    memcpy(again,frame,BYTES);memcpy(frame,saved,BYTES);ui_quick_menu_draw(frame,&menu,true,false);assert(!memcmp(frame,again,BYTES));
+    memcpy(again,frame,BYTES);memset(frame,0x33,BYTES);ui_quick_menu_draw(frame,&menu,true,false);
+    for(int y=0;y<layer_height;++y)for(int x=0;x<epd_rotated_display_width();++x)
+     if(layer_pixel(x,y,epd_rotated_display_width(),layer_height))assert(pixel(frame,x,y)==pixel(again,x,y));
    }
+  }
+  // 图标固定，双向拖动仅改变黑白像素；松手重绘无变化且不越出脏区。
+  // Fixed icons leave only binary changes during bidirectional drags; release is idempotent and stays within dirty bounds.
+  ui_quick_menu_t slider={.frontlight=true,.fl_on=true};
+  memset(frame,255,BYTES);ui_quick_menu_draw(frame,&slider,false,false);
+  const uint8_t values[]={1,25,80,100,70,20,0};
+  for(int c=UI_QUICK_CTL_BRIGHTNESS;c<=UI_QUICK_CTL_CCT;++c)for(unsigned i=0;i<sizeof(values);++i){
+   memcpy(again,frame,BYTES);if(c==UI_QUICK_CTL_BRIGHTNESS)slider.fl_bri=values[i];else slider.fl_cct=values[i];
+   EpdRect dirty;assert(ui_quick_menu_draw_control(frame,&slider,c,&dirty));
+   for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
+    uint8_t a=pixel(again,x,y),b=pixel(frame,x,y);if(a==b)continue;
+    assert(x>=dirty.x&&x<dirty.x+dirty.width&&y>=dirty.y&&y<dirty.y+dirty.height);
+    assert((a==0&&b==255)||(a==255&&b==0));
+   }
+   memcpy(again,frame,BYTES);assert(ui_quick_menu_draw_control(frame,&slider,c,&dirty));assert(!memcmp(frame,again,BYTES));
   }
   for(fast=false;;fast=true){
    patterned();ui_click_feedback_begin(frame);
@@ -136,7 +162,7 @@ int main(void){
  assert(intermediate>100);
  memset(han+5,0,sizeof(han)-5);for(int y=0;y<72;++y)for(int x=0;x<72;++x)assert(!ui_hanzi_coverage(han,72,72,x,y));
  memset(han+5,255,sizeof(han)-5);assert(ui_hanzi_coverage(han,39,39,19,19)==255);
- puts("PASS: actual quick layer uses no allocations, grayscale in all three modes and deterministic masks across four rotations; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
+ puts("PASS: actual quick layer uses no allocations, fixed palette and underlay-independent masks in all three modes across four rotations; click cache <=4096 bytes restores exact pixels, ignores prefetch and tolerates OOM; Han scaling retains native bits and smooths enlarged edges");
  return 0;
 }
 '''

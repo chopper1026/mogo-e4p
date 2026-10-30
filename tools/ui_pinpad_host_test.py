@@ -41,6 +41,7 @@ size_t heap_caps_get_largest_free_block(int);
 #include "ttf_font.h"
 #include "epdiy.h"
 #include "ui_pinpad.h"
+#include "ui_kit.h"
 #include "assets/ui_icons.h"
 static struct {void *p;size_t bytes;} allocations[8192];
 static size_t live,capacity=8*1024*1024;
@@ -59,7 +60,6 @@ int epd_rotated_display_width(void){return 684;}int epd_rotated_display_height(v
 enum EpdRotation epd_get_rotation(void){return display_rotation;}
 typedef struct {uint16_t x,y;} Coord_xy;
 #define _swap_int(a,b) {int temp=a;a=b;b=temp;}
-static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'

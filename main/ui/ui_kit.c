@@ -110,6 +110,7 @@ void ui_draw_icon(
     uint8_t *framebuffer, int cx, int cy, int size, ui_icon_t icon, uint8_t gray
 ) {
     if (framebuffer == NULL || size < 1 || icon < 0 || icon >= UI_ICON_COUNT) return;
+    gray = ui_control_gray(gray);
     const uint8_t *mask = ui_icon_masks[icon];
     // Q16 定点：一个目标像素跨过多少源像素。掩模 72 像素，显示通常更小，所以是降采样。
     // Q16 fixed point: source pixels spanned by one target pixel. The 72 px mask is
@@ -141,7 +142,7 @@ void ui_draw_icon(
             const int background = ui_read_pixel(framebuffer, px, py) << 4;
             const int blended =
                 (background * (15 - cover) + (int)gray * cover + 7) / 15;
-            epd_draw_pixel(px, py, ui_contrast_gray((uint8_t)blended), framebuffer);
+            epd_draw_pixel(px, py, (uint8_t)blended, framebuffer);
         }
     }
 }
@@ -184,8 +185,8 @@ void ui_pager_draw(uint8_t *fb,const char *label,int page,int pages,bool key_mod
         // AnimateIcons end stops and chevrons; key mode outlines the glyph without circles or backing boxes.
         if(outlined)
             for(int dy=-2;dy<=2;++dy)for(int dx=-2;dx<=2;++dx)
-                if(dx*dx+dy*dy<=4)ui_draw_icon(fb,cx+dx,cy+dy,size,icon,enabled?0x10:0x90);
-        ui_draw_icon(fb,cx,cy,size,icon,outlined?(down?0x30:0xf0):(enabled?0:0xa0));
+                if(dx*dx+dy*dy<=4)ui_draw_icon(fb,cx+dx,cy+dy,size,icon,enabled?UI_GRAY_BLACK:UI_GRAY_LIGHT);
+        ui_draw_icon(fb,cx,cy,size,icon,outlined?(down?UI_GRAY_BLACK:UI_GRAY_WHITE):(enabled?UI_GRAY_BLACK:UI_GRAY_LIGHT));
     }
 }
 
@@ -224,8 +225,9 @@ static void draw_frosted(uint8_t *fb, EpdRect rect, bool pocket) {
             for (int x = 0; x < rect.width; ++x)
                 if ((x + y) % 4 == 0) epd_draw_pixel(rect.x + x, rect.y + y, 0xb0, fb);
     }
-    ui_hairline(fb, rect.y + 1, rect.x + 8, rect.width - 16, 0xe0);
-    ui_hairline(fb, rect.y + rect.height - 2, rect.x + 8, rect.width - 16, pocket ? 0x90 : 0x60);
+    ui_fill_rect_fast((EpdRect){rect.x + 8, rect.y + 1, rect.width - 16, 1}, ui_contrast_gray(0xe0), fb);
+    ui_fill_rect_fast((EpdRect){rect.x + 8, rect.y + rect.height - 2, rect.width - 16, 1},
+                      ui_contrast_gray(pocket ? 0x90 : 0x60), fb);
     epd_draw_line(rect.x, rect.y + 6, rect.x, rect.y + rect.height - 7, 0xa0, fb);
     epd_draw_line(rect.x + rect.width - 1, rect.y + 6,
                   rect.x + rect.width - 1, rect.y + rect.height - 7, 0xa0, fb);
@@ -358,7 +360,7 @@ void ui_text_fixed_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *
                           enum EpdFontFlags align, uint8_t gray) {
     if (!fb || !text || !*text || px <= 0) return;
     int above = 0, below = 0;
-    uint8_t ink = ui_contrast_gray(gray) >> 4;
+    uint8_t ink = gray >= 0xF0 ? UI_INK_WHITE : UI_INK_BLACK;
     if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text)) {
         ui_font_measure_line_px(px, text, &above, &below);
         ui_font_draw_text_px(fb, x, center_y + (above-below)/2, px, text, align, ink, UI_INK_WHITE, false);
@@ -378,7 +380,7 @@ void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const cha
                                const char *font_sample,enum EpdFontFlags align,uint8_t gray,uint8_t background) {
     if(!fb||!text||!*text||px<=0)return;
     int above=0,below=0;
-    uint8_t ink=ui_contrast_gray(gray)>>4,back=ui_contrast_gray(background)>>4;
+    uint8_t ink=gray>=0xF0?UI_INK_WHITE:UI_INK_BLACK,back=ui_control_gray(background)>>4;
     if((!s_system_ttf||ttf_font_is_builtin())&&ui_font_has_text(font_sample?font_sample:text)) {
         ui_font_measure_line_px(px,text,&above,&below);
         ui_font_draw_text_px(fb,x,center_y+(above-below)/2,px,text,align,ink,back,false);
@@ -663,12 +665,12 @@ void ui_draw_round_rect_raw(
     }
 }
 
-// 对比度重映射包装：普通 UI 灰阶跟系统对比度走；波形锚点灰阶必须用 _raw 直写。
-// Contrast-remap wrapper: ordinary UI grays follow system contrast; waveform-anchored grays must use the _raw variant.
+// 控件目标归入固定调色板；图片与亚克力继续走原始绘图接口。
+// Map control targets to the fixed palette; artwork and acrylic retain raw drawing interfaces.
 void ui_draw_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 ) {
-    ui_draw_round_rect_raw(framebuffer, rect, radius, ui_contrast_gray(color));
+    ui_draw_round_rect_raw(framebuffer, rect, radius, ui_control_gray(color));
 }
 
 EpdRect ui_inset_rect(EpdRect r, int d) {
@@ -681,9 +683,9 @@ EpdRect ui_inset_rect(EpdRect r, int d) {
 }
 
 void ui_draw_control_frame(uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color) {
-    // 在字形/封面量化前把结构线限制为深灰；双像素线保持原矩形内边界，不扩展刷新范围。
-    // Keep structural ink dark before glyph/cover quantization; two pixels stay inside the original frame and refresh bounds.
-    const uint8_t ink = color > 0x50 ? 0x50 : color;
+    // 双像素边框使用控件调色板，保持原矩形内边界。/ Two-pixel frames use the control palette within the original bounds.
+    (void)color;
+    const uint8_t ink = UI_GRAY_BLACK;
     ui_draw_round_rect(framebuffer, rect, radius, ink);
     if (rect.width > 2 && rect.height > 2)
         ui_draw_round_rect(framebuffer, ui_inset_rect(rect, 1), radius > 0 ? radius - 1 : 0, ink);
@@ -691,7 +693,8 @@ void ui_draw_control_frame(uint8_t* framebuffer, EpdRect rect, int radius, uint8
 
 void ui_draw_separator(uint8_t* framebuffer, int y, int x, int width, uint8_t color) {
     if (width <= 0) return;
-    ui_fill_rect_fast((EpdRect){x, y, width, 2}, ui_contrast_gray(color > 0x60 ? 0x60 : color), framebuffer);
+    (void)color;
+    ui_fill_rect_fast((EpdRect){x, y, width, 2}, UI_GRAY_BLACK, framebuffer);
 }
 
 void ui_draw_selected_round_rect(
@@ -744,13 +747,13 @@ void ui_fill_round_rect_raw(
     );
 }
 
-// 对比度重映射包装，理由同 ui_draw_round_rect_raw。
-// Contrast-remap wrapper; see ui_draw_round_rect_raw for why _raw exists.
+// 控件填充采用固定调色板，保留原始灰阶接口供图片使用。
+// Control fills use the fixed palette; raw artwork retains its separate interface.
 void ui_fill_round_rect(
     uint8_t* framebuffer, EpdRect rect, int radius, uint8_t color
 ) {
     if (rect.width <= 0 || rect.height <= 0) return;
-    ui_fill_round_rect_raw(framebuffer, rect, radius, ui_contrast_gray(color));
+    ui_fill_round_rect_raw(framebuffer, rect, radius, ui_control_gray(color));
 }
 
 bool ui_rect_hit(EpdRect rect, uint16_t x, uint16_t y) {
@@ -826,7 +829,7 @@ EpdRect ui_content_refresh_area(void) {
 }
 
 void ui_hairline(uint8_t* framebuffer, int y, int x, int w, uint8_t color) {
-    color = ui_contrast_gray(color);
+    color = ui_control_gray(color);
     ui_fill_rect_fast(
         (EpdRect){ .x = x, .y = y, .width = w, .height = 1 }, color, framebuffer
     );

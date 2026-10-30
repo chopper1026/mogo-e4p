@@ -14,7 +14,9 @@ from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
 # 334e224的3136组状态：两面板的文字、坐标、颜色、图标及绘制顺序，另含无效矩形与开关。
 # 3136 states from 334e224: text, geometry, colors, icons and call order for both sheets, plus invalid rectangles and switches.
-EXPECTED = 'e7505b2b4d4f68496928912eb860e0f127fe3b926351886d3f3bbb6a3e116625'
+LEGACY_EXPECTED = 'e7505b2b4d4f68496928912eb860e0f127fe3b926351886d3f3bbb6a3e116625'
+EXPECTED = '875447a14c20415a63551c4a01f77a946781dfbc3a88c385d694ad202e6537fa'
+LAYOUT_EXPECTED = 'f4cd5f17b9dff9276e437339aa958bccb80b22b7bc93c025f04ecc6b15475bea'
 
 
 def main():
@@ -44,7 +46,13 @@ def main():
         output = subprocess.check_output([str(folder / 'test')])
         digest = hashlib.sha256(output).hexdigest()
         print(f'reader settings: {len(output.splitlines())} drawing records, SHA256 {digest}')
-        assert digest == EXPECTED, f'drawing order or values changed: {digest}'
+        assert digest == (LEGACY_EXPECTED if legacy else EXPECTED), f'drawing order or values changed: {digest}'
+        # 独立保留原布局、文字与顺序，只排除绘图颜色末字段。
+        # Independently retain original geometry, text and order, excluding only drawing colors.
+        colored = {b'round', b'frame', b'rect', b'icon', b'hairline', b'fill_circle', b'circle'}
+        layout = b'\n'.join(line.rsplit(b' ', 1)[0] if line.split(b' ', 1)[0] in colored
+                            else line for line in output.splitlines()) + b'\n'
+        assert hashlib.sha256(layout).hexdigest() == LAYOUT_EXPECTED
     return 0
 
 

@@ -19,7 +19,7 @@ unit=r'''
 #include "assets/ui_icons.h"
 #define FILE_ROWS 9
 typedef struct {int x,y,width,height;} EpdRect;
-enum {EPD_DRAW_ALIGN_CENTER,UI_GRAY_WHITE=255};
+enum {EPD_DRAW_ALIGN_CENTER,UI_GRAY_WHITE=255,UI_GRAY_BLACK=0,UI_GRAY_LIGHT=0xc0};
 enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE};
 typedef int app_redraw_t;
 typedef struct {uint8_t *fb;void *request_app;} app_ctx_t;
@@ -31,7 +31,6 @@ static char drawn_label[96];
 static int s_count,s_folder,s_page,s_view,s_pager_pressed=-1;
 static bool s_scan_pending,s_pager_paint_pending;
 static uint8_t ui_read_pixel(const uint8_t *fb,int x,int y){assert(x>=0&&x<684&&y>=0&&y<1216);return fb[y*684+x]>>4;}
-static uint8_t ui_contrast_gray(uint8_t gray){return gray&240;}
 static void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=36&&x<648&&y>=1006&&y<1056);fb[y*684+x]=c;}
 static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *text,int align,bool inv){
  (void)fb;assert(r.x==212&&r.y==1006&&r.width==260&&r.height==50&&px==21&&align==EPD_DRAW_ALIGN_CENTER&&!inv);
@@ -40,6 +39,7 @@ static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *text,int align,
 static void ui_fill_rect_fast(EpdRect r,int c,uint8_t *fb){assert(r.y>=1006&&r.y+r.height<=1056);for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)fb[y*684+x]=c;}
 '''
 header=(root/'main/ui/ui_kit.h').read_text()
+unit+=function('ui_control_gray',root/'main/ui/ui_kit.h')+'\n'
 unit+=re.search(r'enum \{ UI_PAGER_NONE=[^}]+\};',header)[0]+'\n'
 for name in ('ui_rect_hit','icon_nibble','ui_draw_icon','ui_pager_area','ui_pager_rect','ui_pager_hit','ui_pager_target','ui_pager_draw'):
     unit+=function(name,kit)+'\n'

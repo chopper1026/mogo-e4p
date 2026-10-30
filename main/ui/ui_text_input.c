@@ -106,7 +106,7 @@ void ui_text_input_draw(uint8_t *fb, const ui_text_edit_t *edit, EpdRect field,
                                  suffix, EPD_DRAW_ALIGN_LEFT, false);
     }
     int divider = field.x + field.width - 2 * INPUT_ARROW_WIDTH;
-    epd_fill_rect((EpdRect){divider, field.y + 12, 1, field.height - 24}, 0x70, fb);
+    epd_fill_rect((EpdRect){divider, field.y + 12, 1, field.height - 24}, UI_GRAY_BLACK, fb);
     for (int i = 0; i < 2; ++i) {
         int center = divider + INPUT_ARROW_WIDTH * i + INPUT_ARROW_WIDTH / 2;
         int tip = center + (i ? 5 : -5), tail = center + (i ? -5 : 5);

@@ -132,7 +132,7 @@ static void toc_pill(uint8_t *fb, EpdRect rect, const char *text, int px, bool s
 void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
                      size_t current, int page, const char *message) {
     ui_clear_page(fb);
-    ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, 0xe0, fb);
+    ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, UI_GRAY_WHITE, fb);
     ui_nav_status(fb);
     ui_nav_back(fb, TOC_LEFT, 79);
     ui_text_box(fb,(EpdRect){120,79,444,72},34,"目录",EPD_DRAW_ALIGN_CENTER,false);
@@ -144,7 +144,7 @@ void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
     char total[48];
     snprintf(total, sizeof(total), "%u 节", (unsigned)chapters);
     ui_text_box(fb,(EpdRect){482,160,166,48},23,total,EPD_DRAW_ALIGN_RIGHT,false);
-    ui_fill_rect_fast((EpdRect){TOC_LEFT, 213, TOC_RIGHT - TOC_LEFT, 2}, 0x68, fb);
+    ui_fill_rect_fast((EpdRect){TOC_LEFT, 213, TOC_RIGHT - TOC_LEFT, 2}, UI_GRAY_BLACK, fb);
 
     if (message && *message) {
         char info[160];one_line(info,sizeof(info),message);fit_line(info,ui_text_effective_px(23),540);
@@ -210,7 +210,7 @@ void book_toc_render_jump(uint8_t *fb, size_t chapters, int percent) {
     if (width) ui_fill_round_rect(fb, (EpdRect){92, 637, width, 8}, 4, 0x40);
     int knob = 92 + width;
     epd_fill_circle(knob, 641, 25, UI_GRAY_WHITE, fb);
-    epd_draw_circle(knob, 641, 25, 0x40, fb);
+    epd_draw_circle(knob, 641, 25, UI_GRAY_BLACK, fb);
     static const char *ticks[] = {"0", "25", "50", "75", "100%"};
     for (int i = 0; i < 5; ++i)
         ui_text_box(fb,(EpdRect){(92 + i * 125)-250,678,500,44},24,ticks[i],EPD_DRAW_ALIGN_CENTER,false);

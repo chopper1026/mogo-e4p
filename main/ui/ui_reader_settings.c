@@ -33,7 +33,7 @@ void ui_reader_settings_switch(uint8_t *fb, EpdRect track, bool on) {
     ui_fill_round_rect(fb, track, 19, on ? 0x38 : 0xc4);
     int cx = track.x + (on ? 49 : 20);
     epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+    epd_draw_circle(cx, track.y + 19, 16, UI_GRAY_BLACK, fb);
 }
 
 static void draw_reading_card(uint8_t *fb, unsigned scale, int index, const char *title,
@@ -104,7 +104,7 @@ void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical) {
             draw_centered_label(fb, 155, diagram.y + 36, 21, "上一页", false);
             draw_centered_label(fb, 155, diagram.y + 147, 21, "下一页", false);
         } else {
-            ui_fill_rect_fast((EpdRect){155, diagram.y + 1, 1, 218}, 0x58, fb);
+            ui_fill_rect_fast((EpdRect){155, diagram.y + 1, 1, 218}, UI_GRAY_BLACK, fb);
             ui_text_box(fb,(EpdRect){110-39,diagram.y+94-15,78,30},21,"上一",EPD_DRAW_ALIGN_CENTER,false);
             ui_text_box(fb,(EpdRect){110-39,diagram.y+126-15,78,30},21,"页",EPD_DRAW_ALIGN_CENTER,false);
             ui_text_box(fb,(EpdRect){201-39,diagram.y+94-15,78,30},21,"下一",EPD_DRAW_ALIGN_CENTER,false);
@@ -114,7 +114,7 @@ void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical) {
         ui_text_box(fb,(EpdRect){274,y+112,350,44},23,i ? "上 1/3：上一页" : "左 1/2：上一页",EPD_DRAW_ALIGN_LEFT,false);
         ui_text_box(fb,(EpdRect){274,y+158,350,44},23,i ? "下 2/3：下一页" : "右 1/2：下一页",EPD_DRAW_ALIGN_LEFT,false);
         ui_text_box(fb,(EpdRect){274,y+213,350,44},21,"左右滑动均可翻页",EPD_DRAW_ALIGN_LEFT,false);
-        epd_draw_circle(610, y + 61, 12, 0x38, fb);
+        epd_draw_circle(610, y + 61, 12, UI_GRAY_BLACK, fb);
         if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
     }
     draw_centered_label(fb, 342, 1051, 21, "工具栏「全屏」按钮切换全屏", false);

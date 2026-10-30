@@ -906,7 +906,7 @@ static void setting_toggle(uint8_t *fb, int y, const char *title, const char *de
     ui_fill_round_rect(fb, track, 19, active ? 0x58 : 0xc4);
     int cx = active ? track.x + 49 : track.x + 20;
     epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+    epd_draw_circle(cx, track.y + 19, 16, UI_GRAY_BLACK, fb);
 }
 
 static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
@@ -915,11 +915,11 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_fill_round_rect(fb, (EpdRect){68,top,548,170}, 12, UI_GRAY_WHITE);
         for (int i=0;i<3;++i) {
             int y=top+9+i*52;
-            ui_fill_rect_fast((EpdRect){86,y,31,43},i==1?0x80:0x40,fb);
+            ui_fill_rect_fast((EpdRect){86,y,31,43},i==1?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
             ui_fill_rect_fast((EpdRect){137,y+6,218,3},0,fb);
-            ui_fill_rect_fast((EpdRect){137,y+19,84,2},0x70,fb);
-            ui_fill_rect_fast((EpdRect){137,y+34,435,4},0xd0,fb);
-            ui_fill_rect_fast((EpdRect){137,y+34,120+i*75,4},0x40,fb);
+            ui_fill_rect_fast((EpdRect){137,y+19,84,2},UI_GRAY_BLACK,fb);
+            ui_fill_rect_fast((EpdRect){137,y+34,435,4},UI_GRAY_LIGHT,fb);
+            ui_fill_rect_fast((EpdRect){137,y+34,120+i*75,4},UI_GRAY_BLACK,fb);
         }
         return;
     }
@@ -927,7 +927,7 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
     for (int i = 0; i < 3; ++i) {
         int x = left + 20 + i * 155;
         EpdRect cover = {x, top, 116, 145};
-        ui_fill_rect_fast(cover, i == 1 ? 0x60 : i == 2 ? 0xa0 : 0x40, fb);
+        ui_fill_rect_fast(cover, i == 1 ? UI_GRAY_BLACK : i == 2 ? UI_GRAY_LIGHT : UI_GRAY_BLACK, fb);
         ui_draw_round_rect(fb, cover, 1, 0x30);
         ui_draw_round_rect(fb, (EpdRect){x + 7, top + 7, 102, 130}, 1, i == 1 ? 0xc0 : 0xe0);
         ui_hairline(fb, top + 47, x + 28, 60, i == 1 ? 0xc0 : 0xe0);
@@ -935,7 +935,7 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_hairline(fb, top + 111, x + 44, 28, i == 1 ? 0xc0 : 0xe0);
     }
     if (style == 1) {
-        ui_fill_rect_fast((EpdRect){left, top + 143, 486, 16}, 0x30, fb);
+        ui_fill_rect_fast((EpdRect){left, top + 143, 486, 16}, UI_GRAY_BLACK, fb);
         ui_hairline(fb, top + 143, left, 486, 0x80);
     } else if (style == 2) {
         ui_draw_acrylic_guard(fb, (EpdRect){left, top + 94, 486, 70});

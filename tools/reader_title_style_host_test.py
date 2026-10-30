@@ -102,7 +102,7 @@ typedef struct {uint16_t x,y;} Coord_xy;
 #define UI_MARGIN 40
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_BLACK 0
-#define UI_GRAY_LIGHT 224
+#define UI_GRAY_LIGHT 192
 #define UI_INK_BLACK 0
 #define UI_INK_WHITE 15
 // 宿主只走 TTF：内建位图字体分支换成同尺寸的真字体调用。
@@ -123,6 +123,7 @@ static char s_chapter_heading_title[128],s_chapter_heading_label[32];
 uint8_t ui_contrast_gray(uint8_t gray);
 void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
 '''
+    unit += function('ui_control_gray',ROOT/'main/ui/ui_kit.h')+'\n'
     for n in ('_rotate', 'epd_draw_pixel', 'epd_get_pixel', 'epd_draw_hline', 'epd_draw_vline',
               'epd_fill_rect', 'epd_draw_circle', 'epd_fill_circle_helper', 'epd_fill_circle',
               'epd_write_line', 'epd_draw_line'):

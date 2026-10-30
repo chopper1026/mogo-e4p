@@ -175,17 +175,8 @@ static void quick_toggle_wifi(void) {
     }
 }
 
-// 前光事件只动它自己的控件：开关点按同时展开或收起胶囊滑杆，层高变化，走整层
-// 重排并按新旧高度并集推 GL16；拖动帧与松手提交都走胶囊拖动表 DU，松手不做
-// 两段式定稿（用户 2026-10-25 决定：左滑暴露带终态为灰，洗白段白闪约 200ms，
-// 拖动近似可接受），随后才写 NVS。
-// A frontlight event touches only its own control: a switch tap also expands or
-// collapses the capsule sliders, so the layer height changes and the whole layer
-// is re-composited and pushed with GL16 over the height union; drag frames and
-// the release commit both drive the capsule drag table's DU, and the release no
-// longer settles in two stages (user decision 2026-10-25: the left-swipe band
-// ends gray, so the wash flashed white for ~200 ms, and the drag approximation
-// is acceptable) — before NVS is written.
+// 前光开关改变层高时整层重绘；黑白滑杆拖动与松手共用短 DU 差分，不追加定稿。
+// Repaint the layer when the light switch changes its height; binary slider motion and release share short DU differences without a settle pass.
 static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
                                      const ui_quick_event_t *event) {
     EpdRect dirty;
@@ -195,22 +186,9 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
         return;
     }
     if (event->commit) {
-        // 松手不再洗白定稿：白表会把终态为灰的左滑暴露带打成 18 相饱和白再落
-        // 回底灰，肉眼可见地白闪一次。拖动帧本来就是真实差分，普通松手时 fb
-        // 与阴影一致，这里按拖动表补推一次终态即可——差分为空、一相都不驱动；
-        // 合并回放的积压批次则由这次推送把终态落上屏。拖动近似的落灰误差留在
-        // 面板上，由下次开层的整层 GL16 与周期 GC16 归一。
-        // The release no longer whitens and settles: the white table drove the
-        // left-swipe band (whose final state is gray) through 18 phases of
-        // saturated white before landing the body gray again — a visible flash.
-        // Drag frames are already real differentials and an ordinary release
-        // leaves fb and shadow agreeing, so one final drag-table push suffices
-        // — the diff is empty and drives nothing; a coalesced replay batch
-        // lands its final row through this push. The drag's approximate landing
-        // stays on the panel until the next layer-open GL16 or periodic GC16
-        // normalizes it.
+        // 松手只提交积压终态；已显示时差分为空。/ Release submits only a coalesced final state; an already displayed state has no differences.
         if (ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) {
-            error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
+            error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl, error);
         }
         // 提交完成，脏范围收回当前档位；跟踪保留，便于恢复定稿时直接使用。
@@ -222,12 +200,8 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
         }
     } else {
         if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
-        // 拖动帧是 DU 差分，必须显式扩脏行/脏列：胶囊上下边缘每次只变一两像素，
-        // 不扩边会留下浅残影；中途与松手都接受拖动表的近似结果。
-        // Drag frames are DU differentials and must dilate dirty rows/columns:
-        // the capsule's top and bottom edges change by a pixel or two per frame.
-        // Mid-drag and release both accept the drag table's approximation.
-        error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
+        // 固定图标与胶囊轮廓保持，只有黑白填充边界改变。/ Hold icons and capsule outlines; only the binary fill boundary changes.
+        error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl, error);
     }
     if (error != EPD_DRAW_SUCCESS) {
