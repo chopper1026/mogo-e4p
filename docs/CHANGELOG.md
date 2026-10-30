@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.1 · 2026-10-30
 
+- 本地调整（未发布）：阅读页眉恢复默认裁剪 GL16，普通页脚恢复短 DU，换章和插图页脚保留默认 GL16 清理，全屏进度恢复默认 GL16；保留正文优先与状态随翻页更新。实际速度、墨度和残影待实屏验证。
+  Local change (unpublished): restore trimmed default GL16 for reader headers and full-screen progress, short DU for ordinary footers, and default GL16 cleanup for chapter/illustration footers. Keep body-first presentation and status updates with turns. Actual latency, ink density and ghosting await panel verification.
+
 - 按用户要求将当前交付版本设为1.0.1，汇总下列本地测试中的 TXT 章节目录、字体列表、电源键、蓝牙、电量及界面调整；阅读状态随翻页更新且正文优先输出。屏幕残影、变淡及翻页耗时仍需真机验证。
   Set the delivery version to 1.0.1 as requested, including the TXT chapter index, font list, power key, Bluetooth, battery and UI changes recorded below. Reader status updates with page turns and the body presents first. Ghosting, fading and turn latency still require device verification.
 

@@ -100,16 +100,19 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
     if (err == EPD_DRAW_SUCCESS && request->refresh == READER_PRESENT_AREA &&
         request->reader_body && request->prior_reader && !request->cleanup && !request->feedback) {
         if (request->footer_pending) {
-            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT);
+            // 恢复旧页脚：普通翻页走短 DU，换章与插图帧走默认 GL16 清理。
+            // Restore the legacy footer: short DU for ordinary turns, default GL16 for chapters and illustration frames.
+            err = display_refresh_area(hl, request->footer_strong || request->image_gray_refresh
+                ? DISPLAY_REFRESH_DETAIL : DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT);
             if (err != EPD_DRAW_SUCCESS) goto done;
             result.footer_updated = true;
         }
         if (request->fullscreen) {
-            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->progress_area, DISPLAY_REFRESH_DEFAULT);
+            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
             if (err != EPD_DRAW_SUCCESS) goto done;
         }
         if (request->status_pending) {
-            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_BODY, request->status_area, DISPLAY_REFRESH_DEFAULT);
+            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->status_area, DISPLAY_REFRESH_DEFAULT);
             if (err != EPD_DRAW_SUCCESS) goto done;
             result.status_updated = true;
         }

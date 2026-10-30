@@ -13,9 +13,10 @@
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
  * 普通翻页优先刷新正文，再更新页脚和有变化的顶部；手动与周期清残影共用整屏 GC16。
  * Ordinary turns present the body before the footer and changed status; manual and periodic cleanup share whole-screen GC16.
- * 用户 2026-10-30 修订：时间与电量随翻页更新，静置不单刷顶部；顶部和页脚复用阅读 GL16，正文优先，避免等待顶底栏拖慢可读内容呈现。
+ * 用户 2026-10-30 修订：时间与电量随翻页更新，静置不单刷顶部；为缩短顶底栏刷新，顶部恢复默认 GL16，普通页脚恢复短 DU，换章与插图页脚保留默认 GL16 清理，正文仍优先。
  * User revision 2026-10-30: update time/power with page turns, without idle top-band output;
- * reuse reader GL16 for status/footer and present the body first so chrome does not delay readable content.
+ * shorten chrome output with default GL16 status and short-DU ordinary footers, retain default GL16
+ * cleanup for chapter/illustration footers, and keep body-first presentation.
  * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换。
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
@@ -3609,6 +3610,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
         .water_turn_pending = s_water_turn_pending,
         .status_pending = status_pending, .footer_pending = s_reader_footer_pending,
+        .footer_strong = s_reader_footer_strong,
         .hold_gray = normalize_hold_gray(ctx),
     };
     reader_present_result_t output = reader_present_output(ctx->hl, &output_request);
@@ -4559,8 +4561,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // reading backgrounds qualify; image pages stay excluded.
     s_water_turn_pending = effects.water;
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
-    // 换章标记仅保留日志区分；局部翻页页脚统一阅读 GL16，整屏清理不重复输出页脚。
-    // Keep the chapter marker for logs; partial-turn footers share reader GL16 and full cleanup never replays the footer.
+    // 换章页脚恢复默认 GL16 清理；普通页脚仍走短 DU，整屏清理不重复输出页脚。
+    // Restore default GL16 cleanup for chapter footers; ordinary footers use short DU and full cleanup never replays them.
     s_reader_footer_strong = effects.footer_strong;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }

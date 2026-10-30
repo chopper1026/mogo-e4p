@@ -41,6 +41,7 @@ typedef struct {
     bool water_turn_pending; ///< 已允许水波纹翻页 / Approved water turn
     bool status_pending; ///< 本次翻页顶部状态有变化 / Top status changed for this turn
     bool footer_pending; ///< 还需更新页脚 / Footer still needs output
+    bool footer_strong; ///< 换章页脚使用旧 GL16 清理 / Use legacy GL16 cleanup for chapter footers
     bool hold_gray; ///< 归一时保持图片灰阶 / Hold picture grays during normalization
 } reader_present_request_t;
 

@@ -111,12 +111,18 @@ static void expect(size_t i, enum call_kind kind, const EpdWaveform *wave, int m
     assert(memcmp(&calls[i].area, &area, sizeof(area)) == 0);
 }
 int main(void) {
-    // 正文必须先输出，再用阅读 GL16 更新页脚。/ Present the body before the reader GL16 footer.
+    // 正文必须先输出，再用旧短 DU 更新普通页脚。/ Present the body before the legacy short-DU footer.
     reader_present_request_t probe = reset(); probe.footer_pending = true;
     reader_present_result_t probe_out = reader_present_output(&hl, &probe);
     assert(probe_out.error == EPD_DRAW_SUCCESS && probe_out.footer_updated && count == 2);
     expect(0, DIFF, &text, MODE_GL16, probe.area);
-    expect(1, DIFF, &page, MODE_GL16, probe.footer_area);
+    expect(1, AREA, &E0470_FOLLOW_WAVEFORM, MODE_DU, probe.footer_area);
+    probe = reset(); probe.footer_pending = probe.footer_strong = probe.status_pending = true;
+    probe_out = reader_present_output(&hl, &probe);
+    assert(probe_out.error == EPD_DRAW_SUCCESS && probe_out.footer_updated && probe_out.status_updated && count == 3);
+    expect(0, DIFF, &text, MODE_GL16, probe.area);
+    expect(1, DIFF, &E0470_WAVEFORM, MODE_GL16, probe.footer_area);
+    expect(2, DIFF, &E0470_WAVEFORM, MODE_GL16, probe.status_area);
     reader_present_request_t r = reset();
     reader_present_result_t out = reader_present_output(&hl, &r);
     assert(out.error == 0 && !out.tools_band && !out.footer_updated && count == 1);
@@ -124,7 +130,7 @@ int main(void) {
     r = reset(); r.fullscreen = true;
     reader_present_output(&hl, &r);
     assert(count == 2); expect(0, DIFF, &text, MODE_GL16, r.area);
-    expect(1, DIFF, &page, MODE_GL16, r.progress_area);
+    expect(1, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
     r = reset(); r.turn_pending = false; r.fullscreen = true;
     reader_present_output(&hl, &r); expect(0, DIFF, &page, MODE_GL16, r.area);
     r = reset(); r.turn_pending = false;
@@ -135,21 +141,24 @@ int main(void) {
     // 正文先输出，随后页脚或进度，顶部最后；背景、状态、全屏及两种效果共用顺序。
     // Body precedes footer or progress, with status last, across backgrounds, status changes, full screen and both effects.
     for (int bg = 0; bg < 2; ++bg) for (int full = 0; full < 2; ++full)
-    for (int water = 0; water < 2; ++water) for (int status = 0; status < 2; ++status) {
+    for (int water = 0; water < 2; ++water) for (int status = 0; status < 2; ++status)
+    for (int strong = 0; strong < 2; ++strong) {
         r = reset(); use_background = bg;
         r.fullscreen = full; r.water_turn_pending = water;
         r.status_pending = status; r.footer_pending = !full;
+        r.footer_strong = strong;
         out = reader_present_output(&hl, &r);
         assert(out.error == 0 && out.status_updated == !!status && out.footer_updated == !full);
         size_t i = 0;
-        const EpdWaveform *chrome = bg ? &background : &page;
         if (water) {
             assert(calls[i++].kind == TICK);
             expect(i++, WATER, NULL, E0470_TURN_BTT, r.area);
             assert(calls[i++].kind == TICK && tick == 13579);
         } else expect(i++, DIFF, &text, MODE_GL16, r.area);
-        expect(i++, DIFF, chrome, MODE_GL16, full ? r.progress_area : r.footer_area);
-        if (status) expect(i++, DIFF, chrome, MODE_GL16, r.status_area);
+        if (full) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
+        else if (strong) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.footer_area);
+        else expect(i++, AREA, &E0470_FOLLOW_WAVEFORM, MODE_DU, r.footer_area);
+        if (status) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
         assert(i == count);
     }
     // 正文失败不刷顶底栏；所有失败都短路并保留错误，水波纹始终恢复节拍。
@@ -176,12 +185,11 @@ int main(void) {
         assert(out.error == (failure < 0 ? 0 : EPD_DRAW_OTHER_ERROR));
         assert(out.status_updated == (failure < 0));
         assert(out.footer_updated == (failure < 0 || failure > 1));
-        const EpdWaveform *chrome = bg ? &background : &page;
         expect(0, water ? DIFF : AREA, water ? &image : &E0470_FULL_WAVEFORM,
                water ? MODE_GL16 : MODE_GC16, r.body_area);
-        if (count > 1) expect(1, DIFF, chrome, MODE_GL16, r.footer_area);
-        if (count > 2) expect(2, DIFF, chrome, MODE_GL16, r.progress_area);
-        if (count > 3) expect(3, DIFF, chrome, MODE_GL16, r.status_area);
+        if (count > 1) expect(1, DIFF, &E0470_WAVEFORM, MODE_GL16, r.footer_area);
+        if (count > 2) expect(2, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
+        if (count > 3) expect(3, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
     }
     r = reset(); r.image_gray_refresh = r.image_page = r.water_effect = true; r.prior_reader = false;
     reader_present_output(&hl, &r); assert(count == 1); expect(0, WHOLE_DIFF, &image, MODE_GL16, none);

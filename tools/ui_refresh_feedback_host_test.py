@@ -243,7 +243,7 @@ int main(void){
  trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
  assert(trace_count==2&&trace_route[0]==DIFF&&trace_mode[0]==MODE_GL16&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
  assert(trace_area[0].y==reader_area().y&&trace_area[0].height==reader_area().height);
- assert(trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
+ assert(trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
  assert(trace_area[1].y==progress_rect().y&&!s_reader_turn_pending);
  for(int full=0;full<2;++full){
    s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
@@ -311,15 +311,17 @@ int main(void){
    bool eligible=hidden||(from==0&&to==0);
    assert(s_reader_fullscreen==full && s_reader_panel==READER_PANEL_NONE);
    if (!full) {
-     // 翻页保持窗口化，正文先输出文字或插图，随后阅读 GL16 页脚。
-     // Turns keep windowed mode, presenting the text/image body before the reader GL16 footer.
+     // 翻页保持窗口化，正文后普通页脚走短 DU，插图页脚保留默认 GL16。
+     // Windowed turns use short-DU footers after the body, retaining default GL16 for illustration footers.
      assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
      trace_count=0;present(&ctx,redraw);
      if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
      else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
      else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==AREA);
      assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
-     assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
+     assert(trace_count==2&&trace_route[1]==(to&&!hidden?DIFF:AREA));
+     assert(trace_mode[1]==(to&&!hidden?MODE_GL16:MODE_DU));
+     assert(trace_wave[1]==(to&&!hidden?E0470_WAVEFORM:E0470_FOLLOW_WAVEFORM));
      continue;
    }
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
@@ -329,8 +331,10 @@ int main(void){
    else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==(full?DIFF:AREA));
    assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
  }
- s_reader_fullscreen=true;test_hide_images=false;
- for(int from=0;from<3;++from)for(int to=0;to<3;++to)for(int dir=-1;dir<=1;dir+=2){
+ test_hide_images=false;
+ for(int full=0;full<2;++full)for(int from=0;from<3;++from)
+ for(int to=0;to<3;++to)for(int dir=-1;dir<=1;dir+=2){
+   s_reader_fullscreen=full;
    int old=dir>0?0:1,new=1-old;
    test_types[old][dir>0?1:0]=from;test_types[new][dir>0?0:1]=to;
    s_chapter=old;s_page=dir>0?1:0;trace_count=0;
@@ -339,7 +343,9 @@ int main(void){
    assert(s_chapter==(unsigned)new&&s_reader_turn_pending==(from==0&&to==0));
    trace_count=0;present(&ctx,redraw);
    assert((trace_wave[0]!=E0470_TEXTTURN_WAVEFORM&&trace_wave[0]!=E0470_SOFT_TEXTTURN_WAVEFORM)||(from==0&&to==0));
+   assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
  }
+ s_reader_fullscreen=true;
  // 失败推屏、面板及离开阅读会失效旧基准；下一次正常绘制后恢复。
  // Failed presents, panels and leaving reading invalidate history; a successful body restores it.
  memset(test_types,0,sizeof(test_types));s_chapter=s_page=0;
@@ -364,7 +370,7 @@ int main(void){
  test_full_pages=0;test_effect=0;s_page=0;test_types[0][0]=1;test_image.gray=NULL;
  trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));assert(!s_reader_text_frame);
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending);
- puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 18 bidirectional chapter transitions, failed image/display/load guards and actual cleanup/water turns");
+ puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 36 bidirectional chapter transitions with GL16 footer/progress, failed image/display/load guards and actual cleanup/water turns");
 }
 '''
 
