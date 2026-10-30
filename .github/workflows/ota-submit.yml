@@ -2,43 +2,32 @@ name: Build and submit OTA firmware
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to retry without moving it
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
-  host-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Host regression tests
-        shell: bash
-        run: |
-          python3 tools/run_reader_baseline.py
-          python3 tools/boot_panel_actions_host_test.py
-          python3 tools/lock_pin_host_test.py
-          python3 tools/lock_screen_host_test.py
-          python3 tools/reader_spacing_host_test.py
-          python3 tools/test_book_toc.py
-          python3 tools/vertical_punctuation_host_test.py
-          python3 tools/vertical_number_host_test.py
-          python3 tools/test_platform_submission.py
-          mkdir -p build/book-tests
-          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/reader_session.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
-          build/book-tests/layout
   release:
-    needs: host-tests
     runs-on: ubuntu-latest
     container: espressif/idf:v6.1
     env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       PLATFORM_URL: ${{ vars.MOGO_PLATFORM_URL }}
       PLATFORM_TOKEN: ${{ secrets.MOGO_FIRMWARE_SUBMISSION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Validate version tag
         shell: bash
         run: |
           python3 - <<'PY'
           import os, re
-          tag = os.environ['GITHUB_REF_NAME']
+          tag = os.environ['RELEASE_TAG']
           if not re.fullmatch(r'v[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}(?:-rc[0-9]{1,5})?', tag):
               raise SystemExit('Unsupported release tag')
           version = tag[1:]
@@ -57,9 +46,44 @@ jobs:
           idf.py --preview set-target esp32s31
           idf.py --preview build
           idf.py --preview size
+      - name: Prepare strict host compiler
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends clang libclang-rt-dev libssl-dev zlib1g-dev
+          mkdir -p /private/tmp build/host-compiler
+          cat > build/host-compiler/cc <<'SH'
+          #!/bin/sh
+          exec /usr/bin/clang -D_DEFAULT_SOURCE "$@"
+          SH
+          chmod +x build/host-compiler/cc
+          cp build/host-compiler/cc build/host-compiler/gcc
+          echo "$PWD/build/host-compiler" >> "$GITHUB_PATH"
+          echo 'CC=/usr/bin/clang -D_DEFAULT_SOURCE' >> "$GITHUB_ENV"
+      - name: Host regression tests with build dependencies
+        shell: bash
+        run: |
+          python3 tools/run_reader_baseline.py
+          python3 tools/boot_panel_actions_host_test.py
+          python3 tools/lock_pin_host_test.py
+          python3 tools/lock_screen_host_test.py
+          python3 tools/reader_spacing_host_test.py
+          python3 tools/test_book_toc.py
+          python3 tools/vertical_punctuation_host_test.py
+          python3 tools/vertical_number_host_test.py
+          python3 tools/test_platform_submission.py
+          mkdir -p build/book-tests
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/reader_session.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
+          build/book-tests/layout
       - name: Verify and prepare submission
         shell: bash
-        run: python3 tools/prepare_platform_submission.py
+        run: GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" python3 tools/prepare_platform_submission.py
+      - name: Preserve host regression diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-host-regressions
+          path: build/reader-baseline/
       - name: Upload draft to platform
         shell: bash
         run: |

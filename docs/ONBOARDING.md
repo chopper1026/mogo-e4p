@@ -33,6 +33,9 @@ idf.py --preview build
 - 本地包不得覆盖已发布的固定下载文件；创建新 OTA 版本标签前先提交准确的更新日志，详见 AGENTS.md。
   Local bundles must not overwrite immutable published downloads. Commit accurate notes before new OTA tags as required by AGENTS.md.
 
+GitHub CI 先构建以准备锁定的 IDF 组件，再用 Clang 执行宿主回归，保留 ASan/UBSan。已有 OTA 标签可通过 `Build and submit OTA firmware` 的手动入口输入原标签重试；构建与提交记录使用该标签的源码提交，不移动标签。失败时保留宿主测试日志附件。
+GitHub CI builds first to prepare locked IDF components, then runs host regressions with Clang and ASan/UBSan. Retry an existing OTA tag through the manual entry of `Build and submit OTA firmware`; the build and submission use that tag's source commit without moving it. Failed host logs are retained as artifacts.
+
 CI 等价命令 / CI-equivalent commands:
 
 ```sh
