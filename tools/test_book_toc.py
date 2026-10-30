@@ -29,6 +29,7 @@ size_t book_navigation_chapter(size_t position);
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
 void ui_clear_page(uint8_t *fb);
 void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *framebuffer);
 void ui_fill_round_rect(uint8_t *fb, EpdRect r, int radius, uint8_t gray);

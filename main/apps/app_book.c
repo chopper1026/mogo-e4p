@@ -11,7 +11,11 @@
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
- * 普通翻页只刷新正文与页脚；手动与周期清残影共用同一条整屏 GC16 全刷。
+ * 普通翻页优先刷新正文，再更新页脚和有变化的顶部；手动与周期清残影共用整屏 GC16。
+ * Ordinary turns present the body before the footer and changed status; manual and periodic cleanup share whole-screen GC16.
+ * 用户 2026-10-30 修订：时间与电量随翻页更新，静置不单刷顶部；顶部和页脚复用阅读 GL16，正文优先，避免等待顶底栏拖慢可读内容呈现。
+ * User revision 2026-10-30: update time/power with page turns, without idle top-band output;
+ * reuse reader GL16 for status/footer and present the body first so chrome does not delay readable content.
  * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换。
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
@@ -350,9 +354,8 @@ static bool s_reader_fullscreen;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending;
 static int s_shelf_key_pressed,s_shelf_key_delta;
 static int64_t s_shelf_key_until;
-static int64_t s_reader_clock_minute = -1, s_reader_clock_painted_minute = -1;
-static int s_reader_power = -1, s_reader_painted_power = -1;
-static bool s_reader_clock_pending;
+static int64_t s_reader_clock_minute = -1;
+static int s_reader_power = -1;
 static char s_message[128], s_storage[128];
 static char s_chapter_heading_title[READER_HEADING_TITLE_BYTES], s_chapter_heading_label[READER_HEADING_LABEL_BYTES];
 static size_t s_chapter_lead_skip;
@@ -3470,16 +3473,16 @@ static int reader_status_power(void) {
     const pmu_snapshot_t *pmu = device_power_get();
     return (pmu_battery_percent(pmu) + 1) * 2 + (pmu_battery_charging(pmu) ? 1 : 0);
 }
-static app_redraw_t reader_clock_tick(app_ctx_t *ctx) {
-    if (!reader_status_visible() || (ctx->touch && ctx->touch->touched)) return APP_REDRAW_NONE;
-    const int64_t minute=ui_nav_clock_minute();
-    const int power=reader_status_power();
-    if (minute==s_reader_clock_minute && power==s_reader_power) return APP_REDRAW_NONE;
-    s_reader_clock_painted_minute=minute;
-    s_reader_painted_power=power;
+// 只在已有翻页请求中准备顶部，空闲分钟或电量变化不产生显示请求。
+// Prepare status only for an existing turn; idle minute/power changes never request output.
+static bool reader_status_prepare(app_ctx_t *ctx, app_redraw_t redraw, int64_t minute, int power) {
+    if (redraw!=APP_REDRAW_AREA || !reader_status_visible() || s_reader_cleanup ||
+        s_reader_panel!=READER_PANEL_NONE || s_toolbar || s_clear_confirm ||
+        (minute==s_reader_clock_minute && power==s_reader_power)) return false;
+    const EpdRect body=reader_area();
+    if (s_area.x!=body.x || s_area.y!=body.y || s_area.width!=body.width || s_area.height!=body.height) return false;
     lock_draw(); reader_status_paint(ctx->fb); unlock_draw();
-    s_reader_clock_pending=true;
-    return APP_REDRAW_AREA;
+    return true;
 }
 // 正文是否是纯文字画面：插图页保留原来的整页差分，不让归一表的字芯推黑改动图片灰阶。
 // 阅读背景不再排除：归一表把非黑相等对清成保持，整屏 pass 只重驱字芯，背景灰阶不动。
@@ -3533,20 +3536,6 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
         return true;
     }
-    if (s_reader_clock_pending) {
-        s_reader_clock_pending=false;
-        if (redraw==APP_REDRAW_AREA && reader_status_visible()) {
-            // 时钟单独短刷，不准备插图、不预排正文，也不累计正文全刷次数。
-            // Update status alone, without image preparation, pagination, or reader cleanup counters.
-            enum EpdDrawError err=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, reader_status_area(), DISPLAY_REFRESH_DEFAULT);
-            if (err==EPD_DRAW_SUCCESS) {
-                s_reader_clock_minute=s_reader_clock_painted_minute;
-                s_reader_power=s_reader_painted_power;
-            }
-            guard_draw_result(ctx->hl,err);
-            return true;
-        }
-    }
     // 输入不准备封面或正文；候选停顿只整理词栏，不累计整页清屏次数。
     // Input skips cover/body preparation; idle candidate settling affects only its strip and not whole-page cleanup counting.
     if (redraw == APP_REDRAW_AREA && (s_view == EDIT || s_view == SEARCH)) {
@@ -3585,6 +3574,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     const int64_t frame_minute=ui_nav_clock_minute();
     const int frame_power=reader_status_power();
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) render(ctx, ctx->fb);
+    const bool status_pending=reader_status_prepare(ctx,redraw,frame_minute,frame_power);
     bool prep = kick_prep();
     int64_t drawn = esp_timer_get_time();
 #if CONFIG_READER_PERF
@@ -3601,7 +3591,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         .refresh = redraw == APP_REDRAW_AREA ? READER_PRESENT_AREA :
                    redraw == APP_REDRAW_FULL ? READER_PRESENT_FULL : READER_PRESENT_PAGE,
         .mode = s_mode, .page_mode = APP_PAGE_REFRESH_MODE,
-        .area = s_area, .body_area = reader_area(), .footer_area = progress_rect(),
+        .area = s_area, .body_area = reader_area(), .status_area = reader_status_area(), .footer_area = progress_rect(),
         .progress_area = reader_fullscreen_progress_area(), .tools_area = reader_tools_area(),
         .screen_area = {0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT},
         .water_dir = s_water_turn_dir,
@@ -3618,7 +3608,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         .feedback = s_view == SHELF && s_shelf_feedback_pending,
         .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
         .water_turn_pending = s_water_turn_pending,
-        .footer_pending = s_reader_footer_pending, .footer_strong = s_reader_footer_strong,
+        .status_pending = status_pending, .footer_pending = s_reader_footer_pending,
         .hold_gray = normalize_hold_gray(ctx),
     };
     reader_present_result_t output = reader_present_output(ctx->hl, &output_request);
@@ -3659,7 +3649,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) && shelf_cover_frame_ready(),
         s_cover_batch_present_pending);
     if (err==EPD_DRAW_SUCCESS && reader_status_visible() && !tools_band &&
-        (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup)) {
+        (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup || output.status_updated)) {
         s_reader_clock_minute=frame_minute;
         s_reader_power=frame_power;
     }
@@ -4569,11 +4559,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     // reading backgrounds qualify; image pages stay excluded.
     s_water_turn_pending = effects.water;
     s_water_turn_dir = dir > 0 ? E0470_TURN_RTL : E0470_TURN_LTR;
-    // 换章时页脚标题整行变化，8 相 DU 擦不干净；这一次单独用 37 相 GL16 差分。
-    // 整屏全刷已覆盖页脚，周期清理那一次不重复升级。
-    // A chapter change replaces the whole footer title and the 8-phase DU cannot erase it,
-    // so that turn presents the footer with the 37-phase GL16 differential. A whole-screen
-    // refresh already covers the footer, so cleanup turns do not upgrade it again.
+    // 换章标记仅保留日志区分；局部翻页页脚统一阅读 GL16，整屏清理不重复输出页脚。
+    // Keep the chapter marker for logs; partial-turn footers share reader GL16 and full cleanup never replays the footer.
     s_reader_footer_strong = effects.footer_strong;
     return chrome_changed ? APP_REDRAW_PAGE : redraw;
 }
@@ -6607,9 +6594,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (!ok) { free_book(); s_view = SHELF; copy_text(s_message, sizeof(s_message), "字体重排失败，请重新打开图书"); }
         return APP_REDRAW_PAGE;
     }
-    app_redraw_t clock=reader_clock_tick(ctx);
-    if(clock==APP_REDRAW_NONE)reader_prefetch_idle(ctx);
-    return clock;
+    reader_prefetch_idle(ctx);
+    return APP_REDRAW_NONE;
 }
 static void before_lock(app_ctx_t* ctx) {
     // 锁屏期间不补发按键动作，唤醒后从干净状态开始。

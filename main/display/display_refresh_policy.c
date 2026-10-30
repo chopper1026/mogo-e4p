@@ -25,8 +25,8 @@ bool display_refresh_resolve(display_refresh_intent_t intent, unsigned flags,
         case DISPLAY_REFRESH_OVERLAY: plan->coverage=DISPLAY_COVERAGE_FULL; break;
         case DISPLAY_REFRESH_FEEDBACK: plan->waveform=DISPLAY_WAVE_FOLLOW; plan->mode=MODE_DU; break;
         case DISPLAY_REFRESH_MOTION:
-        case DISPLAY_REFRESH_READER_FOOTER:
             plan->waveform=DISPLAY_WAVE_FOLLOW; plan->mode=MODE_DU; plan->coverage=DISPLAY_COVERAGE_AUTO; break;
+        case DISPLAY_REFRESH_READER_FOOTER: plan->waveform=reader; break;
         case DISPLAY_REFRESH_DYNAMIC:
             plan->mode=APP_DYNAMIC_REFRESH_MODE; plan->coverage=DISPLAY_COVERAGE_AUTO; break;
         case DISPLAY_REFRESH_MAIN_CLOCK:

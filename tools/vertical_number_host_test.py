@@ -21,6 +21,7 @@ HEADERS = {
     'esp_timer.h': '#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n',
     'esp_heap_caps.h': ('#pragma once\n#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 1\n'
                         '#define MALLOC_CAP_8BIT 2\nvoid *heap_caps_malloc(size_t n,int caps);\n'
+                        'static inline void *heap_caps_realloc(void *p,size_t n,int caps){(void)caps;return realloc(p,n);}\n'
                         'void *heap_caps_calloc(size_t n,size_t s,int caps);\nvoid heap_caps_free(void *p);\n'
                         'static inline size_t heap_caps_get_largest_free_block(int c){(void)c;return 0;}\n'),
 }

@@ -30,7 +30,8 @@ AUTO retains the old exit behavior: area GL16 drives all pixels, DU uses the ori
 | LAYOUT | default | GL16 | AUTO |
 | SETTLE / OVERLAY | default | GL16 | FULL |
 | FEEDBACK | follow | DU | DIFF |
-| MOTION / READER_FOOTER | follow | DU | AUTO |
+| MOTION | follow | DU | AUTO |
+| READER_FOOTER | 背景 reader-background，否则 reader-ink / background reader-background, otherwise reader-ink | GL16 | DIFF |
 | DYNAMIC | default | APP_DYNAMIC_REFRESH_MODE | AUTO |
 | MAIN_CLOCK | 主页快刷 main-bw，否则 main-gray / fast main-bw, otherwise main-gray | DU / GL16 | DIFF |
 | MAIN_DETAIL | 普通 main-normal，否则 main-gray / ordinary main-normal, otherwise main-gray | GL16 | DIFF |
@@ -45,6 +46,17 @@ AUTO retains the old exit behavior: area GL16 drives all pixels, DU uses the ori
 
 仅 READER_BODY 接受 QUICK/IMAGE，READER_LAYOUT 接受 QUICK，RESTORE 接受 HOLD_GRAY；其余意图只接受 DEFAULT。无效意图、无效标志或整屏组合返回 `EPD_DRAW_INVALID_CROP`，缺表返回 `EPD_DRAW_NO_PHASES_AVAILABLE`；都不扫描。
 Only READER_BODY accepts QUICK/IMAGE, READER_LAYOUT accepts QUICK, and RESTORE accepts HOLD_GRAY. Other intents accept DEFAULT only. Invalid intents, flags or screen combinations return EPD_DRAW_INVALID_CROP; missing tables return EPD_DRAW_NO_PHASES_AVAILABLE. Neither scans.
+
+## 阅读状态与输出顺序 / Reader status and output order
+
+阅读正文静置时，分钟、电量及充电变化不单独触发顶部刷新；下一次正文翻页或整页重绘显示当前状态。窗口化页眉与系统状态栏共用80/160像素顶部带，全屏隐藏状态栏时不刷新顶部；主页面和快捷栏仍按原规则更新状态。
+Minute, battery and charging changes do not independently refresh a resting reader. The next body turn or whole-page redraw shows current status. Windowed headers and system status share the 80/160-pixel top band; full screen with a hidden status bar has no top output. Main pages and the quick layer retain their status rules.
+
+局部翻页优先输出正文，成功后再输出窗口化页脚或全屏进度，最后更新有变化的顶部。顶部、页脚与进度复用阅读GL16及背景派生表，保留抗锯齿；插图正文保留原灰阶出口，水波纹正文保留原表和节拍。任一步失败都短路并保留错误，只有成功完成相应输出才确认顶部状态。手动/周期GC16、工具带和关闭面板归一仍保留原出口，不额外叠加顶底栏。正文不再等待顶底栏，但各区域仍顺序刷新，整轮耗时不因顺序调整而减少。
+Partial turns present the body first, then the windowed footer or full-screen progress after success, and changed status last. Chrome reuses reader GL16 and its background derivative, preserving antialiasing. Illustration bodies retain their grayscale exit, and ripple bodies retain their tables and pacing. Any error stops later output and propagates; status acknowledgement requires successful presentation. Manual/periodic GC16, tools bands and panel-close normalization keep their exits without added chrome passes. The body no longer waits for chrome, but sequential regional output retains its total duration.
+
+此调整针对用户观察到的顶部局刷后正文变浅及翻页顶底栏变淡；没有修改VCOM、供电或波形数据。宿主回归只证明刷新时机、顺序和错误处理，累计墨度与残影效果须由实屏验证。
+This adjustment addresses reported body fading after status updates and fading chrome during turns, without changing VCOM, power settings or waveform data. Host regressions establish timing, order and error handling; accumulated ink density and ghosting require panel verification.
 
 ## 界面三色 / UI palette
 

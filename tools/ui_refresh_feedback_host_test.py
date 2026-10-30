@@ -11,27 +11,8 @@ root = Path(__file__).resolve().parents[1]
 
 
 def function(path, name):
-    text = (root / path).read_text()
-    match = re.search(r"^(?:static )?[^\n]+\b" + name + r"\([^;{}]*?\)\s*\{", text, re.M)
-    assert match, name
-    start, at, depth, quote, escape = match.start(), match.end(), 1, None, False
-    while depth:
-        c = text[at]
-        if quote:
-            if escape:
-                escape = False
-            elif c == "\\":
-                escape = True
-            elif c == quote:
-                quote = None
-        elif c in "\"'":
-            quote = c
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-        at += 1
-    return text[start:at]
+    from home_cover_cache_host_test import function as extract_function
+    return extract_function(name, root / path)
 
 
 shelf = r'''
@@ -42,11 +23,11 @@ shelf = r'''
 #include <string.h>
 #include <stddef.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;} app_ctx_t;
+typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SHELF,MANAGE,READING,READER_PANEL_NONE,TOC,EDIT,SEARCH};
 enum EpdDrawMode {MODE_GL16,MODE_DU,MODE_GC16};
-enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_ERROR};
+enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_ERROR,EPD_DRAW_INVALID_CROP,EPD_DRAW_NO_PHASES_AVAILABLE};
 #define APP_PAGE_REFRESH_MODE MODE_GL16
 #define SHELF_BOOK_LIFT_PX 16
 #define portMAX_DELAY 0
@@ -69,7 +50,7 @@ static unsigned s_du_count;
 static int64_t s_du_ms;
 static int s_water_turn_dir;
 static void *s_prep_done;
-static int s_prep_page=-1;static uint32_t s_next_generation;
+static int s_prep_page=-1;
 static struct {bool started;unsigned generation;} s_prep_cursor;
 static void display_main_transition_shelf_page(void){}
 static unsigned pushes;
@@ -84,9 +65,11 @@ static int test_style;static bool test_fast;
 static int app_settings_shelf_style(void){return test_style;}
 static bool app_settings_main_fast_refresh(void){return test_fast;}
 static int shelf_rows(void){return test_style==5?4:9;}
-static bool s_reader_clock_pending,s_cover_batch_present_pending;
-static int64_t s_reader_clock_minute,s_reader_clock_painted_minute;
-static unsigned s_cover_dirty_mask,s_cover_present_mask;
+static bool s_cover_batch_present_pending,s_reader_tools_toggle,s_reader_footer_strong,s_reader_stable_frame;
+static int s_presented_panel;
+static int s_reader_power;
+static int64_t s_reader_clock_minute;
+static int reader_status_power(void){return 0;}
 static bool reader_status_visible(void){return false;}
 static EpdRect reader_status_area(void){return (EpdRect){24,18,156,44};}
 /* F4 诊断埋点宏（touch_diag.h 默认关）；提取的函数引用它们，桩按关闭态展开。/ The F4 diag
@@ -114,7 +97,6 @@ static bool kick_prep(void){return false;}
 static void gather_cover_entry(app_ctx_t *ctx){(void)ctx;}
 static void reader_prefetch_end(bool started){(void)started;s_prep_page=-1;s_prep_cursor.started=false;s_prep_cursor.generation=0;}
 static bool reader_prefetch_resume(size_t page){(void)page;return false;}
-static unsigned book_layout_generation(void){return 0;}
 static void draw_reader_outer(uint8_t *fb,size_t page){(void)fb;(void)page;}
 static int64_t esp_timer_get_time(void){return 1000000;}
 static void test_log(const char *tag,const char *format,...){(void)tag;(void)format;}
@@ -176,7 +158,37 @@ shelf += f'\n#include "{root / "main/book/reader_turn.c"}"\n'
 shelf += function("main/apps/app_book.c", "reader_turn_save") + "\n"
 shelf += function("main/apps/app_book.c", "reader_turn_load") + "\n"
 shelf += function("main/apps/app_book.c", "paint_control") + "\n"
-for name in ("present", "paint_reading", "reader_turn_chrome", "turn_page"):
+# 页面状态机使用真实呈现和策略，只替换物理显示边界。/ Keep real presenter/policy and replace physical display only.
+shelf+='typedef int EpdWaveform;\n'
+for rel in ('main/display/display_refresh.h','main/display/display_waveform_catalog.h','main/display/display_refresh_policy.h','main/book/reader_present.h'):
+    declarations=(root/rel).read_text()
+    shelf+=re.sub(r'^#(?:include|pragma)[^\n]*', '', declarations, flags=re.M)+'\n' if rel!='main/book/reader_present.h' else 'typedef int e0470_turn_dir_t;\n'+re.sub(r'^#(?:include|pragma)[^\n]*', '', declarations, flags=re.M)+'\n'
+shelf+=r'''
+#define APP_DYNAMIC_REFRESH_MODE MODE_DU
+static EpdRect reader_tools_area(void){return (EpdRect){0,920,684,296};}
+static bool normalize_hold_gray(app_ctx_t *ctx){(void)ctx;return false;}
+static int reader_image_slots(unsigned page){return book_layout_page_image_count(page);}
+static int s_shelf_covers;
+static void book_shelf_covers_ack(int *state,bool ok,bool full,bool batch){(void)state;(void)ok;(void)full;(void)batch;}
+display_refresh_context_t display_refresh_context(void){return (display_refresh_context_t){0};}
+const EpdWaveform *display_waveform_get(display_waveform_id_t id){
+ switch(id){
+ case DISPLAY_WAVE_DEFAULT: return &E0470_WAVEFORM;
+ case DISPLAY_WAVE_FOLLOW: return &E0470_FOLLOW_WAVEFORM;
+ case DISPLAY_WAVE_READER_TEXT: return display_reader_text_waveform();
+ case DISPLAY_WAVE_READER_INK: return &E0470_WAVEFORM;
+ case DISPLAY_WAVE_FULL: return &E0470_FULL_WAVEFORM;
+ default: assert(false);return NULL;
+ }
+}
+static enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState *h,const int*w,enum EpdDrawMode m,EpdRect a,int x,int y){(void)h;(void)w;(void)m;(void)a;(void)x;(void)y;assert(false);return EPD_DRAW_ERROR;}
+static enum EpdDrawError update_display_mode_diff_with(EpdiyHighlevelState *h,const int*w,enum EpdDrawMode m){(void)w;return update_display_mode_diff(h,m);}
+'''
+for rel in ('main/display/display_refresh_policy.c','main/display/display_refresh.c','main/book/reader_present.c'):
+    shelf+=re.sub(r'^#include[^\n]*','',(root/rel).read_text(),flags=re.M)+'\n'
+shelf+='static bool reader_text_body(void){return book_layout_page_image_count(s_page)==0;}\nstatic void book_layout_adopt_page(unsigned page){(void)page;}\n'
+shelf+='#define READER_PANEL_TOOLS 99\n'
+for name in ("reader_status_prepare", "present", "paint_reading", "reader_turn_chrome", "turn_page"):
     shelf += function("main/apps/app_book.c", name) + "\n"
 shelf += r'''
 int main(void){
@@ -231,7 +243,7 @@ int main(void){
  trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
  assert(trace_count==2&&trace_route[0]==DIFF&&trace_mode[0]==MODE_GL16&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
  assert(trace_area[0].y==reader_area().y&&trace_area[0].height==reader_area().height);
- assert(trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
+ assert(trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
  assert(trace_area[1].y==progress_rect().y&&!s_reader_turn_pending);
  for(int full=0;full<2;++full){
    s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
@@ -257,7 +269,9 @@ int main(void){
    s_reader_fullscreen=full;s_reader_footer_pending=false;s_water_turn_pending=true;
    test_push_error=error;test_tick_us=full?19000:12000;int prior=test_tick_us,sets=test_tick_sets;
    trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
-   assert(trace_route[0]==WATER&&test_tick_us==prior&&test_tick_sets==sets+2&&!s_water_turn_pending);
+   assert(trace_route[0]==WATER&&test_tick_sets==sets+2);
+   assert(trace_count==(full&&!error?2u:1u));
+   assert(test_tick_us==prior&&!s_water_turn_pending);
  }
  test_push_error=0;test_tick_us=12000;s_reader_fullscreen=false;
  for(int priority=0;priority<3;++priority){
@@ -297,17 +311,15 @@ int main(void){
    bool eligible=hidden||(from==0&&to==0);
    assert(s_reader_fullscreen==full && s_reader_panel==READER_PANEL_NONE);
    if (!full) {
-     // 翻页保持退出全屏：正文 AREA 推屏加页脚 DU 差分；有插图时正文走灰阶分支、页脚走差分。
-     // Turns keep windowed mode: one body AREA push plus a DU footer differential; images take
-     // the grayscale branch with a differential footer.
+     // 翻页保持窗口化，正文先输出文字或插图，随后阅读 GL16 页脚。
+     // Turns keep windowed mode, presenting the text/image body before the reader GL16 footer.
      assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
      trace_count=0;present(&ctx,redraw);
      if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
      else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
      else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==AREA);
      assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
-     if(to&&!hidden)assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
-     else assert(trace_count==2&&trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
+     assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
      continue;
    }
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);

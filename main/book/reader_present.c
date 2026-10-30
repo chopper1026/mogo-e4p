@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 中文：从阅读页面提取同步刷新路由；保留原显示出口、错误组合与水波纹节拍恢复。
- * English: Synchronous output routing extracted from the book page, retaining display exits, error combination and water pacing restoration.
+ * 中文：从阅读页面提取同步刷新路由；保留原显示出口与水波纹节拍恢复，局部翻页优先输出正文。
+ * English: Synchronous output routing extracted from the book page, retaining display exits and water pacing restoration; partial turns present the body first.
  */
 #include "reader_present.h"
 #include "display.h"
@@ -29,10 +29,6 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         err = request->water_effect
             ? display_refresh_area(hl, DISPLAY_REFRESH_READER_BODY, request->body_area, frame_flags)
             : display_refresh_area(hl, DISPLAY_REFRESH_READER_IMAGE, request->body_area, DISPLAY_REFRESH_DEFAULT);
-        if (err == EPD_DRAW_SUCCESS && request->footer_pending)
-            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->footer_area, DISPLAY_REFRESH_DEFAULT);
-        if (err == EPD_DRAW_SUCCESS && request->fullscreen)
-            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
     }
     else if (request->image_gray_refresh) err = request->water_effect &&
         request->refresh != READER_PRESENT_FULL && !request->cleanup
@@ -80,20 +76,7 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
                 ? display_refresh_area(hl, request->turn_pending ? DISPLAY_REFRESH_READER_TEXT : DISPLAY_REFRESH_READER_BODY, request->area, DISPLAY_REFRESH_DEFAULT)
                 : display_refresh_area(hl, DISPLAY_REFRESH_READER_LAYOUT, request->area, request->mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT);
         if (request->water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
-        if (request->fullscreen && err == EPD_DRAW_SUCCESS) {
-            // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
-            // Skip unchanged percentages; otherwise update only the small bottom strip.
-            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
-        }
-        if (request->footer_pending) {
-            // 普通翻页页脚只驱动变化像素；换章这一次改用 37 相 GL16 擦净标题和页码。
-            // Ordinary turns drive only changed footer pixels; a chapter change uses the
-            // 37-phase GL16 differential to erase the old title and page number.
-            err = (enum EpdDrawError)(err | (request->footer_strong
-                ? display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->footer_area, DISPLAY_REFRESH_DEFAULT)
-                : display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT)));
-            result.footer_updated = true;
-        }
+
     }
     // 关闭阅读设置等面板时，被白底盖过的字已经多走了一轮「擦白 → 推黑」，比没被盖过的
     // 字更黑；单次还原追不平。这里整屏再走一遍归一表，全页字芯落在同一墨度。
@@ -112,6 +95,26 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         ? display_refresh_screen(hl, DISPLAY_REFRESH_READER_BODY, frame_flags |
             (request->page_mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT))
         : update_display_fast_page(hl);
+    // 正文成功后再更新页脚、进度和顶部；任一步失败都保留错误并停止后续输出。
+    // Update footer, progress and status after a successful body; preserve errors and stop subsequent output on failure.
+    if (err == EPD_DRAW_SUCCESS && request->refresh == READER_PRESENT_AREA &&
+        request->reader_body && request->prior_reader && !request->cleanup && !request->feedback) {
+        if (request->footer_pending) {
+            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT);
+            if (err != EPD_DRAW_SUCCESS) goto done;
+            result.footer_updated = true;
+        }
+        if (request->fullscreen) {
+            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_FOOTER, request->progress_area, DISPLAY_REFRESH_DEFAULT);
+            if (err != EPD_DRAW_SUCCESS) goto done;
+        }
+        if (request->status_pending) {
+            err = display_refresh_area(hl, DISPLAY_REFRESH_READER_BODY, request->status_area, DISPLAY_REFRESH_DEFAULT);
+            if (err != EPD_DRAW_SUCCESS) goto done;
+            result.status_updated = true;
+        }
+    }
+done:
     result.error = err;
     return result;
 }

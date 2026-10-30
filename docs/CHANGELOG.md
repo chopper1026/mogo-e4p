@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.1 · 2026-10-30
+
+- 按用户要求将当前交付版本设为1.0.1，汇总下列本地测试中的 TXT 章节目录、字体列表、电源键、蓝牙、电量及界面调整；阅读状态随翻页更新且正文优先输出。屏幕残影、变淡及翻页耗时仍需真机验证。
+  Set the delivery version to 1.0.1 as requested, including the TXT chapter index, font list, power key, Bluetooth, battery and UI changes recorded below. Reader status updates with page turns and the body presents first. Ghosting, fading and turn latency still require device verification.
+
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-30
 
 - 界面底色与控件统一白、黑及固定灰，小字改黑，卡片和导航改白底；保留书架亚克力挡板、封面、图像及抗锯齿。快捷栏使用不透明白底，前光滑杆改为黑白差分刷新。
@@ -10,6 +15,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - WiFi传书连接框与传输状态框改为黑色边框；底部导航只保留图标，高度104像素、图标居中，分隔线加粗并使用0x90灰，控件固定灰加深至0x90。前光滑杆复用完整 DU 并扩边擦除；快捷栏收起恢复整屏归一化，按当前页面保护阅读背景灰阶，退出阅读回主页面（含书架）恢复整屏GC16清理文字残影。实际残影效果待实屏验证。
   WiFi transfer connection/status cards use black frames; the footer uses centered icons in 104 pixels with a thicker 0x90 gray divider and darker 0x90 control gray. Frontlight sliders reuse complete DU with padded dirty masks; closing the quick layer restores whole-screen normalization with reading-background gray protection selected by the current page, and reader-to-main returns (including the shelf) restore whole-screen GC16 to clear text residue. Optical residue awaits panel acceptance.
+
+- 阅读页时间、电量和充电状态改为随翻页更新，静置不单独刷新顶部；正文优先输出，随后用阅读GL16更新页脚和顶部，保留水波纹及手动/周期全刷。累计变淡改善效果待实屏验证。
+  Reader time, battery and charging status update with turns without idle top-band refreshes; the body presents first, followed by reader GL16 footer and status output, retaining ripple and manual/periodic full refresh. Fading improvement awaits panel verification.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 

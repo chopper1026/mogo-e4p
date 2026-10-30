@@ -19,6 +19,7 @@ typedef struct {
     enum EpdDrawMode page_mode; ///< 普通整页模式 / Ordinary page mode
     EpdRect area; ///< 页面给出的局部区域 / Requested area
     EpdRect body_area; ///< 阅读正文带 / Reader body band
+    EpdRect status_area; ///< 随翻页更新的顶部带 / Top band refreshed with page turns
     EpdRect footer_area; ///< 窗口化页脚带 / Windowed footer band
     EpdRect progress_area; ///< 全屏进度带 / Full-screen progress band
     EpdRect tools_area; ///< 阅读工具栏覆盖带 / Reader tools band
@@ -38,14 +39,15 @@ typedef struct {
     bool fullscreen; ///< 阅读全屏偏好 / Reader full-screen state
     bool turn_pending; ///< 普通文字翻页 / Ordinary text turn
     bool water_turn_pending; ///< 已允许水波纹翻页 / Approved water turn
+    bool status_pending; ///< 本次翻页顶部状态有变化 / Top status changed for this turn
     bool footer_pending; ///< 还需更新页脚 / Footer still needs output
-    bool footer_strong; ///< 换章页脚使用 GL16 / Chapter footer uses GL16
     bool hold_gray; ///< 归一时保持图片灰阶 / Hold picture grays during normalization
 } reader_present_request_t;
 
 typedef struct {
     enum EpdDrawError error; ///< 原显示出口返回的错误位 / Original display error bits
     bool tools_band; ///< 只更新了工具栏带 / Only the tools band was updated
+    bool status_updated; ///< 顶部带已成功输出 / Top band was successfully presented
     bool footer_updated; ///< 普通局部路径更新了页脚 / Ordinary area path updated the footer
 } reader_present_result_t;
 
