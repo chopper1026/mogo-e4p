@@ -422,7 +422,7 @@ for path, name in (("main/ui/ui_kit.c", "ui_text_fixed_context_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_context_vc"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_vc"), ("main/ui/ui_nav.c", "ui_nav_battery_draw")):
     status += function(path, name) + "\n"
-status += nav[nav.index('static bool s_status_reading;'):nav.index('static const char *const labels[]')]
+status += nav[nav.index('static bool s_status_reading;'):nav.index('void ui_nav_back(')]
 # ui_nav_clock_text 只是 clock_text 的包装，必须等时区格式化函数定义后再提取。
 # ui_nav_clock_text only wraps clock_text, so extract it after the time-formatting function.
 for name in ('status_time','clock_text','ui_nav_clock_text','ui_nav_status'):
@@ -463,6 +463,7 @@ int main(void){
 '''
 
 navigation = r'''
+#include <stdlib.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -474,25 +475,24 @@ typedef struct {int x,y,width,height;} EpdRect;
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_BLACK 0
 #define UI_GRAY_WHITE 255
-#define UI_GRAY_LIGHT 224
+#define UI_GRAY_LIGHT 144
 #define EPD_DRAW_ALIGN_CENTER 1
 #define UI_NAV_TAB_ICON_PX 44
-static const char *const labels[]={"首页","书架","文件管理","设置"};
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static int main_choice;
 static int app_settings_main_refresh_mode(void){return main_choice;}
-static int first_ink, markers, tracks, texts, guards;
+static int first_ink, last_ink, markers, tracks, guards, dividers;
 static uint8_t ui_read_pixel(const uint8_t *fb,int x,int y){(void)fb;(void)x;(void)y;return 14;}
-static uint8_t ui_contrast_gray(uint8_t value){return value&240;}
-static void epd_draw_pixel(int x,int y,uint8_t value,uint8_t *fb){(void)x;(void)value;(void)fb;if(y<first_ink)first_ink=y;}
+static uint8_t ui_control_gray(uint8_t value){return value;}
+static void epd_draw_pixel(int x,int y,uint8_t value,uint8_t *fb){(void)x;(void)value;(void)fb;assert(y<UI_LOCK_HEIGHT);if(y<first_ink)first_ink=y;if(y>last_ink)last_ink=y;}
 static void epd_fill_rect(EpdRect area,int gray,uint8_t *fb){
  (void)fb;
- if(area.y==UI_NAV_TOP+1){assert(area.height==5);if(gray==UI_GRAY_BLACK){assert(area.width==56);++markers;}
+ if(area.y==UI_NAV_MARKER_TOP){assert(area.height==5);if(gray==UI_GRAY_BLACK){assert(area.width==56);++markers;}
  else {assert(gray==UI_GRAY_WHITE&&area.width==UI_LOCK_WIDTH);++tracks;}}
- if(area.y==UI_NAV_REFRESH_END){assert(area.height==UI_NAV_TOP-UI_NAV_REFRESH_END&&area.width==UI_LOCK_WIDTH&&gray==0xf0);++guards;}
+ if(area.y==UI_NAV_TOP&&area.height==UI_NAV_DIVIDER_H){assert(gray==UI_GRAY_LIGHT&&area.width==UI_LOCK_WIDTH&&area.height==2);++dividers;}
+ if(area.y==UI_NAV_REFRESH_END){assert(area.height==UI_NAV_TOP-UI_NAV_REFRESH_END&&area.width==UI_LOCK_WIDTH&&gray==UI_GRAY_WHITE);++guards;}
 }
-static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;(void)x;(void)width;(void)gray;assert(y==UI_NAV_TOP);}
-static void ui_text(uint8_t *fb,int x,int y,int px,const char *label,int align,bool wrap){(void)fb;(void)x;(void)label;(void)align;(void)wrap;assert(y==UI_NAV_TOP+74&&px==17);++texts;}
+
 '''
 navigation += 'static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}'
 for path, name in (("main/ui/ui_kit.c", "icon_nibble"), ("main/ui/ui_kit.c", "ui_draw_icon"),
@@ -507,10 +507,12 @@ int main(void){
    assert(ui_nav_hit(x,1216)==-1);
  }
  assert(ui_nav_hit(684,1141)==-1&&ui_nav_hit(UINT16_MAX,1141)==-1);
- assert(UI_NAV_TOUCH_TOP==1080&&UI_NAV_TOP==1096&&UI_NAV_REFRESH_END==1088);
+ assert(UI_NAV_TOUCH_TOP==1096&&UI_NAV_TOP==1112&&UI_NAV_REFRESH_END==1088);
+ assert(UI_LOCK_HEIGHT-UI_NAV_TOP==104);
  for(main_choice=0;main_choice<3;++main_choice)for(int active=0;active<4;++active){
-   first_ink=2000;markers=tracks=texts=guards=0;ui_nav_draw(&fb,active);
-   assert(markers==1&&texts==4&&tracks==(main_choice!=0)&&guards==1);
+   first_ink=2000;last_ink=0;markers=tracks=guards=dividers=0;ui_nav_draw(&fb,active);
+   assert(markers==1&&tracks==(main_choice!=0)&&guards==1&&dividers==1);
+   assert(abs((first_ink+last_ink)-(UI_NAV_TOP+UI_LOCK_HEIGHT))<=2);
    // 验证真实图标掩模的第一笔，单次刷新32列对齐后不能触碰图标。
    // Check actual mask ink: the 32-column-expanded single update must not reach an icon.
    assert(first_ink>=UI_NAV_MARKER_SCAN_END);
@@ -574,7 +576,7 @@ from run_reader_baseline import toolchain
 shelf = position_state(page=0) + shelf
 with tempfile.TemporaryDirectory() as folder:
     env, _ = toolchain(Path(folder))
-    units = (("status", status),) if "--status-only" in sys.argv else (
+    units = (("status", status),) if "--status-only" in sys.argv else (("nav-modes", navigation),) if "--nav-only" in sys.argv else (
         ("shelf", shelf), ("status", status), ("nav-modes", navigation), ("image-bw", image_bw))
     for name, unit in units:
         source, binary = Path(folder) / (name + ".c"), Path(folder) / name

@@ -65,6 +65,9 @@ enum EpdDrawError update_display_mode_diff_with(
 /// 四主页面固定底栏，仅横条局部更新；普通保留灰阶与内容区整理，快刷用完整黑白表及棋盘格亚克力。
 /// All main screens retain navigation with local markers; ordinary uses soft gray differences and periodic body cleanup, fast uses monochrome/checkerboard acrylic.
 enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl);
+/// 保留目标帧，先向白擦除覆盖区再重绘灰阶；复用已有波形，两步共持有显示互斥。
+/// Preserve the target, whiten the covered area and redraw its grays with existing waveforms under one display lock.
+enum EpdDrawError update_display_white_restore(EpdiyHighlevelState* hl, EpdRect area);
 /// 为下一次主页面输出启用固定底栏；标记书架切出与真正切页，避免同页重绘播放动画。
 /// Arm fixed navigation for the next main-screen output; tag shelf exit and actual navigation so same-page repaints do not animate.
 void display_main_transition_arm(const void* owner, bool leaving_shelf, bool changing_page);

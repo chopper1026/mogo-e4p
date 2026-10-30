@@ -5843,7 +5843,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
             if (ui_rect_hit(*rect, x, y)) return 701 + i;
         }
         int tab = ui_nav_hit(x, y);
-        if (tab >= 0) { *rect = (EpdRect){tab * 171, UI_NAV_TOP, 171, 120}; return 705 + tab; }
+        if (tab >= 0) { *rect = (EpdRect){tab * 171, UI_NAV_TOP, 171, UI_LOCK_HEIGHT - UI_NAV_TOP}; return 705 + tab; }
         return -1;
     }
     if (s_view == SEARCH) {

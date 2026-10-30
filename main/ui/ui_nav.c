@@ -8,10 +8,12 @@
  * User revision: only shared backs register local hits; footer icon taps just navigate, never enlarging or shifting.
  * 变更原因：底栏放大后复位被读成图标跳动，底栏改为完全静止。
  * Why it changed: enlarge-then-settle read as the icon jumping, so the footer now stays completely still.
- * 用户修订：所有模式把内容扫描截止到分隔线之间的8行固定为白色留白；滚动不能把列表画进这条扫描保护带。
- * User revision: every mode keeps the eight rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
+ * 用户修订：所有模式把内容扫描截止到分隔线之间的24行固定为白色留白；滚动不能把列表画进这条扫描保护带。
+ * User revision: every mode keeps the 24 rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
  * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
  * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses a small metrics table without reloading the system font.
+ * 用户修订：底栏去掉文字，只保留四枚图标和选中横条，高104像素，分隔线使用0x90灰。
+ * User revision: keep only four icons and the selection marker in a 104-pixel footer, without labels, using a 0x90 gray divider.
  */
 #include "ui_nav.h"
 #include <stdio.h>
@@ -116,8 +118,6 @@ static void status_fit_signature(char *text, int width) {
     }
 }
 
-static const char *const labels[] = {"首页", "书架", "文件管理", "设置"};
-
 void ui_nav_back(uint8_t *fb, int x, int y) {
     ui_click_feedback_register(fb,(EpdRect){x-10,y+3,64,64},UI_CLICK_BACK_SMALL,UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT);
     // 24px原画以48px输出，圆外径约44px，中心与触控区域保持原位。
@@ -140,23 +140,23 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
         UI_ICON_FOLDER_OPEN, UI_ICON_SLIDERS_HORIZONTAL,
     };
     if (tab < 0 || tab >= 4) return;
-    ui_draw_icon(fb, cx, y + 18, UI_NAV_TAB_ICON_PX, tabs[tab], UI_GRAY_BLACK);
+    ui_draw_icon(fb, cx, y + UI_NAV_TAB_ICON_PX / 2, UI_NAV_TAB_ICON_PX, tabs[tab], UI_GRAY_BLACK);
 }
 
 void ui_nav_draw(uint8_t *fb, int active) {
     ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
-    ui_hairline(fb, UI_NAV_TOP, 0, UI_LOCK_WIDTH, UI_GRAY_LIGHT);
+    ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_NAV_DIVIDER_H}, UI_GRAY_LIGHT, fb);
     ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, UI_GRAY_WHITE, fb);
     if (app_settings_main_refresh_mode() != APP_MAIN_REFRESH_NORMAL) {
-        // 快刷内容边界预留空白；横条在白底上单独短刷，图标和文字保持固定。
-        // Reserve a blank fast-refresh boundary; short-update the marker on white while retaining icons and text.
+        // 快刷内容边界预留空白；横条在白底上单独短刷，图标保持固定。
+        // Reserve a blank fast-refresh boundary; short-update the marker on white while retaining icons.
         ui_fill_rect_fast((EpdRect){0, UI_NAV_MARKER_TOP, UI_LOCK_WIDTH, UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_WHITE, fb);
     }
     for (int i = 0; i < 4; ++i) {
         int center = (i * 2 + 1) * UI_LOCK_WIDTH / 8;
-        if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_TOP + 1, 56, 5}, UI_GRAY_BLACK, fb);
-        icon(fb, i, center, UI_NAV_TOP + 27);
-        ui_text(fb, center, UI_NAV_TOP + 74, 17, labels[i], EPD_DRAW_ALIGN_CENTER, false);
+        if (i == active) ui_fill_rect_fast((EpdRect){center - 28, UI_NAV_MARKER_TOP, 56,
+            UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP}, UI_GRAY_BLACK, fb);
+        icon(fb, i, center, UI_NAV_TOP + (UI_LOCK_HEIGHT - UI_NAV_TOP - UI_NAV_TAB_ICON_PX) / 2);
     }
 }
 

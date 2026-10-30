@@ -17,6 +17,7 @@ static app_touch_t raw_touch;
 static esp_err_t read_error;
 static char sequence[128];
 static unsigned sequence_size;
+static app_redraw_t last_redraw;
 static uint64_t trace = UINT64_C(1469598103934665603);
 
 static void record(uint64_t value) { trace = (trace ^ value) * UINT64_C(1099511628211); }
@@ -62,6 +63,7 @@ bool app_font_activate_system(void) { event('F'); return true; }
 void app_time_service_cancel(void) { event('T'); }
 void app_present(app_ctx_t *context, const app_desc_t *app, app_redraw_t redraw) {
     assert(context == &ctx && app == current); event('P'); record(redraw);
+    last_redraw = redraw;
 }
 static void present_menu(app_ctx_t *context, const app_desc_t *app, int leaf, void *opaque) {
     assert(context == &ctx && app == current && leaf == menu_leaf && opaque == &history);
@@ -125,6 +127,7 @@ static void reader_returns(void) {
     app_navigation_capture_reader_return(current);
     apply(&settings, false, false);
     assert(!strcmp(sequence, "CXFEPD"));
+    assert(last_redraw == APP_REDRAW_FULL);
     int before = restores;
     apply(NULL, true, false);
     assert(!strcmp(sequence, "CXFREPD") && restores == before + 1 && ctx.leaf == 41);
@@ -139,6 +142,24 @@ static void reader_returns(void) {
     assert(restores == before + 1);
     snapshot_ok = true; body_visible = false;
     app_navigation_capture_reader_return(current);
+    // 四个主页面都清掉正文历史；正常主页切页仍保持普通刷新。
+    // Clear reader history on all four roots while ordinary root transitions stay ordinary.
+    for (unsigned i = 0; i < 4; ++i) {
+        if (pages[i] == &app_book) continue;
+        current = &app_book; body_visible = true;
+        apply(pages[i], false, false);
+        assert(last_redraw == APP_REDRAW_FULL);
+        current = &app_book;
+        history = (app_navigation_history_t){.return_app=pages[i]};
+        apply(NULL, true, false);
+        assert(last_redraw == APP_REDRAW_FULL);
+    }
+    body_visible = false; current = &home;
+    apply(&settings, false, false);
+    assert(last_redraw == APP_REDRAW_PAGE);
+    current = &app_book; body_visible = true;
+    apply(&app_transfer, false, false);
+    assert(last_redraw == APP_REDRAW_PAGE);
 }
 
 static void contact_latches(void) {

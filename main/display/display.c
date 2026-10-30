@@ -144,8 +144,8 @@ static bool main_nav_geometry(void) {
 }
 
 static EpdRect main_body_area(void) {
-    // 内容截止到 y=1087，32列对齐也不能扩展到 y=1097 的小横条。
-    // Content ends at y=1087, so 32-column expansion cannot reach the marker at y=1097.
+    // 内容止于分隔线上方的32列边界，扫描扩展不能触碰小横条。
+    // Content stops at the aligned 32-column boundary above the divider, so scan expansion cannot touch the marker.
     return (EpdRect){0, 0, epd_rotated_display_width(), UI_NAV_REFRESH_END};
 }
 
@@ -582,6 +582,43 @@ static enum EpdDrawError update_display_mode_diff_with_unlocked(
     return result;
 }
 
+static enum EpdDrawError update_display_white_restore_unlocked(EpdiyHighlevelState* hl, EpdRect area) {
+    if (!hl || !hl->front_fb || !hl->back_fb || area.x < 0 || area.y < 0 ||
+        area.width <= 0 || area.height <= 0 ||
+        (int64_t)area.x + area.width > epd_rotated_display_width() ||
+        (int64_t)area.y + area.height > epd_rotated_display_height()) return EPD_DRAW_INVALID_CROP;
+    enum EpdDrawError intercepted;
+    if (main_before_update(hl, &intercepted)) return intercepted;
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
+    const size_t bytes = (size_t)epd_width() / 2 * epd_height();
+    uint8_t *target = heap_caps_aligned_alloc(16, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    const EpdWaveform *wave = display_main_water_waveform();
+    use_scan_for(wave, MODE_GL16);
+    epd_hl_waveform(hl, wave);
+    enum EpdDrawError result;
+    if (target) {
+        memcpy(target, hl->front_fb, bytes);
+        // 白目标只向白推动；成功后 back 才成为真实白底，不能先伪造缓存。
+        // White targets drive only white; only successful output commits the real white baseline.
+        epd_fill_rect(area, 0xff, hl->front_fb);
+        result = epd_hl_update_area_padded(hl, MODE_GL16, 25, area, 1, 1);
+        memcpy(hl->front_fb, target, bytes);
+        heap_caps_free(target);
+        if (result == EPD_DRAW_SUCCESS)
+            result = epd_hl_update_area_padded(hl, MODE_GL16, 25, area, 1, 1);
+    } else {
+        // 低内存仍呈现完整目标，退回单次同向擦白差分，不额外黑闪。
+        // Low memory still presents the complete target in one directional-white differential without an extra black flash.
+        result = epd_hl_update_area_padded(hl, MODE_GL16, 25, area, 1, 1);
+    }
+    if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
+    epd_hl_waveform(hl, &E0470_WAVEFORM);
+    if (area.x == 0 && area.y == 0 && area.width == epd_rotated_display_width() &&
+        area.height == epd_rotated_display_height()) s_page_refreshes = 0;
+    rails_keepalive();
+    return result;
+}
+
 static enum EpdDrawError update_display_fast_page_unlocked(EpdiyHighlevelState* hl) {
     enum EpdDrawError navigation;
     if (main_begin(hl, &navigation)) return navigation;
@@ -835,6 +872,16 @@ int64_t local_display_elapsed_us;
 // 连续相位全部完成后，back已是真实黑白画面；不因尚未补灰阶而多做一次整屏GC16。
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
 static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
+
+enum EpdDrawError update_display_white_restore(EpdiyHighlevelState* hl, EpdRect area) {
+    LATENCY_DISPLAY_BEGIN();
+    bool held = pico_online_display_begin();
+    enum EpdDrawError result = display_needs_full()
+        ? update_display_full_unlocked(hl) : update_display_white_restore_unlocked(hl, area);
+    pico_online_display_end(held);
+    LATENCY_DISPLAY_END();
+    return result;
+}
 
 // 统一硬件出口，递归调用也必须覆盖整个扫描过程。/ Guard complete scans, including recursive fallback paths.
 enum EpdDrawError update_display_mode(

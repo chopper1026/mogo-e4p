@@ -34,7 +34,7 @@ code=r'''
 #define UI_TOUCH_SLOP_PX 24
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_BLACK 0
-#define UI_GRAY_LIGHT 0xc0
+#define UI_GRAY_LIGHT 0x90
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
@@ -44,7 +44,7 @@ static int rotation;
 #define W 1216
 #define H 684
 #define BYTES (W*H/2)
-static uint8_t frame[BYTES],saved[BYTES],again[BYTES];
+static uint8_t frame[BYTES],saved[BYTES],again[BYTES],fresh[BYTES];
 static int live,allocs,max_bytes;
 static bool oom,fast;
 static int epd_width(void){return W;}
@@ -105,7 +105,7 @@ int main(void){
      bool mask=y<layer_height&&layer_pixel(x,y,epd_rotated_display_width(),layer_height);
      uint8_t p=pixel(frame,x,y);
      if(!mask)assert(p==pixel(saved,x,y));
-     else {if(!icon_edge(x,y))assert(p==0||p==204||p==255);grays+=p==204;}
+     else {if(!icon_edge(x,y))assert(p==0||p==153||p==255);grays+=p==153;}
     }
     assert(grays>1000);
     assert(ui_quick_menu_rect(&menu).height==layer_height);
@@ -127,6 +127,8 @@ int main(void){
     assert(x>=dirty.x&&x<dirty.x+dirty.width&&y>=dirty.y&&y<dirty.y+dirty.height);
     assert((a==0&&b==255)||(a==255&&b==0));
    }
+   memset(fresh,255,BYTES);ui_quick_menu_draw(fresh,&slider,false,false);
+   assert(!memcmp(frame,fresh,BYTES));
    memcpy(again,frame,BYTES);assert(ui_quick_menu_draw_control(frame,&slider,c,&dirty));assert(!memcmp(frame,again,BYTES));
   }
   for(fast=false;;fast=true){

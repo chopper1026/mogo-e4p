@@ -48,5 +48,12 @@ int main(void) {
     assert(!display_waveform_get(-1)&&!display_waveform_get(DISPLAY_WAVE_COUNT));
     assert(!display_waveform_inspect(-1,MODE_DU,&info)&&!display_waveform_inspect(DISPLAY_WAVE_DEFAULT,63,&info));
     assert(!display_waveform_inspect(DISPLAY_WAVE_DEFAULT,MODE_DU,NULL));
+    // 黑白胶囊复用完整 DU，双向推动强于跟随短表；表本身保持原样。
+    // Binary capsules reuse complete DU with stronger pushes in both directions than follow DU; neither table changes.
+    display_waveform_info_t complete, follow;
+    assert(display_waveform_inspect(DISPLAY_WAVE_DEFAULT,MODE_DU,&complete));
+    assert(display_waveform_inspect(DISPLAY_WAVE_FOLLOW,MODE_DU,&follow));
+    assert(complete.black_pushes_from_white>follow.black_pushes_from_white);
+    assert(complete.white_pushes_from_black>follow.white_pushes_from_black);
     puts("catalog: PASS (23 original table identities, unique acyclic descriptors, reserved/executor roles, all-mode pulse statistics and invalid inputs)");
 }

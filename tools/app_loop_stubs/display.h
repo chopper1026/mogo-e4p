@@ -6,3 +6,6 @@
 void display_request_full_refresh(void);
 
 enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area);
+
+
+enum EpdDrawError update_display_white_restore(EpdiyHighlevelState *hl, EpdRect area);

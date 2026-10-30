@@ -137,6 +137,8 @@ static bool feedback_enabled;
 static bool online_busy;
 static bool ble_enabled, saved_wifi, upload_busy, click_enabled, click_active;
 static wifi_transfer_status_t transfer_status;
+static int white_restores;
+static int normalize_pushes, normalize_wave;
 static int quick_draws, quick_gl, quick_du, wifi_starts, wifi_stops, ble_resets, click_presses, click_restores;
 
 static app_redraw_t long_key(app_ctx_t* c, int k) { assert(k==UI_KEY_2); ++long_keys; c->request_menu=true; return APP_REDRAW_NONE; }
@@ -171,22 +173,16 @@ static bool mounted_steps[32], present_steps[32];
 static int media_lost, media_ready, builtin_opens, font_opens, probes, remounts, loss_step;
 static bool fl_ready, fl_on;
 static uint8_t fl_bri=40, fl_cct=50;
-static int fl_applies, fl_control_draws, fl_sweep_draws, fl_drag_pushes, fl_white_pushes, fl_gray_pushes, fl_key_gl, quick_gl_height, quick_norm;
+static int fl_applies, fl_control_draws, fl_sweep_draws, fl_drag_pushes, fl_white_pushes, fl_gray_pushes, fl_key_gl, quick_gl_height;
 int E0470_WAVEFORM;
 int E0470_FOLLOW_WAVEFORM;
 int E0470_CAPSULE_DRAG_WAVEFORM;
 int E0470_CAPSULE_WHITE_WAVEFORM;
 int E0470_CAPSULE_GRAY_WAVEFORM;
-// 收起快捷层改用整屏归一表；调度测试只关心换表不影响推屏次数，同时记录页面是否要求
-// 保护图片灰阶——主机假页面没有阅读背景，必须走完整归一。
-// A closing quick layer swaps in the whole-screen normalize table; the scheduling test only
-// checks that the swap changes nothing else, and records whether the page asked to protect
-// picture grays—the host stand-in has no reading background, so it must take the full pass.
-static int s_normalize_waveform;
-static bool quick_norm_hold;
+// 主机假页面无阅读背景，关闭时应走完整归一。
+// The host page has no reading background, so closing must use full normalization.
 const EpdWaveform *display_normalize_waveform(bool hold_gray) {
-    quick_norm_hold = hold_gray;
-    return (const EpdWaveform*)&s_normalize_waveform;
+    assert(!hold_gray); return (const EpdWaveform *)&normalize_wave;
 }
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
@@ -195,7 +191,7 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
         else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     }
     if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
-        assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++fl_drag_pushes;
+        assert(!"binary sliders require padded complete DU");
     }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
     if (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT) {assert(a.x==0&&a.y==0&&a.width==684);++quick_du;}
@@ -206,8 +202,9 @@ enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const vo
                                                   int pad_lines,int pad_col_bytes) {
     (void)pad_lines;(void)pad_col_bytes;
     if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
-        // 黑白胶囊使用短差分，不能再进入灰阶专用表。/ Binary capsules use short differences, never gray-only tables.
-        assert(!"binary capsules must use unpadded FOLLOW DU");
+        assert(w==&E0470_WAVEFORM&&m==MODE_DU&&pad_lines==1&&pad_col_bytes==1);
+        ++fl_drag_pushes;
+        return update_display_area_with(h,w,m,a);
     }
     return update_display_area_diff_with(h,w,m,a);
 }
@@ -219,10 +216,12 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     assert(a.x==0&&a.y==0&&a.width==684&&
-           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT||a.height==1216));++quick_gl;
-    // 展开只推快捷层；收起改走整屏归一，单记一次。
-    // Opening pushes the layer only; closing normalizes the whole screen and is counted apart.
-    if(a.height==1216)++quick_norm; else quick_gl_height=a.height;
+           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT||a.height==1216));
+    if(a.height==1216){
+        assert(w==&normalize_wave&&m==MODE_GL16);++normalize_pushes;
+        return update_display_area_with(h,w,m,a);
+    }
+    ++quick_gl; quick_gl_height=a.height;
     // 快捷层展开刷新阻塞期间，用户抬手并快速点按 Wi-Fi 圆键；三帧都在队列里。
     // While the quick layer's opening refresh blocks, the user lifts and taps Wi-Fi fast.
     if (tap_during_present) {
@@ -314,6 +313,7 @@ enum EpdDrawError update_display_mode_diff(EpdiyHighlevelState*h,int m) {(void)h
 enum EpdDrawError update_display_fast_page(EpdiyHighlevelState*h) {(void)h;mode++;nav_draws+=nav_armed!=NULL;nav_armed=NULL;return 0;}
 enum EpdDrawError update_display_white(EpdiyHighlevelState*h) {(void)h;return 0;}
 bool display_take_white_exit(void) {return false;}
+enum EpdDrawError update_display_white_restore(EpdiyHighlevelState *h,EpdRect area) {(void)h;assert(area.height<=UI_QUICK_FRONTLIGHT_HEIGHT);++white_restores;return 0;}
 void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
@@ -415,6 +415,7 @@ static void reset(void) {
     last_du_area=(EpdRect){0};
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(wifi_transfer_status_t){0};
+    white_restores=normalize_pushes=0;
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
     wifi_setup_requests=bt_settings_requests=0;
     bt_return_to_origin=false;
@@ -423,7 +424,7 @@ static void reset(void) {
     reader_returns=0;reader_return_path[0]=0;reader_return_fullscreen=false;
     transfer_returns=false;
     haptic_pulses=haptic_stops=0;
-    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=quick_norm=0;
+    fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=0;
     main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
@@ -516,27 +517,27 @@ int main(void) {
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
         add(200,UI_NAV_TOUCH_TOP,1,0);run();assert(nav_draws==1&&enters==2&&!touch_calls&&haptic_pulses==1);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
-        add(200,1080,1,0);add(232,1092,1,0);add(232,1092,1,0);add(0,0,0,0);run();
+        add(200,UI_NAV_TOUCH_TOP,1,0);add(232,UI_NAV_TOUCH_TOP+12,1,0);add(232,UI_NAV_TOUCH_TOP+12,1,0);add(0,0,0,0);run();
         assert(nav_draws==1&&enters==2&&!touch_calls);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
-        add(200,1080,1,0);add(0,0,0,0);add(85,1080,1,0);add(0,0,0,0);run();
+        add(200,UI_NAV_TOUCH_TOP,1,0);add(0,0,0,0);add(85,UI_NAV_TOUCH_TOP,1,0);add(0,0,0,0);run();
         assert(nav_draws==2&&enters==3&&!touch_calls);
     }
-    reset();enable_main_tabs();add(85,1080,1,0);add(0,0,0,0);run();assert(!nav_draws&&enters==1);
-    reset();enable_main_tabs();first.on_gesture=gesture;add(200,1080,2,0);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
-    reset();enable_main_tabs();add(200,1080,1,-1);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
+    reset();enable_main_tabs();add(85,UI_NAV_TOUCH_TOP,1,0);add(0,0,0,0);run();assert(!nav_draws&&enters==1);
+    reset();enable_main_tabs();first.on_gesture=gesture;add(200,UI_NAV_TOUCH_TOP,2,0);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
+    reset();enable_main_tabs();add(200,UI_NAV_TOUCH_TOP,1,-1);add(0,0,0,0);run();assert(!nav_draws&&haptic_pulses==0);
     reset();enable_main_tabs();main_source_visible=false;first.on_gesture=gesture;
-    add(200,1080,1,0);run();assert(!nav_draws&&enters==1);
+    add(200,UI_NAV_TOUCH_TOP,1,0);run();assert(!nav_draws&&enters==1);
     for(int policy=0;policy<3;++policy){
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
-        add(85,1080,1,0);add(0,0,0,0);add(85,1080,1,0);add(0,0,0,0);run();
+        add(85,UI_NAV_TOUCH_TOP,1,0);add(0,0,0,0);add(85,UI_NAV_TOUCH_TOP,1,0);add(0,0,0,0);run();
         assert(!nav_draws&&enters==1);
     }
     // 待切另一页时点击当前页必须取消旧待切请求，底栏图标保持静止。
     // Tapping the active page while another tab is pending must drop that pending request, leaving the footer still.
     for(int policy=0;policy<3;++policy){
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;first.on_enter=enter_with_pending_tab;
-        add(85,1080,1,0);run();assert(enters==1&&!nav_draws);
+        add(85,UI_NAV_TOUCH_TOP,1,0);run();assert(enters==1&&!nav_draws);
     }
     puts("PASS: root tabs act on first contact in all modes, enlarged top edge, one-shot holds, rapid taps, active-tab no-op, subview/multitouch/read-error guards");
     reset();add(10,1141,1,0);
@@ -741,7 +742,7 @@ int main(void) {
     reset();first.on_gesture=gesture;
     add(300,20,1,0);add(300,110,1,0);add(300,120,1,0);add(0,0,0,0);
     add(300,500,1,0);add(0,0,0,0);add(100,400,1,0);add(0,0,0,0);run();
-    assert(quick_draws==1&&quick_gl==2&&!quick_du);
+    assert(quick_draws==1&&quick_gl==1&&!quick_du&&fulls==1&&!white_restores&&normalize_pushes==1);
     assert(events[UI_GESTURE_PRESS]==1&&events[UI_GESTURE_TAP]==1);
     reset();main_fast=true;saved_wifi=true;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
@@ -813,12 +814,12 @@ int main(void) {
            reader_return_fullscreen&&enters==2);
     puts("quick layer return: leaving the reading body restores the same book and full-screen state");
     // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
-    // 提交都走黑白短差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
-    // 按 480 高度擦除；开关点按不再单独重画圆钮。
+    // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
+    // 整屏归一；开关点按不再单独重画圆钮。
     // The fourth circle is the frontlight switch: the capsules expand with a
     // whole-layer re-composite to 480, drag frames and the release commit both
-    // use FOLLOW DU (no two-stage settle; zero white/gray pushes),
-    // switching off returns to 264 and closing erases by 480px; the switch tap
+    // use complete DU (no two-stage settle; zero white/gray pushes),
+    // switching off returns to 264 and closing normalizes the whole screen; the switch tap
     // no longer repaints its circle alone.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
@@ -827,17 +828,13 @@ int main(void) {
     add(399,398,1,0);add(0,0,0,0);
     add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==78&&fl_cct==59);
-    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&quick_norm==1);
-    // 主机假页面没有阅读背景：收起快捷栏必须走完整归一，不能沿用背景变体。
-    // The host stand-in has no reading background: closing must take the full pass, never
-    // the background variant.
-    assert(!quick_norm_hold);
+    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&fulls==1&&!white_restores&&normalize_pushes==1);
     assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
     // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
     // Opening and the switch tap each re-composite and redraw the layer; on close the
     // layer is already gone, so only the underlay page is re-rendered.
-    assert(quick_draws==2&&quick_gl==3&&base_renders==4);
-    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag and release commit and a whole-screen close normalize passed");
+    assert(quick_draws==2&&quick_gl==2&&base_renders==4);
+    puts("frontlight: fourth-circle switch expands the capsule card, slider rows, DU drag and release commit and whole-screen normalization on close passed");
     // 采样回放：快捷层展开的整页刷新期间快速点按，按下沿不能丢；一次点按只切换一次。
     // Sampler replay: a fast tap during the quick layer's opening refresh keeps its
     // press edge and toggles exactly once.

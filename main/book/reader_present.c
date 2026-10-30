@@ -104,6 +104,10 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
              request->closing_panel_to_text) {
         err = display_refresh_area(hl, DISPLAY_REFRESH_RESTORE, request->screen_area, request->hold_gray ? DISPLAY_REFRESH_HOLD_GRAY : DISPLAY_REFRESH_DEFAULT);
     }
+    else if (!request->reading && request->prior_reader && request->refresh == READER_PRESENT_PAGE)
+        // 同页退出正文回书架也全刷，清掉阅读文字残影。
+        // Fully refresh body-to-shelf returns within this page to clear reading-text residue.
+        err = update_display_full(hl);
     else err = request->reading
         ? display_refresh_screen(hl, DISPLAY_REFRESH_READER_BODY, frame_flags |
             (request->page_mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT))

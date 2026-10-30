@@ -185,6 +185,10 @@ int main(void) {
     r = reset(); r.refresh = READER_PRESENT_PAGE;
     reader_present_output(&hl, &r); expect(0, WHOLE_DIFF, &page, MODE_DU, none);
     r.reading = false; count = outputs = 0;
+    reader_present_output(&hl, &r); expect(0, FULL, NULL, 0, none);
+    count = outputs = 0; errors[0] = EPD_DRAW_OTHER_ERROR;
+    assert(reader_present_output(&hl, &r).error == EPD_DRAW_OTHER_ERROR);
+    count = outputs = 0; errors[0] = EPD_DRAW_SUCCESS; r.prior_reader = false;
     reader_present_output(&hl, &r); expect(0, FAST, NULL, 0, none);
     for (int du = 0; du < 2; ++du) {
         r = reset(); r.reading = false; r.feedback = true; r.mode = du ? MODE_DU : MODE_GL16;

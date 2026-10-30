@@ -99,13 +99,11 @@ void app_quick_layer_present(app_ctx_t *ctx, const app_desc_t *current, bool ful
     const int quick_height = ui_quick_menu_rect(&s_quick).height;
     const int area_height = quick_height > s_quick_height ? quick_height : s_quick_height;
     s_quick_height = quick_height;
-    // 收起快捷层时，被半透明遮罩盖过的字多走了一轮推黑，比没被盖过的字更黑；单次还原
-    // 追不平。整屏用归一表再走一遍，全页字芯落在同一墨度。展开仍只画遮罩与圆键。
+    // 收起后整屏归一，统一覆盖区内外的字芯驱动；展开仍只推快捷栏覆盖带。
     // 是否保护图片灰阶由当前页面决定：只有阅读背景正文需要，其他页面完整归一。
-    // Closing leaves the text under the translucent shade one black cycle ahead of the rest,
-    // which a single restore cannot match. One whole-screen normalize pass puts every glyph
-    // core on the same ink. Whether picture grays need protecting is the current page's call:
-    // only a background reading body does, and every other page takes the full pass.
+    // Normalize the whole screen on close so covered and uncovered glyph cores share the
+    // same drive history; opening pushes only the quick band. The visible page decides
+    // whether to protect picture grays: only a background reading body does.
     display_refresh_intent_t intent = DISPLAY_REFRESH_OVERLAY;
     unsigned flags = DISPLAY_REFRESH_DEFAULT;
     EpdRect area = {0, 0, UI_LOCK_WIDTH, area_height};
@@ -175,8 +173,8 @@ static void quick_toggle_wifi(void) {
     }
 }
 
-// 前光开关改变层高时整层重绘；黑白滑杆拖动与松手共用短 DU 差分，不追加定稿。
-// Repaint the layer when the light switch changes its height; binary slider motion and release share short DU differences without a settle pass.
+// 前光开关改变层高时整层重绘；黑白滑杆拖动与松手共用完整 DU 差分，不追加定稿。
+// Repaint the layer when the light switch changes its height; binary slider motion and release share complete DU differences without a settle pass.
 static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
                                      const ui_quick_event_t *event) {
     EpdRect dirty;
@@ -188,7 +186,7 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
     if (event->commit) {
         // 松手只提交积压终态；已显示时差分为空。/ Release submits only a coalesced final state; an already displayed state has no differences.
         if (ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) {
-            error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
+            error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl, error);
         }
         // 提交完成，脏范围收回当前档位；跟踪保留，便于恢复定稿时直接使用。
@@ -201,7 +199,7 @@ static void quick_frontlight_present(app_ctx_t *ctx, const app_desc_t *current,
     } else {
         if (!ui_quick_menu_draw_control(ctx->fb, &s_quick, event->control, &dirty)) return;
         // 固定图标与胶囊轮廓保持，只有黑白填充边界改变。/ Hold icons and capsule outlines; only the binary fill boundary changes.
-        error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
+        error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, dirty, DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl, error);
     }
     if (error != EPD_DRAW_SUCCESS) {

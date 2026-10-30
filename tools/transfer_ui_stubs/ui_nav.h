@@ -1,6 +1,6 @@
 #pragma once
 
-#define UI_NAV_TOP 1096
+#include "../../main/ui/ui_nav_layout.h"
 #define UI_KEY_2 2
 
 static inline void ui_nav_draw(uint8_t *fb, int active) { (void)fb; (void)active; }

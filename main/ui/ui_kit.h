@@ -93,7 +93,7 @@ extern "C" {
 // epdiy 图形接口取 8 位灰度（仅高 4 位有效），字体属性取 4 位灰度，两者不可混用。
 // epdiy graphics uses 8-bit gray (high nibble only); font attrs use 4-bit gray. Do not mix them.
 #define UI_GRAY_WHITE 0xFF
-#define UI_GRAY_LIGHT 0xC0
+#define UI_GRAY_LIGHT 0x90
 #define UI_GRAY_BLACK 0x00
 #define UI_INK_WHITE 15
 #define UI_INK_BLACK 0

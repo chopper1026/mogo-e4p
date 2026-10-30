@@ -472,7 +472,7 @@ int main(void) {
     // 内容成功后横条失败，重建最新完整目标；不得继续显示旧横条或半张新页。
     // If the marker fails after successful content, rebuild the latest complete target rather than retaining an old marker or partial new page.
     reset(); main_mode=APP_MAIN_REFRESH_NORMAL; target(5);
-    for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + 550] = 0;
+    for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + UI_NAV_TOP / 2 + 2] = 0;
     memcpy(final, front, BYTES);
     failures = 1; fail_after = 1; fail_error = EPD_DRAW_OTHER_ERROR;
     begin(&owner_a); assert_final();
@@ -509,7 +509,7 @@ int main(void) {
     // Fail black/white, gray and marker passes separately; each recovers the latest final target without leaking the cache.
     for (int stage = 0; stage < 3; ++stage) {
         reset(); gray_target(3);
-        for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + 550] = 0;
+        for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + UI_NAV_TOP / 2 + 2] = 0;
         memcpy(final, front, BYTES);
         failures = 1; fail_after = stage; fail_error = EPD_DRAW_OTHER_ERROR;
         gray_begin();
@@ -529,7 +529,7 @@ int main(void) {
 
     // 无效条带及取消许可不能泄漏到下一页；包括奇数、重叠和可能溢出的输入。
     // Invalid bands and cancelled permission cannot leak into another page, including odd, overlapping and potentially overflowing input.
-    const EpdRect invalid[] = {{0,361,H,90},{1,360,H,90},{0,1000,H,90},
+    const EpdRect invalid[] = {{0,361,H,90},{1,360,H,90},{0,UI_NAV_REFRESH_END-88,H,90},
                                {0,360,H,2147483646},{0,-2,H,90}};
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
         reset(); target(1);
@@ -572,8 +572,8 @@ int main(void) {
     display_main_transition_arm(&owner_a,true,false);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS); assert_final();
     assert(bw_calls==1 && !complete_bw_calls && !exit_calls && !allocations && gray_calls==1 && nav_draws==1);
-    // 普通灰阶周期清理、局部滚动与后台封面均止于1088，重复目标不清屏，手动全刷仍含底栏。
-    // Ordinary gray cleanup, scrolling and background covers stop at 1088; identical targets skip cleanup and manual full output still includes nav.
+    // 普通灰阶周期清理、局部滚动与后台封面均止于内容扫描边界，重复目标不清屏，手动全刷仍含底栏。
+    // Ordinary gray cleanup, scrolling and background covers stop at the content scan boundary; identical targets skip cleanup and manual full output still includes nav.
     reset(); main_mode=APP_MAIN_REFRESH_NORMAL; memset(front,0x73,BYTES);
     assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);
     calls=gray_calls=gc_calls=full_calls=nav_draws=0;
@@ -604,7 +604,7 @@ int main(void) {
     // 普通柔和输出在内容或横条扫描失败时从白底重建，绝不提交半帧。
     // Soft ordinary output rebuilds from white after a body or marker scan failure instead of committing an intermediate frame.
     for(int stage=0;stage<2;++stage){
-        reset();main_mode=APP_MAIN_REFRESH_NORMAL;gray_target(3);front[550]=0;memcpy(final,front,BYTES);
+        reset();main_mode=APP_MAIN_REFRESH_NORMAL;gray_target(3);front[UI_NAV_TOP/2+2]=0;memcpy(final,front,BYTES);
         failures=1;fail_after=stage;fail_error=EPD_DRAW_OTHER_ERROR;
         display_main_transition_arm(&owner_a,false,true);
         assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
@@ -640,7 +640,7 @@ int main(void) {
             display_main_transition_gray_bands(&settings_content,1);
             assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
             assert(region_calls==step&&calls==step&&!clears&&!nav_draws&&!allocations);
-            assert(last_strong_area.y==160&&last_strong_area.height==928);
+        assert(last_strong_area.y==160&&last_strong_area.height==UI_NAV_REFRESH_END-160);
             assert(last_area.y==0&&last_area.height==UI_NAV_MARKER_SCAN_END);
         }
         assert(gc_calls==24/APP_UI_FAST_GC16_EVERY);
@@ -762,6 +762,46 @@ int main(void) {
         assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS);
         assert(clears == 2); assert_final();
     }
+    // 覆盖带先变白再落目标灰阶；两步失败都必须保住目标并可靠恢复。
+    // Whiten the covered band before its gray target; failures in either step must preserve and recover the target.
+    for (int whole = 0; whole < 2; ++whole) for (int failure = 0; failure < 4; ++failure) {
+        reset(); main_mode = APP_MAIN_REFRESH_NORMAL;
+        memset(front, 0x22, BYTES); memcpy(back, front, BYTES); memcpy(panel, front, BYTES);
+        const EpdRect area = {0, 0, H, whole ? W : 256};
+        for (int y = 0; y < H; ++y) memset(front + (size_t)y * W / 2, 0x96, area.height / 2);
+        memcpy(final, front, BYTES);
+        if (failure == 1 || failure == 2) {
+            failures = 1; fail_after = failure - 1; fail_error = EPD_DRAW_EMPTY_LINE_QUEUE;
+        }
+        alloc_fail = failure == 3;
+        assert(update_display_white_restore(&hl, area) == EPD_DRAW_SUCCESS);
+        assert_final(); assert(!ota_display_depth && allocations == 1);
+        assert(frees == (failure != 3));
+        if (!failure) assert(calls == 2 && gray_calls == 2 && !gc_calls && !clears);
+        if (failure == 1 || failure == 2) assert(clears == 1 && gc_calls == 1);
+        if (failure == 3) assert(calls == 1 && !clears && !gc_calls);
+    }
+    reset(); memset(back, 0x22, BYTES); memcpy(panel, back, BYTES); target(39);
+    assert(update_display_full(&hl) == EPD_DRAW_SUCCESS); assert_final();
+    assert(!allocations && gc_calls == 1);
+    target(40); assert(update_display_full(&hl) == EPD_DRAW_SUCCESS); assert_final();
+    assert(gc_calls == 2 && !allocations);
+    reset(); main_mode = APP_MAIN_REFRESH_NORMAL;
+    for (int i = 1; i < APP_UI_FAST_GC16_EVERY; ++i) {target((unsigned)i); begin(&owner_a);}
+    assert(!gc_calls);
+    memcpy(front, back, BYTES); memcpy(final, front, BYTES);
+    assert(update_display_white_restore(&hl, (EpdRect){0,0,H,256}) == EPD_DRAW_SUCCESS);
+    target(101); begin(&owner_a); assert(gc_calls == 1); assert_final();
+    reset(); target(11); power_failure = true;
+    assert(update_display_white_restore(&hl, (EpdRect){0,0,H,256}) == DISPLAY_DRAW_POWER_NOT_READY);
+    assert(!memcmp(front, final, BYTES) && !allocations && !calls);
+    power_failure = false; now_us += 1000001;
+    assert(update_display_white_restore(&hl, (EpdRect){0,0,H,256}) == EPD_DRAW_SUCCESS);
+    assert_final();
+    assert(update_display_white_restore(&hl, (EpdRect){0,-1,H,256}) == EPD_DRAW_INVALID_CROP);
+    assert(update_display_white_restore(&hl, (EpdRect){0,0,H+1,W}) == EPD_DRAW_INVALID_CROP);
+    assert(update_display_white_restore(&hl, (EpdRect){0,0,H,0}) == EPD_DRAW_INVALID_CROP);
+    puts("PASS: local/full white restoration preserves gray targets, handles either scan failure, OOM and power loss, and never black-flashes on the normal path");
     puts("PASS: native-size gray targets survive power failure, cached-band restoration, OOM, ordinary/ripple modes and repeated recovery failure under OTA exclusion");
     puts("PASS: loading-time control feedback preserves pending main transitions in all three modes");
     puts("PASS: protected Cat/Kehai short motion retains FOLLOW/DU/FAST in normal, fast and ripple; unchanged targets skip scans and failures rebuild the exact frame");
@@ -771,3 +811,13 @@ int main(void) {
 }
 
 // Continuous state is exercised separately with native-size buffers.
+
+void epd_fill_rect(EpdRect area, uint8_t color, uint8_t *fb) {
+    assert(rotation == EPD_ROT_INVERTED_PORTRAIT);
+    for (int y = area.y; y < area.y + area.height; ++y)
+        for (int x = area.x; x < area.x + area.width; ++x) {
+            size_t at = (size_t)(H - x - 1) * W / 2 + y / 2;
+            int shift = (y & 1) * 4;
+            fb[at] = (fb[at] & ~(15 << shift)) | ((color >> 4) << shift);
+        }
+}

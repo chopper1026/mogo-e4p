@@ -28,6 +28,10 @@ static uint8_t fb[1];
 static EpdiyHighlevelState hl;
 int E0470_WAVEFORM, E0470_FOLLOW_WAVEFORM, E0470_CAPSULE_DRAG_WAVEFORM;
 static int normalize_wave;
+static unsigned last_kind;
+static const void *last_wave;
+static int last_mode;
+static EpdRect last_area;
 
 static void render(app_ctx_t *c, uint8_t *buffer) {
     assert(c == &ctx && buffer == fb); ++renders; record(1, renders);
@@ -106,6 +110,7 @@ bool ui_quick_menu_draw_control(uint8_t *buffer, const ui_quick_menu_t *m,
     *dirty = (EpdRect){40, control == UI_QUICK_CTL_BRIGHTNESS ? 244 : 344, 604, 80}; return true;
 }
 static enum EpdDrawError push(unsigned kind, const void *wave, int mode, EpdRect area) {
+    last_kind = kind; last_wave = wave; last_mode = mode; last_area = area;
     record(kind, mode); record(40, area.x); record(41, area.y); record(42, area.width); record(43, area.height);
     record(44, wave == &E0470_WAVEFORM ? 1 : wave == &E0470_FOLLOW_WAVEFORM ? 2 :
         wave == &E0470_CAPSULE_DRAG_WAVEFORM ? 3 : wave == &normalize_wave ? 4 : 5);
@@ -122,6 +127,9 @@ enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState *h, const 
 }
 enum EpdDrawError update_display_full(EpdiyHighlevelState *h) {
     assert(h == &hl); return push(39, NULL, MODE_GC16, (EpdRect){0, 0, 684, 1216});
+}
+enum EpdDrawError update_display_white_restore(EpdiyHighlevelState *h, EpdRect area) {
+    assert(h == &hl); return push(50, NULL, MODE_GL16, area);
 }
 void guard_draw_result(EpdiyHighlevelState *h, enum EpdDrawError error) {
     assert(h == &hl); if (error != EPD_DRAW_SUCCESS) ++failures; record(45, error);
@@ -167,6 +175,8 @@ int main(void) {
     assert(applies == a + 4 && settings_writes == w + 1 && pushes == p);
     assert(saved_on == hw_on && saved_bri == hw_bri && saved_cct == hw_cct);
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p + 1);
+    assert(last_kind == 38 && last_wave == &E0470_WAVEFORM && last_mode == MODE_DU);
+    assert(last_area.y == 244 && last_area.height == 80);
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p + 1);
     (void)frame(true, true, false, 600, 384, 10, true);
     app_quick_layer_discard_frontlight(); p = pushes;
@@ -177,10 +187,14 @@ int main(void) {
     open_layer(); p = renders; tap(2); assert(renders == p);
     hold_gray = true; tap(3); p = renders; usb = true;
     release(); assert(!app_quick_layer_is_open() && renders == p + 1);
+    assert(last_kind == 36 && last_wave == &normalize_wave && last_mode == MODE_GL16 && last_area.height == 1216);
     hold_gray = false;
     open_layer(); online = true; release(); assert(!app_quick_layer_is_open()); online = false;
+    assert(last_kind == 36 && last_wave == &normalize_wave && last_mode == MODE_GL16 && last_area.height == 1216);
+    app_quick_layer_present(&ctx, &app_transfer, false);
+    assert(last_kind == 36 && last_wave == &normalize_wave && last_area.height == 1216);
 
-    for (int path = 0; path < 4; ++path) {
+    for (int path = 0; path < 5; ++path) {
         open_layer(); unsigned f = fallback, n = failures; error_once = 1;
         if (path == 0) app_quick_layer_present(&ctx, current, false);
         if (path == 1) app_quick_layer_present(&ctx, current, true);
@@ -189,6 +203,7 @@ int main(void) {
             app_quick_layer_present_buttons(&ctx, current);
         }
         if (path == 3) (void)frame(true, true, false, 250, 284, 10, false);
+        if (path == 4) {usb = true; release(); usb = false;}
         assert(!app_quick_layer_is_open() && fallback == f + 1 && failures == n + 1);
         p = pushes; app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p);
     }

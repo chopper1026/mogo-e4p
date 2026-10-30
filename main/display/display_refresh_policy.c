@@ -51,7 +51,9 @@ bool display_refresh_resolve(display_refresh_intent_t intent, unsigned flags,
             plan->waveform=flags & DISPLAY_REFRESH_HOLD_GRAY ? DISPLAY_WAVE_NORMALIZE_GRAY : DISPLAY_WAVE_NORMALIZE;
             plan->coverage=DISPLAY_COVERAGE_FULL; break;
         case DISPLAY_REFRESH_CAPSULE:
-            plan->waveform=DISPLAY_WAVE_CAPSULE_DRAG; plan->mode=MODE_DU;
+            // 黑白滑杆使用完整 DU，并擦除边界外扩区的细线残影。
+            // Binary sliders use complete DU pulses and padded dirty edges to erase fine-line ghosts.
+            plan->mode=MODE_DU;
             plan->pad_lines=plan->pad_col_bytes=1; break;
         case DISPLAY_REFRESH_COUNT: return false;
     }

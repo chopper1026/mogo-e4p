@@ -675,7 +675,7 @@ static void draw_status(uint8_t* fb) {
     EpdRect area = status_rect();
     ui_clear_rect_fast(fb, area);
     ui_fill_round_rect(fb, area, 24, UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, area, 24, 0x98);
+    ui_draw_round_rect(fb, area, 24, UI_GRAY_BLACK);
     const char* state = "网络已停止";
     if (s_start_pending || s_status.state == WIFI_TRANSFER_STARTING) state = "正在准备传书…";
     else if (s_status.state == WIFI_TRANSFER_READY) state = "等待上传";
@@ -770,7 +770,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     transfer_header(fb, s_mode == WIFI_TRANSFER_MODE_AP ? "热点传书" : "WiFi 传书", NULL);
     EpdRect connection = {36, 168, 612, 132};
     ui_fill_round_rect(fb, connection, 24, UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, connection, 24, 0x98);
+    ui_draw_round_rect(fb, connection, 24, UI_GRAY_BLACK);
     char name[64];
     snprintf(name, sizeof(name), "%s", s_mode == WIFI_TRANSFER_MODE_AP ? s_status.ssid : s_status.wifi_ssid);
     if (!name[0]) snprintf(name, sizeof(name), "%s", s_mode == WIFI_TRANSFER_MODE_AP ? "kiikoread 热点" : "已保存的 WiFi");

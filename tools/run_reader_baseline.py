@@ -34,6 +34,8 @@ SUITES = {
     "battery": [sys.executable, "tools/test_pmu_battery.py"],
     "battery_filter": [sys.executable, "tools/test_pmu_soc_filter.py"],
     "status_power": [sys.executable, "tools/ui_refresh_feedback_host_test.py", "--status-only"],
+    "nav_layout": [sys.executable, "tools/ui_refresh_feedback_host_test.py", "--nav-only"],
+    "quick_pixels": [sys.executable, "tools/quick_layer_raster_host_test.py"],
     "media": [sys.executable, "tools/test_sd_media_guard.py"],
     "shelf_covers": ["bash", "tools/run_shelf_cover_host_tests.sh"],
     "shelf": [sys.executable, "tools/shelf_categories_host_test.py"],

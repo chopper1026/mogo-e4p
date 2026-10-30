@@ -55,6 +55,7 @@ static void app_navigation_switch_to(
     const int probe_from=app_index_of(*current);
 #endif
     bool main_source = app_navigation_main_page_ready(ctx, *current);
+    bool reader_source = *current == &app_book && !main_source;
     bool shelf_source = main_source && app_index_of(*current) == 1;
     display_main_transition_cancel();
     if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
@@ -75,7 +76,8 @@ static void app_navigation_switch_to(
     const int64_t probe_enter=esp_timer_get_time();
 #endif
     if (main_source && app_navigation_main_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
-    app_present(ctx, next, next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
+    const bool reader_return = reader_source && app_navigation_main_page_ready(ctx, next);
+    app_present(ctx, next, reader_return || next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
     display_main_transition_disarm();
 #ifdef KIIKO_LOCAL_LATENCY
     ESP_LOGI("latency","SWITCH from=%d to=%d mode=%d exit_us=%lld font_us=%lld enter_us=%lld present_us=%lld total_us=%lld",probe_from,app_index_of(next),app_settings_main_refresh_mode(),
@@ -129,6 +131,7 @@ void app_navigation_apply_request(app_ctx_t *ctx, const app_desc_t **current,
     const app_desc_t *next = request.next;
     if (request.go_back) {
         bool main_source = app_navigation_main_page_ready(ctx, *current);
+        bool reader_source = *current == &app_book && !main_source;
         bool shelf_source = main_source && app_index_of(*current) == 1;
         display_main_transition_cancel();
         *menu_open = history->return_app ? history->return_to_menu : true;
@@ -156,7 +159,8 @@ void app_navigation_apply_request(app_ctx_t *ctx, const app_desc_t **current,
         else {
             if (main_source && app_navigation_main_page_ready(ctx, *current))
                 display_main_transition_arm(*current, shelf_source, true);
-            app_present(ctx, *current, APP_REDRAW_PAGE);
+            const bool reader_return = reader_source && app_navigation_main_page_ready(ctx, *current);
+            app_present(ctx, *current, reader_return ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
             display_main_transition_disarm();
         }
     } else if (next) {

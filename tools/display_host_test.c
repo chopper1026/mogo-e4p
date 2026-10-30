@@ -413,3 +413,7 @@ int main(void) {
 }
 
 // Continuous state is exercised separately with native-size buffers.
+
+void epd_fill_rect(EpdRect area, uint8_t color, uint8_t *fb) {
+    (void)area; (void)color; (void)fb; assert(false);
+}

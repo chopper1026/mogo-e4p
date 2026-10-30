@@ -5,8 +5,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-30
 
-- 界面底色与控件统一白、黑及固定灰，小字改黑，卡片和导航改白底；保留书架亚克力挡板、封面、图像及抗锯齿。快捷栏使用不透明白底，前光滑杆改为黑白短差分刷新。
-  UI surfaces and controls use white, black and one fixed gray, with black small text and white cards/navigation. Retain acrylic shelf guards, covers, artwork and antialiasing. The quick layer is opaque white and frontlight sliders use binary short differential refreshes.
+- 界面底色与控件统一白、黑及固定灰，小字改黑，卡片和导航改白底；保留书架亚克力挡板、封面、图像及抗锯齿。快捷栏使用不透明白底，前光滑杆改为黑白差分刷新。
+  UI surfaces and controls use white, black and one fixed gray, with black small text and white cards/navigation. Retain acrylic shelf guards, covers, artwork and antialiasing. The quick layer is opaque white and frontlight sliders use binary differential refreshes.
+
+- WiFi传书连接框与传输状态框改为黑色边框；底部导航只保留图标，高度104像素、图标居中，分隔线加粗并使用0x90灰，控件固定灰加深至0x90。前光滑杆复用完整 DU 并扩边擦除；快捷栏收起恢复整屏归一化，按当前页面保护阅读背景灰阶，退出阅读回主页面（含书架）恢复整屏GC16清理文字残影。实际残影效果待实屏验证。
+  WiFi transfer connection/status cards use black frames; the footer uses centered icons in 104 pixels with a thicker 0x90 gray divider and darker 0x90 control gray. Frontlight sliders reuse complete DU with padded dirty masks; closing the quick layer restores whole-screen normalization with reading-background gray protection selected by the current page, and reader-to-main returns (including the shelf) restore whole-screen GC16 to clear text residue. Optical residue awaits panel acceptance.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-29
 

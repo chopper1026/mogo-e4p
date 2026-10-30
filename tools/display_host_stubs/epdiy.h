@@ -24,3 +24,5 @@ int epd_rotated_display_width(void);
 int epd_rotated_display_height(void);
 int epd_width(void);
 int epd_height(void);
+
+void epd_fill_rect(EpdRect area, uint8_t color, uint8_t *fb);
