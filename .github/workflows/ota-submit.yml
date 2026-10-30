@@ -81,7 +81,11 @@ jobs:
           build/book-tests/layout
       - name: Verify and prepare submission
         shell: bash
-        run: GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" python3 tools/prepare_platform_submission.py
+        run: |
+          set -eu
+          release_source_commit=$(git -c safe.directory="$PWD" rev-parse HEAD)
+          test "${#release_source_commit}" -eq 40
+          GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$release_source_commit" python3 tools/prepare_platform_submission.py
       - name: Preserve host regression diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
