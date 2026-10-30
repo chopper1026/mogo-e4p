@@ -52,14 +52,18 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends clang libclang-rt-dev libssl-dev zlib1g-dev
           mkdir -p /private/tmp build/host-compiler
-          cat > build/host-compiler/cc <<'SH'
-          #!/bin/sh
-          exec /usr/bin/clang -D_DEFAULT_SOURCE "$@"
-          SH
+          # 保留严格检查，将历史 macOS 链接参数映射为 Linux 等价选项。
+          # Preserve strict checks and map legacy macOS linker flags to their Linux equivalent.
+          cat > build/host-compiler/cc <<'PY'
+          #!/usr/bin/python3
+          import os, sys
+          args = ['-Wl,--gc-sections' if arg == '-Wl,-dead_strip' else arg for arg in sys.argv[1:]]
+          os.execv('/usr/bin/clang', ['clang', '-D_DEFAULT_SOURCE', '-ffunction-sections', '-fdata-sections'] + args)
+          PY
           chmod +x build/host-compiler/cc
           cp build/host-compiler/cc build/host-compiler/gcc
           echo "$PWD/build/host-compiler" >> "$GITHUB_PATH"
-          echo 'CC=/usr/bin/clang -D_DEFAULT_SOURCE' >> "$GITHUB_ENV"
+          echo "CC=$PWD/build/host-compiler/cc" >> "$GITHUB_ENV"
       - name: Host regression tests with build dependencies
         shell: bash
         run: |
