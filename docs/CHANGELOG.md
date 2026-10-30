@@ -3,18 +3,16 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## v1.0.2 · 2026-10-30
+## v1.0.1 · 2026-10-30
+
+- 本次交付统一使用1.0.1，包含下列高压关断、阅读刷新及本地测试中的 TXT 章节目录、字体列表、电源键、蓝牙、电量和界面调整。开书、连续翻页和保存阅读设置已通过本轮真机复测，实际高压归零时刻仍未测量。
+  This delivery consistently uses 1.0.1, including the power-off and reader-refresh changes below and the TXT chapters, font list, power key, Bluetooth, battery and UI changes recorded under local testing. Book opening, consecutive page turns and reader-setting saves passed this round of device checks; the physical time at which the high-voltage rails reach zero has not been measured.
 
 - 本地调整（未发布）：高压改为真实扫描前上电、完整显示组结束即关电，组内仍由独立任务执行扫描后100ms空闲关断；关电先撤MODE/XOE并等待至少12µs，再关闭供电。设置保存与OTA写入前确认关电并阻止扫描，保留通信失败重试及马达共享扩展口并发保护。实际电压时序与光学效果需真机验证。
   Local change (unpublished): power on immediately before physical scans and shut down when a complete display group ends, retaining independent 100 ms idle shutdown within groups. Lower MODE/XOE and wait at least 12 µs before disabling power. Settings and OTA writes confirm shutdown and exclude scanning, retaining communication retries and concurrent motor/expander protection. Actual voltage timing and optical behavior require device verification.
 
 - 本地调整（未发布）：阅读页眉恢复默认裁剪 GL16，普通页脚恢复短 DU，换章和插图页脚保留默认 GL16 清理，全屏进度恢复默认 GL16；保留正文优先与状态随翻页更新。实际速度、墨度和残影待实屏验证。
   Local change (unpublished): restore trimmed default GL16 for reader headers and full-screen progress, short DU for ordinary footers, and default GL16 cleanup for chapter/illustration footers. Keep body-first presentation and status updates with turns. Actual latency, ink density and ghosting await panel verification.
-
-## v1.0.1 · 2026-10-30
-
-- 按用户要求将当前交付版本设为1.0.1，汇总下列本地测试中的 TXT 章节目录、字体列表、电源键、蓝牙、电量及界面调整；阅读状态随翻页更新且正文优先输出。屏幕残影、变淡及翻页耗时仍需真机验证。
-  Set the delivery version to 1.0.1 as requested, including the TXT chapter index, font list, power key, Bluetooth, battery and UI changes recorded below. Reader status updates with page turns and the body presents first. Ghosting, fading and turn latency still require device verification.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-10-30
 
