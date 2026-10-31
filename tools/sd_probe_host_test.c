@@ -21,6 +21,13 @@ static uint64_t test_total=1024*512,test_free=768*512;
 static esp_err_t test_info_error=ESP_OK;
 static unsigned space_calls, invalidations;
 static bool fat_locked;
+static bool log_available, log_gate_blocked;
+bool device_power_batt_log_storage(bool available, uint32_t timeout_ms) {
+    assert(timeout_ms == 2000);
+    if (log_gate_blocked) return false;
+    log_available = available;
+    return true;
+}
 bool test_dma_internal = true;
 static int64_t mock_us;
 
@@ -93,12 +100,14 @@ esp_err_t esp_vfs_fat_sdmmc_mount(const char* path, const sdmmc_host_t* host,
 }
 esp_err_t esp_vfs_fat_sdcard_unmount(const char* path, sdmmc_card_t* mounted) {
     (void)path;
+    assert(!log_available);
     assert(mounted == &test_card);
     ++unmount_calls;
     return ESP_OK;
 }
 esp_err_t esp_vfs_fat_sdcard_format(const char* path, sdmmc_card_t* mounted) {
     (void)path; (void)mounted;
+    assert(!log_available);
     return ESP_OK;
 }
 esp_err_t esp_vfs_fat_info(const char* path, uint64_t* total, uint64_t* free_bytes) {
@@ -124,6 +133,12 @@ int main(void) {
     assert(board_sd_start_probe() == ESP_ERR_NOT_FINISHED);
     assert(board_sd_get_info(&info) == ESP_OK);
     assert(info.present && info.mounted && mount_calls == 1);
+    assert(log_available);
+    log_gate_blocked = true;
+    assert(close_card() == ESP_ERR_TIMEOUT && unmount_calls == 0);
+    assert(board_sd_get_info(&info) == ESP_OK && info.mounted);
+    assert(board_sd_format() == ESP_ERR_TIMEOUT && unmount_calls == 0);
+    log_gate_blocked = false;
 
     detect_failure = true;
     assert(board_sd_get_info(&info) == ESP_OK && info.mounted && info.capacity_bytes);

@@ -50,6 +50,7 @@
 #include "book_lock_bookmark.h"
 #include "book_ticket.h"
 #include "cache_wake_restore.h"
+#include "s31_sleep_compat.h"
 #include "display.h"
 #include "display_refresh.h"
 #include "frontlight.h"
@@ -118,6 +119,7 @@ static bool s_acc_was_on;
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc) {
     s_tp = tp;
     s_acc = acc;
+    app_s31_sleep_init();
     // 没开 PM 时 IDF 不分配 CPU 保存区，浅睡里 CPU 不会掉电；这里手动申请一次。
     // Without PM, IDF never allocates CPU retention, so light sleep keeps the CPU powered; request it once here.
 #if defined(CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU)
@@ -297,6 +299,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     unsigned sleep_errors = 0;
     esp_err_t last_sleep_error = ESP_OK;
     int64_t last_sleep_error_log_ms = 0;
+    device_power_batt_log_event(DEVICE_POWER_BATT_LOG_LOCK);
     for (;;) {
         int64_t now_us = esp_timer_get_time();
         // The PMU event is authoritative even if the IOE edge was missed.
@@ -349,7 +352,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             continue;
         }
         int64_t t0 = esp_timer_get_time();
-        esp_err_t sleep_error = esp_light_sleep_start();
+        esp_err_t sleep_error = app_s31_light_sleep_start();
         int64_t dt_ms = (esp_timer_get_time() - t0) / 1000;
         // 唤醒路径不恢复 CACHE_L1 仲裁/门控配置，必须在任何刷新前写回。
         // The wake path never restores the CACHE_L1 arbitration/gating words;
@@ -357,6 +360,11 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         if (sleep_error == ESP_OK) {
             cache_wake_restore_apply();
         }
+#ifdef KIIKO_SLEEP_DIAG
+        // 缓存恢复后才输出，避免诊断本身干扰唤醒。/ Log only after cache restore to avoid disturbing wake.
+        ESP_LOGI(TAG, "sleep result=%d causes=0x%lx elapsed_ms=%lld", (int)sleep_error,
+                 (unsigned long)esp_sleep_get_wakeup_causes(), (long long)dt_ms);
+#endif
         board_clear_ioe_int();
         if (device_power_take_key_wakeup()) {
             wake = APP_WAKE_KEY;
@@ -399,6 +407,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         }
     }
 
+    device_power_batt_log_event(DEVICE_POWER_BATT_LOG_WAKE);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     gpio_wakeup_disable((gpio_num_t)BOARD_IOE_INT_GPIO);
     if (acc_armed) {
@@ -424,6 +433,8 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     if (!app_lifecycle_prepare_poweroff()) return ESP_ERR_INVALID_STATE;
     const bool key_sampling = device_power_key_sampler_enable(false);
     (void)app_sync_time_to_pmu();
+    device_power_batt_log_event(DEVICE_POWER_BATT_LOG_OFF);
+    (void)device_power_batt_log_flush(250);
     // 必须先断面板轨，再拉低 MODE，避免常开逻辑仍耗电。/ Drop panel rails before parking MODE on the always-on supply.
     pmu_selftest_prepare_powerdown();
     periph_suspend(true);

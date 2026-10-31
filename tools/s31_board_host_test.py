@@ -237,11 +237,16 @@ int main(void) {
         assert(board_ioe_sleep(host_off) == ESP_OK);
         assert(!(output[0] & (P0_TPS_MASK | IOE_BIT(IO_MOTOR))));
         assert((output[0] & (IOE_BIT(IO_PA_EN) | IOE_BIT(IO_CAM_SCR))) == s_p0_extra);
-        assert(!(output[1] & IOE_BIT(IO_PWR_PULSE)) && (output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
+        assert(!(output[1] & (IOE_BIT(IO_PWR_PULSE) | IOE_BIT(IO_BT_PA_PWR))));
+        assert(output[1] & IOE_BIT(IO_TP_RST));
         assert(config[1] == P1_INPUT_MASK);
+        // 重复休眠及马达关断不得重新打开 P14；唤醒才恢复。
+        // Repeated parking and motor-off writes must leave P14 off until wake.
+        assert(board_ioe_sleep(host_off) == ESP_OK && board_motor(false) == ESP_OK);
+        assert(!(output[1] & IOE_BIT(IO_BT_PA_PWR)) && (output[1] & IOE_BIT(IO_TP_RST)));
         assert(board_ioe_wake() == ESP_OK);
         assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
-        assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK && clears == 2);
+        assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK && clears == 3);
     }
     // 缺失扩展器与方向写入失败不假报唤醒成功。
     // Missing expanders and failed direction writes must not report a successful wake.

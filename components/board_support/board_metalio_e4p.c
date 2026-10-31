@@ -705,11 +705,12 @@ esp_err_t board_ioe_sleep(bool host_off) {
     s_vcom_ctrl = false;
     s_wakeup = false;
     p0_write();
-    // 按键脚改输入、空闲保持高；关机脉冲回低。 / Keys input, pulse low.
-    s_p1_out &= (uint8_t)~IOE_BIT(IO_PWR_PULSE);
+    // 无线已停栈且前光已灭，按原厂浅睡流程关闭 P14；关机脉冲回低。
+    // Radios are stopped and frontlight is off; cut P14 as in vendor light sleep and lower the power pulse.
+    s_p1_out &= (uint8_t)~(IOE_BIT(IO_PWR_PULSE) | IOE_BIT(IO_BT_PA_PWR));
     p1_write();
-    // 只把按键脚改输入；P12/P14 仍保持输出高，浅睡期间触摸/功放不断电。
-    // Only keys become inputs; keep P12/P14 driven high so touch/PA stay powered in light sleep.
+    // P12 是触摸复位，保持输出高；按键仍为输入，P14 在唤醒入口恢复。
+    // P12 is touch reset and stays high; keys remain inputs and wake restores P14.
     (void)ioe_write(7, P1_INPUT_MASK);
     (void)fca9555_clear_int(s_ioe);
     return ESP_OK;

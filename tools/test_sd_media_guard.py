@@ -14,7 +14,7 @@ for name in ('driver/sdmmc_host.h', 'esp_log.h', 'esp_vfs_fat.h', 'esp_timer.h',
     p = out / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('#pragma once\n', encoding='utf-8')
-for name in ('ff.h','diskio_sdmmc.h'):
+for name in ('ff.h','diskio_sdmmc.h','device_power.h'):
     (out/name).write_text((root/'tools/sd_probe_stubs'/name).read_text())
 source = r'''
 #include <assert.h>
@@ -117,6 +117,7 @@ static int mock_mkdir(const char* p,int mode){
 // Declare the board hook before the implementation include; the generated headers are placeholders.
 bool board_sd_has_cd(void);
 static int64_t mock_us;
+bool device_power_batt_log_storage(bool available,uint32_t timeout_ms) {(void)available;assert(timeout_ms==2000);return true;}
 static int64_t esp_timer_get_time(void){return mock_us;}
 #include "../../components/board_support/board_sd.c"
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。

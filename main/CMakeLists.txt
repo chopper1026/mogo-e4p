@@ -76,6 +76,7 @@ idf_component_register(
         "display/display_reader_waveform.c"
         "display/display_normalize.c"
         "power/cache_wake_restore.c"
+        "power/s31_sleep_compat.c"
         "services/storage_jobs.c"
         "power/sleep.c"
         "time/time_service.c"
@@ -189,6 +190,9 @@ idf_component_register(
 # that is the only place it survives. The option hangs off main, whose INTERFACE carries it into
 # the final link; a global property set after project() is too late for the linker to see it.
 target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
+
+# S31 浅睡时钟交接与唤醒校准。/ S31 sleep clock handoff and wake calibration.
+include("${CMAKE_CURRENT_LIST_DIR}/power/s31_sleep_compat.cmake")
 
 # 本地 USB 测时入口，普通构建不包含。/ Local USB timing probe, omitted from ordinary product builds.
 if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")

@@ -20,6 +20,7 @@
  */
 
 #include "device_power.h"
+#include "battery_log.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -28,6 +29,9 @@
 
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
+#include "esp_random.h"
+#include "esp_system.h"
 #include "board_i2c.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -335,6 +339,7 @@ static void cx_charger_poll(int64_t now, bool have_v, uint16_t mv,
     const bool below = mv < CX_CHG_VREG_MV;
     const uint8_t vbus = status & 0x07;
     if (!s_charger_uv_shutdown && mv <= 3100 && have_status && vbus == 0) {
+        device_power_batt_log_event(DEVICE_POWER_BATT_LOG_UNDERVOLTAGE);
         const uint8_t shutdown = 0x01;
         if (dev_write(s_cx, CX_REG_CHG_CTRL3, &shutdown, 1) == ESP_OK) {
             s_charger_uv_shutdown = true;
@@ -571,68 +576,159 @@ static void batt_save(int32_t permille) {
 
 /* ---- 校准日志 / Calibration log ---- */
 
-// 最新采样快照：轮询侧在主循环任务里填，日志任务只读副本；I2C 全部留在轮询侧。
-// Latest sample snapshot: the poll side fills it on the loop task and the logger
-// task only copies it out; every I2C access stays on the poll side.
-typedef struct {
-    bool valid;
-    uint16_t raw_mv;
-    int16_t ma;
-    bool have_i;
-    bool charging;
-    bool charge_done;
-    int8_t chg_stat;
-    int32_t ocv_mv;
-    int32_t disp_permille;
-    int8_t ic_soc;
-} batt_log_sample_t;
-static batt_log_sample_t s_batt_log_sample;
+// 快照、事件与队列只在短临界区处理；文件 I/O 独占另一把互斥锁。
+// Snapshots, events and queues use short critical sections; file I/O owns a separate mutex.
+static batt_log_state_t s_batt_log;
 static portMUX_TYPE s_batt_log_mux = portMUX_INITIALIZER_UNLOCKED;
-// 日志任务句柄，deinit 时停止，避免反初始化后继续写旧采样。
-// Logger task handle, stopped on deinit so a torn-down shim cannot keep logging stale samples.
+static StaticSemaphore_t s_batt_io_storage;
+static SemaphoreHandle_t s_batt_io_mutex;
+static bool s_batt_io_available;
+static bool s_batt_log_busy;
 static TaskHandle_t s_batt_log_task;
-// 设置页的日志开关；默认关，关时任务照常休眠但不碰卡也不打印。
-// Settings-page log switch; off by default, and while off the task keeps sleeping but touches
-// neither the card nor the console.
-static bool s_batt_log_enabled;
+static uint32_t s_batt_io_errors, s_batt_file_missed;
+static uint64_t s_batt_boot_id;
+static char s_batt_metadata[768];
+static int8_t s_batt_ic_soc = -1;
+static int64_t s_batt_ic_us = -1;
 
-void device_power_set_batt_log(bool enabled) { s_batt_log_enabled = enabled; }
+static int64_t batt_log_wall(void) {
+    const time_t wall = time(NULL);
+    return wall >= 1704067200 ? (int64_t)wall : -1;
+}
 
-// 校准日志任务：串口与 TF 卡写同一行，写卡只在本任务做，不卡主循环跟手；卡不在
-// 或未挂载（含 USB 读卡让出）时静默跳过，逐行开关文件，拔卡/断电最多丢最后一行。
-// Calibration logger task: serial and the TF card carry the same line, and only
-// this task touches the card so the loop never stalls mid-drag; a missing or
-// unmounted card (including USB export) skips silently, and the per-line
-// open/close loses at most the last line on removal or power loss.
+static bool batt_log_enabled(void) {
+    portENTER_CRITICAL(&s_batt_log_mux);
+    const bool enabled = s_batt_log.enabled;
+    portEXIT_CRITICAL(&s_batt_log_mux);
+    return enabled;
+}
+
+static void batt_log_notify(void) {
+    if (s_batt_log_task != NULL) xTaskNotifyGive(s_batt_log_task);
+}
+
+static SemaphoreHandle_t batt_log_io_mutex(void) {
+    portENTER_CRITICAL(&s_batt_log_mux);
+    if (s_batt_io_mutex == NULL) s_batt_io_mutex = xSemaphoreCreateMutexStatic(&s_batt_io_storage);
+    portEXIT_CRITICAL(&s_batt_log_mux);
+    return s_batt_io_mutex;
+}
+
+bool device_power_batt_log_storage(bool available, uint32_t timeout_ms) {
+    SemaphoreHandle_t mutex = batt_log_io_mutex();
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
+    s_batt_io_available = available;
+    xSemaphoreGive(mutex);
+    return true;
+}
+
+void device_power_set_batt_log(bool enabled) {
+    const int64_t now = esp_timer_get_time();
+    const int64_t wall = batt_log_wall();
+    portENTER_CRITICAL(&s_batt_log_mux);
+    if (enabled && !s_batt_log.enabled) {
+        s_batt_ic_soc = -1;
+        s_batt_ic_us = -1;
+    }
+    batt_log_set_enabled(&s_batt_log, enabled, now, wall);
+    portEXIT_CRITICAL(&s_batt_log_mux);
+    batt_log_notify();
+}
+
+void device_power_batt_log_event(device_power_batt_log_event_t event) {
+    const int64_t now = esp_timer_get_time();
+    const int64_t wall = batt_log_wall();
+    portENTER_CRITICAL(&s_batt_log_mux);
+    batt_log_note(&s_batt_log, (uint32_t)event, now, wall);
+    const bool pending = s_batt_log.count != 0;
+    portEXIT_CRITICAL(&s_batt_log_mux);
+    if (pending) batt_log_notify();
+}
+
+bool device_power_batt_log_flush(uint32_t timeout_ms) {
+    const int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    batt_log_notify();
+    for (;;) {
+        portENTER_CRITICAL(&s_batt_log_mux);
+        const bool drained = s_batt_log.count == 0 && !s_batt_log_busy;
+        portEXIT_CRITICAL(&s_batt_log_mux);
+        if (drained) return true;
+        if (s_batt_log_task == NULL || esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(1);
+    }
+}
+
+// 只被事件或新到期采样唤醒；不为日志增加睡眠唤醒定时器。
+// Wake only for events or newly due samples; logging adds no sleep wakeup timer.
 static void batt_log_task(void *arg) {
     (void)arg;
+    batt_log_file_t file = {.header = true};
+    uint32_t serial_session = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(BATT_LOG_INTERVAL_MS));
-        if (!s_batt_log_enabled) continue;
-        batt_log_sample_t s;
-        portENTER_CRITICAL(&s_batt_log_mux);
-        s = s_batt_log_sample;
-        portEXIT_CRITICAL(&s_batt_log_mux);
-        if (!s.valid) continue;
-        const time_t wall = time(NULL);
-        char line[160];
-        const int n = snprintf(line, sizeof(line),
-            "t=%lld up=%lld raw=%u ma=%d chg=%d done=%d cs=%d ocv=%ld disp=%ld ic_soc=%d\n",
-            wall >= 1704067200 ? (long long)wall : -1LL,
-            (long long)(esp_timer_get_time() / 1000000),
-            (unsigned)s.raw_mv, s.have_i ? (int)s.ma : 0, s.charging ? 1 : 0,
-            s.charge_done ? 1 : 0, (int)s.chg_stat, (long)s.ocv_mv,
-            (long)s.disp_permille, (int)s.ic_soc);
-        if (n <= 1 || (size_t)n >= sizeof(line)) continue;
-        ESP_LOGI(TAG, "batt: %.*s", n - 1, line);
-        FILE *f = fopen(BATT_LOG_PATH, "a");
-        if (f == NULL) continue;
-        if (ftell(f) == 0) {
-            fputs("# t up raw ma chg done cs ocv disp ic_soc\n", f);
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        for (;;) {
+            batt_log_record_t record;
+            portENTER_CRITICAL(&s_batt_log_mux);
+            const bool have = batt_log_pop(&s_batt_log, &record);
+            s_batt_log_busy = have;
+            const uint32_t errors = s_batt_io_errors, missed = s_batt_file_missed;
+            portEXIT_CRITICAL(&s_batt_log_mux);
+            if (!have) break;
+            char line[BATT_LOG_LINE_SIZE];
+            const int n = batt_log_format(line, sizeof(line), &record, s_batt_boot_id,
+                                          esp_timer_get_time(), errors, missed);
+            bool ok = n > 0;
+            bool attempted = false;
+            if (ok) {
+                if (serial_session != record.session) {
+                    ESP_LOGI(TAG, "batt-meta: fmt=2 session=%u %s", (unsigned)record.session, s_batt_metadata);
+                    serial_session = record.session;
+                }
+                ESP_LOGI(TAG, "batt: %.*s", n - 1, line);
+                SemaphoreHandle_t mutex = batt_log_io_mutex();
+                (void)xSemaphoreTake(mutex, portMAX_DELAY);
+                attempted = s_batt_io_available;
+                ok = attempted && batt_log_append(&file, BATT_LOG_PATH, BATT_LOG_PATH ".1",
+                    BATT_LOG_FILE_LIMIT, record.session, s_batt_metadata, line);
+                xSemaphoreGive(mutex);
+            }
+            portENTER_CRITICAL(&s_batt_log_mux);
+            if (!ok) {
+                ++s_batt_file_missed;
+                if (attempted || n <= 0) ++s_batt_io_errors;
+            }
+            s_batt_log_busy = false;
+            portEXIT_CRITICAL(&s_batt_log_mux);
+            if (!ok) file.header = true;
+            if (!ok && attempted) ESP_LOGW(TAG, "battery log write/sync failed");
         }
-        fputs(line, f);
-        fclose(f);
     }
+}
+
+static void batt_log_metadata(void) {
+    if (!s_batt_boot_id) s_batt_boot_id = ((uint64_t)esp_random() << 32) | esp_random();
+    const esp_app_desc_t *app = esp_app_get_description();
+    char sha[65];
+    char built[40];
+    snprintf(built, sizeof(built), "%.15sT%.15s", app->date, app->time);
+    for (char *p = built; *p; ++p) if (*p == ' ') *p = '_';
+    for (size_t i = 0; i < sizeof(app->app_elf_sha256); ++i)
+        snprintf(sha + i * 2, 3, "%02x", app->app_elf_sha256[i]);
+    // 算法参数和曲线散列辅助对照源码；同版本的本地构建由 ELF 散列区分。
+    // Parameters and a curve hash identify the source algorithm; ELF hashes distinguish local builds of one version.
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < sizeof(s_soc_curve) / sizeof(s_soc_curve[0]); ++i)
+        for (unsigned j = 0; j < 2; ++j) hash = (hash ^ (uint32_t)s_soc_curve[i][j]) * 16777619u;
+    snprintf(s_batt_metadata, sizeof(s_batt_metadata),
+        "fw=%.31s elf=%s built=%s boot=%016llx reset=%d curve_hash=%08lx "
+        "r_mohm=%d comp_cap_mv=%d ema_ms=%d deadband=%d step=%d step_ms=%d "
+        "full_mv=%d full_ma=%d full_ms=%d max_dt_ms=%lld q=sampled_estimate "
+        "units=mv,ma,permille,ms,uah valid_bits=v1,i2,cx4,ic8",
+        app->version, sha, built, (unsigned long long)s_batt_boot_id,
+        (int)esp_reset_reason(), (unsigned long)hash, BATT_R_MOHM, BATT_COMP_CAP_MV,
+        BATT_EMA_TAU_MS, BATT_DEADBAND_PERMILLE, BATT_MAX_STEP_PERMILLE,
+        BATT_MIN_STEP_INTERVAL_MS, BATT_FULL_MV, BATT_FULL_MA, BATT_FULL_CONFIRM_MS,
+        (long long)(BATT_LOG_MAX_INTERVAL_US / 1000));
 }
 
 static batt_filter_t s_batt_filter;
@@ -640,10 +736,6 @@ static batt_filter_t s_batt_filter;
 static int32_t s_batt_saved_permille = -1;
 static bool s_batt_charging_last;
 static int64_t s_batt_last_save_us;
-static int64_t s_batt_last_log_us;
-// 最近一次 BQ27220 库仑计读数（60 s 一次，轮询侧更新）。 / Latest BQ27220 coulomb
-// reading (60 s cadence, refreshed on the poll side).
-static int8_t s_batt_ic_soc = -1;
 // 涓流判满的确认窗口起点（µs，-1 表示未在窗口内）。 / Start of the taper-full
 // confirmation window (µs; -1 when outside the window).
 static int64_t s_batt_full_since_us = -1;
@@ -820,6 +912,9 @@ static void poll_battery(void) {
             have_chg = true;
         }
     }
+    const bool logging = batt_log_enabled();
+    const int64_t sampled = logging ? esp_timer_get_time() : 0;
+    const int64_t sample_wall = logging ? batt_log_wall() : -1;
     cx_charger_poll(now, have_v, mv, have_i, ma, have_chg, charger_status);
     bool charging;
     if (have_chg) {
@@ -864,33 +959,34 @@ static void poll_battery(void) {
             s_batt_last_save_us = now;
             batt_save(disp);
         }
-
-        // 采样快照喂给日志任务；ic_soc 仍按 60 s 在轮询侧读，I2C 不离开主循环任务。
-        // 日志关闭时连这次库仑计读也省掉，不产生无人消费的 I2C 流量。
-        // Feed the snapshot to the logger task; ic_soc still reads at a 60 s cadence on the poll
-        // side so I2C never leaves the loop task. With logging off even that coulomb read is
-        // skipped, so no I2C traffic goes to a consumer that will not look at it.
-        if (s_batt_log_enabled && now - s_batt_last_log_us >= (int64_t)BATT_LOG_INTERVAL_MS * 1000) {
-            s_batt_last_log_us = now;
-            s_batt_ic_soc = (int8_t)bq_read_soc();
-        }
-        const batt_log_sample_t sample = {
-            .valid = true,
-            .raw_mv = mv,
-            .ma = ma,
-            .have_i = have_i,
-            .charging = charging,
-            .charge_done = charge_done,
-            .chg_stat = have_chg ? (int8_t)chg_stat : (int8_t)-1,
-            .ocv_mv = ocv_mv,
-            .disp_permille = disp,
-            .ic_soc = s_batt_ic_soc,
-        };
-        portENTER_CRITICAL(&s_batt_log_mux);
-        s_batt_log_sample = sample;
-        portEXIT_CRITICAL(&s_batt_log_mux);
     } else {
         s_snap.flags &= ~PMU_STATUS_BATTERY_VALID;
+    }
+
+    if (logging) {
+        if (s_batt_ic_us < 0 || sampled - s_batt_ic_us >= BATT_LOG_PERIOD_US) {
+            s_batt_ic_soc = (int8_t)bq_read_soc();
+            s_batt_ic_us = esp_timer_get_time();
+        }
+        int32_t comp = have_i ? ((int32_t)(ma < 0 ? -ma : ma) * BATT_R_MOHM) / 1000 : 0;
+        if (comp > BATT_COMP_CAP_MV) comp = BATT_COMP_CAP_MV;
+        const batt_log_sample_t sample = {
+            .up_us = sampled, .wall_sec = sample_wall, .read_us = (uint32_t)(sampled - now),
+            .have_v = have_v, .have_i = have_i, .have_chg = have_chg,
+            .raw_mv = mv, .ma = ma, .charging = charging, .charge_done = charge_done,
+            .done_source = charge_done ? (charge_done_cx ? 1 : 2) : 0,
+            .charger_status = charger_status,
+            .comp_mv = charging ? (int32_t)mv - comp : (int32_t)mv + comp,
+            .ocv_mv = have_v ? s_snap.battery_mv : -1,
+            .curve_permille = have_v ? batt_curve_soc(s_snap.battery_mv) : -1,
+            .disp_permille = have_v ? s_snap.soc_permille : -1,
+            .ic_soc = s_batt_ic_soc, .ic_us = s_batt_ic_us,
+        };
+        portENTER_CRITICAL(&s_batt_log_mux);
+        batt_log_observe(&s_batt_log, &sample);
+        const bool pending = s_batt_log.count != 0;
+        portEXIT_CRITICAL(&s_batt_log_mux);
+        if (pending) batt_log_notify();
     }
 }
 
@@ -947,9 +1043,12 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
     s_ready = true;
     // 校准日志任务：起不来只影响串口/卡日志，不影响电量功能。
     // Calibration logger task: failing to start only costs the serial/card log.
-    if (xTaskCreate(batt_log_task, "battlog", 4096, NULL, 1, &s_batt_log_task) != pdPASS) {
+    batt_log_metadata();
+    if (s_batt_log_task == NULL &&
+        xTaskCreate(batt_log_task, "battlog", 6144, NULL, 1, &s_batt_log_task) != pdPASS) {
         ESP_LOGW(TAG, "battery log task not started");
     }
+    batt_log_notify();
     ESP_LOGI(TAG, "Metalio PMU shim ready (BQ=%d CX=%d RTC=%d VCOM=%dmV)", s_bq != NULL,
              s_cx != NULL, s_rtc != NULL, s_vcom_mv);
     return ESP_OK;
@@ -963,13 +1062,10 @@ esp_err_t device_power_deinit(void) {
     if (parked != ESP_OK) return parked;
     s_charger_configured = false;
     s_charger_next_us = s_charger_resume_us = 0;
-    if (s_batt_log_task != NULL) {
-        vTaskDelete(s_batt_log_task);
-        s_batt_log_task = NULL;
-    }
-    portENTER_CRITICAL(&s_batt_log_mux);
-    s_batt_log_sample.valid = false;
-    portEXIT_CRITICAL(&s_batt_log_mux);
+    device_power_set_batt_log(false);
+    if (!device_power_batt_log_flush(2000)) return ESP_ERR_TIMEOUT;
+    // 保留等待通知的任务，避免异步删除打断文件关闭；后续初始化复用。
+    // Retain the notification-blocked task so asynchronous deletion cannot interrupt close; reinitialize by reusing it.
     if (s_bq) i2c_master_bus_rm_device(s_bq);
     if (s_cx) i2c_master_bus_rm_device(s_cx);
     if (s_rtc) i2c_master_bus_rm_device(s_rtc);
@@ -1055,6 +1151,8 @@ esp_err_t device_power_action(uint8_t action, uint16_t delay_ms, uint16_t reason
     switch (action) {
         case PMU_ACTION_HOST_NORMAL_RESTART:
         case PMU_ACTION_HOST_HARD_RESET:
+            device_power_batt_log_event(DEVICE_POWER_BATT_LOG_RESTART);
+            (void)device_power_batt_log_flush(250);
             esp_restart();
             return ESP_OK;
         case PMU_ACTION_HOST_LOGICAL_OFF:
@@ -1132,6 +1230,8 @@ esp_err_t device_power_report_ready(void) {
 }
 
 esp_err_t device_power_power_off(void) {
+    device_power_batt_log_event(DEVICE_POWER_BATT_LOG_OFF);
+    (void)device_power_batt_log_flush(250);
     const esp_err_t parked = cx_charger_park();
     if (parked != ESP_OK) return parked;
     // 每轮 train 打 PWR_PULSE_COUNT 次；PMU 不掉电就按原厂反复打，打满才进深睡兜底。

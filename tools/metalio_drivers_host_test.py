@@ -292,7 +292,8 @@ def power_source():
     code += r"""
 static bool s_ready=true;
 static pmu_snapshot_t s_snap;
-static unsigned clock_sets;
+static unsigned clock_sets, uv_log_events;
+void device_power_batt_log_event(device_power_batt_log_event_t event) { assert(event == DEVICE_POWER_BATT_LOG_UNDERVOLTAGE); ++uv_log_events; }
 static time_t clock_value;
 static int test_settimeofday(const struct timeval *tv,const void *tz){assert(!tz);++clock_sets;clock_value=tv->tv_sec;return 0;}
 #define settimeofday test_settimeofday
@@ -316,7 +317,7 @@ int main(void){
     charge(12199999,4200,0,true,1);assert(!(r[0x16]&0x20));
     fail_reg=0x16;fail_writes=1;charge(12200000,4200,0,true,1);assert(s_charger_resume_us);
     charge(12400000,4200,0,true,1);assert((r[0x16]&0x20) && !s_charger_resume_us);
-    reset_power();r=devices[0x6b].regs;charge(0,3100,-10,true,0);assert(r[0x18]==1 && s_charger_uv_shutdown);
+    reset_power();r=devices[0x6b].regs;charge(0,3100,-10,true,0);assert(r[0x18]==1 && s_charger_uv_shutdown && uv_log_events==1);
     charge(2000000,3100,-10,true,0);assert(!s_charger_resume_us);
     charge(4000000,3100,0,true,1);assert(s_charger_resume_us==4200000);
     charge(4200000,3100,0,true,1);assert(!s_charger_resume_us && (r[0x16]&0x20));
@@ -365,6 +366,9 @@ typedef struct {bool jobs_ready,ble_stopped;} app_lifecycle_light_t;
 static bool jobs_ready=true, ble_stopped=true, pickup_setting=true, key_pending;
 static unsigned suspend_count,resume_count,sleep_count,key_polls,cache_restores,last_wake;
 static int scenario;
+enum { DEVICE_POWER_BATT_LOG_LOCK=128, DEVICE_POWER_BATT_LOG_WAKE=256 };
+static unsigned log_locks, log_wakes;
+static void device_power_batt_log_event(int event){if(event==128)++log_locks;else {assert(event==256);++log_wakes;}}
 static bool key_sampling=true;
 static bool device_power_key_sampler_enable(bool enabled){bool previous=key_sampling;key_sampling=enabled;return previous;}
 static app_lifecycle_light_t app_lifecycle_prepare_light(void){return (app_lifecycle_light_t){jobs_ready,ble_stopped};}
@@ -373,7 +377,7 @@ static void cache_wake_restore_apply(void){++cache_restores;}
 static bool app_settings_pickup_wake(void){return pickup_setting;}
 static void app_settings_set_last_wake(uint8_t value){last_wake=value;}
 static void periph_suspend(bool off){assert(!off&&!key_sampling);++suspend_count;}
-static void periph_resume(void){++resume_count;}
+static void periph_resume(void){assert(log_locks==1 && log_wakes==1);++resume_count;}
 static int gpio_wakeup_disable(int pin){assert(pin==2);return ESP_OK;}
 static void board_clear_ioe_int(void){devices[0x20].latched[0]=devices[0x20].latched[1]=false;}
 static bool device_power_take_key_wakeup(void){
@@ -386,7 +390,7 @@ static bool device_power_take_key_wakeup(void){
 }
 static int esp_sleep_enable_timer_wakeup(uint64_t usec){assert(usec==APP_LOCK_KEY_POLL_US);return scenario==7?ESP_FAIL:ESP_OK;}
 static int esp_sleep_disable_wakeup_source(int source){assert(source==ESP_SLEEP_WAKEUP_TIMER);return ESP_OK;}
-static int esp_light_sleep_start(void){
+static int app_s31_light_sleep_start(void){
     assert(!key_sampling);
     ++sleep_count;assert(sleep_count<10 && ble_stopped);
     now_us+=(scenario==3 && sleep_count==1)?10000:100000;
@@ -405,6 +409,7 @@ static void reset_sleep(int next){
     jobs_ready=ble_stopped=pickup_setting=true;key_pending=false;
     key_sampling=true;
     suspend_count=resume_count=sleep_count=key_polls=cache_restores=last_wake=0;
+    log_locks=log_wakes=0;
 }
 int main(void){
     struct sc7a20h_dev_t storage={.dev=&devices[0x19],.int1_gpio=2,.cfg=SC7A20H_CONFIG_IDLE};

@@ -15,9 +15,10 @@ defines = '\n'.join(line for line in source.splitlines()
                     if re.match(r'#define (?:BATT_|BQ_REG_|CX_REG_STATUS1\b|CX_CHG_STAT_TOPOFF\b)', line))
 curve = re.search(r'^static const int32_t s_soc_curve\[.*?\};', source, re.M | re.S).group(0)
 types = '\n'.join(re.search(r'typedef struct \{[^}]*\} ' + name + ';', source, re.S).group(0)
-                  for name in ('batt_filter_t', 'batt_log_sample_t'))
+                  for name in ('batt_filter_t',))
 code = r'''
 #include "device_power.h"
+#include "battery_log.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,13 +33,15 @@ code += r'''
 static void *s_bq, *s_cx;
 static pmu_snapshot_t s_snap;
 static batt_filter_t s_batt_filter;
-static batt_log_sample_t s_batt_log_sample;
+static batt_log_state_t s_batt_log;
 static int s_batt_log_mux;
 static int32_t s_batt_saved_permille;
-static bool s_batt_charging_last, s_batt_log_enabled;
-static int64_t s_batt_last_save_us, s_batt_last_log_us, s_batt_full_since_us;
+static bool s_batt_charging_last;
+static int64_t s_batt_last_save_us, s_batt_ic_us, s_batt_full_since_us;
 static int8_t s_batt_ic_soc;
 static int64_t now_us;
+static int64_t batt_log_wall(void) { return 1793415600 + now_us / 1000000; }
+static void batt_log_notify(void) {}
 static uint16_t raw_mv;
 static int16_t raw_ma;
 static uint8_t charger_state;
@@ -70,7 +73,7 @@ static esp_err_t dev_read(void *dev, uint8_t reg, uint8_t *out, size_t len) {
     out[0] = value & 0xff; out[1] = value >> 8; return ESP_OK;
 }
 '''
-for name in ('bq_read_voltage', 'bq_read_current', 'batt_curve_soc', 'batt_filter_step', 'batt_full_now', 'poll_battery'):
+for name in ('bq_read_voltage', 'bq_read_current', 'batt_curve_soc', 'batt_filter_step', 'batt_full_now', 'batt_log_enabled', 'poll_battery'):
     code += function(name, backend) + '\n'
 code += r'''
 static void reset(void) {
@@ -78,8 +81,9 @@ static void reset(void) {
     memset(&s_batt_filter, 0, sizeof(s_batt_filter));
     s_bq = (void *)1; s_cx = (void *)2;
     s_batt_saved_permille = -1; s_batt_full_since_us = -1;
-    s_batt_last_save_us = s_batt_last_log_us = now_us = 0;
-    s_batt_charging_last = s_batt_log_enabled = false;
+    s_batt_last_save_us = now_us = 0; s_batt_ic_us = -1; s_batt_ic_soc = -1;
+    memset(&s_batt_log, 0, sizeof(s_batt_log));
+    s_batt_charging_last = false;
     voltage_fail = current_fail = charger_fail = false;
     raw_mv = 4000; raw_ma = 0; charger_state = saves = soc_reads = 0;
 }
@@ -103,7 +107,7 @@ int main(void) {
     reset(); charger_state = 1; raw_ma = -100; poll_battery(); assert(pmu_battery_charging(&s_snap));
     reset(); charger_fail = true; raw_ma = 21; poll_battery(); assert(pmu_battery_charging(&s_snap));
     reset(); s_cx = NULL; raw_ma = -200; poll_battery(); assert(!pmu_battery_charging(&s_snap));
-    assert(s_batt_log_sample.ma == -200 && s_snap.battery_mv == 4036);
+    assert(s_snap.battery_mv == 4036);
     reset(); charger_fail = current_fail = true; poll_battery();
     assert(!pmu_battery_charging(&s_snap) && pmu_battery_percent(&s_snap) == 56);
     // 充满对齐、恢复值只消费一次，日志关闭时不增加库仑计读数。
@@ -112,8 +116,21 @@ int main(void) {
     assert(pmu_battery_percent(&s_snap) == 100 && saves == 1);
     reset(); raw_mv = 3900; s_batt_saved_permille = 430; poll_battery();
     assert(pmu_battery_percent(&s_snap) == 43 && s_batt_saved_permille == -1 && !soc_reads);
-    s_batt_log_enabled = true; now_us = (int64_t)BATT_LOG_INTERVAL_MS * 1000; poll_battery();
-    assert(soc_reads == 1 && s_batt_log_sample.ic_soc == 63);
+    batt_log_set_enabled(&s_batt_log, true, now_us, batt_log_wall());
+    now_us = (int64_t)BATT_LOG_INTERVAL_MS * 1000; poll_battery();
+    assert(soc_reads == 1 && s_batt_log.latest.ic_soc == 63);
+    assert(s_batt_log.latest.up_us == now_us && s_batt_log.latest.ic_us == now_us);
+    // 失败的采样也必须替换日志快照；不能保留旧电压或把无效电流当零电流。
+    // Failed attempts must replace the log sample rather than retaining old voltage or treating invalid current as zero.
+    now_us += 1000000; voltage_fail = true; current_fail = true; poll_battery();
+    assert(!s_batt_log.latest.have_v && !s_batt_log.latest.have_i);
+    assert(s_batt_log.latest.up_us == now_us && s_batt_log.latest.ocv_mv == -1);
+    voltage_fail = current_fail = false; raw_ma = -200; now_us += 1000000; poll_battery();
+    assert(s_batt_log.latest.have_v && s_batt_log.latest.have_i && s_batt_log.latest.ma == -200);
+    assert(s_batt_log.latest.comp_mv == 3936 && s_batt_log.latest.curve_permille >= 0);
+    assert(soc_reads == 1 && s_batt_log.latest.ic_us == now_us - 2000000);
+    batt_log_set_enabled(&s_batt_log, false, now_us, batt_log_wall());
+    now_us += BATT_LOG_PERIOD_US; poll_battery(); assert(soc_reads == 1);
     // 公共快照的兼容有效位与边界仍保留，不再依赖旧 CW32 解析器。
     // Keep public snapshot validity/boundary compatibility without the old CW32 parser.
     s_snap.quick_ok = true; s_snap.qb_flags = 3; s_snap.qb_soc = 0; assert(pmu_battery_percent(&s_snap) == 0);
@@ -134,5 +151,6 @@ with tempfile.TemporaryDirectory() as folder:
     c.write_text(code)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I' + folder, '-I' + str(root / 'components/device_power/include'),
-                    str(c), '-o', str(binary)], check=True)
+                    '-I' + str(root / 'components/device_power'),
+                    str(c), str(root / 'components/device_power/battery_log.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

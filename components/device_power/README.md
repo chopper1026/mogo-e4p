@@ -41,6 +41,41 @@ Before power-off or deinit, restore hardware termination and pending charge enab
 原厂来源与调度差异见 [board_i2c](../board_i2c/README.md)。
 See board_i2c for vendor provenance and scheduling differences.
 
+## 电量校准日志 / Battery calibration log
+
+设置中的「电量校准日志」默认关闭。开启后，清醒状态每分钟记录新采样，采样有效性、CX 状态或判满结果变化时额外记录；锁屏等待开始和结束、关机与重启请求也产生事件。关闭时补一条会话结束记录，之后不再采样芯片 SOC 或写新日志。写卡在独立任务完成，不增加睡眠唤醒定时器。
+The battery-calibration log defaults off. While enabled, new awake samples are recorded each minute, with extra records for sample-validity, CX-status and full-decision changes, locked-wait boundaries, and power-off/restart requests. Disabling adds a session-end record and stops further gauge-SOC reads and new logging. A separate task writes the file without adding sleep wakeup timers.
+
+串口 `batt-meta` 与卡上 `# battlog` 元信息包含格式版本、固件版本、ELF SHA-256、编译时间、启动编号、复位原因、曲线散列和算法参数。同一正式版本的本地测试包通过 ELF 散列区分；每次重新开启日志递增 `session`，本次开机内的记录序号 `seq` 持续递增。先按 `boot/session` 分段，再按 `seq` 分析；不能只按固件版本合并数据。
+Serial `batt-meta` and card `# battlog` metadata include format and firmware versions, ELF SHA-256, build time, boot ID, reset reason, curve hash and algorithm parameters. ELF hashes distinguish local test images sharing a published version. Each enable increments `session`, while `seq` increases throughout the boot. Group by `boot/session` before analyzing sequences; firmware version alone is insufficient.
+
+格式 2 的每条数据均带 `fmt=2`，主要字段如下。旧格式记录可与新格式共存，但必须分别解析；未知值为 `-1`，有符号电流的 `-1 mA` 本身也是合法读数，必须结合 `valid` 判断。
+Each format-2 row carries `fmt=2`. Legacy and new rows may coexist and require separate parsers. Unknown values are `-1`; signed current of `-1 mA` is also a valid measurement, so always consult `valid`.
+
+| 字段 / Field | 含义 / Meaning |
+| --- | --- |
+| `t`, `up_ms` | 事件的日历秒和本次开机单调毫秒；未校时 `t=-1`。/ Event wall seconds and boot-monotonic milliseconds; unknown wall time is -1. |
+| `sample_t`, `sample_ms`, `read_us` | 最近采样尝试的日历时间、单调时间与电压/电流/CX 读取耗时；事件不会伪造新采样。/ Latest sampling-attempt times and voltage/current/CX read duration; events never fabricate new samples. |
+| `write_ms`, `age_ms` | 输出开始的单调时间及最近采样的年龄，含队列延迟；不代表落盘完成时间。/ Output-start monotonic time and sample age including queue delay, not completed persistence. |
+| `valid` | 位 1 电压、2 电流、4 CX、8 芯片 SOC；无效电压不会沿用旧值，无效电流不会写成零。/ Bits 1 voltage, 2 current, 4 CX, 8 gauge SOC; invalid voltage never reuses an old value and invalid current never becomes zero. |
+| `raw`, `ma`, `cx`, `chg` | 原始 mV、正充负放 mA、完整 CX 状态字节、现有算法的充电判断。CX 低三位保留输入状态编码。/ Raw mV, signed mA, complete CX status byte and the existing charging decision; CX low three bits retain the input-state code. |
+| `done`, `done_src` | 现有算法判满；来源 0 无、1 CX top-off、2 软件高压低电流持续判定。不是独立满电测量。/ Existing full decision; source 0 none, 1 CX top-off, 2 sustained software voltage/current decision, not independent proof of full capacity. |
+| `comp`, `ocv`, `curve`, `disp` | 即时负载补偿 mV、EMA 后 mV、查表目标和最终显示千分比；`ocv` 不是静置实测开路电压。/ Instant compensated mV, EMA mV, curve target and displayed permille; `ocv` is not measured rested open-circuit voltage. |
+| `ic_soc`, `ic_age_ms` | 每分钟独立读取的芯片百分比和其输出时年龄，仅用于对照；读取失败为 -1。/ Separately sampled gauge percent and its age at output, comparison only; -1 after failed reads. |
+| `locked`, `lock_ms` | 是否处于锁屏等待及会话内累计等待时长，包含定时唤醒轮询，不是精确 CPU 睡眠时长。/ Locked-wait state and session wait duration including timer-wake polling, not exact CPU sleep duration. |
+| `covered_ms`, `unknown_ms` | 会话内可积分与无覆盖的时间。锁屏等待、无效端点、超过 5 秒的采样间隔及事件边界均不外推容量。/ Eligible and uncovered session durations; never extrapolate locked waits, invalid endpoints, intervals above 5 seconds or event boundaries. |
+| `in_uah_est`, `out_uah_est` | 相邻有效清醒采样按时间作梯形积分，跨零分别计算充入/放出，单位 µAh；均为估算。/ Separate charge/discharge trapezoidal estimates in µAh from adjacent valid awake samples, splitting zero crossings. |
+| `dropped`, `io_errors`, `file_missed` | 队列丢弃、文件/格式失败、未确认成功写入文件的累计记录数；同步或关闭失败时数据可能已写入，I/O 计数在后续记录反映。/ Queue drops, file/format failures and records without confirmed successful file persistence; data may already have been written when sync or close fails, and I/O counters appear in subsequent rows. |
+
+`event` 为可组合位图：1 定期/首次采样、2 开启、4 关闭、8 充电/CX 变化、16 判满变化、32 有效性变化、64 清醒长空白、128 锁屏等待开始、256 等待结束、512 关机请求、1024 重启请求、2048 欠压保护请求。事件只说明软件观察或请求，不能证明设备已经断电；欠压保护不会等待日志落盘。
+`event` is a combinable mask: 1 periodic/first sample, 2 enable, 4 disable, 8 charger/CX change, 16 full-decision change, 32 validity change, 64 long awake gap, 128 locked-wait start, 256 wait end, 512 power-off request, 1024 restart request, 2048 undervoltage-protection request. Events describe software observations or requests, not proof of power loss; undervoltage protection never waits for logging.
+
+日志最多保留约 4 MiB 的 `batt.log` 和上一份 `batt.log.1`；单条记录可能略超轮转门槛。已有旧日志先继续保留并追加新会话头，达到门槛后正常轮转。每条检查写入、刷新、同步和关闭结果；失败后下一条重新写元信息。队列为 16 条，满时丢最旧记录并递增 `dropped`。无卡或 USB 交出 TF 时保留串口输出并累计 `file_missed`，不无限重试；卸载或格式化前等待在途日志 I/O 结束，超时中止该存储操作。断电仍可能丢失记录或损坏文件，不能承诺只丢最后一行。
+Logging retains approximately 4 MiB in `batt.log` and one previous `batt.log.1`, with a possible one-row overshoot. Existing legacy rows remain until normal rotation, with new metadata appended. Every record checks write, flush, sync and close results; failures require metadata again. The 16-record queue drops its oldest record on overflow and increments `dropped`. Missing/exported cards retain serial output and increment `file_missed` without endless retries. Unmount/format joins in-flight log I/O and aborts on timeout. Power loss can still lose records or damage files; last-row-only loss is not guaranteed.
+
+校准优先使用版本已知、充满与停止使用条件明确的自有设备记录。累计值只覆盖所采到的区间，不是硬件库仑计，也不能用锁屏前后两次瞬时电流推算整夜容量。日志不能代替电流表验证待机功耗；芯片 SOC 和软件判满结果也不能直接作为校准真值。
+Prefer logs from an identified build and device with known full-charge and discharge endpoints. Totals cover sampled intervals only; they are not hardware coulomb counters, and endpoint current samples cannot establish overnight capacity. Logs do not replace standby-current instrumentation, and neither gauge SOC nor software full decisions are calibration ground truth.
+
 ## 兼容边界 / Compatibility boundary
 
 `include/pmu_protocol.h` 保留原 CW32 线格式常量、命令码与共用数据结构；`device_power.h` 保留应用正在使用的快照和 API。删除旧硬件后端不代表这些兼容标识也能删除。
@@ -56,7 +91,7 @@ historical CW32 protocol references, not current Metalio hardware specifications
 ## 验证 / Validation
 
 ```sh
-python3 tools/run_reader_baseline.py power_key loop metalio_drivers battery battery_filter storage
+python3 tools/run_reader_baseline.py power_key loop metalio_drivers battery battery_filter battery_log battery_log_task storage
 ```
 
 采样与滤波测试执行当前 Metalio 实现；存储组同时覆盖 S31 外设睡眠恢复和应用下电交接。宿主测试不能替代真机电压、充电和关机验证。

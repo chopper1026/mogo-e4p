@@ -57,6 +57,9 @@ static bool cover_ok = true, avatar_ok = true;
 static bool book_cover_jobs_quiesce(unsigned ms) { assert(ms == 2000); return cover_ok; }
 static bool ui_avatar_quiesce(unsigned ms) { assert(ms == 2000); return avatar_ok; }
 static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
+#define DEVICE_POWER_BATT_LOG_OFF 512
+static void device_power_batt_log_event(int event) { assert(event == DEVICE_POWER_BATT_LOG_OFF); }
+static bool device_power_batt_log_flush(unsigned ms) { assert(ms == 250); return true; }
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
 static int error_result, waits;
 static bool soft_supported;
@@ -82,6 +85,7 @@ static int cst836u_get_mode(void *h) { assert(h == s_tp); return tp_mode; }
 static int cst836u_set_mode(void *h, int m) { assert(h == s_tp); tp_mode = m; return ESP_OK; }
 static int cst836u_wake(void *h);
 static int sleep_cpu_configure(bool enabled) { assert(enabled); ++cpu_requests; return ESP_OK; }
+static void app_s31_sleep_init(void) {}
 static bool pico_online_busy(void) { return ota; }
 static bool wifi_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
 static void wifi_transfer_resume_after_sleep(void) { ++resumes; }
@@ -138,12 +142,13 @@ static void reset(void) {
 }
 int main(void) {
     reset(); app_sleep_bind((void *)2, (void *)3); assert(cpu_requests == 1);
-    // 当前板浅睡与下电均保留触摸/功放供电，马达和关机脉冲必须关闭。
-    // Both light sleep and power-off retain touch/PA rails while stopping the motor and power pulse.
+    // 浅睡与下电均关闭 P14、马达和关机脉冲；P12 触摸复位保持高。
+    // Both light sleep and power-off cut P14, motor and power pulse while keeping touch reset P12 high.
     for (int off = 0; off < 2; ++off) {
         reset(); periph_suspend(off);
         assert(!buzzer && !acc_on && tp_mode == CST836U_MODE_DEEPSLEEP);
-        assert(config[1] == P1_INPUT_MASK && (output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
+        assert(config[1] == P1_INPUT_MASK && (output[1] & IOE_BIT(IO_TP_RST)));
+        assert(!(output[1] & (IOE_BIT(IO_BT_PA_PWR) | IOE_BIT(IO_PWR_PULSE))));
         assert(!(output[0] & (P0_TPS_MASK | IOE_BIT(IO_MOTOR))));
         assert((output[0] & (IOE_BIT(IO_CAM_SCR) | IOE_BIT(IO_PA_EN))) != 0);
         periph_resume();
@@ -200,6 +205,9 @@ typedef int esp_err_t;
 #define ESP_ERR_NOT_SUPPORTED -5
 #define pdMS_TO_TICKS(n) (n)
 #define ESP_LOGW(...) ((void)0)
+#define DEVICE_POWER_BATT_LOG_OFF 512
+static void device_power_batt_log_event(int event) { assert(event == DEVICE_POWER_BATT_LOG_OFF); }
+static bool device_power_batt_log_flush(unsigned ms) { assert(ms == 250); return true; }
 static unsigned edges, fail_edge, delays, elapsed, deep_sleeps;
 static bool charger_fault;
 static esp_err_t cx_charger_park(void){return charger_fault ? ESP_FAIL : ESP_OK;}

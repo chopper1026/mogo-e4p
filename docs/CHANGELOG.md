@@ -3,6 +3,17 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.1 · 本地测试 / Local testing · 2026-10-31
+
+- 电量日志增加版本与构建标识、实际采样时间、有效性、锁屏/唤醒及电源事件，分别记录采样覆盖与容量估算；加入文件轮转、写入失败计数和 TF 交接保护。电量曲线保持不变。
+  Battery logs add build identity, actual sample times, validity, lock/wake and power events, separating sample coverage from capacity estimates, with rotation, write-failure counters and TF handoff protection. The battery curve is unchanged.
+
+- 浅睡引入原厂 S31 MPLL 唤醒校准及 PSRAM 时钟交接兼容处理；实际待机电流尚未测量。
+  Light sleep adopts the vendor S31 MPLL wake-calibration and PSRAM clock-handoff workaround; standby current has not been measured.
+
+- 浅睡时关闭 P14 蓝牙／功放供电，唤醒后恢复；触摸复位脚 P12 保持高电平。
+  Light sleep cuts the P14 Bluetooth/amplifier supply and restores it on wake, keeping touch reset P12 high.
+
 ## v1.0.1 · 2026-10-30
 
 - 本次交付统一使用1.0.1，包含下列高压关断、阅读刷新及本地测试中的 TXT 章节目录、字体列表、电源键、蓝牙、电量和界面调整。开书、连续翻页和保存阅读设置已通过本轮真机复测，实际高压归零时刻仍未测量。

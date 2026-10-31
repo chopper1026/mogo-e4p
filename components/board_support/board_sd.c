@@ -26,6 +26,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "board_hardware.h"
+#include "device_power.h"
 #include "sdmmc_cmd.h"
 #include "ff.h"
 #include "diskio_sdmmc.h"
@@ -193,7 +194,9 @@ static void publish_info(const board_sd_info_t* info) {
     if (detect_err == ESP_OK || media_invalidated)
         observe_media_locked(detect_err == ESP_OK ? present : cached_info.present);
     probe_state = 2;
+    const bool log_available = cached_info.mounted && !media_invalidated && info->error == ESP_OK;
     portEXIT_CRITICAL(&state_lock);
+    (void)device_power_batt_log_storage(log_available, 2000);
 }
 
 static esp_err_t fill_space(board_sd_info_t *info) {
@@ -396,6 +399,7 @@ static esp_err_t mount_card(bool format_if_failed) {
 }
 
 static esp_err_t close_card(void) {
+    if (!device_power_batt_log_storage(false, 2000)) return ESP_ERR_TIMEOUT;
     if (card != NULL) {
         esp_err_t err = esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card);
         if (err != ESP_OK) {
@@ -556,6 +560,10 @@ esp_err_t board_sd_format(void) {
     portEXIT_CRITICAL(&state_lock);
     if (invalid) return current.present ? ESP_ERR_INVALID_STATE : ESP_ERR_NOT_FOUND;
     if (busy) return ESP_ERR_NOT_FINISHED;
+    if (!device_power_batt_log_storage(false, 2000)) {
+        publish_info(&current);
+        return ESP_ERR_TIMEOUT;
+    }
     bool present = false;
     if (board_sd_detect(&present) == ESP_OK && !present) {
         board_sd_info_t info = { .error = ESP_ERR_NOT_FOUND };

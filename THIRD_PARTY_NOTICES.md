@@ -14,6 +14,7 @@ remain in the source. This project is not an official MindReset release.
 | Material / 组件 | License / 许可 | Notice / 声明 |
 | --- | --- | --- |
 | Metalio E-INK4 Plus vendor drivers, commit `2f55cb1234baae4968982feb23e7a9001dac16f0` — bus, TCA9555, TPS65185, SC7A20H, FT6336U, CX25601N and PCF8563 adaptations | MIT | [Vendor notice](components/board_i2c/LICENSE.Metalio), [source and adaptation boundary](components/board_i2c/README.md) |
+| Metalio E-INK4 Plus S31 sleep compatibility, commit `2c1e5ef` — MPLL calibration and build-local PSRAM clock handoff in `main/power/s31_sleep_compat.c` and `.cmake` | MIT | [Vendor notice](components/board_i2c/LICENSE.Metalio); source file headers |
 | MindReset Read Pico firmware and board components | Apache-2.0 | [Original Apache-2.0 license](licenses/Apache-2.0.txt); source file headers |
 | [MokuMMk/MokuReader](https://github.com/MokuMMk/MokuReader/commit/1d7951ec303c320a154282f4e6a579f687d0dc4f) — power and PIN liquid-glass rendering adapted into `main/ui/ui_glass.c` and `ui_pinpad.c` | Apache-2.0 (upstream file notices retained) | Gaussian blur, bezel refraction and highlights; local adaptations bound/release PSRAM workspaces and pack control snapshots |
 | [Lucide](https://lucide.dev/icons/) — UI icon paths, vendored as SVG sources in `tools/icons/lucide/` and compiled into `main/assets/ui_icons.h` by `tools/gen_ui_icons.py` | ISC | [Lucide notice](flash/licenses/LUCIDE-ISC.txt) |

@@ -179,10 +179,26 @@ bool device_power_key_sampler_start(void);
 /// Loop-only: switch sampling and return its previous state; disable joins reads and discards stale actions/releases before sleep/exclusive use.
 bool device_power_key_sampler_enable(bool enabled);
 
-/// 电池校准日志开关：打开后每分钟把 batt 行写串口与 TF 卡 `/sdcard/batt.log`，默认关闭。
-/// Battery calibration log switch: when on, one batt line per minute goes to serial and
-/// `/sdcard/batt.log`; off by default, so no file is created and nothing is written.
+/// 校准日志默认关闭；清醒时每分钟及关键事件异步写串口和 TF，格式 2 区分采样时间与有效性。
+/// Calibration logging defaults off; awake minute samples and key events asynchronously reach serial/TF in timestamped, validity-aware format 2.
 void device_power_set_batt_log(bool enabled);
+
+typedef enum {
+    DEVICE_POWER_BATT_LOG_LOCK = 1u << 7,         ///< 锁屏等待开始 / Locked wait begins
+    DEVICE_POWER_BATT_LOG_WAKE = 1u << 8,         ///< 锁屏等待结束 / Locked wait ends
+    DEVICE_POWER_BATT_LOG_OFF = 1u << 9,          ///< 请求断电 / Power-off requested
+    DEVICE_POWER_BATT_LOG_RESTART = 1u << 10,     ///< 请求重启 / Restart requested
+    DEVICE_POWER_BATT_LOG_UNDERVOLTAGE = 1u << 11, ///< 欠压保护请求 / Undervoltage protection requested
+} device_power_batt_log_event_t;
+/// 只排队，不读硬件或写卡；事件时间与最近采样时间分别保留，关闭时只跟踪锁屏状态。
+/// Enqueue without hardware/file I/O; preserve separate event/sample times, tracking only lock state while disabled.
+void device_power_batt_log_event(device_power_batt_log_event_t event);
+/// 有界等待日志任务交还；成功只说明已处理，实际文件失败计数见日志。
+/// Bounded wait for logger handoff; success means processed, with file-failure counters in the log.
+bool device_power_batt_log_flush(uint32_t timeout_ms);
+/// 板级挂载后开放写入，卸载/格式化前关闭并等待在途 I/O；超时不得卸载。
+/// Board mounts allow writes; close the gate and join in-flight I/O before unmount/format, aborting those operations on timeout.
+bool device_power_batt_log_storage(bool available, uint32_t timeout_ms);
 
 esp_err_t device_power_cmd(uint16_t code, const uint8_t* payload, uint8_t plen);
 /// 读出厂绑定的面板 VCOM。valid 则 *out_mv 为 500..2500，
