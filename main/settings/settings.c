@@ -90,6 +90,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_VOLUME_TURN "rd_volume"
+#define NVS_KEY_SHAKE_TURN "rd_shake"
 // 状态栏显隐新键；rd_immersive 是旧「全屏沉浸」位，仅作老固件升级迁移与降级回写。/ New
 // status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
 #define NVS_KEY_STATUS "rd_status"
@@ -175,6 +176,7 @@ static uint8_t s_book_margin_l = 24, s_book_margin_r = 24;
 static uint8_t s_book_margin_t, s_book_margin_b;
 static bool s_reader_power_turn;
 static bool s_reader_volume_turn;
+static bool s_reader_shake_turn;
 static bool s_reader_statusbar = true;
 // 打开图书的全屏偏好：默认全屏（沿用历史行为），用户切换后记忆。/ Full-screen preference when
 // opening a book: full screen by default (historical behavior), remembered once toggled.
@@ -385,6 +387,8 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
     uint8_t volume_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VOLUME_TURN, &volume_turn) == ESP_OK) s_reader_volume_turn = volume_turn == 1;
+    uint8_t shake_turn = 0;
+    if (nvs_get_u8(h, NVS_KEY_SHAKE_TURN, &shake_turn) == ESP_OK) s_reader_shake_turn = shake_turn == 1;
     // 状态栏显隐：新键优先；老固件只有沉浸位，沉浸=1 迁移为隐藏，两键皆无则默认显示。
     // Status visibility prefers the new key; firmwares before it only had the immersive bit,
     // where 1 meant hidden. With neither key present the bar defaults to shown.
@@ -872,6 +876,12 @@ void app_settings_set_reader_volume_turn(bool on) {
     s_reader_volume_turn = on;
     nvs_put_u8(NVS_KEY_VOLUME_TURN, on ? 1 : 0);
 }
+bool app_settings_reader_shake_turn(void) { return s_reader_shake_turn; }
+void app_settings_set_reader_shake_turn(bool on) {
+    if (s_reader_shake_turn == on) return;
+    s_reader_shake_turn = on;
+    nvs_put_u8(NVS_KEY_SHAKE_TURN, on ? 1 : 0);
+}
 bool app_settings_reader_statusbar(void) { return s_reader_statusbar; }
 void app_settings_set_reader_statusbar(bool on) {
     if (s_reader_statusbar == on) return;
@@ -1270,6 +1280,17 @@ static bool backup_volume_valid(const settings_backup_volume_t *volume) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)volume->checksum[i] << (8 * i);
     return volume->on <= 1 && stored == backup_volume_checksum(volume);
 }
+// v30 追加晃动翻页开关；旧备份回落默认关闭。
+// V30 appends the shake-turn switch; older backups fall back to the off default.
+typedef struct { uint8_t on, checksum[4]; } settings_backup_shake_t;
+static uint32_t backup_shake_checksum(const settings_backup_shake_t *shake) {
+    return (2166136261u ^ shake->on) * 16777619u;
+}
+static bool backup_shake_valid(const settings_backup_shake_t *shake) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)shake->checksum[i] << (8 * i);
+    return shake->on <= 1 && stored == backup_shake_checksum(shake);
+}
 // v26 追加更新上键单击；旧备份回落「不操作」。
 // V26 appends the up-key single press; older backups fall back to no action.
 typedef struct { uint8_t action, checksum[4]; } settings_backup_up_t;
@@ -1363,9 +1384,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1451,7 +1472,9 @@ esp_err_t app_settings_backup_save(void) {
     // v28: appends the touch-vibration switch and intensity after the v27 tail.
     // v29：在 v28 尾部再追加四向边距；旧槽位继续写左边距。
     // v29: appends the four per-side margins after the v28 tail; the legacy slot keeps the left inset.
-    memcpy(backup.magic, "PICOSETT", sizeof(backup.magic));
+    // v30：在 v29 尾部再追加晃动翻页开关。
+    // v30: appends the shake-turn switch after the v29 tail.
+    memcpy(backup.magic, "PICOSETU", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1553,6 +1576,9 @@ esp_err_t app_settings_backup_save(void) {
                                          .top = s_book_margin_t, .bottom = s_book_margin_b};
     uint32_t margins_hash = backup_margins_checksum(&margins);
     for (unsigned i = 0; i < 4; ++i) margins.checksum[i] = (uint8_t)(margins_hash >> (8 * i));
+    settings_backup_shake_t shake = {.on = s_reader_shake_turn ? 1 : 0};
+    uint32_t shake_hash = backup_shake_checksum(&shake);
+    for (unsigned i = 0; i < 4; ++i) shake.checksum[i] = (uint8_t)(shake_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = wifi_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1595,6 +1621,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style);
     if (ok) ok = fwrite(&haptic, 1, sizeof(haptic), file) == sizeof(haptic);
     if (ok) ok = fwrite(&margins, 1, sizeof(margins), file) == sizeof(margins);
+    if (ok) ok = fwrite(&shake, 1, sizeof(shake), file) == sizeof(shake);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1692,6 +1719,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_shutdown_style_t shutdown_style = {.style = APP_SHUTDOWN_STAGED};
     settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
     settings_backup_margins_t margins = {0};
+    settings_backup_shake_t shake = {.on = 0};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1786,6 +1814,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 27) ok = fread(&shutdown_style, 1, sizeof(shutdown_style), file) == sizeof(shutdown_style) && backup_shutdown_style_valid(&shutdown_style);
     if (ok && version >= 28) ok = fread(&haptic, 1, sizeof(haptic), file) == sizeof(haptic) && backup_haptic_valid(&haptic);
     if (ok && version >= 29) ok = fread(&margins, 1, sizeof(margins), file) == sizeof(margins) && backup_margins_valid(&margins);
+    if (ok && version >= 30) ok = fread(&shake, 1, sizeof(shake), file) == sizeof(shake) && backup_shake_valid(&shake);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1861,6 +1890,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHAKE_TURN, shake.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
@@ -1967,6 +1997,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_volume_turn = volume.on != 0;
+    s_reader_shake_turn = shake.on != 0;
     s_reader_up_action = up_action.action;
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_reader_open_fullscreen = open_full.open_full == 1;

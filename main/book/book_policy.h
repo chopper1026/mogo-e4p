@@ -3,8 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 阅读进度换算和晃动判定，不访问硬件。/ Reading position and shake policy without hardware access.
- * 用户修订：横向一次动作翻页，按方向返回 -1/+1；冷却800ms并静止120ms后再接受动作。
- * User revision: one horizontal impulse returns -1/+1; rearm after 800ms cooldown and 120ms at rest.
+ * 用户修订（2026-10-31）：改为连续甩动检测。慢基线做高通，高通 x 上穿 +阈值翻下一页、
+ * 下穿 -阈值翻上一页；y 轴高通须小于 x 减裕量，排除纵向抖动；不应期吸收回摆半程；
+ * 采样断档或调用方压制（触摸）后重新锚定基线，不继承半个动作。真机校准见各常量。
+ * User revision (2026-10-31): continuous-shake detection. A slow per-axis baseline high-passes
+ * the sample; the high-passed x crossing +threshold turns forward and -threshold turns back.
+ * The high-passed y must stay below x minus a margin to reject vertical jiggle, a refractory
+ * window swallows the rebound half-swing, and a sampling gap or caller suppression (touch)
+ * re-anchors the baseline so no half gesture carries over. Constants are device-calibrated.
  */
 #pragma once
 #include <stdbool.h>
@@ -18,48 +24,69 @@ static inline uint32_t book_position_bytes(uint32_t start, uint32_t end, size_t 
     return start + (uint64_t)(end - start) * off / len;
 }
 
+enum {
+    /// 基线每帧 1/32 递推，50ms 采样下时间常数约 1.6s：慢倾斜跟得上，甩动半程拖不走。
+    /// / Baseline EMA 1/32 per feed, ~1.6s at 50ms: tracks slow tilts, survives a swing.
+    BOOK_SHAKE_BASE_SHIFT = 5,
+    /// 高通 x 触发阈值（mg），2026-10-31 真机校准：典型甩动峰值 400-900。
+    /// / High-pass x trigger (mg), device-calibrated 2026-10-31: stroke peaks run 400-900.
+    BOOK_SHAKE_THRESHOLD_MG = 350,
+    /// x 高通须高出 y 高通的裕量（mg），过滤纵向抖动。/ x must beat high-passed y by this much (mg).
+    BOOK_SHAKE_Y_MARGIN_MG = 50,
+    /// 触发后不应期（ms），覆盖回摆半程。/ Refractory after a turn (ms), covers the rebound.
+    BOOK_SHAKE_REFRACTORY_MS = 800,
+    /// 重新锚定后需静置的采样时长（ms），触摸与断档后半动作不得直接触发。
+    /// / Settled sampling required after a re-anchor (ms); no half gesture fires straight away.
+    BOOK_SHAKE_SETTLE_MS = 300,
+    /// 采样断档重新锚定（ms）。/ Re-anchor after a sampling gap (ms).
+    BOOK_SHAKE_GAP_MS = 250,
+};
+
 typedef struct {
-    bool ready, armed;
-    int gravity[3]; ///< 随姿态缓慢更新的重力基准 / Slowly tracked gravity baseline
-    int previous_x;
-    int64_t last_ms, quiet_ms;
-    int64_t cooldown_ms; ///< 冷却截止 / Cooldown deadline
+    bool ready;
+    int baseline_x, baseline_y; ///< 慢速跟踪的重力基准，作高通滤波 / Slow gravity baseline for the high pass
+    int previous_hpx;           ///< 上一帧高通 x，捕捉上穿沿 / Previous high-passed x for edge detection
+    int64_t last_ms;            ///< 上一帧时间，断档重新锚定 / Last feed time; a gap re-anchors
+    int64_t anchor_ms;          ///< 最近一次锚定时刻，静置期从这起算 / Last re-anchor time; the settle window starts here
+    int64_t cooldown_ms;        ///< 不应期截止 / Refractory deadline
 } book_shake_gate_t;
 
 static inline int book_shake_abs(int value) { return value < 0 ? -value : value; }
 
-/// 输入为屏幕坐标的毫克加速度；慢倾斜不触发，强动作先解除待触发以屏蔽回弹。
-/// Input is screen-axis acceleration in mg; reject slow tilts and disarm on strong motion to suppress rebounds.
+/// 输入为屏幕坐标的毫克加速度，采样周期应不小于传感器出数周期；连续甩动中每一下各自触发。
+/// Input is screen-axis acceleration in mg; the feed period must not be shorter than the
+/// sensor's output period, and each swing of a continuous shake triggers on its own.
 static inline int book_shake_feed(book_shake_gate_t* g, int x, int y, int z,
                                   bool suppressed, int64_t now) {
+    (void)z;
     if (!g) return 0;
-    if (!g->ready || suppressed || now < g->last_ms || now - g->last_ms > 250) {
+    if (!g->ready || suppressed || now < g->last_ms || now - g->last_ms > BOOK_SHAKE_GAP_MS) {
         g->ready = true;
-        g->armed = false;
-        g->gravity[0] = x; g->gravity[1] = y; g->gravity[2] = z;
-        g->previous_x = x;
-        g->last_ms = g->quiet_ms = now;
+        g->baseline_x = x;
+        g->baseline_y = y;
+        g->previous_hpx = 0;
+        g->last_ms = g->anchor_ms = now;
         return 0;
     }
     g->last_ms = now;
-    const int dx = x - g->gravity[0], dy = y - g->gravity[1], dz = z - g->gravity[2];
-    const int ax = book_shake_abs(dx), ay = book_shake_abs(dy), az = book_shake_abs(dz);
-    const int jerk = book_shake_abs(x - g->previous_x);
-    g->previous_x = x;
-    if (g->armed && now >= g->cooldown_ms && ax >= 210 && jerk >= 35 &&
-        ax > ay * 3 / 2 + 30 && ax > az * 3 / 2 + 30) {
-        g->armed = false;
-        g->quiet_ms = now;
-        g->cooldown_ms = now + 800;
-        return dx > 0 ? 1 : -1;
+    // 基线全时段慢速跟踪：连续甩动的对称摆动只轻微摆动基准，不会被拖走。
+    // The baseline tracks all the time: a continuous shake's symmetric swings only wobble it
+    // instead of dragging it away.
+    g->baseline_x += (x - g->baseline_x) >> BOOK_SHAKE_BASE_SHIFT;
+    g->baseline_y += (y - g->baseline_y) >> BOOK_SHAKE_BASE_SHIFT;
+    const int hpx = x - g->baseline_x;
+    const int hpy = y - g->baseline_y;
+    int dir = 0;
+    // 上穿正阈值=向右甩（下一页），下穿负阈值=向左甩（上一页）；静置期、y 优势与不应期在此把关。
+    // Crossing up turns forward, crossing down turns back; the settle window, y dominance and
+    // the refractory window do the gating here.
+    if (now >= g->cooldown_ms && now - g->anchor_ms >= BOOK_SHAKE_SETTLE_MS &&
+        book_shake_abs(hpx) >= BOOK_SHAKE_THRESHOLD_MG &&
+        book_shake_abs(hpx) > book_shake_abs(hpy) + BOOK_SHAKE_Y_MARGIN_MG) {
+        if (g->previous_hpx < BOOK_SHAKE_THRESHOLD_MG && hpx >= BOOK_SHAKE_THRESHOLD_MG) dir = 1;
+        else if (g->previous_hpx > -BOOK_SHAKE_THRESHOLD_MG && hpx <= -BOOK_SHAKE_THRESHOLD_MG) dir = -1;
     }
-    const bool quiet = ax < 80 && ay < 80 && az < 80;
-    if (!quiet) g->quiet_ms = now;
-    if (now < g->cooldown_ms || ax >= 210 || ay >= 210 || az >= 210) g->armed = false;
-    if (quiet && now >= g->cooldown_ms && now - g->quiet_ms >= 120) g->armed = true;
-    // 静止或缓慢倾斜时跟踪姿态，不让重力产生翻页信号。/ Track posture at rest or during slow tilts.
-    if (quiet || jerk < 35) {
-        g->gravity[0] += dx / 8; g->gravity[1] += dy / 8; g->gravity[2] += dz / 8;
-    }
-    return 0;
+    g->previous_hpx = hpx;
+    if (dir) g->cooldown_ms = now + BOOK_SHAKE_REFRACTORY_MS;
+    return dir;
 }

@@ -88,7 +88,7 @@ void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *val
     draw_centered_label(fb, 342, 1170, 26, "完成", true);
 }
 
-void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical) {
+void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical, bool shake) {
     for (int i = 0; i < 2; ++i) {
         int y = 370 + i * 322;
         bool selected = vertical == (i != 0);
@@ -117,7 +117,15 @@ void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical) {
         epd_draw_circle(610, y + 61, 12, UI_GRAY_BLACK, fb);
         if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
     }
-    draw_centered_label(fb, 342, 1051, 21, "工具栏「全屏」按钮切换全屏", false);
+    // 晃动翻页整行开关：标题、方向说明与右端开关；全屏提示移到行下方。
+    // A full-width shake-turn toggle row: title, direction hint and a right-hand switch; the fullscreen hint moves below it.
+    EpdRect row = {36, 1000, 612, 88};
+    ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
+    ui_draw_control_frame(fb, row, 20, 0x68);
+    ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-14},21,"晃动翻页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2+2,row.width-40,row.height/2-12},17,"左晃上一页，右晃下一页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_reader_settings_switch(fb,(EpdRect){row.x+row.width-90,row.y+row.height/2-19,69,39},shake);
+    draw_centered_label(fb, 342, 1110, 21, "工具栏「全屏」按钮切换全屏", false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     draw_centered_label(fb, 342, 1170, 26, "完成", true);
 }

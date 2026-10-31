@@ -28,5 +28,5 @@ EpdRect ui_reader_settings_rect(unsigned system_font_size, int index);
 void ui_reader_settings_switch(uint8_t *fb, EpdRect track, bool on);
 /// 绘制控件与完成键；调用方先画面板壳，不推屏、不读取或修改设置。/ Paint controls and Done after the caller paints the shell; no presentation or settings access.
 void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *values);
-/// 绘制翻页示意与完成键；调用方先画面板壳和返回键。/ Paint turn diagrams and Done after the caller paints the shell and Back.
-void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical);
+/// 绘制翻页示意、晃动开关与完成键；调用方先画面板壳和返回键。/ Paint turn diagrams, the shake toggle and Done after the caller paints the shell and Back.
+void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical, bool shake);

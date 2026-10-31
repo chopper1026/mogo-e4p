@@ -58,6 +58,7 @@ static unsigned app_settings_system_font_size(void) { ++setting_reads; return sc
 static unsigned app_settings_reader_full_pages(void) { ++setting_reads; return pages; }
 static bool app_settings_reader_turn_effect(void) { ++setting_reads; return (flags & 1) != 0; }
 static bool app_settings_reader_vertical_turn(void) { ++setting_reads; return (flags & 2) != 0; }
+static bool app_settings_reader_shake_turn(void) { ++setting_reads; return (flags & 32) != 0; }
 static bool app_settings_reader_statusbar(void) { ++setting_reads; return (flags & 4) != 0; }
 static bool app_settings_reader_hide_images(void) { ++setting_reads; return (flags & 8) != 0; }
 static bool app_settings_book_vertical(void) { ++setting_reads; return (flags & 16) != 0; }
@@ -112,7 +113,7 @@ int main(void) {
     unsigned reads_before = setting_reads;
     recording = false;
     ui_reader_settings_draw(framebuffer, &values);
-    ui_reader_turn_settings_draw(framebuffer, true);
+    ui_reader_turn_settings_draw(framebuffer, true, false);
     assert(setting_reads == reads_before && !memcmp(&values, &before, sizeof(values)));
     // 快照直接调用的额外绘制不属于旧实现对照。/ Direct snapshot calls above are checked outside the legacy comparison.
 #else

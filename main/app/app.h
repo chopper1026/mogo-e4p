@@ -57,6 +57,8 @@ typedef struct ui_gesture_event_s ui_gesture_event_t;
 /// Read synchronously, retaining errors and payloads; the assembler owns context throughout the call.
 typedef esp_err_t (*app_touch_read_t)(void *context, app_touch_t *touch);
 
+struct sc7a20h_dev_t;
+
 typedef struct {
     /// 显示服务借用状态，生命周期由启动装配与显示层管理。/ Borrowed display state; boot assembly and display services manage its lifetime.
     display_state_t* hl;
@@ -70,6 +72,9 @@ typedef struct {
     /// 去抖后的触摸快照：空槽已清零，抬手后保留最后一次坐标。
     /// / Debounced touch: empty slots cleared; last coords kept after lift.
     const app_touch_t* touch;
+    /// 借用的加速度计句柄，主循环装配填入；为空表示板上无传感器。
+    /// / Borrowed accelerometer handle filled by the loop; NULL when the board has none.
+    struct sc7a20h_dev_t* acc;
     /// 本轮是不是按下沿 / 抬起沿，触摸页的跟随节流要用。
     /// / Press/release edge this tick. Touch tracking uses this to throttle.
     bool pressed;

@@ -156,6 +156,10 @@ void app_settings_set_reader_power_turn(bool on);
 /// Turn pages with the side volume keys in the reader body: up goes back, down forward; off by default.
 bool app_settings_reader_volume_turn(void);
 void app_settings_set_reader_volume_turn(bool on);
+/// 阅读正文里横向晃动翻页：左晃上一页、右晃下一页；默认关闭。
+/// Shake the reader body horizontally to turn: left goes back, right forward; off by default.
+bool app_settings_reader_shake_turn(void);
+void app_settings_set_reader_shake_turn(bool on);
 /// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
 bool app_settings_reader_statusbar(void);
 void app_settings_set_reader_statusbar(bool on);

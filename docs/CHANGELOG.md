@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.1 · 本地测试 / Local testing · 2026-10-31
 
+- 阅读新增「晃动翻页」：翻页设置里默认关闭，开启后正文横向晃动翻页，左晃上一页、右晃下一页；触摸与回弹不触发，离开正文或锁屏时加速度计自动休眠。晃动方向以真机校准为准。
+  Reading gains shake page turning: off by default in the turn settings; when enabled, a horizontal shake in the reading body turns one page, left back and right forward. Touch and rebounds do not trigger it, and the accelerometer sleeps automatically outside the body or on lock. Shake direction remains subject to on-device calibration.
+
 - 电量日志增加版本与构建标识、实际采样时间、有效性、锁屏/唤醒及电源事件，分别记录采样覆盖与容量估算；加入文件轮转、写入失败计数和 TF 交接保护。电量曲线保持不变。
   Battery logs add build identity, actual sample times, validity, lock/wake and power events, separating sample coverage from capacity estimates, with rotation, write-failure counters and TF handoff protection. The battery curve is unchanged.
 

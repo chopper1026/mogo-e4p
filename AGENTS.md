@@ -13,6 +13,9 @@ Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Takin
 当前硬件为 Metalio E-INK4 Plus（ESP32-S31）；构建及硬件入口以根目录 [README.md](README.md) 为准。下文 S3 / CW32 / SY7636A 内容是上游背景；不要据此将产品目标切回 S3。现用 `board_*`、`cst836u_*`、`fca9555_*` 名称包含新板兼容接口，不能仅凭旧芯片名删除。
 This port targets Metalio E-INK4 Plus (ESP32-S31); use the root [README.md](README.md) for its build and hardware entry points. S3 / CW32 / SY7636A details below describe upstream history, not the product target. Existing `board_*`, `cst836u_*` and `fca9555_*` names include active compatibility interfaces for this board; a legacy chip name does not imply dead code.
 
+原厂仓库本地路径：`/Users/chopper1026/codespace/Metalio-E-INK4-Plus`。今后提到「原厂」均指此仓库；其固件含 SC7A20H 驱动与 AOI1 运动中断等硬件基础，可作硬件事实参考，但不含晃动翻页这类功能实现，硬件问题可对照其板级目录排查。
+Vendor repo local path: `/Users/chopper1026/codespace/Metalio-E-INK4-Plus`. From now on, "原厂/vendor" refers to this checkout. Its firmware carries the hardware groundwork (SC7A20H driver, AOI1 motion interrupt and alike) and is the reference for hardware facts, but it does not implement features like shake page turning; debug board-level questions against its board directory.
+
 ## Git 提交 / Git commits
 
 今后的提交必须遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)：标题使用 `分类（范围）：中文摘要`，正文按分类顺序从 `1.` 连续编号，每项只写一件事，最后如实说明验证结果。标题、分类和正文均使用中文，技术标识保留原文；agent 提交末尾注明 `代理：<名称>`。历史提交不改写。

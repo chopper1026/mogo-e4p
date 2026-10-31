@@ -1,11 +1,16 @@
 /*
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
- * 图书进度与晃动门槛测试。/ Book progress and shake-gate tests.
+ * 图书进度与连续甩动门槛测试。/ Book progress and continuous-shake gate tests.
  */
 #include <assert.h>
 #include <stdio.h>
 #include "book_policy.h"
+
+/* 50ms 采样节奏与真机一致。/ The 50ms cadence matches the on-device sampler. */
+static int feed(book_shake_gate_t *g, int x, int y, int z, bool suppressed, int t) {
+    return book_shake_feed(g, x, y, z, suppressed, t);
+}
 
 int main(void) {
     assert(book_position_bytes(100, 200, 50, 100) == 150);
@@ -13,49 +18,65 @@ int main(void) {
     assert(book_position_bytes(100, 200, 0, 0) == 100);
     assert(book_position_bytes(0, UINT32_MAX, UINT32_MAX, UINT32_MAX) == UINT32_MAX);
     book_shake_gate_t g = {0};
-    // 任意持机角度均从重力基准开始，静止后一次水平动作即可翻页。
-    // Any holding angle starts from gravity; one horizontal impulse after rest turns a page.
-    for (int t = 1000; t <= 1140; t += 20) assert(book_shake_feed(&g, 180, -600, -760, false, t) == 0);
-    assert(book_shake_feed(&g, 480, -590, -750, false, 1160) == 1);
-    assert(book_shake_feed(&g, -150, -600, -760, false, 1180) == 0); /* 回弹 / Rebound */
-    for (int t = 1200; t <= 2180; t += 20) assert(!book_shake_feed(&g, 180, -600, -760, false, t));
-    assert(book_shake_feed(&g, -160, -595, -760, false, 2200) == -1);
-    assert(!book_shake_feed(&g, 520, -600, -760, false, 2220));
-    // 平滑的横向晃动也能识别，不要求采样间突然阶跃。
-    // Recognize rounded horizontal gestures without requiring an abrupt sample step.
-    const int smooth[] = {70, 138, 200, 255, 300, 333, 353, 360, 353, 333, 300,
-                          255, 200, 138, 70, 0, -70, -138, -200, -255, -300, -333,
-                          -353, -360, -353, -333, -300, -255, -200, -138, -70, 0};
-    for (int sign=-1;sign<=1;sign+=2) {
-        g = (book_shake_gate_t){0};
-        for (int t=0;t<=160;t+=20) assert(!book_shake_feed(&g,0,0,-1000,false,t));
-        int turns=0;
-        for (size_t i=0;i<sizeof(smooth)/sizeof(smooth[0]);++i) {
-            int dir=book_shake_feed(&g,sign*smooth[i],0,-1000,false,180+(int64_t)i*20);
-            if (dir) { assert(dir==sign); ++turns; }
-        }
-        assert(turns==1);
-    }
-    // 抖动、慢倾斜、纵向或前后运动不翻页。/ Reject jitter, slow tilts and other axes.
+    // 任意持机角度先锚定基线；一次向右甩动在 +350mg 上穿沿翻下一页，同向后续帧不重复触发。
+    // Anchor at any holding angle first; one right swing turns forward on the +350mg crossing
+    // edge and later frames of the same swing never retrigger.
+    for (int t = 0; t <= 400; t += 50) assert(feed(&g, 180, -600, -760, false, t) == 0);
+    assert(feed(&g, 300, -600, -760, false, 450) == 0);
+    assert(feed(&g, 500, -600, -760, false, 500) == 0);
+    assert(feed(&g, 700, -600, -760, false, 550) == 1);
+    assert(feed(&g, 850, -600, -760, false, 600) == 0);
+    // 回摆半程落在不应期内。/ The rebound half-swing lands inside the refractory window.
+    assert(feed(&g, 200, -600, -760, false, 850) == 0);
+    assert(feed(&g, -450, -600, -760, false, 1000) == 0);
+    assert(feed(&g, -180, -600, -760, false, 1150) == 0);
+    // 不应期结束后独立的一下向左甩翻上一页。/ After the refractory, an independent left swing turns back.
+    for (int t = 1200; t <= 1850; t += 50) assert(feed(&g, -180, -600, -760, false, t) == 0);
+    assert(feed(&g, -700, -600, -760, false, 1900) == -1);
+    assert(feed(&g, 180, -600, -760, false, 2100) == 0);
+    // 连续甩动：左右交替的每一摆各触发一次，不要求中间回到静止。
+    // Continuous shaking: each alternating swing fires on its own without needing stillness between.
     g = (book_shake_gate_t){0};
-    for (int t = 0; t <= 500; t += 20) assert(!book_shake_feed(&g, t % 40 ? 30 : -30, 0, -1000, false, t));
-    for (int t = 520; t <= 1200; t += 20) assert(!book_shake_feed(&g, (t - 520) / 2, 0, -1000, false, t));
-    for (int t = 1220; t <= 1500; t += 20) assert(!book_shake_feed(&g, 340, 0, -1000, false, t));
-    assert(!book_shake_feed(&g, 350, 450, -1000, false, 1520));
-    assert(!book_shake_feed(&g, 0, 0, -1000, false, 1540)); /* 纵向动作后回弹 / Rebound after rejected motion */
-    for (int t = 1560; t <= 1940; t += 20) assert(!book_shake_feed(&g, 340, 0, -1000, false, t));
-    assert(!book_shake_feed(&g, 600, 260, -1000, false, 1960)); /* 对角 / Diagonal */
-    for (int t = 1980; t <= 2360; t += 20) assert(!book_shake_feed(&g, 340, 0, -1000, false, t));
-    assert(!book_shake_feed(&g, 340, 0, -500, false, 2380));
-    // 触摸、工具栏或屏幕刷新的屏蔽期结束后必须先静止，不能继承半个动作。
-    // Touch/tools/refresh suppression requires fresh rest afterward; do not inherit partial motion.
-    assert(!book_shake_feed(&g, 640, 0, -1000, true, 2400));
-    assert(!book_shake_feed(&g, 340, 0, -1000, true, 2420));
-    for (int t = 2440; t <= 2580; t += 20) assert(!book_shake_feed(&g, 340, 0, -1000, false, t));
-    assert(book_shake_feed(&g, 60, 0, -1000, false, 2600) == -1);
-    // 丢采样、离页或时间重置后不让旧方向误触发。/ Rebaseline after lost samples, leaving or clock reset.
-    assert(!book_shake_feed(&g, 700, 0, -1000, false, 4000));
-    assert(!book_shake_feed(&g, -700, 0, -1000, false, 10));
+    for (int t = 0; t <= 400; t += 50) assert(feed(&g, 0, 0, -1000, false, t) == 0);
+    int forward = 0, back = 0;
+    static const int wave[] = {0, 500, 900, 500, 0, -500, -900, -500};
+    for (int i = 0; i < 21; ++i) {
+        // 半周期 300ms 的对称摆动，峰值 ±900。/ A symmetric 300ms half-period swing, ±900 peaks.
+        int dir = feed(&g, wave[i % 8], 0, -1000, false, 500 + (int64_t)i * 75);
+        if (dir == 1) ++forward;
+        if (dir == -1) ++back;
+    }
+    assert(forward >= 1 && back >= 1 && forward + back <= 4);
+    // 慢倾斜：基线跟随，永远不触发。/ Slow tilt: the baseline follows and nothing ever fires.
+    g = (book_shake_gate_t){0};
+    for (int t = 0; t <= 10000; t += 50) assert(!feed(&g, (t - 5000) / 8, (t - 5000) / 16, -1000, false, t));
+    // 纵向甩动不触发。/ Vertical swings never fire.
+    g = (book_shake_gate_t){0};
+    for (int i = 0; i < 6; ++i) {
+        int64_t t = 2000 + (int64_t)i * 200;
+        assert(!feed(&g, 0, i % 2 ? 800 : -800, -1000, false, t));
+    }
+    // x 越限但 y 占优不触发。/ An x crossing with y dominant is rejected.
+    assert(feed(&g, 0, 0, -1000, false, 3300) == 0); /* 断档重新锚定 / gap re-anchor */
+    assert(feed(&g, 0, 0, -1000, false, 3350) == 0);
+    assert(!feed(&g, 500, 700, -1000, false, 3400));
+    assert(!feed(&g, 0, 0, -1000, false, 3450));
+    // z 轴大幅度摆动与 x/y 无关。/ Large z swings are irrelevant to x/y.
+    for (int i = 0; i < 6; ++i)
+        assert(!feed(&g, 30, 12, i % 2 ? 200 : -2200, false, 4000 + (int64_t)i * 200));
+    // 触摸压制帧重新锚定；静置期内的大步进与回落穿越都不得触发，不继承半个动作。
+    // Suppressed frames re-anchor; within the settle window neither a large step nor the
+    // return crossing may fire, so no half gesture carries over.
+    assert(!feed(&g, 700, 0, -1000, true, 5000));
+    assert(!feed(&g, 400, 0, -1000, false, 5050));
+    assert(!feed(&g, 180, 0, -1000, false, 5100));
+    assert(!feed(&g, 180, 0, -1000, false, 5150));
+    assert(!feed(&g, 500, 0, -1000, false, 5200));
+    assert(!feed(&g, 180, 0, -1000, false, 5250));
+    assert(!feed(&g, 180, 0, -1000, false, 5300));
+    // 断档与时钟回退都重新锚定，不让旧方向误触发。/ Gaps and clock resets re-anchor without firing.
+    assert(!feed(&g, 700, 0, -1000, false, 6000));
+    assert(!feed(&g, -700, 0, -1000, false, 20));
     assert(!book_shake_feed(NULL, 0, 0, 0, false, 0));
-    puts("PASS book position and directional shake: left/right, rebound, tilt and suppression");
+    puts("PASS book position and continuous shake: edges, refractory, no-stillness chaining, tilt, other axes, suppression");
 }

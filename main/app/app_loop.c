@@ -433,6 +433,7 @@ void app_loop_run(const app_loop_config_t* config) {
         .read_touch = config->tp ? s31_input_read_touch : NULL,
         .touch_context = config->tp,
         .touch = &latest,
+        .acc = config->acc,
     };
 
     bool was_touched = false;

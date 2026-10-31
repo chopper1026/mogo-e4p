@@ -21,15 +21,16 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v29 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v29; legacy fixtures drop them all. */
+/* v15..v30 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v30; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
                             sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + \
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
-                            sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t))
+                            sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
+                            sizeof(settings_backup_shake_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -140,7 +141,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                   sizeof(settings_backup_margins_t));
+                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -338,12 +339,13 @@ int main(void) {
     strlcpy(s_wallpaper, "/sdcard/pictures/missing.jpg", sizeof(s_wallpaper));
     s_touch_haptics = false;
     s_haptic_intensity = APP_HAPTIC_STRONG;
-    // v29 尾部保存四向边距；恢复前先改成别的值，确认四项都回来。
-    // The v29 tail carries all four margins; change them before restoring so each one must return.
+    // v29 尾部保存四向边距；v30 尾部保存晃动翻页。恢复前先改值，确认都能回来。
+    // The v29 tail carries all four margins and the v30 tail the shake switch; change them before restoring so each must return.
     app_settings_set_book_margin_left(96);
     app_settings_set_book_margin_right(12);
     app_settings_set_book_margin_top(18);
     app_settings_set_book_margin_bottom(30);
+    app_settings_set_reader_shake_turn(true);
     assert(app_settings_backup_save() == ESP_OK);
     assert(history_saves == 1);
     FILE *saved = fopen(BACKUP_FILE, "rb");
@@ -436,6 +438,7 @@ int main(void) {
     s_reader_turn_effect = 0;
     s_reader_power_turn = false;
     s_reader_volume_turn = false;
+    s_reader_shake_turn = false;
     s_reader_up_action = APP_READER_KEY_NONE;
     s_reader_statusbar = true;
     s_reader_open_fullscreen = true; /* dirty value must come back from the backup */
@@ -487,6 +490,7 @@ int main(void) {
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
     assert(app_settings_reader_vertical_turn());
+    assert(app_settings_reader_shake_turn());
 
     assert(s_home_full_refresh && !strcmp(s_device_name, "Kiiko Pico") &&
            !strcmp(s_status_signature, "今天也要读书"));
@@ -533,7 +537,7 @@ int main(void) {
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                   sizeof(settings_backup_margins_t));
+                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -604,7 +608,7 @@ int main(void) {
     const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                  sizeof(settings_backup_margins_t);
+                                  sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1018,7 +1022,7 @@ int main(void) {
         sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                              sizeof(settings_backup_margins_t);
+                              sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -1041,6 +1045,9 @@ int main(void) {
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_fonts() && !app_settings_book_vertical() &&
            app_settings_shutdown_style() == APP_SHUTDOWN_STAGED);
+    // v26 老备份没有晃动块，恢复回落默认关闭。
+    // A v26 backup has no shake block; restore falls back to the off default.
+    assert(!app_settings_reader_shake_turn());
     // 所有阅读字号都可保存与备份恢复，范围外仍使用默认48。
     // Every reader size survives settings/backup restore; out-of-range values still use default 48.
     for(int px=18;px<=90;++px){

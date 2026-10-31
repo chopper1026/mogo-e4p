@@ -14,9 +14,10 @@ from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
 # 334e224的3136组状态：两面板的文字、坐标、颜色、图标及绘制顺序，另含无效矩形与开关。
 # 3136 states from 334e224: text, geometry, colors, icons and call order for both sheets, plus invalid rectangles and switches.
+# 晃动翻页行加入翻页面板后的新状态。/ New states after the shake-turn row joined the turn sheet.
 LEGACY_EXPECTED = 'e7505b2b4d4f68496928912eb860e0f127fe3b926351886d3f3bbb6a3e116625'
-EXPECTED = '875447a14c20415a63551c4a01f77a946781dfbc3a88c385d694ad202e6537fa'
-LAYOUT_EXPECTED = 'f4cd5f17b9dff9276e437339aa958bccb80b22b7bc93c025f04ecc6b15475bea'
+EXPECTED = 'ccb4bdbdf799d35c13a2897fdc7efb010d1f531a7cfae70032a89c3e8df7c1f9'
+LAYOUT_EXPECTED = '29a5b99acf14978497595b0cea28facb3187a8c73994ada200c3f811204304cf'
 
 
 def main():

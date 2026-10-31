@@ -422,6 +422,12 @@ static size_t s_jump_offset = SIZE_MAX, s_jump_page;
 static int s_px, s_margin[MARGIN_COUNT], s_line_spacing, s_turns, s_unsaved;
 static int64_t s_poll_ms, s_last_turn_ms;
 static int64_t s_stats_last_ms, s_stats_activity_ms;
+// 晃动翻页状态：判定门槛、触摸静默时间与传感器供电标志，采样和生命周期钩子共同维护。
+// Shake-turn state: the gate, touch-quiet timestamp and sensor-power flag, maintained by
+// sampling and the lifecycle hooks together.
+static book_shake_gate_t s_shake_gate;
+static int64_t s_shake_touch_ms;
+static bool s_shake_sensor_on, s_shake_cfg_pending = true;
 static uint32_t s_stats_pending_ms, s_stats_pending_turns;
 static uint32_t s_session_read_ms, s_session_turns;
 static int s_font_page;
@@ -2237,7 +2243,7 @@ static void draw_reading_settings(uint8_t* fb) {
 static void draw_turn_settings(uint8_t *fb) {
     draw_sheet(fb, 270, "翻页模式");
     draw_sheet_back(fb, 270);
-    ui_reader_turn_settings_draw(fb, app_settings_reader_vertical_turn());
+    ui_reader_turn_settings_draw(fb, app_settings_reader_vertical_turn(), app_settings_reader_shake_turn());
 }
 
 static const char *reader_key_label(app_reader_key_action_t action) {
@@ -5082,6 +5088,13 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (ui_rect_hit((EpdRect){36, 299, 56, 56}, x, y)) s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
         else if (ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y)) s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
         else {
+            // 晃动翻页整行开关，矩形与 ui_reader_turn_settings_draw 的行保持一致。
+            // The shake-turn toggle row; keep the rect in sync with ui_reader_turn_settings_draw.
+            if (ui_rect_hit((EpdRect){36, 1000, 612, 88}, x, y)) {
+                app_settings_set_reader_shake_turn(!app_settings_reader_shake_turn());
+                invalidate_prep();
+                return APP_REDRAW_PAGE;
+            }
             for (int i = 0; i < 2; ++i) {
                 if (!ui_rect_hit((EpdRect){36, 370 + i * 322, 612, 292}, x, y)) continue;
                 app_settings_set_reader_vertical_turn(i != 0);
@@ -5764,6 +5777,13 @@ static void on_enter(app_ctx_t* ctx) {
 static void book_on_exit(app_ctx_t* ctx) {
     middle_pending_clear();
     reader_indent_hold_cancel();
+    // 离页恢复加速度计静默；门槛与静默窗口一并复位，下次进书重新起步。
+    // Silence the accelerometer on exit; reset the gate and touch window so the next session starts clean.
+    if (s_shake_sensor_on && ctx->acc) board_sensor_sleep(ctx->acc);
+    s_shake_sensor_on = false;
+    s_shake_cfg_pending = true;
+    s_shake_gate = (book_shake_gate_t){0};
+    s_shake_touch_ms = 0;
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     book_shelf_covers_cancel(&s_shelf_covers);
     shelf_category_remember(ctx);
@@ -6115,6 +6135,9 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         return APP_REDRAW_NONE;
     }
     if (s_view == READING && ev->type != UI_GESTURE_PRESS) s_stats_activity_ms = ctx->now_ms;
+    // 触摸全程压制晃动翻页，抬手后留一个短窗口吸收点按与翻页回弹。
+    // Suppress shake turns throughout touch; keep a short post-release window to absorb taps and turn rebounds.
+    if (s_view == READING) s_shake_touch_ms = ctx->now_ms;
     if (s_view == READING &&
         (s_reader_panel == READER_PANEL_FONT_SETTINGS || s_reader_panel == READER_PANEL_LAYOUT_SETTINGS)) {
         if (ev->type == UI_GESTURE_PRESS) {
@@ -6483,6 +6506,76 @@ static app_redraw_t reader_up_key_tick(app_ctx_t* ctx) {
     s_stats_activity_ms = ctx->now_ms;
     return reader_key_action(ctx, action);
 }
+// 屏轴映射：面板固定倒置竖屏，整机 X（board_accel_to_device 已转换）为屏幕短边横轴，
+// Y 为长边、Z 出屏。sx 符号已按真机校准（2026-10-31）：整机 x 与屏幕右向相反，取负号，
+// 右晃为下一页；若换装或面板方向变更需重新校准。
+// Screen-axis mapping: the panel is fixed inverted portrait; device X (already converted by
+// board_accel_to_device) is the screen's short-edge horizontal axis, Y the long edge and Z out
+// of the screen. The sx sign is device-calibrated (2026-10-31): device x opposes the screen's
+// rightward direction, so it is negated to make a right shake turn forward. Recalibrate if the
+// board or panel orientation ever changes.
+static void reader_shake_screen_axes(const sc7a20h_sample_t* sample, int* sx, int* sy, int* sz) {
+    *sx = -sample->x_mg;
+    *sy = sample->y_mg;
+    *sz = sample->z_mg;
+}
+// 晃动翻页：阅读正文横晃一次翻一页，判定在 book_policy.h；触摸 600ms 内与回弹由门槛屏蔽。
+// 传感器只在正文可见时上电（25Hz HR 约 10µA），离页、锁屏与重排窗口自动断电；浅睡会被
+// 拿起唤醒重配，醒来靠 pending 重放本配置。
+// Shake turns: one horizontal shake turns one page in the reader body; the book_policy gate
+// rejects the 600ms touch window and rebounds. The sensor powers up only while the body is
+// visible (25Hz HR, ~10uA) and sleeps on exit, lock or panel windows; light sleep may leave the
+// pickup-wake config behind, so the pending flag replays ours after wake.
+// 轮询周期必须不小于传感器出数周期（25Hz 即 40ms）：30ms 会把同一样本读两次，重复样本的
+// jerk=0 会被策略当作静止而打开重力跟踪，基准在甩动中途被拖走，门槛从此无法重臂。
+// The poll period must not go below the sensor's output period (40ms at 25Hz): polling faster
+// feeds the gate the same sample twice, whose zero jerk reads as rest and opens gravity
+// tracking mid-swing, dragging the baseline away until nothing re-arms.
+#define READER_SHAKE_POLL_MS 50
+#define READER_SHAKE_TOUCH_QUIET_MS 600
+#define READER_SHAKE_CFG_BACKOFF_MS 2000
+static const sc7a20h_sensor_config_t READER_SHAKE_SENSOR_CONFIG = {
+    .odr = SC7A20H_ODR_25, .fs = SC7A20H_FS_2G, .mode = SC7A20H_MODE_HR,
+    .osr = SC7A20H_OSR_OFF, .dlpf = SC7A20H_DLPF_OFF, .hpf = SC7A20H_HPF_OFF,
+    .axis_mask = SC7A20H_AXIS_XYZ,
+};
+static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
+    static int64_t s_poll_ms, s_cfg_fail_ms;
+    const bool active = app_settings_reader_shake_turn() &&
+                        app_book_reader_body_visible() && ctx->acc != NULL;
+    if (!active) {
+        if (s_shake_sensor_on && ctx->acc) {
+            board_sensor_sleep(ctx->acc);
+            s_shake_sensor_on = false;
+            s_shake_cfg_pending = true;
+        }
+        return APP_REDRAW_NONE;
+    }
+    if (ctx->now_ms - s_poll_ms < READER_SHAKE_POLL_MS) return APP_REDRAW_NONE;
+    s_poll_ms = ctx->now_ms;
+    if (!sc7a20h_powered(ctx->acc) || s_shake_cfg_pending) {
+        if (ctx->now_ms - s_cfg_fail_ms < READER_SHAKE_CFG_BACKOFF_MS) return APP_REDRAW_NONE;
+        // apply_config 本身会置起供电；失败退避 2s 再试，不给坏总线刷 I2C。
+        // apply_config powers the sensor up itself; back off 2s on failure instead of
+        // hammering a broken bus.
+        if (sc7a20h_apply_config(ctx->acc, &READER_SHAKE_SENSOR_CONFIG) != ESP_OK) {
+            s_cfg_fail_ms = ctx->now_ms;
+            return APP_REDRAW_NONE;
+        }
+        s_shake_cfg_pending = false;
+        s_shake_sensor_on = true;
+    }
+    sc7a20h_sample_t sample;
+    if (board_accel_read(ctx->acc, &sample) != ESP_OK) return APP_REDRAW_NONE;
+    int sx, sy, sz;
+    reader_shake_screen_axes(&sample, &sx, &sy, &sz);
+    int dir = book_shake_feed(&s_shake_gate, sx, sy, sz,
+                              ctx->now_ms - s_shake_touch_ms < READER_SHAKE_TOUCH_QUIET_MS,
+                              ctx->now_ms);
+    if (!dir) return APP_REDRAW_NONE;
+    s_stats_activity_ms = ctx->now_ms;
+    return turn_page(ctx, dir);
+}
 static app_redraw_t on_tick(app_ctx_t* ctx) {
     app_redraw_t indent=reader_indent_hold_tick(ctx);
     if(indent!=APP_REDRAW_NONE)return indent;
@@ -6525,6 +6618,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (volume != APP_REDRAW_NONE) return volume;
     app_redraw_t up_key = reader_up_key_tick(ctx);
     if (up_key != APP_REDRAW_NONE) return up_key;
+    app_redraw_t shake = reader_shake_tick(ctx);
+    if (shake != APP_REDRAW_NONE) return shake;
     if (s_reader_notice[0] && ctx->now_ms >= s_reader_notice_until) {
         s_reader_notice[0] = 0;
         if (s_view == READING) {
@@ -6604,6 +6699,9 @@ static void before_lock(app_ctx_t* ctx) {
     // Never replay a key action across lock; resume from a clean state.
     middle_pending_clear();
     reader_indent_hold_cancel();
+    // 浅睡会给加速度计配拿起唤醒，醒来由晃动采样重放阅读配置。
+    // Light sleep rearms the accelerometer for pickup wake; the shake sampler replays the reading config after wake.
+    s_shake_cfg_pending = true;
     s_shelf_key_mode=s_shelf_key_paint_pending=false;s_shelf_key_delta=s_shelf_key_pressed=0;
     shelf_category_remember(ctx);
     book_shelf_categories_menu_close(&s_shelf_categories);
