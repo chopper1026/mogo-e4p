@@ -22,7 +22,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
 /* v15..v30 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v30; legacy fixtures drop them all. */
+   Tail blocks appended by v15..v31; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,7 +30,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -141,7 +141,8 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t));
+                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
+                                  sizeof(settings_backup_chrome_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -537,7 +538,8 @@ int main(void) {
                                    sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t));
+                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
+                                  sizeof(settings_backup_chrome_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -608,7 +610,8 @@ int main(void) {
     const size_t dropped_blocks = sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t) +
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                                  sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t);
+                                  sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
+                                  sizeof(settings_backup_chrome_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1022,7 +1025,8 @@ int main(void) {
         sizeof(settings_backup_double_t) + sizeof(settings_backup_volume_t) + sizeof(settings_backup_up_t));
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
-                              sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t);
+                              sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
+                                  sizeof(settings_backup_chrome_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;

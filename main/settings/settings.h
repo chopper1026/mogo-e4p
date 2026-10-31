@@ -241,6 +241,30 @@ app_reader_key_action_t app_settings_reader_up_action(void);
 bool app_settings_set_reader_up_action(app_reader_key_action_t action);
 /// 一次提交整套推荐设置，1为翻页，2为首页/全屏/工具栏。/ Commit preset 1 (page turns) or 2 (Home/full screen/tools) together.
 void app_settings_set_reader_key_preset(unsigned preset);
+/// 页眉/页脚槽位内容：两条信息条各分左/中/右三格，每格自选一项。
+/// Header/footer slot content: each bar splits into left/center/right slots, each picking one item.
+typedef enum {
+    APP_READER_SLOT_BLANK,         ///< 不显示 / Nothing
+    APP_READER_SLOT_TITLE,         ///< 书名 / Book title
+    APP_READER_SLOT_CHAPTER,       ///< 章节名 / Chapter name
+    APP_READER_SLOT_PAGE,          ///< 本章页码 x/y / Chapter page x/y
+    APP_READER_SLOT_PAGE_PROGRESS, ///< 页码与全书进度 / Chapter page plus book progress
+    APP_READER_SLOT_PERCENT,       ///< 全书进度百分比 / Whole-book progress percentage
+    APP_READER_SLOT_CLOCK,         ///< 时间 HH:MM / Clock
+    APP_READER_SLOT_BATTERY,       ///< 电量百分比 / Battery percentage
+    APP_READER_SLOT_DATE,          ///< 日期与星期 / Date and weekday
+    APP_READER_SLOT_ICON_BATTERY,  ///< 电量图标 / Battery icon
+    APP_READER_SLOT_COUNT
+} app_reader_slot_item_t;
+/// 槽位内容，bar 0=页眉 1=页脚，slot 0/1/2=左/中/右；越界回落「不显示」。
+/// Slot item by bar (0 header, 1 footer) and slot (0/1/2 = left/center/right); out-of-range reads as blank.
+app_reader_slot_item_t app_settings_reader_chrome_item(unsigned bar, unsigned slot);
+/// 返回是否成功保存；失败不改变槽位。/ Return successful persistence, leaving the slot unchanged on failure.
+bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader_slot_item_t item);
+/// 六槽一次提交恢复默认布局：页眉 书名/时间/电量图标，页脚 章节名/空/页码·进度。
+/// Restore all six slots to the default layout in one commit: header title/clock/battery icon,
+/// footer chapter/blank/page·progress.
+void app_settings_set_reader_chrome_default(void);
 /// 旧长按设置API保留用于历史备份兼容。/ Retained legacy hold APIs for historical backup compatibility.
 bool app_settings_reader_hold_refresh(void);
 void app_settings_set_reader_hold_refresh(bool on);

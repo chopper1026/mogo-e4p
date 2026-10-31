@@ -102,6 +102,14 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_DOUBLE_ACTION "rd_key_dbl"
 #define NVS_KEY_UP_ACTION "rd_key_up"
 #define NVS_KEY_READER_KEYS_V2 "rd_keys_v2"
+// 页眉页脚三段槽位：页眉左/中/右、页脚左/中/右各存一个内容枚举。
+// Header/footer three-slot chrome: one content enum per slot across both bars.
+#define NVS_KEY_CHROME_HEADER_L "rd_hdr_l"
+#define NVS_KEY_CHROME_HEADER_M "rd_hdr_m"
+#define NVS_KEY_CHROME_HEADER_R "rd_hdr_r"
+#define NVS_KEY_CHROME_FOOTER_L "rd_ftr_l"
+#define NVS_KEY_CHROME_FOOTER_M "rd_ftr_m"
+#define NVS_KEY_CHROME_FOOTER_R "rd_ftr_r"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_BLE_TURNER "ble_turn"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
@@ -188,6 +196,21 @@ static uint8_t s_reader_hold_action = APP_READER_KEY_HOME;
 static uint8_t s_reader_double_action = APP_READER_KEY_NONE;
 static uint8_t s_reader_up_action = APP_READER_KEY_NONE;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
+// 页眉页脚默认布局沿用历史画面：页眉 书名/时间/电量图标，页脚 章节名/空/页码·进度。
+// Default chrome keeps the historical picture: header title/clock/battery icon,
+// footer chapter/blank/page·progress.
+static const char *s_reader_chrome_names[] = {
+    NVS_KEY_CHROME_HEADER_L, NVS_KEY_CHROME_HEADER_M, NVS_KEY_CHROME_HEADER_R,
+    NVS_KEY_CHROME_FOOTER_L, NVS_KEY_CHROME_FOOTER_M, NVS_KEY_CHROME_FOOTER_R,
+};
+static const uint8_t s_reader_chrome_defaults[6] = {
+    APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
+    APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS,
+};
+static uint8_t s_reader_chrome[6] = {
+    APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
+    APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS,
+};
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
 // 前光默认关、亮度 40%、中性色温；升级后行为和没有该功能时一致。
@@ -423,6 +446,13 @@ void app_settings_init(void) {
     s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK &&
             up_action < APP_READER_KEY_COUNT && up_action != APP_READER_KEY_LEGACY_BACK
         ? up_action : APP_READER_KEY_NONE;
+    // 槽位内容逐格校验；缺键或越界都保留默认布局，无需迁移标记。
+    // Validate slots one by one; missing or out-of-range keys keep the default layout, no migration marker.
+    for (unsigned i = 0; i < 6; ++i) {
+        uint8_t value;
+        if (nvs_get_u8(h, s_reader_chrome_names[i], &value) == ESP_OK && value < APP_READER_SLOT_COUNT)
+            s_reader_chrome[i] = value;
+    }
     uint8_t keys_v2 = 0;
     bool migrate_reader_defaults = nvs_get_u8(h, NVS_KEY_READER_KEYS_V2, &keys_v2) != ESP_OK || keys_v2 != 1;
     bool old_default_hold = migrate_reader_defaults && s_reader_hold_action == APP_READER_KEY_REFRESH &&
@@ -1002,6 +1032,33 @@ void app_settings_set_reader_key_preset(unsigned preset) {
     }
 }
 
+app_reader_slot_item_t app_settings_reader_chrome_item(unsigned bar, unsigned slot) {
+    return bar < 2 && slot < 3
+        ? (app_reader_slot_item_t)s_reader_chrome[bar * 3 + slot] : APP_READER_SLOT_BLANK;
+}
+bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader_slot_item_t item) {
+    if (bar >= 2 || slot >= 3 || item >= APP_READER_SLOT_COUNT) return false;
+    if (s_reader_chrome[bar * 3 + slot] == item) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, s_reader_chrome_names[bar * 3 + slot], item);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) s_reader_chrome[bar * 3 + slot] = item;
+    return err == ESP_OK;
+}
+void app_settings_set_reader_chrome_default(void) {
+    if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome))) return;
+    nvs_handle_t h;
+    esp_err_t err = settings_write_open(&h);
+    if (err != ESP_OK) return;
+    for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
+        err = nvs_set_u8(h, s_reader_chrome_names[i], s_reader_chrome_defaults[i]);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) memcpy(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome));
+}
+
 bool app_settings_reader_hold_refresh(void) { return s_reader_hold_refresh; }
 bool app_settings_reader_vertical_turn(void) { return s_reader_vertical_turn; }
 void app_settings_set_reader_vertical_turn(bool on) {
@@ -1291,6 +1348,20 @@ static bool backup_shake_valid(const settings_backup_shake_t *shake) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)shake->checksum[i] << (8 * i);
     return shake->on <= 1 && stored == backup_shake_checksum(shake);
 }
+// v31 追加页眉页脚六槽内容；旧备份回落默认布局。
+// V31 appends the six header/footer chrome slots; older backups fall back to the default layout.
+typedef struct { uint8_t items[6], checksum[4]; } settings_backup_chrome_t;
+static uint32_t backup_chrome_checksum(const settings_backup_chrome_t *chrome) {
+    uint32_t hash = 2166136261u;
+    for (unsigned i = 0; i < 6; ++i) hash = (hash ^ chrome->items[i]) * 16777619u;
+    return hash;
+}
+static bool backup_chrome_valid(const settings_backup_chrome_t *chrome) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)chrome->checksum[i] << (8 * i);
+    for (unsigned i = 0; i < 6; ++i) if (chrome->items[i] >= APP_READER_SLOT_COUNT) return false;
+    return stored == backup_chrome_checksum(chrome);
+}
 // v26 追加更新上键单击；旧备份回落「不操作」。
 // V26 appends the up-key single press; older backups fall back to no action.
 typedef struct { uint8_t action, checksum[4]; } settings_backup_up_t;
@@ -1384,9 +1455,9 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1474,7 +1545,9 @@ esp_err_t app_settings_backup_save(void) {
     // v29: appends the four per-side margins after the v28 tail; the legacy slot keeps the left inset.
     // v30：在 v29 尾部再追加晃动翻页开关。
     // v30: appends the shake-turn switch after the v29 tail.
-    memcpy(backup.magic, "PICOSETU", sizeof(backup.magic));
+    // v31：在 v30 尾部再追加页眉页脚六槽内容。
+    // v31: appends the six header/footer chrome slots after the v30 tail.
+    memcpy(backup.magic, "PICOSETV", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1579,6 +1652,10 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_shake_t shake = {.on = s_reader_shake_turn ? 1 : 0};
     uint32_t shake_hash = backup_shake_checksum(&shake);
     for (unsigned i = 0; i < 4; ++i) shake.checksum[i] = (uint8_t)(shake_hash >> (8 * i));
+    settings_backup_chrome_t chrome = {0};
+    memcpy(chrome.items, s_reader_chrome, sizeof(chrome.items));
+    uint32_t chrome_hash = backup_chrome_checksum(&chrome);
+    for (unsigned i = 0; i < 4; ++i) chrome.checksum[i] = (uint8_t)(chrome_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = wifi_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1603,8 +1680,8 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
-    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns、26 up action、27 book fonts/vertical/shutdown。
-    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns, 26 up action, 27 book fonts/vertical/shutdown.
+    // 记录顺序与版本号一一对应：18 bookmark、21 open_full、22 title_style、23 title_size、24 double_action、25 volume turns、26 up action、27 book fonts/vertical/shutdown；28 haptic、29 margins、30 shake、31 chrome 尾块随后。
+    // Record order matches the version numbers: 18 bookmark, 21 open_full, 22 title_style, 23 title_size, 24 double_action, 25 volume turns, 26 up action, 27 book fonts/vertical/shutdown; the 28 haptic, 29 margins, 30 shake and 31 chrome tail blocks follow.
     settings_backup_background_t bookmark = {0};
     strlcpy(bookmark.path,s_bookmark,sizeof(bookmark.path));
     uint32_t bookmark_hash=backup_background_checksum(&bookmark);
@@ -1622,6 +1699,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&haptic, 1, sizeof(haptic), file) == sizeof(haptic);
     if (ok) ok = fwrite(&margins, 1, sizeof(margins), file) == sizeof(margins);
     if (ok) ok = fwrite(&shake, 1, sizeof(shake), file) == sizeof(shake);
+    if (ok) ok = fwrite(&chrome, 1, sizeof(chrome), file) == sizeof(chrome);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1720,6 +1798,9 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
     settings_backup_margins_t margins = {0};
     settings_backup_shake_t shake = {.on = 0};
+    settings_backup_chrome_t chrome = {.items = {
+        APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
+        APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS}};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1815,6 +1896,9 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 28) ok = fread(&haptic, 1, sizeof(haptic), file) == sizeof(haptic) && backup_haptic_valid(&haptic);
     if (ok && version >= 29) ok = fread(&margins, 1, sizeof(margins), file) == sizeof(margins) && backup_margins_valid(&margins);
     if (ok && version >= 30) ok = fread(&shake, 1, sizeof(shake), file) == sizeof(shake) && backup_shake_valid(&shake);
+    if (ok && version >= 31) ok = fread(&chrome, 1, sizeof(chrome), file) == sizeof(chrome) && backup_chrome_valid(&chrome);
+    // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
+    // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1891,6 +1975,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHAKE_TURN, shake.on);
+    for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
+        err = nvs_set_u8(h, s_reader_chrome_names[i], chrome.items[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
@@ -1964,6 +2050,7 @@ esp_err_t app_settings_backup_restore(void) {
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;
     s_reader_double_action = double_action.action;
+    memcpy(s_reader_chrome, chrome.items, sizeof(s_reader_chrome));
     s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
     s_book_weight_fine = fine_weight;
     s_book_antialias = antialias;

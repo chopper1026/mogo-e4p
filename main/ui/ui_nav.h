@@ -29,6 +29,9 @@ int64_t ui_nav_clock_minute(void);
 void ui_nav_clock_draw(uint8_t *fb);
 /// 状态栏同款时间文本，供阅读页眉等自定义位置复用。/ Status-bar clock text for reuse at custom spots such as the reader header.
 void ui_nav_clock_text(char *clock, size_t capacity);
+/// 状态栏同时钟来源的日期文本「MM-DD 周X」；未对时返回空串，槽位自然不画。
+/// "MM-DD 周X" from the same clock source as the status bar; empty when unsynced so custom slots skip it.
+void ui_nav_date_text(char *date, size_t capacity);
 /// 在 (x,cy) 画状态栏同款电池（含电量填充与充电闪电），x 为电池左沿。
 /// Draw the status-bar battery (fill and charging bolt included) at (x,cy); x is the battery's left edge.
 void ui_nav_battery_draw(uint8_t *fb, int x, int cy);

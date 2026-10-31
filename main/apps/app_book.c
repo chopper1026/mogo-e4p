@@ -128,6 +128,13 @@
  * User revision: drop the header back/favorite controls and left-align the title; the right side draws the status-bar clock and battery; key actions gain "back" (undoing the entry path) and the favorite toggle moves to the shelf details panel.
  * 用户修订：工具栏展开时点按正文只收起工具栏，不再顺带翻页；滑动、按键与电源键仍翻页。
  * User revision: a body tap with the tools bar open only dismisses it; swipes, keys and the power key still turn pages.
+ * 用户 2026-10-31 修订：页眉页脚各分左中右三槽，内容在阅读设置内自选；默认页眉变为
+ * 书名/时间/电量图标，页脚保持章节名/空/页码·进度。页眉合成文本指纹随翻页对比，
+ * 内容变化才推顶部差分带，静置仍不单刷。
+ * User revision of 2026-10-31: each bar splits into left/center/right slots picked in the reading
+ * sheet; the default header becomes title/clock/battery icon while the footer keeps
+ * chapter/blank/page·progress. The composed header fingerprint is compared per turn and the top
+ * diff band only presents when it changed; idle stays silent.
  * 用户 2026-10-21 修订：工具栏开关恢复为带内 GL16 差分；此前改 GC16 只因实心进度条擦除后留轮廓，
  * 差分脏区膨胀已补推边缘邻行/邻列，不再需要整块全像素驱动。
  * User revision 2026-10-21: the tools toggle returns to a band GL16 differential. GC16 was only
@@ -154,6 +161,7 @@
 #include "app_registry.h"
 #include "ble_page_turner.h"
 #include "book_layout.h"
+#include "reader_chrome.h"
 #include "book_cover.h"
 #include "book_shelf_covers.h"
 #include "book_lock_collage.h"
@@ -253,6 +261,8 @@ typedef enum {
     READER_PANEL_TURN_SETTINGS,
     READER_PANEL_KEY_SETTINGS,
     READER_PANEL_KEY_PICKER,
+    READER_PANEL_CHROME_SETTINGS,
+    READER_PANEL_CHROME_PICKER,
     READER_PANEL_TITLE_STYLE,
     READER_PANEL_NOTE,
 } reader_panel_t;
@@ -357,6 +367,10 @@ static int s_shelf_key_pressed,s_shelf_key_delta;
 static int64_t s_shelf_key_until;
 static int64_t s_reader_clock_minute = -1;
 static int s_reader_power = -1;
+// 已推屏页眉的合成文本指纹；内容不变时不随翻页重复推顶部带。
+// Fingerprint of the presented header's composed texts; unchanged content never re-presents the top band on turns.
+static uint32_t s_reader_chrome_fp;
+static bool s_reader_chrome_fp_valid;
 static char s_message[128], s_storage[128];
 static char s_chapter_heading_title[READER_HEADING_TITLE_BYTES], s_chapter_heading_label[READER_HEADING_LABEL_BYTES];
 static size_t s_chapter_lead_skip;
@@ -462,6 +476,15 @@ static bool s_cover_batch_present_pending;
 static bool s_shelf_page_pending;
 static unsigned s_reader_key_pick;
 static char s_reader_key_error[64];
+// 页眉页脚设置面板状态：选中槽位、列表滚动与保存错误提示。
+// Chrome settings panel state: the picked slot, list scroll and the save-error notice.
+static unsigned s_chrome_pick_bar;   // 0=页眉 1=页脚 / 0 header, 1 footer
+static unsigned s_chrome_pick_slot;  // 0/1/2 = 左/中/右 / left/center/right
+static int s_chrome_scroll;
+static bool s_chrome_drag;
+static int s_chrome_pick_scroll;
+static bool s_chrome_pick_drag;
+static char s_chrome_error[64];
 // 中键双击：绑定动作后，单击先挂起一个双击窗口，超时且无触摸才补发。
 // Middle double press: once an action is bound, a single click is held for the double-press
 // window and replayed only after it expires with no contact.
@@ -2384,6 +2407,120 @@ static void draw_key_picker(uint8_t *fb) {
     reader_panel_text_vc(fb, 342, 1170, 26, "返回", EPD_DRAW_ALIGN_CENTER, true);
 }
 
+/* ---- 页眉页脚设置面板 / Header & footer chrome panels ---- */
+// 六个槽位行加「恢复默认」整行滚动，视口四行；选择页复用动作卡样式，超出视口两行。
+// Six slot rows plus a reset row scroll whole rows in a four-row viewport; the picker reuses the
+// action-card style and outgrows its viewport by two rows.
+#define CHROME_ROW_TOP 640
+#define CHROME_ROW_HEIGHT 96
+#define CHROME_ROW_GAP 12
+#define CHROME_ROW_PITCH (CHROME_ROW_HEIGHT + CHROME_ROW_GAP)
+#define CHROME_ROW_VISIBLE 4
+#define CHROME_ROW_VIEW_HEIGHT (CHROME_ROW_VISIBLE * CHROME_ROW_HEIGHT + (CHROME_ROW_VISIBLE - 1) * CHROME_ROW_GAP)
+#define CHROME_ROW_COUNT 7
+#define CHROME_ROW_MAX_SCROLL ((CHROME_ROW_COUNT - CHROME_ROW_VISIBLE) * CHROME_ROW_PITCH)
+#define CHROME_PICK_TOP 390
+#define CHROME_PICK_PITCH 86
+#define CHROME_PICK_HEIGHT 78
+#define CHROME_PICK_VISIBLE 8
+#define CHROME_PICK_VIEW_HEIGHT ((CHROME_PICK_VISIBLE - 1) * CHROME_PICK_PITCH + CHROME_PICK_HEIGHT)
+// 显示顺序与存储枚举解耦：内容项在前，「不显示」压尾。/ Display order decouples from the stored
+// enum: content items first, "blank" last.
+static const app_reader_slot_item_t s_chrome_item_order[] = {
+    APP_READER_SLOT_TITLE, APP_READER_SLOT_CHAPTER, APP_READER_SLOT_PAGE,
+    APP_READER_SLOT_PAGE_PROGRESS, APP_READER_SLOT_PERCENT, APP_READER_SLOT_CLOCK,
+    APP_READER_SLOT_BATTERY, APP_READER_SLOT_DATE, APP_READER_SLOT_ICON_BATTERY,
+    APP_READER_SLOT_BLANK,
+};
+#define READER_CHROME_ITEM_ROWS ((int)(sizeof(s_chrome_item_order) / sizeof(s_chrome_item_order[0])))
+#define CHROME_PICK_MAX_SCROLL ((READER_CHROME_ITEM_ROWS - CHROME_PICK_VISIBLE) * CHROME_PICK_PITCH)
+_Static_assert(CHROME_ROW_TOP + CHROME_ROW_VIEW_HEIGHT < 1112, "chrome rows must clear the hint");
+_Static_assert(CHROME_PICK_TOP + CHROME_PICK_VIEW_HEIGHT < 1112, "chrome picker must clear the hint");
+static EpdRect chrome_row_rect(int row) {
+    return (EpdRect){36, CHROME_ROW_TOP - s_chrome_scroll + row * CHROME_ROW_PITCH, 612, CHROME_ROW_HEIGHT};
+}
+// 视口外的整行不画；滚动量总是整行，所以不会出现半张卡片。
+// Rows outside the viewport are skipped; the offset is always whole rows, so no card is partial.
+static void draw_chrome_row(uint8_t *fb, int row) {
+    static const char *const names[] = {"页眉左侧", "页眉中间", "页眉右侧",
+                                        "页脚左侧", "页脚中间", "页脚右侧"};
+    EpdRect card = chrome_row_rect(row);
+    if (card.y < CHROME_ROW_TOP || card.y + card.height > CHROME_ROW_TOP + CHROME_ROW_VIEW_HEIGHT) return;
+    ui_fill_round_rect(fb, card, 20, 0xf0);
+    ui_draw_control_frame(fb, card, 20, 0x58);
+    if (row == CHROME_ROW_COUNT - 1) {
+        reader_panel_text_vc(fb, 342, card.y + 48, 26, "恢复默认布局", EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
+    const app_reader_slot_item_t item = app_settings_reader_chrome_item((unsigned)row / 3, (unsigned)row % 3);
+    ui_text_box(fb,(EpdRect){58,card.y+24,238,48},26,names[row],EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,card.y+24,270,48},25,reader_chrome_item_label(item),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, card.y + 48, 20, UI_ICON_CHEVRON_DOWN, 0x38);
+}
+static void draw_chrome_settings(uint8_t *fb) {
+    draw_sheet(fb, KEY_SETTINGS_TOP, "页眉页脚");
+    draw_sheet_back(fb, KEY_SETTINGS_TOP);
+    for (int row = 0; row < CHROME_ROW_COUNT; ++row) draw_chrome_row(fb, row);
+    reader_panel_text_vc(fb, 342, 1112, 21, "上下滑动查看更多", EPD_DRAW_ALIGN_CENTER, false);
+    ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
+    reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
+}
+static EpdRect chrome_pick_card(int index) {
+    return (EpdRect){36, CHROME_PICK_TOP - s_chrome_pick_scroll + index * CHROME_PICK_PITCH, 612, CHROME_PICK_HEIGHT};
+}
+static void draw_chrome_picker(uint8_t *fb) {
+    static const char *const titles[2][3] = {
+        {"页眉左侧内容", "页眉中间内容", "页眉右侧内容"},
+        {"页脚左侧内容", "页脚中间内容", "页脚右侧内容"},
+    };
+    draw_sheet(fb, 270, titles[s_chrome_pick_bar < 2 ? s_chrome_pick_bar : 0]
+                                 [s_chrome_pick_slot < 3 ? s_chrome_pick_slot : 0]);
+    draw_sheet_back(fb, 270);
+    const app_reader_slot_item_t current = app_settings_reader_chrome_item(s_chrome_pick_bar, s_chrome_pick_slot);
+    for (int i = 0; i < READER_CHROME_ITEM_ROWS; ++i) {
+        const app_reader_slot_item_t item = s_chrome_item_order[i];
+        EpdRect card = chrome_pick_card(i);
+        if (card.y < CHROME_PICK_TOP || card.y + card.height > CHROME_PICK_TOP + CHROME_PICK_VIEW_HEIGHT) continue;
+        ui_fill_round_rect(fb, card, 20, current == item ? 0xd8 : UI_GRAY_WHITE);
+        ui_draw_control_frame(fb, card, 20, 0x58);
+        reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_chrome_item_label(item), EPD_DRAW_ALIGN_LEFT, false);
+        epd_draw_circle(608, card.y + 39, 11, UI_GRAY_BLACK, fb);
+        if (current == item) epd_fill_circle(608, card.y + 39, 6, UI_GRAY_BLACK, fb);
+    }
+    reader_panel_text_vc(fb, 342, 1112, 20, s_chrome_error[0] ? s_chrome_error : "选择该位置显示的内容", EPD_DRAW_ALIGN_CENTER, false);
+    ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
+    reader_panel_text_vc(fb, 342, 1170, 26, "返回", EPD_DRAW_ALIGN_CENTER, true);
+}
+// 两个面板共用整行滚动：视口内起手的纵向手势按一行步进，落点始终对齐行边界。
+// Both panels share whole-row scrolling: a vertical gesture starting inside the viewport steps one
+// row and always lands on a row boundary.
+static app_redraw_t chrome_list_scroll(app_ctx_t *ctx, const ui_gesture_event_t *ev,
+                                       int view_top, int view_height, int pitch, int max_scroll,
+                                       int *scroll, bool *drag) {
+    if (ev->y0 < view_top || ev->y0 >= view_top + view_height) return APP_REDRAW_NONE;
+    if (*drag) {
+        if (ev->type != UI_GESTURE_MOVE) *drag = false;
+        return APP_REDRAW_NONE;
+    }
+    int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
+    int distance = dy < 0 ? -dy : dy;
+    if (ev->type == UI_GESTURE_MOVE) {
+        int across = dx < 0 ? -dx : dx;
+        if (distance < 108 || distance <= across) return APP_REDRAW_NONE;
+    }
+    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
+    int next = *scroll + (up ? pitch : -pitch);
+    if (next < 0) next = 0;
+    if (next > max_scroll) next = max_scroll;
+    if (ev->type == UI_GESTURE_MOVE) *drag = true;
+    if (next == *scroll) return APP_REDRAW_NONE;
+    *scroll = next;
+    render(ctx, ctx->fb);
+    s_area = (EpdRect){0, view_top, UI_LOCK_WIDTH, view_height};
+    s_mode = MODE_GL16;
+    return APP_REDRAW_AREA;
+}
+
 /* ---- 标题样式选择面板 / Heading style picker ---- */
 // 卡片里贴的是真实题头带 [y+4, y+176] 的 1:1 结果：四种样式的内容都落在这 172 像素里
 // （最上沿是边框索引的框顶 y+10，最下沿是静页余白的细线 y+175）。
@@ -3003,6 +3140,8 @@ static void draw_reader_panel(uint8_t* fb) {
     else if (s_reader_panel == READER_PANEL_TURN_SETTINGS) draw_turn_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_SETTINGS) draw_key_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_PICKER) draw_key_picker(fb);
+    else if (s_reader_panel == READER_PANEL_CHROME_SETTINGS) draw_chrome_settings(fb);
+    else if (s_reader_panel == READER_PANEL_CHROME_PICKER) draw_chrome_picker(fb);
     else if (s_reader_panel == READER_PANEL_TITLE_STYLE) draw_title_style_picker(fb);
     else if (s_reader_panel == READER_PANEL_NOTE) draw_note_sheet(fb);
     ui_text_set_system_scale(false);
@@ -3015,31 +3154,53 @@ static uint8_t inline_ink_gray(uint8_t gray) {
     return gray;
 }
 
+/* ---- 页眉页脚槽位数据 / Chrome slot data ---- */
+// 槽位数据缓冲：章节名带「未保存 ·」前缀，时钟与日期来自状态栏同一来源，电量取自 PMU。
+// Slot data buffers: the chapter name carries the unsaved prefix, clock and date share the
+// status-bar source, and power comes from the PMU.
+static char s_reader_chrome_chapter[96];
+static char s_reader_chrome_clock[12];
+static char s_reader_chrome_date[24];
+static void reader_chrome_data(reader_chrome_data_t *data) {
+    char chapter_name[72];
+    reader_footer_chapter_name(chapter_name, sizeof(chapter_name));
+    snprintf(s_reader_chrome_chapter, sizeof(s_reader_chrome_chapter), "%s%s",
+             s_save_failed ? "未保存 · " : "", chapter_name);
+    ui_nav_clock_text(s_reader_chrome_clock, sizeof(s_reader_chrome_clock));
+    ui_nav_date_text(s_reader_chrome_date, sizeof(s_reader_chrome_date));
+    const pmu_snapshot_t *pmu = device_power_get();
+    *data = (reader_chrome_data_t){
+        .title = s_reader_session.book.title[0] ? s_reader_session.book.title
+                                                : s_reader_session.book.chapter_title,
+        .chapter = s_reader_chrome_chapter,
+        .page = (unsigned)s_reader_session.position.page,
+        .page_count = (unsigned)book_layout_page_count(),
+        .percent = percent(s_reader_session.position.page),
+        .clock = s_reader_chrome_clock,
+        .battery = pmu_battery_percent(pmu),
+        .charging = pmu_battery_charging(pmu),
+        .date = s_reader_chrome_date,
+    };
+}
+// 翻页时对比页眉合成文本，决定顶部差分带是否随本帧推屏。
+// Composed header texts decide on each turn whether the top diff band joins this frame.
+static uint32_t reader_chrome_fingerprint(void) {
+    reader_chrome_data_t data;
+    reader_chrome_data(&data);
+    return reader_chrome_header_fingerprint(&data);
+}
+
 static void draw_reader_header(uint8_t *fb) {
-    // 状态栏隐藏时头部整体上移 80px 贴顶；书名、时间与电池共用中心线随平移保持对齐。
-    // With the status bar hidden the header shifts up 80 px to the top edge; title, clock and
-    // battery keep their shared centerline under the shift.
+    // 状态栏隐藏时头部整体上移 80px 贴顶；三槽内容与分隔线随平移保持对齐。
+    // With the status bar hidden the header shifts up 80 px to the top edge; slots and the rule
+    // keep their alignment under the shift.
     // 中心线 y=121（状态栏底 80 下 41px）；分隔线 158，正文顶在其下 18px。
     // Centerline y=121 (41 px below the status bar's bottom edge at 80); rule at 158 with the
     // body starting 18 px below it.
     const int dy = app_settings_reader_statusbar() ? 0 : -80;
-    // 右侧为状态栏同款电池（左沿 606），时间 28px 右对齐于电池左 12px；书名 36 起左排，
-    // 可用宽度按时间实测宽度收缩，长书名先于时间截断。
-    // The right side holds the status-bar battery (left edge 606) with the 28 px clock right
-    // aligned 12 px before it; the title starts at 36 and yields width to the measured clock.
-    char clock[12];
-    ui_nav_clock_text(clock, sizeof(clock));
-    const int clock_width = ui_text_fixed_width_px(UI_STATUS_TIME_PX, clock);
-    const int clock_right = 606 - 12;
-    char header[128];
-    const char *sample = s_reader_session.book.title[0] ? s_reader_session.book.title : s_reader_session.book.chapter_title;
-    copy_text(header, sizeof(header), sample);
-    int title_px = ui_text_title_fit(header, 32, clock_right - clock_width - 36, sample);
-    // 书名与时间、电池共用同一视觉中心线；字体切换不改变对齐。
-    // Title, clock and battery share one visual centerline across font changes.
-    ui_text_title_vc(fb, 36, 121 + dy, title_px, header, sample, EPD_DRAW_ALIGN_LEFT);
-    ui_text_fixed_vc(fb, clock_right, 121 + dy, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_RIGHT, false);
-    ui_nav_battery_draw(fb, 606, 121 + dy);
+    reader_chrome_data_t data;
+    reader_chrome_data(&data);
+    reader_chrome_draw_header(fb, &data, 121 + dy);
     ui_hairline(fb, 158 + dy, 36, 612, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
@@ -3227,40 +3388,8 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
     }
 }
 // 页脚整行固定一种字体：有卡上字体时跟随阅读字体，否则用内建补充位图。
-// 内建字库缺《》【】等常用标点，按每行覆盖情况换字体会让同一行页脚在两种字号间跳。
-// One face for the whole footer: the card face when one is loaded, otherwise the builtin
-// supplement. The builtin lacks common punctuation such as 《》【】, and choosing the face per
-// line made the same footer jump between two apparent sizes.
-static bool reader_footer_card_face(void) {
-    return ttf_font_ready() && !ttf_font_is_builtin();
-}
-static int reader_footer_width(int px, const char *text) {
-    if (!reader_footer_card_face()) return ui_text_fixed_width_px(px, text);
-    int keep = ttf_font_select(TTF_FONT_SLOT_SYSTEM);
-    int width = ttf_text_width_px(px, text);
-    ttf_font_select(keep);
-    return width;
-}
-// 按页脚实际字体量宽再截短：内建字宽比阅读字体窄三成，拿它截完再换字体就会压到页码。
-// Trim against the footer face: the builtin advances are about 30% narrower than the card face,
-// so measuring with the builtin would let the title run into the page counter.
-static void fit_reader_footer_text(char *text, int px, int width) {
-    while (*text && reader_footer_width(px, text) > width) {
-        size_t n = strlen(text) - 1;
-        while (n && ((unsigned char)text[n] & 0xc0) == 0x80) --n;
-        text[n] = 0;
-    }
-}
-static void reader_footer_text(uint8_t *fb, int x, int y_top, int px, const char *text,
-                               enum EpdFontFlags align) {
-    if (!reader_footer_card_face()) {
-        ui_text_fixed(fb, x, y_top, px, text, align, false);
-        return;
-    }
-    int keep = ttf_font_select(TTF_FONT_SLOT_SYSTEM);
-    ttf_draw_text_px(fb, x, y_top + ttf_ascender_px(px), px, text, align, UI_INK_BLACK, UI_INK_WHITE);
-    ttf_font_select(keep);
-}
+// 页脚字体面与量宽/绘制已随三段槽位迁入 main/book/reader_chrome.c。
+// The footer face with its metrics and painting moved to main/book/reader_chrome.c with the slots.
 // 只补画外框：进来的帧缓冲里已经有正文（整页重绘是 draw_reader 先清再画，预绘命中是整帧拷来的）。
 // 这里再清一次会把刚画好的正文整块擦掉，页面上就只剩页眉、页脚和状态栏。
 // Chrome only: the incoming frame already holds the body (draw_reader clears and paints it first;
@@ -3298,7 +3427,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         if (track.width) ui_fill_round_rect(fb, track, 1, UI_GRAY_BLACK);
     } else {
         EpdRect track = progress_rect();
-        // 带内布局：条顶 track.y+8（距正文底 8px），章节名行顶 track.y+27；条与文字 7px
+        // 带内布局：条顶 track.y+8（距正文底 8px），文字行顶 track.y+27；条与文字 7px
         // 间隙，均落在 progress_rect 差分带内。
         // In-band layout: bar top at track.y+8 (8 px below the body), text top at track.y+27;
         // the 7 px bar-to-text gap stays inside the footer diff band.
@@ -3306,25 +3435,12 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         ui_fill_round_rect(fb, bar, 5, UI_GRAY_LIGHT);
         bar.width = bar.width * (int)percent(page) / 100;
         if (bar.width) ui_fill_round_rect(fb, bar, 5, UI_GRAY_BLACK);
-        char chapter_name[72] = {0};
-        reader_footer_chapter_name(chapter_name, sizeof(chapter_name));
-        const int footer_px = 28;
-        char progress[48];
-        snprintf(progress, sizeof(progress), "%u/%u · 全书 %u%%",
-                 (unsigned)page + 1, (unsigned)book_layout_page_count(), percent(page));
-        char chapter_line[192];
-        snprintf(chapter_line, sizeof(chapter_line), "%s%s",
-                 s_save_failed ? "未保存 · " : "", chapter_name);
-        fit_reader_footer_text(chapter_line, footer_px,
-                               track.width - reader_footer_width(footer_px, progress) - 16);
-        // 页码和全书进度靠右固定，长章节名仅截短左侧；字号不跟随正文设置。
-        // 左右两段同一种字体，页脚不会因为章名里的标点换字体而忽大忽小。
-        // Keep page and book progress right-aligned; trim only long chapter titles and ignore body
-        // font settings. Both halves share one face, so punctuation in the chapter name can no
-        // longer resize the footer.
-        reader_footer_text(fb, track.x, track.y + 27, footer_px, chapter_line, EPD_DRAW_ALIGN_LEFT);
-        reader_footer_text(fb, track.x + track.width, track.y + 27, footer_px,
-                           progress, EPD_DRAW_ALIGN_RIGHT);
+        // 页脚文字行三段槽位：字号不随正文设置，布局与截短在 reader_chrome 内完成。
+        // The footer text row's three slots: the size never follows body settings; layout and
+        // trimming live in reader_chrome.
+        reader_chrome_data_t data;
+        reader_chrome_data(&data);
+        reader_chrome_draw_footer_row(fb, &data, track.y + 27, 28, track.x, track.x + track.width);
     }
     if (s_reader_notice[0]) {
         EpdRect notice = {218, 160, 248, 48};
@@ -3480,12 +3596,17 @@ static int reader_status_power(void) {
     const pmu_snapshot_t *pmu = device_power_get();
     return (pmu_battery_percent(pmu) + 1) * 2 + (pmu_battery_charging(pmu) ? 1 : 0);
 }
-// 只在已有翻页请求中准备顶部，空闲分钟或电量变化不产生显示请求。
-// Prepare status only for an existing turn; idle minute/power changes never request output.
-static bool reader_status_prepare(app_ctx_t *ctx, app_redraw_t redraw, int64_t minute, int power) {
+// 只在已有翻页请求中准备顶部，空闲分钟或电量变化不产生显示请求；页眉含页码/进度等
+// 翻页相关槽位时，合成文本指纹随翻页变化，顶部带照样推屏。
+// Prepare status only for an existing turn; idle minute/power changes never request output. When
+// the header carries turn-dependent slots such as page or progress, the composed-text fingerprint
+// changes with the turn and the top band still presents.
+static bool reader_status_prepare(app_ctx_t *ctx, app_redraw_t redraw, int64_t minute, int power,
+                                  uint32_t chrome) {
     if (redraw!=APP_REDRAW_AREA || !reader_status_visible() || s_reader_cleanup ||
         s_reader_panel!=READER_PANEL_NONE || s_toolbar || s_clear_confirm ||
-        (minute==s_reader_clock_minute && power==s_reader_power)) return false;
+        (minute==s_reader_clock_minute && power==s_reader_power &&
+         s_reader_chrome_fp_valid && chrome==s_reader_chrome_fp)) return false;
     const EpdRect body=reader_area();
     if (s_area.x!=body.x || s_area.y!=body.y || s_area.width!=body.width || s_area.height!=body.height) return false;
     lock_draw(); reader_status_paint(ctx->fb); unlock_draw();
@@ -3580,8 +3701,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     int64_t start = esp_timer_get_time();
     const int64_t frame_minute=ui_nav_clock_minute();
     const int frame_power=reader_status_power();
+    const uint32_t frame_chrome=s_view == READING && s_text ? reader_chrome_fingerprint() : 0;
     if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) render(ctx, ctx->fb);
-    const bool status_pending=reader_status_prepare(ctx,redraw,frame_minute,frame_power);
+    const bool status_pending=reader_status_prepare(ctx,redraw,frame_minute,frame_power,frame_chrome);
     bool prep = kick_prep();
     int64_t drawn = esp_timer_get_time();
 #if CONFIG_READER_PERF
@@ -3660,6 +3782,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         (redraw==APP_REDRAW_PAGE || redraw==APP_REDRAW_FULL || s_reader_cleanup || output.status_updated)) {
         s_reader_clock_minute=frame_minute;
         s_reader_power=frame_power;
+        s_reader_chrome_fp=frame_chrome;
+        s_reader_chrome_fp_valid=true;
     }
     const bool reader_frame_ok = err == EPD_DRAW_SUCCESS && s_view == READING && s_text &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
@@ -4919,6 +5043,10 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_reader_panel = READER_PANEL_KEY_SETTINGS;
         s_key_scroll = 0;
         s_key_drag = false;
+    } else if (ui_rect_hit(reading_setting_rect(7), x, y)) {
+        s_reader_panel = READER_PANEL_CHROME_SETTINGS;
+        s_chrome_scroll = 0;
+        s_chrome_drag = false;
     } else {
         for (int i = 0; i < 3; ++i)
             if (ui_rect_hit(reading_setting_rect(4 + i), x, y)) return apply_reader_option(ctx, i);
@@ -5076,6 +5204,48 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_reader_key_pick = 3 + (unsigned)row;
                 s_reader_key_error[0] = 0;
                 s_reader_panel = READER_PANEL_KEY_PICKER;
+                return APP_REDRAW_PAGE;
+            }
+            return APP_REDRAW_NONE;
+        }
+        invalidate_prep();
+        return APP_REDRAW_PAGE;
+    }
+    if (s_reader_panel == READER_PANEL_CHROME_SETTINGS || s_reader_panel == READER_PANEL_CHROME_PICKER) {
+        bool picker = s_reader_panel == READER_PANEL_CHROME_PICKER;
+        int top = picker ? 270 : KEY_SETTINGS_TOP;
+        if (y < top) s_reader_panel = READER_PANEL_NONE;
+        else if (ui_rect_hit((EpdRect){36, top + 29, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
+            s_reader_panel = picker ? READER_PANEL_CHROME_SETTINGS : READER_PANEL_REFRESH_SETTINGS;
+        else if (picker) {
+            for (int i = 0; i < READER_CHROME_ITEM_ROWS; ++i) {
+                EpdRect card = chrome_pick_card(i);
+                if (card.y < CHROME_PICK_TOP || !ui_rect_hit(card, x, y)) continue;
+                if (!app_settings_set_reader_chrome_item(s_chrome_pick_bar, s_chrome_pick_slot, s_chrome_item_order[i])) {
+                    copy_text(s_chrome_error, sizeof(s_chrome_error), "保存失败，请重试");
+                    return APP_REDRAW_PAGE;
+                }
+                s_reader_panel = READER_PANEL_CHROME_SETTINGS;
+                invalidate_prep();
+                return APP_REDRAW_PAGE;
+            }
+            return APP_REDRAW_NONE;
+        } else {
+            for (int row = 0; row < CHROME_ROW_COUNT; ++row) {
+                EpdRect card = chrome_row_rect(row);
+                if (card.y < CHROME_ROW_TOP || !ui_rect_hit(card, x, y)) continue;
+                if (row == CHROME_ROW_COUNT - 1) {
+                    app_settings_set_reader_chrome_default();
+                    invalidate_prep();
+                    return APP_REDRAW_PAGE;
+                }
+                s_chrome_pick_bar = (unsigned)row / 3;
+                s_chrome_pick_slot = (unsigned)row % 3;
+                s_chrome_error[0] = 0;
+                s_chrome_pick_scroll = 0;
+                s_chrome_pick_drag = false;
+                s_reader_panel = READER_PANEL_CHROME_PICKER;
+                invalidate_prep();
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
@@ -5615,9 +5785,9 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // link test runs before the page-turn test.
         int link = book_layout_link_at(s_reader_session.position.page, x, y);
         if (link >= 0 && note_open_link(link)) return APP_REDRAW_PAGE;
-        // 页眉只显示书名、时间与电池，无控件；点页眉不翻页，落入下方正文热区判定。
-        // The header shows only the title, clock and battery with no controls; header taps do
-        // not turn pages and fall through to the body hit test below.
+        // 页眉页脚槽位只显示内容，无控件；点信息条不翻页，落入下方正文热区判定。
+        // The chrome slots show content only, no controls; bar taps do not turn pages and fall
+        // through to the body hit test below.
         // 通栏插图铺满整屏，点在图两侧的边条上同样要翻页；文字页仍按正文栏判定。
         // A full-bleed illustration spans the panel, so taps on its side strips must turn pages
         // too; text pages keep the body column.
@@ -6071,6 +6241,31 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_SWIPE_U ||
             ev->type == UI_GESTURE_SWIPE_D)
             return key_settings_scroll_gesture(ctx, ev);
+    }
+    if (s_view == READING && (s_reader_panel == READER_PANEL_CHROME_SETTINGS ||
+                              s_reader_panel == READER_PANEL_CHROME_PICKER)) {
+        // 与按键控制同构：TAP 留给命中测试，这里只接管列表视口内的纵向滚动。
+        // Mirrors the key sheet: TAP stays with hit testing; only vertical scrolling inside the
+        // list viewport lands here.
+        if (ev->type == UI_GESTURE_PRESS) {
+            s_pressed_control = -1;
+            s_chrome_drag = s_chrome_pick_drag = false;
+            return APP_REDRAW_NONE;
+        }
+        if (ev->type == UI_GESTURE_CANCEL) {
+            s_chrome_drag = s_chrome_pick_drag = false;
+            return APP_REDRAW_NONE;
+        }
+        if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_SWIPE_U ||
+            ev->type == UI_GESTURE_SWIPE_D) {
+            if (s_reader_panel == READER_PANEL_CHROME_SETTINGS)
+                return chrome_list_scroll(ctx, ev, CHROME_ROW_TOP, CHROME_ROW_VIEW_HEIGHT,
+                                          CHROME_ROW_PITCH, CHROME_ROW_MAX_SCROLL,
+                                          &s_chrome_scroll, &s_chrome_drag);
+            return chrome_list_scroll(ctx, ev, CHROME_PICK_TOP, CHROME_PICK_VIEW_HEIGHT,
+                                      CHROME_PICK_PITCH, CHROME_PICK_MAX_SCROLL,
+                                      &s_chrome_pick_scroll, &s_chrome_pick_drag);
+        }
     }
     if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;
     bool input_feedback = false;

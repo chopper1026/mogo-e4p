@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.1 · 本地测试 / Local testing · 2026-10-31
 
+- 阅读新增「页眉页脚」自定义：页眉页脚各分左/中/右三格，在阅读设置内自选显示内容（书名、章节名、页码、进度、时间、电量、日期星期、电量图标或不显示）。默认页眉变为书名/时间/电量图标，页脚保持章节名与页码·全书进度；恢复默认可一键还原。设置随备份文件保存。真机显示效果待验证。
+  Reading adds header/footer customization: each bar splits into left/center/right slots picked in the reading sheet (book title, chapter, page, progress, clock, battery, date, battery icon or blank). The default header becomes title/clock/battery icon and the footer keeps chapter plus page·progress; a reset row restores defaults. Settings ride the backup file. On-device appearance awaits verification.
+
 - 阅读新增「晃动翻页」：翻页设置里默认关闭，开启后正文横向晃动翻页，左晃上一页、右晃下一页；触摸与回弹不触发，离开正文或锁屏时加速度计自动休眠。晃动方向以真机校准为准。
   Reading gains shake page turning: off by default in the turn settings; when enabled, a horizontal shake in the reading body turns one page, left back and right forward. Touch and rebounds do not trigger it, and the accelerometer sleeps automatically outside the body or on lock. Shake direction remains subject to on-device calibration.
 

@@ -187,6 +187,19 @@ void ui_nav_clock_draw(uint8_t *fb) {
 void ui_nav_clock_text(char *clock, size_t capacity) {
     clock_text(clock, capacity);
 }
+void ui_nav_date_text(char *date, size_t capacity) {
+    // 与 clock_text 同源同时区：未对时（PMU 回退也不可用）返回空串，调用方按空内容跳过。
+    // Same source and zone as clock_text: when the clock is unsynced (PMU fallback unavailable) the
+    // string stays empty and callers skip it.
+    date[0] = 0;
+    time_t now = status_time();
+    if (now <= 1704067200) return;
+    time_t china = now + 8 * 3600;
+    struct tm day;
+    if (!gmtime_r(&china, &day)) return;
+    static const char *const weekdays[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    snprintf(date, capacity, "%02d-%02d %s", day.tm_mon + 1, day.tm_mday, weekdays[day.tm_wday % 7]);
+}
 void ui_nav_battery_draw(uint8_t *fb, int x, int cy) {
     EpdRect battery = {x, cy - 11, 40, 22};
     ui_draw_round_rect(fb, battery, 6, UI_GRAY_BLACK);
