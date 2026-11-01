@@ -18,13 +18,13 @@ int main(void) {
     assert(book_position_bytes(100, 200, 0, 0) == 100);
     assert(book_position_bytes(0, UINT32_MAX, UINT32_MAX, UINT32_MAX) == UINT32_MAX);
     book_shake_gate_t g = {0};
-    // 任意持机角度先锚定基线；一次向右甩动在 +350mg 上穿沿翻下一页，同向后续帧不重复触发。
-    // Anchor at any holding angle first; one right swing turns forward on the +350mg crossing
+    // 任意持机角度先锚定基线；一次向右甩动在 +250mg 上穿沿翻下一页，同向后续帧不重复触发。
+    // Anchor at any holding angle first; one right swing turns forward on the +250mg crossing
     // edge and later frames of the same swing never retrigger.
     for (int t = 0; t <= 400; t += 50) assert(feed(&g, 180, -600, -760, false, t) == 0);
     assert(feed(&g, 300, -600, -760, false, 450) == 0);
-    assert(feed(&g, 500, -600, -760, false, 500) == 0);
-    assert(feed(&g, 700, -600, -760, false, 550) == 1);
+    assert(feed(&g, 500, -600, -760, false, 500) == 1);
+    assert(feed(&g, 700, -600, -760, false, 550) == 0);
     assert(feed(&g, 850, -600, -760, false, 600) == 0);
     // 回摆半程落在不应期内。/ The rebound half-swing lands inside the refractory window.
     assert(feed(&g, 200, -600, -760, false, 850) == 0);

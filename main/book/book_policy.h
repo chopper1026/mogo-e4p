@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 阅读进度换算和晃动判定，不访问硬件。/ Reading position and shake policy without hardware access.
- * 用户修订（2026-10-31）：改为连续甩动检测。慢基线做高通，高通 x 上穿 +阈值翻下一页、
+ * 用户修订（2026-11-01）：改为连续甩动检测。慢基线做高通，高通 x 上穿 +阈值翻下一页、
  * 下穿 -阈值翻上一页；y 轴高通须小于 x 减裕量，排除纵向抖动；不应期吸收回摆半程；
- * 采样断档或调用方压制（触摸）后重新锚定基线，不继承半个动作。真机校准见各常量。
- * User revision (2026-10-31): continuous-shake detection. A slow per-axis baseline high-passes
+ * 采样断档或调用方压制（触摸）后重新锚定基线，不继承半个动作。阈值按竖持校准，见常量。
+ * User revision (2026-11-01): continuous-shake detection. A slow per-axis baseline high-passes
  * the sample; the high-passed x crossing +threshold turns forward and -threshold turns back.
  * The high-passed y must stay below x minus a margin to reject vertical jiggle, a refractory
  * window swallows the rebound half-swing, and a sampling gap or caller suppression (touch)
- * re-anchors the baseline so no half gesture carries over. Constants are device-calibrated.
+ * re-anchors the baseline so no half gesture carries over. The threshold is calibrated for a
+ * vertical hold; see the constants.
  */
 #pragma once
 #include <stdbool.h>
@@ -28,9 +29,13 @@ enum {
     /// 基线每帧 1/32 递推，50ms 采样下时间常数约 1.6s：慢倾斜跟得上，甩动半程拖不走。
     /// / Baseline EMA 1/32 per feed, ~1.6s at 50ms: tracks slow tilts, survives a swing.
     BOOK_SHAKE_BASE_SHIFT = 5,
-    /// 高通 x 触发阈值（mg），2026-10-31 真机校准：典型甩动峰值 400-900。
-    /// / High-pass x trigger (mg), device-calibrated 2026-10-31: stroke peaks run 400-900.
-    BOOK_SHAKE_THRESHOLD_MG = 350,
+    /// 高通 x 触发阈值（mg），2026-11-01 真机校准：竖持时甩动弧线把部分平动泄入被忽略的
+    /// z 轴，同力度幅度约为平持一半（竖持典型 250-350、平持 500-900），按竖持校准。
+    /// / High-pass x trigger (mg), device-calibrated 2026-11-01: in a vertical hold the swing
+    /// arc leaks part of the translation into the ignored z axis and the same effort reads
+    /// about half of a flat hold (vertical 250-350 vs flat 500-900), so the threshold is
+    /// calibrated against the vertical hold.
+    BOOK_SHAKE_THRESHOLD_MG = 250,
     /// x 高通须高出 y 高通的裕量（mg），过滤纵向抖动。/ x must beat high-passed y by this much (mg).
     BOOK_SHAKE_Y_MARGIN_MG = 50,
     /// 触发后不应期（ms），覆盖回摆半程。/ Refractory after a turn (ms), covers the rebound.
