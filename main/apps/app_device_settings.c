@@ -938,7 +938,7 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_fill_rect_fast((EpdRect){left, top + 143, 486, 16}, UI_GRAY_BLACK, fb);
         ui_hairline(fb, top + 143, left, 486, 0x80);
     } else if (style == 2) {
-        ui_draw_acrylic_guard(fb, (EpdRect){left, top + 94, 486, 70});
+        ui_draw_acrylic_guard(fb, (EpdRect){left, top + 129, 486, 35});
 
     }
 }

@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.1 · 本地测试 / Local testing · 2026-11-01
+
+- 亚克力书架挡板高度减半，保留底边位置以露出更多封面；设置预览同步调整。
+  Halve acrylic shelf guard height while retaining its bottom edge to reveal more cover art; update the settings preview accordingly.
+
 ## v1.0.1 · 本地测试 / Local testing · 2026-10-31
 
 - 阅读新增「页眉页脚」自定义：页眉页脚各分左/中/右三格，在阅读设置内自选显示内容（书名、章节名、页码、进度、时间、电量、日期星期、电量图标或不显示）。默认页眉变为书名/时间/电量图标，页脚保持章节名与页码·全书进度；恢复默认可一键还原。设置随备份文件保存。真机显示效果待验证。

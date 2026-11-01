@@ -1041,7 +1041,7 @@ static void draw_shelf_furniture(uint8_t* fb) {
             ui_hairline(fb, top + 214, 36, 612, 0x58);
             ui_hairline(fb, top + 225, 36, 612, 0x10);
         } else if (style == 2) {
-            EpdRect acrylic = {20, top + 136, 644, 90};
+            EpdRect acrylic = {20, top + 181, 644, 45};
             draw_shelf_guard(fb, acrylic, row);
 
         }
