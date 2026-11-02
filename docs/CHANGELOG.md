@@ -3,6 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.2 · 本地测试 / Local testing · 2026-11-02
+
+- 阅读设置的页眉页脚增加独立高度调节，正文与刷新区域同步调整，保持阅读位置；默认布局与全屏排版不变，支持保存、备份和恢复默认。
+  Add independent header/footer height controls with anchored body reflow and matching refresh bounds; retain default/full-screen geometry, persistence, backups and reset.
+- 为内置字体补齐「眉」「锋」的原生轮廓，避免设置文字放大低分辨率补充位图；实屏效果待验证。
+  Add native outlines for the two reader-label glyphs instead of enlarging low-resolution supplemental bitmaps; on-device appearance remains unverified.
+
 ## v1.0.2 · 2026-11-02
 
 - 优化浅睡时钟兼容与待机电量读取，减少重复总线访问；实际待机电流与节电比例尚未测量。

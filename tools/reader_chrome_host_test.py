@@ -27,7 +27,26 @@ enum {READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_CHROME_SETTIN
 static app_reader_slot_item_t items[2][3];
 static unsigned s_chrome_pick_bar,s_chrome_pick_slot;
 static int s_reader_panel,s_chrome_scroll,s_chrome_pick_scroll,s_mode;
-static bool s_chrome_pick_drag,save_ok=true;
+static bool s_chrome_pick_drag,save_ok=true,s_reader_fullscreen;
+static int s_chrome_height[2]={80,57};
+static bool s_reader_footer_pending,s_reader_image_refresh_pending,s_reader_footer_strong,s_water_turn_pending;
+static size_t s_jump_offset;
+static char s_message[96];
+enum {SHELF, READING};
+static int s_view=READING;
+static struct {struct {size_t page;} position;} s_reader_session;
+static unsigned builds,build_failures,maps,progress_saves,freed;
+static bool locked;
+static size_t book_layout_page_start_offset(size_t page){return page*100;}
+static size_t book_layout_page_for_offset(size_t offset){assert(locked);++maps;return offset/80;}
+static void lock_draw(void){assert(!locked);locked=true;}
+static void unlock_draw(void){assert(locked);locked=false;}
+static void refresh_chapter_lead(void){assert(locked);}
+static bool reader_reflow_build(void){assert(locked);++builds;if(build_failures){--build_failures;return false;}return true;}
+static void release_page_images(void){}
+static void prepare_inline_image(void){}
+static void save_progress(void){assert(!locked);++progress_saves;}
+static void free_book(void){assert(!locked);++freed;}
 static char s_chrome_error[64];
 static unsigned saves,invalidates;
 static app_reader_slot_item_t app_settings_reader_chrome_item_impl(unsigned bar,unsigned slot){return items[bar][slot];}
@@ -36,6 +55,8 @@ static bool app_settings_set_reader_chrome_item_impl(unsigned bar,unsigned slot,
 #define app_settings_set_reader_chrome_item app_settings_set_reader_chrome_item_impl
 static bool reset_default(void){++saves;return save_ok;}
 #define app_settings_set_reader_chrome_default reset_default
+static bool set_heights(uint8_t h,uint8_t f){(void)h;(void)f;++saves;return save_ok;}
+#define app_settings_set_reader_chrome_heights set_heights
 static void invalidate_prep(void){++invalidates;}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
@@ -52,6 +73,7 @@ for name in ('chrome_row_rect', 'chrome_pick_card'):
     unit += function(name, book) + '\n'
 if 'static bool chrome_row_visible(' in page:
     unit += function('chrome_row_visible', book) + '\n'
+unit += function('apply_reader_chrome_heights', book) + '\n'
 action = function('reader_panel_action', book)
 start = action.index('    if (s_reader_panel == READER_PANEL_CHROME_SETTINGS ||')
 end = action.index('    if (s_reader_panel == READER_PANEL_TURN_SETTINGS)', start)
@@ -83,7 +105,7 @@ int main(void){
    EpdRect card=chrome_row_rect(row);
    if(card.y<CHROME_ROW_TOP||card.y+card.height>CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT)continue;
    s_reader_panel=READER_PANEL_CHROME_SETTINGS;
-   assert(action(&ctx,card.x,card.y)==APP_REDRAW_PAGE);
+   assert(action(&ctx,row>=6&&row<8?600:card.x,card.y)==APP_REDRAW_PAGE);
    if(row<6)assert(s_reader_panel==READER_PANEL_CHROME_PICKER&&s_chrome_pick_bar==(unsigned)row/3&&s_chrome_pick_slot==(unsigned)row%3);
   }
  }
@@ -98,7 +120,24 @@ int main(void){
   }
  }
  s_chrome_scroll=CHROME_ROW_MAX_SCROLL;s_reader_panel=READER_PANEL_CHROME_SETTINGS;save_ok=false;
- EpdRect reset=chrome_row_rect(6);action(&ctx,300,reset.y+20);assert(s_chrome_error[0]);
+ EpdRect reset=chrome_row_rect(CHROME_ROW_COUNT-1);action(&ctx,300,reset.y+20);assert(s_chrome_error[0]);
+ for(unsigned full=0;full<2;++full)for(unsigned fail=0;fail<4;++fail){
+  s_reader_fullscreen=full;s_chrome_height[0]=80;s_chrome_height[1]=57;
+  s_reader_session.position.page=3;builds=maps=progress_saves=freed=0;
+  save_ok=fail!=3;build_failures=full?0:fail==1?1:fail==2?2:0;s_view=READING;
+  apply_reader_chrome_heights(96,73,false);
+  bool success=full?save_ok:fail==0;
+  assert(!locked&&s_chrome_height[0]==(success?96:80)&&s_chrome_height[1]==(success?73:57));
+  assert(s_reader_session.position.page==(!full&&success?300/80:3));
+  assert(maps==(!full&&success)&&progress_saves==maps);
+  assert(builds==(full?0:success?1:2));assert(freed==(!full&&fail==2));
+ }
+ save_ok=true;s_reader_fullscreen=false;s_chrome_height[0]=APP_READER_HEADER_HEIGHT_MAX;s_chrome_height[1]=57;
+ s_chrome_scroll=3*CHROME_ROW_PITCH;s_reader_panel=READER_PANEL_CHROME_SETTINGS;
+ EpdRect height=chrome_row_rect(6);unsigned before=saves;
+ assert(action(&ctx,602,height.y+48)==APP_REDRAW_NONE&&saves==before);
+ assert(action(&ctx,474,height.y+48)==APP_REDRAW_NONE&&saves==before);
+ assert(action(&ctx,374,height.y+48)==APP_REDRAW_PAGE&&s_chrome_height[0]==APP_READER_HEADER_HEIGHT_MAX-8);
  puts("PASS: all chrome slot combinations stay bounded and disjoint; visible rows alone accept taps; reset reports failures");
  (void)s_mode;
 }

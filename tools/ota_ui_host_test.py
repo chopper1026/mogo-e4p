@@ -86,6 +86,7 @@ static struct {reader_book_t book;} s_reader_session = {.book = {.title = "æµ·è¾
 static int chrome_center,header_rule;
 static bool statusbar=true;
 bool app_settings_reader_statusbar(void){return statusbar;}
+static int s_chrome_height[2]={80,57};
 static void reader_chrome_data(reader_chrome_data_t *data){*data=(reader_chrome_data_t){.title=s_reader_session.book.title};}
 void reader_chrome_draw_header(uint8_t *fb,const reader_chrome_data_t *data,int cy){(void)fb;assert(!strcmp(data->title,s_reader_session.book.title));chrome_center=cy;}
 static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;assert(x==36&&width==612&&gray==UI_GRAY_LIGHT);header_rule=y;}

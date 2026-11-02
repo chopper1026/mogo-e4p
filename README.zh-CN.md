@@ -96,6 +96,9 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 
 阅读设置 → 页眉页脚可分别选择左、中、右三格的内容。信息条在非全屏阅读时显示；长书名或章节名自动截短，短项放不下时先隐藏中格，两侧仍冲突则隐藏右格。默认页眉为书名／时间／电量图标，页脚为章节名／不显示／页码·全书进度；支持恢复默认，六槽内容随设置备份保存。时钟、电量等信息随翻页更新，静置时不单独刷新。
 
+同一列表下方可独立调节页眉高度（64–144px，默认80px）与页脚高度（57–121px，默认57px），每次加减8px。调整会同步重排正文并保持当前阅读位置，不改变全屏排版；恢复默认布局会同时重置内容和高度。高度随设置备份保存，新版可恢复旧备份并使用默认高度，旧固件不能恢复新增高度的新版备份。
+The same list independently adjusts header height (64–144px, default 80px) and footer height (57–121px, default 57px) in 8px steps. Changes reflow the body around the current reading position without changing full-screen geometry. Reset restores both slots and heights. Settings backups include heights; new firmware reads old backups with default heights, while old firmware cannot restore the new backup format.
+
 书架封面处理后保存在TF卡隐藏目录 `.readpico/covers`：普通/水波纹直接复用灰阶缩略图，快刷额外保存最终黑白点阵，后续加载跳过解码、缩放和抖动转换。书源身份、尺寸、对比度和抖动相位变化或缓存损坏时重新生成；首次没有缓存仍需要处理。选择拼贴锁屏后，书架空闲时每次预生成一本有界封面到 `.readpico/locks`，锁屏复用原比例封面及校验过的完整画面，保持原画质。缓存可删除，不是原书文件；TF卡写入失败不会阻止阅读。
 
 ## 联网升级

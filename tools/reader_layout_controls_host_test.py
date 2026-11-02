@@ -25,6 +25,7 @@ typedef struct {int x,y,width,height;} EpdRect;
 static bool s_reader_fullscreen;
 static int s_margin[MARGIN_COUNT];
 static bool app_settings_reader_statusbar(void){return true;}
+static int s_chrome_height[2]={80,57};
 static unsigned s_book_indent_adjust=20;
 static void nvs_put_u8(const char *key,uint8_t v){(void)key;assert(v==s_book_indent_adjust);}
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"

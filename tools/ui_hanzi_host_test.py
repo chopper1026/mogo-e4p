@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # 中文：验证实际汉字补充解码、字形覆盖与栈界限。/ English: Test actual Han supplement decoding, coverage and bounded stack use.
-import re,struct,subprocess,tempfile,zlib
+import os,re,struct,subprocess,tempfile,zlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 asset=(ROOT/'main/assets/ui-hanzi.bin').read_bytes()
@@ -38,7 +38,8 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
 ''')
  assets='#include <stdint.h>\n'
  for filename,symbol in [('builtin.ttf','_binary_builtin_ttf'),('ui-hanzi.bin','_binary_ui_hanzi_bin')]:
-  payload=(ROOT/'main/assets'/filename).read_bytes();var=filename.replace('.','_').replace('-','_')
+  source=Path(os.environ['UI_FONT_TEST_FONT']) if filename=='builtin.ttf' and os.environ.get('UI_FONT_TEST_FONT') else ROOT/'main/assets'/filename
+  payload=source.read_bytes();var=filename.replace('.','_').replace('-','_')
   assets+=f'const uint8_t {var}[] asm("{symbol}_start")={{'+','.join(map(str,payload))+'};\n'
   assets+=f'asm(".globl {symbol}_end\\n.set {symbol}_end, {symbol}_start + {len(payload)}");\n'
  (work/'assets.c').write_text(assets)
@@ -52,7 +53,9 @@ int fail;
 static unsigned painted;
 static bool capture;
 static uint8_t actual[192*192];
-void epd_draw_pixel(int x,int y,uint8_t color,uint8_t *fb){(void)fb;painted++;if(capture){assert(x>=0&&x<192&&y>=0&&y<192);assert(color==0);actual[y*192+x]=1;}}
+static bool preview;
+static uint8_t raster[684*384];
+void epd_draw_pixel(int x,int y,uint8_t color,uint8_t *fb){(void)fb;painted++;if(preview){assert(x>=0&&x<684&&y>=0&&y<384);raster[y*684+x]=(color>>4)*17;}if(capture){assert(x>=0&&x<192&&y>=0&&y<192);assert(color==0);actual[y*192+x]=1;}}
 int main(void){
  uint8_t record[77],fb=0;
  fail=1;assert(!ui_hanzi_get(TEST_CP,record));fail=0;
@@ -78,6 +81,19 @@ int main(void){
  assert(ui_font_title_px(48,"ABC")==48);
  assert(!ui_font_title_uses_supplement("ABC")&&!ui_font_title_uses_supplement(NULL));
  assert(!ui_font_title_uses_supplement(""));
+ const char *output=getenv("UI_FONT_PREVIEW");
+ if(output){
+  memset(raster,255,sizeof(raster));preview=true;
+  const int sizes[]={26,36,48,64};
+  for(unsigned i=0;i<4;++i){
+   int baseline=60+(int)i*90;
+   ui_font_draw_text_px(&fb,24,baseline,sizes[i],"页眉页脚",EPD_DRAW_ALIGN_LEFT,0,15,false);
+   ui_font_draw_text_px(&fb,350,baseline,sizes[i],"左锋题签",EPD_DRAW_ALIGN_LEFT,0,15,false);
+  }
+  FILE *file=fopen(output,"wb");assert(file);
+  assert(fprintf(file,"P5\\n684 384\\n255\\n")>0);
+  assert(fwrite(raster,1,sizeof(raster),file)==sizeof(raster)&&fclose(file)==0);
+ }
  puts("Han supplement: PASS (actual decoder/cache, common glyphs, rendering, supplement detection, OOM and metrics)");
 }
 '''.replace('TEST_CP',str(chars[0])).replace('CPS',','.join(map(str,chars)))

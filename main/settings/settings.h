@@ -271,10 +271,23 @@ typedef enum {
 app_reader_slot_item_t app_settings_reader_chrome_item(unsigned bar, unsigned slot);
 /// 返回是否成功保存；失败不改变槽位。/ Return successful persistence, leaving the slot unchanged on failure.
 bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader_slot_item_t item);
+/// 信息条高度，单位 px；bar 0=页眉、1=页脚，按 8px 调节并保持原默认布局。
+/// Bar height in px; bar 0=header, 1=footer, in 8px steps with the original default geometry.
+#define APP_READER_HEADER_HEIGHT_DEFAULT 80
+#define APP_READER_HEADER_HEIGHT_MIN 64
+#define APP_READER_HEADER_HEIGHT_MAX 144
+#define APP_READER_FOOTER_HEIGHT_DEFAULT 57
+#define APP_READER_FOOTER_HEIGHT_MIN 57
+#define APP_READER_FOOTER_HEIGHT_MAX 121
+#define APP_READER_CHROME_HEIGHT_STEP 8
+uint8_t app_settings_reader_chrome_height(unsigned bar);
+/// 同时保存两条高度；无效值或保存失败不改变内存。/ Save both heights; invalid values or failed writes leave memory unchanged.
+bool app_settings_set_reader_chrome_heights(uint8_t header, uint8_t footer);
 /// 六槽一次提交恢复默认布局：页眉 书名/时间/电量图标，页脚 章节名/空/页码·进度。
 /// Restore all six slots to the default layout in one commit: header title/clock/battery icon,
 /// footer chapter/blank/page·progress.
-/// 保存失败返回 false，内存布局不变。/ Return false on failure, preserving the in-memory layout.
+/// 同时恢复默认高度；保存失败返回 false，内存布局不变。
+/// Also restore default heights; return false on failure, preserving the in-memory layout.
 bool app_settings_set_reader_chrome_default(void);
 /// 旧长按设置API保留用于历史备份兼容。/ Retained legacy hold APIs for historical backup compatibility.
 bool app_settings_reader_hold_refresh(void);

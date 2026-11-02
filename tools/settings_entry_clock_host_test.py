@@ -70,6 +70,7 @@ static unsigned status_paints,background_paints,header_paints;
 // the windowed header joins the status bar. Assertions track the painted band, not a constant.
 static int expected_band(void){return !s_reader_fullscreen&&statusbar?160:80;}
 static bool app_settings_reader_statusbar(void){return statusbar;}
+static int s_chrome_height[2]={80,57};
 static const char *app_settings_book_background_path(void){return wallpaper?"/sdcard/pictures/bg.jpg":"";}
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}

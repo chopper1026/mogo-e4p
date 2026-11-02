@@ -103,3 +103,5 @@ print(f"PASS: {len(labels)} real reader-setting and keyboard labels have complet
 hanzi_codepoints.clear()
 assert all(has_glyph(ord(ch)) for ch in "抗锯齿"), "antialias label lacks native UI outlines"
 print("PASS: antialias label uses native outline glyphs")
+assert all(has_glyph(ord(ch)) for ch in "眉锋"), "reader labels must not enlarge 24px bitmap supplements"
+print("PASS: header and title-style labels use native outline glyphs")
