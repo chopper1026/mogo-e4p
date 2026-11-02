@@ -33,7 +33,7 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGH
 #define UI_INK_BLACK 0
 #define BOOK_PX_MIN 24
 #define BOOK_PX_MAX 60
-enum {UI_ICON_CHEVRON_RIGHT,UI_ICON_ROTATE_CW};
+enum {UI_ICON_CHEVRON_RIGHT,UI_ICON_ROTATE_CW,UI_ICON_CHEVRON_DOWN};
 #define TTF_FONT_NAME_MAX 64
 #define TTF_FONT_SLOT_SYSTEM 0
 static unsigned scale=100,face;
@@ -115,6 +115,15 @@ for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slid
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_panel_text_vc',book)+'\n'
+unit+='\n'.join(re.findall(r'^#define CHROME_ROW_.*',s,re.M))+'\n'
+unit+=r'''
+static int s_chrome_scroll,s_chrome_height[2]={144,121};
+typedef int app_reader_slot_item_t;
+static app_reader_slot_item_t app_settings_reader_chrome_item(unsigned bar,unsigned slot){(void)bar;(void)slot;return 0;}
+static const char *reader_chrome_item_label(app_reader_slot_item_t item){(void)item;return "页码与全书进度";}
+'''
+for name in ('chrome_row_rect','chrome_row_visible','draw_chrome_row'):
+    unit+=function(name,book)+'\n'
 unit+=function('reader_weight_value',book)+'\n'
 unit+=function('draw_font_settings',book)+'\n'+function('draw_reading_settings',book)+'\n'
 unit+=function('reader_font_picker_top',book)+'\n'+function('reader_font_pick_rect',book)+'\n'
@@ -123,6 +132,8 @@ unit+=r'''
 static bool overlap(EpdRect a,EpdRect b){return a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<b.y+b.height&&b.y<a.y+a.height;}
 int main(void){uint8_t fb[1]={0};
  for(face=0;face<3;++face)for(scale=100;scale<=200;scale+=10){
+   for(s_chrome_scroll=0;s_chrome_scroll<=CHROME_ROW_MAX_SCROLL;s_chrome_scroll+=CHROME_ROW_PITCH)
+     for(int row=0;row<CHROME_ROW_COUNT;++row)draw_chrome_row(fb,row);
    draw_font_settings(fb);assert(!antialias&&selected_slot==2);draw_reading_settings(fb);
    for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);

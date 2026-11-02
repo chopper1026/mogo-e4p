@@ -7,6 +7,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - WiFi 与热点传书网页改为纯白文件工作台：桌面并排显示目录与上传记录，壁纸和签名单独切换，手机首屏可添加文件；保留分页和覆盖确认，增加本页搜索/排序、批量删除及失败重试。尚未发布，真实设备传输待验收。
   Redesign WiFi/AP transfer as a white file workspace with side-by-side desktop browsing and transfer history, separate wallpaper/signature views and first-screen mobile upload. Retain paging and overwrite confirmation; add current-page search/sort, bulk deletion and failed-upload retry. Unreleased; real-device transfer awaits acceptance.
+- 阅读设置的页眉页脚增加独立高度调节，正文与刷新区域同步调整，保持阅读位置；默认布局与全屏排版不变，支持保存、备份和恢复默认。
+  Add independent header/footer height controls with anchored body reflow and matching refresh bounds; retain default/full-screen geometry, persistence, backups and reset.
+- 为内置字体补齐「眉」「锋」的原生轮廓，避免设置文字放大低分辨率补充位图；实屏效果待验证。
+  Add native outlines for the two reader-label glyphs instead of enlarging low-resolution supplemental bitmaps; on-device appearance remains unverified.
 
 ## v1.0.2 · 2026-11-02
 

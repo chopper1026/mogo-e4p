@@ -135,6 +135,8 @@
  * sheet; the default header becomes title/clock/battery icon while the footer keeps
  * chapter/blank/page·progress. The composed header fingerprint is compared per turn and the top
  * diff band only presents when it changed; idle stays silent.
+ * 用户 2026-11-02 修订：页眉页脚高度独立调节，默认几何不变；正文、信息栏绘制与刷新边界同步重排，全屏不受影响。
+ * User revision 2026-11-02: independent bar heights retain default geometry; body, chrome and refresh bounds reflow together without changing full-screen geometry.
  * 用户 2026-10-21 修订：工具栏开关恢复为带内 GL16 差分；此前改 GC16 只因实心进度条擦除后留轮廓，
  * 差分脏区膨胀已补推边缘邻行/邻列，不再需要整块全像素驱动。
  * User revision 2026-10-21: the tools toggle returns to a band GL16 differential. GC16 was only
@@ -481,6 +483,7 @@ static char s_reader_key_error[64];
 static unsigned s_chrome_pick_bar;   // 0=页眉 1=页脚 / 0 header, 1 footer
 static unsigned s_chrome_pick_slot;  // 0/1/2 = 左/中/右 / left/center/right
 static int s_chrome_scroll;
+static int s_chrome_height[2] = {APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT};
 static bool s_chrome_drag;
 static int s_chrome_pick_scroll;
 static bool s_chrome_pick_drag;
@@ -567,20 +570,15 @@ static void lock_draw(void) {
 static void unlock_draw(void) { reader_prefetch_unlock(); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
-// 正文上方留出一致的呼吸空间，下沿与页脚带同步贴底；两种模式共用排版与刷新边界。
-// Give the body a consistent top inset and extend it toward the footer band in both modes.
-// 带头部时正文顶在页眉分隔线（158/状态栏关 78）下 18px；正文底 = UI_BAR_TOP+39 = 1135，
-// 与页脚差分带（progress_rect）上沿衔接，进度条距正文保持 8px。
-// In windowed mode the body starts 18 px below the header rule (158, or 78 with the status bar
-// hidden); the body bottom at UI_BAR_TOP+39 = 1135 meets the footer band's top edge, keeping the
-// 8 px body-to-bar gap.
+// 正文保留顶部呼吸空间，下沿与可调页脚带相接；全屏沿用原有几何。
+// Keep the top breathing space and meet the adjustable footer band; full screen retains its geometry.
 static EpdRect reader_area(void) {
     const int top = s_reader_fullscreen
         ? (app_settings_reader_statusbar() ? 80 : 0)
-        : (app_settings_reader_statusbar() ? 160 : 80);
+        : (app_settings_reader_statusbar() ? 80 : 0) + s_chrome_height[0];
     // 全屏进度线单独差分，翻页时不让正文刷新反复驱动整条横线。
     // Keep the full-screen progress strip out of body updates so turns do not drive the whole bar.
-    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 39;
+    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + UI_BAR_H - s_chrome_height[1];
     return (EpdRect){0, top, UI_LOCK_WIDTH, bottom - top};
 }
 static EpdRect reader_fullscreen_progress_area(void) {
@@ -596,10 +594,9 @@ static EpdRect body_rect_for_tracking(int tracking_index) {
     (void)tracking_index;
     int top = s_reader_fullscreen
         ? (app_settings_reader_statusbar() ? 96 : 24)
-        : (app_settings_reader_statusbar() ? 176 : 96);
-    // 正文底与页脚差分带衔接；39 是页脚贴底下调量，与 reader_area/progress_rect 联动。
-    // Body bottom meets the footer band; 39 is the footer drop shared with reader_area/progress_rect.
-    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 39;
+        : (app_settings_reader_statusbar() ? 96 : 16) + s_chrome_height[0];
+    // 正文底与页脚差分带相接。/ Body bottom meets the footer refresh band.
+    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + UI_BAR_H - s_chrome_height[1];
     // 四向留白是屏幕边距，横排竖排同一套：左右缩栏宽，上下缩页高。
     // 不吸附整字格，完整行把余量摊到字间。
     // The four insets are screen-side margins shared by both writing modes: left/right narrow the
@@ -626,17 +623,9 @@ static int reader_margin_value(int level) {
     return BOOK_MARGIN_MIN + level * BOOK_MARGIN_STEP;
 }
 static EpdRect progress_rect(void) {
-    // 阅读页没有右侧菜单按钮；进度信息应和页眉分隔线一样铺满内容宽度。
-    // 页脚整体贴底：带上沿 = 正文底（UI_BAR_TOP+39=1135），高 57 到 1192。进度条 =
-    // track.y+8（1143–1155），章节名行顶 = track.y+27（28px 行底 1190，距屏底 26px），条距
-    // 正文保持 8px。正文底、页脚刷新带、绘制基准共用本矩形；39 为页脚贴底下调量，
-    // 调整时须与 reader_area/body_rect 的 bottom 三处联动。
-    // The reader has no right-hand menu button; the footer spans the full content width.
-    // The whole footer hugs the bottom edge: band top = body bottom (1135), height 57 to 1192;
-    // bar at track.y+8 (1143–1155), chapter text top at track.y+27 (28 px line ends at 1190,
-    // 26 px above the screen edge), keeping the 8 px body-to-bar gap. Body bottom, refresh band
-    // and drawing origin share this rect; 39 is the footer drop — keep the two bottoms above in sync.
-    return (EpdRect){36, UI_BAR_TOP + 39, UI_LOCK_WIDTH - 72, UI_BAR_H - 39};
+    // 固定底边与左右边距，增高时向正文方向扩展；进度条和文字随上沿移动。
+    // Keep the bottom and side insets fixed; growth expands toward the body, moving the bar and text with its top.
+    return (EpdRect){36, UI_BAR_TOP + UI_BAR_H - s_chrome_height[1], UI_LOCK_WIDTH - 72, s_chrome_height[1]};
 }
 static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
 #define SHELF_BOOK_LIFT_PX 16
@@ -2408,8 +2397,8 @@ static void draw_key_picker(uint8_t *fb) {
 }
 
 /* ---- 页眉页脚设置面板 / Header & footer chrome panels ---- */
-// 六个槽位行加「恢复默认」整行滚动，视口四行；选择页复用动作卡样式，超出视口两行。
-// Six slot rows plus a reset row scroll whole rows in a four-row viewport; the picker reuses the
+// 六个槽位、两条高度加「恢复默认」整行滚动，视口四行；选择页复用动作卡样式，超出视口两行。
+// Six slots, two heights and a reset row scroll whole rows in a four-row viewport; the picker reuses the
 // action-card style and outgrows its viewport by two rows.
 #define CHROME_ROW_TOP 640
 #define CHROME_ROW_HEIGHT 96
@@ -2417,7 +2406,7 @@ static void draw_key_picker(uint8_t *fb) {
 #define CHROME_ROW_PITCH (CHROME_ROW_HEIGHT + CHROME_ROW_GAP)
 #define CHROME_ROW_VISIBLE 4
 #define CHROME_ROW_VIEW_HEIGHT (CHROME_ROW_VISIBLE * CHROME_ROW_HEIGHT + (CHROME_ROW_VISIBLE - 1) * CHROME_ROW_GAP)
-#define CHROME_ROW_COUNT 7
+#define CHROME_ROW_COUNT 9
 #define CHROME_ROW_MAX_SCROLL ((CHROME_ROW_COUNT - CHROME_ROW_VISIBLE) * CHROME_ROW_PITCH)
 #define CHROME_PICK_TOP 390
 #define CHROME_PICK_PITCH 86
@@ -2453,6 +2442,17 @@ static void draw_chrome_row(uint8_t *fb, int row) {
     ui_draw_control_frame(fb, card, 20, 0x58);
     if (row == CHROME_ROW_COUNT - 1) {
         reader_panel_text_vc(fb, 342, card.y + 48, 26, "恢复默认布局", EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
+    if (row >= 6) {
+        const unsigned bar = (unsigned)row - 6;
+        char value[24];
+        snprintf(value, sizeof(value), "%d px", s_chrome_height[bar]);
+        ui_text_box(fb, (EpdRect){58, card.y + 24, 238, 48}, 26,
+                    bar ? "页脚高度" : "页眉高度", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){414, card.y + 24, 140, 48}, 25, value, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){338, card.y + 16, 72, 64}, 32, "−", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){566, card.y + 16, 72, 64}, 32, "+", EPD_DRAW_ALIGN_CENTER, false);
         return;
     }
     const app_reader_slot_item_t item = app_settings_reader_chrome_item((unsigned)row / 3, (unsigned)row % 3);
@@ -3194,17 +3194,13 @@ static uint32_t reader_chrome_fingerprint(void) {
 }
 
 static void draw_reader_header(uint8_t *fb) {
-    // 状态栏隐藏时头部整体上移 80px 贴顶；三槽内容与分隔线随平移保持对齐。
-    // With the status bar hidden the header shifts up 80 px to the top edge; slots and the rule
-    // keep their alignment under the shift.
-    // 中心线 y=121（状态栏底 80 下 41px）；分隔线 158，正文顶在其下 18px。
-    // Centerline y=121 (41 px below the status bar's bottom edge at 80); rule at 158 with the
-    // body starting 18 px below it.
-    const int dy = app_settings_reader_statusbar() ? 0 : -80;
+    // 信息居中，分隔线固定在信息栏下沿；默认高度保留原位置。
+    // Center the slots and keep the rule at the bar's bottom; the default preserves original positions.
+    const int top = app_settings_reader_statusbar() ? 80 : 0;
     reader_chrome_data_t data;
     reader_chrome_data(&data);
-    reader_chrome_draw_header(fb, &data, 121 + dy);
-    ui_hairline(fb, 158 + dy, 36, 612, UI_GRAY_LIGHT);
+    reader_chrome_draw_header(fb, &data, top + s_chrome_height[0] / 2 + 1);
+    ui_hairline(fb, top + s_chrome_height[0] - 2, 36, 612, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
 // 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
@@ -3570,13 +3566,10 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     unlock_draw();
 }
 static EpdRect reader_status_area(void) {
-    // 时钟重刷带：全屏只有状态栏 80px；窗口化状态栏开时页眉带（80..159，含分隔线）
-    // 也有时钟，合并为 160px；状态栏关时页眉贴顶只占 80px。160 不触及正文顶 176。
-    // Clock refresh band: full screen keeps the 80 px status alone; windowed with the status
-    // bar on merges the header band (80..159, rule included) into 160 px, and with the status
-    // bar hidden the top-hugging header fits 80 px. 160 never reaches the body top at 176.
+    // 状态栏和页眉合并到正文上沿，全屏只保留状态栏。
+    // Merge status and header up to the body's top; full screen retains status alone.
     if (!s_reader_fullscreen)
-        return (EpdRect){0, 0, UI_LOCK_WIDTH, app_settings_reader_statusbar() ? 160 : 80};
+        return (EpdRect){0, 0, UI_LOCK_WIDTH, (app_settings_reader_statusbar() ? 80 : 0) + s_chrome_height[0]};
     return (EpdRect){0, 0, UI_LOCK_WIDTH, 80};
 }
 static bool reader_status_visible(void) {
@@ -4927,6 +4920,52 @@ static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item
     return APP_REDRAW_PAGE;
 }
 
+// 高度先在当前阅读状态试排，保存成功后才接受；失败不把候选高度留在设置里。
+// Trial the height in reader state before persistence; failed candidates never remain in settings.
+static app_redraw_t apply_reader_chrome_heights(int header, int footer, bool reset) {
+    const int previous[2] = {s_chrome_height[0], s_chrome_height[1]};
+    const bool reflow = !s_reader_fullscreen && (header != previous[0] || footer != previous[1]);
+    size_t offset = book_layout_page_start_offset(s_reader_session.position.page);
+    lock_draw();
+    invalidate_prep();
+    s_chrome_height[0] = header;
+    s_chrome_height[1] = footer;
+    bool ok = true, restored = true;
+    if (reflow) {
+        refresh_chapter_lead();
+        ok = reader_reflow_build();
+    }
+    if (ok) ok = reset ? app_settings_set_reader_chrome_default()
+        : app_settings_set_reader_chrome_heights((uint8_t)header, (uint8_t)footer);
+    if (ok && reflow) s_reader_session.position.page = book_layout_page_for_offset(offset);
+    if (!ok) {
+        s_chrome_height[0] = previous[0];
+        s_chrome_height[1] = previous[1];
+        if (reflow) {
+            refresh_chapter_lead();
+            restored = reader_reflow_build();
+        }
+    }
+    unlock_draw();
+    if (!restored) {
+        free_book();
+        s_view = SHELF;
+        copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
+    } else if (!ok) copy_text(s_chrome_error, sizeof(s_chrome_error), "调整失败，请重试");
+    else {
+        s_chrome_error[0] = 0;
+        if (reflow) {
+            release_page_images();
+            prepare_inline_image();
+            s_jump_offset = SIZE_MAX;
+            save_progress();
+        }
+    }
+    s_reader_footer_pending = s_reader_image_refresh_pending = false;
+    s_reader_footer_strong = s_water_turn_pending = false;
+    return APP_REDRAW_PAGE;
+}
+
 static int slider_index(EpdRect rect, int x, int count) {
     int span = rect.width - 128;
     int pos = x - rect.x - 64;
@@ -5240,13 +5279,19 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 EpdRect card = chrome_row_rect(row);
                 if (!chrome_row_visible(card, CHROME_ROW_TOP, CHROME_ROW_VIEW_HEIGHT) || !ui_rect_hit(card, x, y)) continue;
                 if (row == CHROME_ROW_COUNT - 1) {
-                    if (!app_settings_set_reader_chrome_default()) {
-                        copy_text(s_chrome_error, sizeof(s_chrome_error), "保存失败，请重试");
-                        return APP_REDRAW_PAGE;
-                    }
-                    s_chrome_error[0] = 0;
-                    invalidate_prep();
-                    return APP_REDRAW_PAGE;
+                    return apply_reader_chrome_heights(APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT, true);
+                }
+                if (row >= 6) {
+                    const unsigned bar = (unsigned)row - 6;
+                    int next = s_chrome_height[bar];
+                    if (x >= 338 && x < 410) next -= APP_READER_CHROME_HEIGHT_STEP;
+                    else if (x >= 566 && x < 638) next += APP_READER_CHROME_HEIGHT_STEP;
+                    else return APP_REDRAW_NONE;
+                    const int min = bar ? APP_READER_FOOTER_HEIGHT_MIN : APP_READER_HEADER_HEIGHT_MIN;
+                    const int max = bar ? APP_READER_FOOTER_HEIGHT_MAX : APP_READER_HEADER_HEIGHT_MAX;
+                    if (next < min || next > max) return APP_REDRAW_NONE;
+                    return apply_reader_chrome_heights(bar ? s_chrome_height[0] : next,
+                                                       bar ? next : s_chrome_height[1], false);
                 }
                 s_chrome_pick_bar = (unsigned)row / 3;
                 s_chrome_pick_slot = (unsigned)row % 3;
@@ -5903,6 +5948,8 @@ static void on_enter(app_ctx_t* ctx) {
     s_presented_view = -1;
     ctx->leaf = s_view == SHELF ? book_shelf_categories_saved_page(&s_shelf_categories, app_settings_shelf_style() == 5) : 0;
     s_px = app_settings_book_px();
+    s_chrome_height[0] = app_settings_reader_chrome_height(0);
+    s_chrome_height[1] = app_settings_reader_chrome_height(1);
     s_recent_sort = app_settings_shelf_recent_sort();
     s_margin[MARGIN_LEFT] = app_settings_book_margin_left();
     s_margin[MARGIN_RIGHT] = app_settings_book_margin_right();

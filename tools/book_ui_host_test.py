@@ -349,6 +349,8 @@ static int app_settings_book_indent_adjust(void){return 0;}
 static int app_settings_book_reading_line(void){return 0;}
 static int app_settings_book_reading_line_offset(void){return 0;}
 static bool app_settings_reader_statusbar(void){return test_reader_statusbar;}
+static int s_chrome_height[2]={80,57};
+static uint8_t app_settings_reader_chrome_height(unsigned bar){return bar?57:80;}
 static bool app_settings_reader_hold_refresh(void){return test_hold_refresh;}
 static bool app_settings_reader_hide_images(void){return test_hide_images;}
 static void book_layout_set_spacing(int line,int para){(void)line;(void)para;}
@@ -634,6 +636,19 @@ int main(void) {
     text_body=body_rect();
     assert(reading_body.y==0&&text_body.y==24&&text_body.y+text_body.height==fullscreen_progress.y-2);
     s_reader_fullscreen=false;test_reader_statusbar=true;
+    // 所有高度组合共用正文与刷新边界，切换全屏时不带入窗口高度。
+    // Every height pair shares body/refresh boundaries; full screen ignores windowed heights.
+    for(int h=64;h<=144;h+=8)for(int f=57;f<=121;f+=8)
+      for(int full=0;full<2;++full)for(int status=0;status<2;++status){
+        s_chrome_height[0]=h;s_chrome_height[1]=f;s_reader_fullscreen=full;test_reader_statusbar=status;
+        EpdRect area=reader_area(),body=body_rect(),footer=progress_rect();
+        assert(area.y==(full?(status?80:0):(status?80:0)+h));
+        assert(body.height>600&&body.y>=area.y);
+        assert(area.y+area.height==(full?READER_FULLSCREEN_PROGRESS_TOP:footer.y));
+        assert(body.y+body.height==(full?READER_FULLSCREEN_PROGRESS_TOP-2:footer.y));
+        assert(footer.y+footer.height==1192&&footer.height==f);
+      }
+    s_chrome_height[0]=80;s_chrome_height[1]=57;s_reader_fullscreen=false;test_reader_statusbar=true;
     char footer_name[72];
     reader_footer_strip_number(footer_name,sizeof(footer_name),"第一章：海边的信");
     assert(!strcmp(footer_name,"海边的信"));

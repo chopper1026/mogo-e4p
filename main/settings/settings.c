@@ -111,6 +111,8 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_CHROME_FOOTER_L "rd_ftr_l"
 #define NVS_KEY_CHROME_FOOTER_M "rd_ftr_m"
 #define NVS_KEY_CHROME_FOOTER_R "rd_ftr_r"
+#define NVS_KEY_CHROME_HEADER_H "rd_hdr_h"
+#define NVS_KEY_CHROME_FOOTER_H "rd_ftr_h"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_BLE_TURNER "ble_turn"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
@@ -213,6 +215,13 @@ static uint8_t s_reader_chrome[6] = {
     APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS,
 };
 static bool s_reader_vertical_turn;
+static uint8_t s_reader_chrome_heights[2] = {APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT};
+static bool reader_chrome_heights_valid(uint8_t header, uint8_t footer) {
+    return header >= APP_READER_HEADER_HEIGHT_MIN && header <= APP_READER_HEADER_HEIGHT_MAX &&
+        (header - APP_READER_HEADER_HEIGHT_MIN) % APP_READER_CHROME_HEIGHT_STEP == 0 &&
+        footer >= APP_READER_FOOTER_HEIGHT_MIN && footer <= APP_READER_FOOTER_HEIGHT_MAX &&
+        (footer - APP_READER_FOOTER_HEIGHT_MIN) % APP_READER_CHROME_HEIGHT_STEP == 0;
+}
 static bool s_ble_turner;
 // 前光默认关、亮度 40%、中性色温；升级后行为和没有该功能时一致。
 // Frontlight defaults to off, 40% brightness and neutral CCT, so upgrading behaves as before.
@@ -457,6 +466,13 @@ void app_settings_init(void) {
             s_reader_chrome[i] = value;
     }
     uint8_t keys_v2 = 0;
+    uint8_t header = APP_READER_HEADER_HEIGHT_DEFAULT, footer = APP_READER_FOOTER_HEIGHT_DEFAULT;
+    nvs_get_u8(h, NVS_KEY_CHROME_HEADER_H, &header);
+    nvs_get_u8(h, NVS_KEY_CHROME_FOOTER_H, &footer);
+    s_reader_chrome_heights[0] = reader_chrome_heights_valid(header, APP_READER_FOOTER_HEIGHT_DEFAULT)
+        ? header : APP_READER_HEADER_HEIGHT_DEFAULT;
+    s_reader_chrome_heights[1] = reader_chrome_heights_valid(APP_READER_HEADER_HEIGHT_DEFAULT, footer)
+        ? footer : APP_READER_FOOTER_HEIGHT_DEFAULT;
     bool migrate_reader_defaults = nvs_get_u8(h, NVS_KEY_READER_KEYS_V2, &keys_v2) != ESP_OK || keys_v2 != 1;
     bool old_default_hold = migrate_reader_defaults && s_reader_hold_action == APP_READER_KEY_REFRESH &&
         s_reader_keys[0] == APP_READER_KEY_PREV && s_reader_keys[1] == APP_READER_KEY_TOOLS &&
@@ -1064,16 +1080,42 @@ bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader
     if (err == ESP_OK) s_reader_chrome[bar * 3 + slot] = item;
     return err == ESP_OK;
 }
+uint8_t app_settings_reader_chrome_height(unsigned bar) {
+    return bar < 2 ? s_reader_chrome_heights[bar] : 0;
+}
+bool app_settings_set_reader_chrome_heights(uint8_t header, uint8_t footer) {
+    if (!reader_chrome_heights_valid(header, footer)) return false;
+    if (s_reader_chrome_heights[0] == header && s_reader_chrome_heights[1] == footer) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, header);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, footer);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) {
+        s_reader_chrome_heights[0] = header;
+        s_reader_chrome_heights[1] = footer;
+    }
+    return err == ESP_OK;
+}
 bool app_settings_set_reader_chrome_default(void) {
-    if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome))) return true;
+    if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome)) &&
+        s_reader_chrome_heights[0] == APP_READER_HEADER_HEIGHT_DEFAULT &&
+        s_reader_chrome_heights[1] == APP_READER_FOOTER_HEIGHT_DEFAULT) return true;
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return false;
     for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
         err = nvs_set_u8(h, s_reader_chrome_names[i], s_reader_chrome_defaults[i]);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, APP_READER_HEADER_HEIGHT_DEFAULT);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, APP_READER_FOOTER_HEIGHT_DEFAULT);
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
-    if (err == ESP_OK) memcpy(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome));
+    if (err == ESP_OK) {
+        memcpy(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome));
+        s_reader_chrome_heights[0] = APP_READER_HEADER_HEIGHT_DEFAULT;
+        s_reader_chrome_heights[1] = APP_READER_FOOTER_HEIGHT_DEFAULT;
+    }
     return err == ESP_OK;
 }
 
@@ -1369,6 +1411,18 @@ static bool backup_shake_valid(const settings_backup_shake_t *shake) {
 // v31 追加页眉页脚六槽内容；旧备份回落默认布局。
 // V31 appends the six header/footer chrome slots; older backups fall back to the default layout.
 typedef struct { uint8_t items[6], checksum[4]; } settings_backup_chrome_t;
+// v32 追加两条信息栏高度，单独校验并兼容旧备份默认值。
+// V32 appends independently checked bar heights, retaining defaults for legacy backups.
+typedef struct { uint8_t header, footer, checksum[4]; } settings_backup_chrome_heights_t;
+static uint32_t backup_chrome_heights_checksum(const settings_backup_chrome_heights_t *height) {
+    return ((2166136261u ^ height->header) * 16777619u ^ height->footer) * 16777619u;
+}
+static bool backup_chrome_heights_valid(const settings_backup_chrome_heights_t *height) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)height->checksum[i] << (8 * i);
+    return reader_chrome_heights_valid(height->header, height->footer) &&
+        stored == backup_chrome_heights_checksum(height);
+}
 static uint32_t backup_chrome_checksum(const settings_backup_chrome_t *chrome) {
     uint32_t hash = 2166136261u;
     for (unsigned i = 0; i < 6; ++i) hash = (hash ^ chrome->items[i]) * 16777619u;
@@ -1473,9 +1527,10 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
+    // W 追加 v32 信息栏高度。/ W appends v32 bar heights.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1565,7 +1620,8 @@ esp_err_t app_settings_backup_save(void) {
     // v30: appends the shake-turn switch after the v29 tail.
     // v31：在 v30 尾部再追加页眉页脚六槽内容。
     // v31: appends the six header/footer chrome slots after the v30 tail.
-    memcpy(backup.magic, "PICOSETV", sizeof(backup.magic));
+    // v32：在 v31 尾部追加页眉页脚高度。/ V32 appends header/footer heights to v31.
+    memcpy(backup.magic, "PICOSETW", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1718,6 +1774,11 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&margins, 1, sizeof(margins), file) == sizeof(margins);
     if (ok) ok = fwrite(&shake, 1, sizeof(shake), file) == sizeof(shake);
     if (ok) ok = fwrite(&chrome, 1, sizeof(chrome), file) == sizeof(chrome);
+    settings_backup_chrome_heights_t heights = {
+        .header = s_reader_chrome_heights[0], .footer = s_reader_chrome_heights[1]};
+    uint32_t heights_hash = backup_chrome_heights_checksum(&heights);
+    for (unsigned i = 0; i < 4; ++i) heights.checksum[i] = (uint8_t)(heights_hash >> (8 * i));
+    if (ok) ok = fwrite(&heights, 1, sizeof(heights), file) == sizeof(heights);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1816,6 +1877,8 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
     settings_backup_margins_t margins = {0};
     settings_backup_shake_t shake = {.on = 0};
+    settings_backup_chrome_heights_t heights = {
+        .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
         APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
         APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS}};
@@ -1915,6 +1978,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 29) ok = fread(&margins, 1, sizeof(margins), file) == sizeof(margins) && backup_margins_valid(&margins);
     if (ok && version >= 30) ok = fread(&shake, 1, sizeof(shake), file) == sizeof(shake) && backup_shake_valid(&shake);
     if (ok && version >= 31) ok = fread(&chrome, 1, sizeof(chrome), file) == sizeof(chrome) && backup_chrome_valid(&chrome);
+    if (ok && version >= 32) ok = fread(&heights, 1, sizeof(heights), file) == sizeof(heights) && backup_chrome_heights_valid(&heights);
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -1996,6 +2060,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHAKE_TURN, shake.on);
     for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
         err = nvs_set_u8(h, s_reader_chrome_names[i], chrome.items[i]);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, heights.header);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, heights.footer);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
@@ -2070,6 +2136,8 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_hold_action = hold.action;
     s_reader_double_action = double_action.action;
     memcpy(s_reader_chrome, chrome.items, sizeof(s_reader_chrome));
+    s_reader_chrome_heights[0] = heights.header;
+    s_reader_chrome_heights[1] = heights.footer;
     s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
     s_book_weight_fine = fine_weight;
     s_book_antialias = antialias;
