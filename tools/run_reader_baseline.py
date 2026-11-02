@@ -59,6 +59,7 @@ SUITES = {
     "glyph_cache": [sys.executable, "tools/ttf_glyph_cache_host_test.py"],
     "images": [sys.executable, "tools/reader_images_host_test.py"],
     "settings_view": ["bash", "tools/run_reader_settings_host_tests.sh"],
+    "settings_backup": [sys.executable, "tools/settings_backup_host_test.py"],
     "controls": ["bash", "tools/run_reader_controls_host_tests.sh"],
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],
     "background": [sys.executable, "tools/reader_stability_host_test.py"],

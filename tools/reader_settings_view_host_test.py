@@ -14,10 +14,11 @@ from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
 # 334e224的3136组状态：两面板的文字、坐标、颜色、图标及绘制顺序，另含无效矩形与开关。
 # 3136 states from 334e224: text, geometry, colors, icons and call order for both sheets, plus invalid rectangles and switches.
-# 晃动翻页行加入翻页面板后的新状态。/ New states after the shake-turn row joined the turn sheet.
+# 八项设置与晃动开关两态的绘制基准。/ Drawing baseline for eight settings and both shake toggle states.
 LEGACY_EXPECTED = 'e7505b2b4d4f68496928912eb860e0f127fe3b926351886d3f3bbb6a3e116625'
-EXPECTED = 'ccb4bdbdf799d35c13a2897fdc7efb010d1f531a7cfae70032a89c3e8df7c1f9'
-LAYOUT_EXPECTED = '29a5b99acf14978497595b0cea28facb3187a8c73994ada200c3f811204304cf'
+LEGACY_LAYOUT_EXPECTED = '29a5b99acf14978497595b0cea28facb3187a8c73994ada200c3f811204304cf'
+EXPECTED = '30497fb09bdcad1855480d7ba18ccbc371cbe674f897c7ff5ad1f19dba17a9a5'
+LAYOUT_EXPECTED = '7e890b9d96711da49522f6d48b929b767ad65bca0a6ef3343620e1d7555b5085'
 
 
 def main():
@@ -47,13 +48,15 @@ def main():
         output = subprocess.check_output([str(folder / 'test')])
         digest = hashlib.sha256(output).hexdigest()
         print(f'reader settings: {len(output.splitlines())} drawing records, SHA256 {digest}')
-        assert digest == (LEGACY_EXPECTED if legacy else EXPECTED), f'drawing order or values changed: {digest}'
         # 独立保留原布局、文字与顺序，只排除绘图颜色末字段。
         # Independently retain original geometry, text and order, excluding only drawing colors.
         colored = {b'round', b'frame', b'rect', b'icon', b'hairline', b'fill_circle', b'circle'}
         layout = b'\n'.join(line.rsplit(b' ', 1)[0] if line.split(b' ', 1)[0] in colored
                             else line for line in output.splitlines()) + b'\n'
-        assert hashlib.sha256(layout).hexdigest() == LAYOUT_EXPECTED
+        layout_digest = hashlib.sha256(layout).hexdigest()
+        print(f'reader settings layout: SHA256 {layout_digest}')
+        assert digest == (LEGACY_EXPECTED if legacy else EXPECTED), f'drawing order or values changed: {digest}'
+        assert layout_digest == (LEGACY_LAYOUT_EXPECTED if legacy else LAYOUT_EXPECTED)
     return 0
 
 

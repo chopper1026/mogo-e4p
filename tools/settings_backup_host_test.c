@@ -347,6 +347,13 @@ int main(void) {
     app_settings_set_book_margin_top(18);
     app_settings_set_book_margin_bottom(30);
     app_settings_set_reader_shake_turn(true);
+    const uint8_t custom_chrome[6]={APP_READER_SLOT_PAGE,APP_READER_SLOT_DATE,APP_READER_SLOT_BATTERY,
+        APP_READER_SLOT_TITLE,APP_READER_SLOT_CLOCK,APP_READER_SLOT_PERCENT};
+    for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
+    commit_fails=true;
+    assert(!app_settings_set_reader_chrome_default()&&!memcmp(s_reader_chrome,custom_chrome,6));
+    assert(!app_settings_set_reader_chrome_item(0,0,APP_READER_SLOT_BLANK)&&s_reader_chrome[0]==custom_chrome[0]);
+    commit_fails=false;
     assert(app_settings_backup_save() == ESP_OK);
     assert(history_saves == 1);
     FILE *saved = fopen(BACKUP_FILE, "rb");
@@ -440,6 +447,7 @@ int main(void) {
     s_reader_power_turn = false;
     s_reader_volume_turn = false;
     s_reader_shake_turn = false;
+    memset(s_reader_chrome,0,sizeof(s_reader_chrome));
     s_reader_up_action = APP_READER_KEY_NONE;
     s_reader_statusbar = true;
     s_reader_open_fullscreen = true; /* dirty value must come back from the backup */
@@ -492,6 +500,7 @@ int main(void) {
     assert(s_reader_hold_refresh);
     assert(app_settings_reader_vertical_turn());
     assert(app_settings_reader_shake_turn());
+    assert(!memcmp(s_reader_chrome,custom_chrome,6));
 
     assert(s_home_full_refresh && !strcmp(s_device_name, "Kiiko Pico") &&
            !strcmp(s_status_signature, "今天也要读书"));
@@ -1052,6 +1061,35 @@ int main(void) {
     // v26 老备份没有晃动块，恢复回落默认关闭。
     // A v26 backup has no shake block; restore falls back to the off default.
     assert(!app_settings_reader_shake_turn());
+    assert(!memcmp(s_reader_chrome,s_reader_chrome_defaults,6));
+    // 损坏枚举或校验和在任何提交前拒绝；还原合法尾块后仍能往返。
+    // Reject invalid enums/checksums before committing; restoring the valid tail keeps round trips working.
+    for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
+    assert(app_settings_backup_save()==ESP_OK);
+    saved=fopen(BACKUP_FILE,"r+b");assert(saved);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t)),SEEK_END)==0);
+    long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
+    assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
+    assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
+    assert(fclose(saved)==0);
+    for(unsigned fault=0;fault<2;++fault){
+        settings_backup_chrome_t bad=valid_chrome;
+        if(fault==0)bad.checksum[0]^=1;
+        else{
+            bad.items[0]=APP_READER_SLOT_COUNT;
+            uint32_t hash=backup_chrome_checksum(&bad);
+            for(unsigned j=0;j<4;++j)bad.checksum[j]=(uint8_t)(hash>>(8*j));
+        }
+        saved=fopen(BACKUP_FILE,"r+b");assert(saved&&fseek(saved,chrome_at,SEEK_SET)==0);
+        assert(fwrite(&bad,1,sizeof(bad),saved)==sizeof(bad)&&fclose(saved)==0);
+        int commits_before=commit_count;unsigned imports_before=wifi_imports,history_before=history_restores;
+        assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE);
+        assert(commit_count==commits_before&&wifi_imports==imports_before&&history_restores==history_before&&!memcmp(s_reader_chrome,custom_chrome,6));
+    }
+    saved=fopen(BACKUP_FILE,"r+b");assert(saved&&fseek(saved,chrome_at,SEEK_SET)==0);
+    assert(fwrite(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome)&&fclose(saved)==0);
+    assert(app_settings_set_reader_chrome_default());
+    assert(app_settings_backup_restore()==ESP_OK&&!memcmp(s_reader_chrome,custom_chrome,6));
     // 所有阅读字号都可保存与备份恢复，范围外仍使用默认48。
     // Every reader size survives settings/backup restore; out-of-range values still use default 48.
     for(int px=18;px<=90;++px){

@@ -10,3 +10,4 @@ python3 tools/settings_entry_clock_host_test.py
 python3 tools/reader_controls_host_test.py
 python3 tools/reading_settings_host_test.py
 python3 tools/reader_indent_hold_host_test.py
+python3 tools/reader_chrome_host_test.py

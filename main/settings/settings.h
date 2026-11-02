@@ -264,7 +264,8 @@ bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader
 /// 六槽一次提交恢复默认布局：页眉 书名/时间/电量图标，页脚 章节名/空/页码·进度。
 /// Restore all six slots to the default layout in one commit: header title/clock/battery icon,
 /// footer chapter/blank/page·progress.
-void app_settings_set_reader_chrome_default(void);
+/// 保存失败返回 false，内存布局不变。/ Return false on failure, preserving the in-memory layout.
+bool app_settings_set_reader_chrome_default(void);
 /// 旧长按设置API保留用于历史备份兼容。/ Retained legacy hold APIs for historical backup compatibility.
 bool app_settings_reader_hold_refresh(void);
 void app_settings_set_reader_hold_refresh(bool on);

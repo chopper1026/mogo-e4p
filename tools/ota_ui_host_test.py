@@ -81,16 +81,14 @@ static void assert_progress(int width){
  assert(s_upgrade_bar_width==width&&!erased_completed);
 }
 #include "book/reader_book.h"
+#include "book/reader_chrome.h"
 static struct {reader_book_t book;} s_reader_session = {.book = {.title = "海边的信", .chapter_title = "chapter"}};
-static int title_center,battery_center;
-static int title_left=-1,clock_right=-1;
-static bool app_settings_reader_statusbar(void){return true;}
-static void ui_nav_clock_text(char *out,size_t cap){snprintf(out,cap,"20:31");}
-static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)fb;(void)px;assert(!strcmp(text,sample));title_left=x;title_center=y;(void)align;}
-static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){(void)fb;(void)px;(void)text;(void)align;(void)inverted;(void)y;clock_right=x;}
-static void ui_nav_battery_draw(uint8_t *fb,int x,int cy){(void)fb;(void)x;battery_center=cy;}static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
-static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
-static int ui_text_title_fit(char *text,int px,int width,const char *sample){assert(px==32&&width>0&&!strcmp(text,sample));return 24;}
+static int chrome_center,header_rule;
+static bool statusbar=true;
+bool app_settings_reader_statusbar(void){return statusbar;}
+static void reader_chrome_data(reader_chrome_data_t *data){*data=(reader_chrome_data_t){.title=s_reader_session.book.title};}
+void reader_chrome_draw_header(uint8_t *fb,const reader_chrome_data_t *data,int cy){(void)fb;assert(!strcmp(data->title,s_reader_session.book.title));chrome_center=cy;}
+static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;assert(x==36&&width==612&&gray==UI_GRAY_LIGHT);header_rule=y;}
 static char note_lines[6][384];
 static int note_count;
 static int ui_text_fixed_width_px(int px,const char *text){
@@ -123,8 +121,7 @@ static bool s_input_settle,s_input_layout,s_scroll_present_pending;
 static EpdRect s_input_area;
 typedef struct {int kind;} EpdWaveform;
 static const EpdWaveform E0470_WAVEFORM={0},E0470_FOLLOW_WAVEFORM={1};
-enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
-static int app_settings_main_refresh_mode(void){return APP_MAIN_REFRESH_NORMAL;}
+app_main_refresh_mode_t app_settings_main_refresh_mode(void){return APP_MAIN_REFRESH_NORMAL;}
 static const EpdWaveform *display_main_normal_waveform(void){return &E0470_WAVEFORM;}
 enum EpdDrawMode {MODE_DU,MODE_GL16};
 enum EpdDrawError {EPD_DRAW_SUCCESS};
@@ -197,9 +194,9 @@ int main(void){
  cache_releases=0;backend_status.state=PICO_UPDATE_AVAILABLE;snprintf(backend_status.message,sizeof(backend_status.message),"发现新版本，可下载安装");
  upgrade_schedule(true,60);assert(upgrade_start_pending()==APP_REDRAW_PAGE);
  assert(!strcmp(s_upgrade_notice,"无法开始升级，请退出传书后重试"));
- draw_reader_header(NULL);assert(title_left==36&&clock_right==594&&title_center==121&&battery_center==121);
- draw_reader_header(NULL);assert(title_left==36&&clock_right==594&&title_center==battery_center);
- title_left=clock_right=-1; snprintf(s_update.release.notes,sizeof(s_update.release.notes),"1. 优化图文混排\n2. 支持滑动翻页\n3. 新增自动休眠\n4. 优化蓝牙翻页器\n5. 优化图标与界面\n6. 优化文件管理排版");
+ draw_reader_header(NULL);assert(chrome_center==121&&header_rule==158);
+ statusbar=false;draw_reader_header(NULL);assert(chrome_center==41&&header_rule==78);
+ snprintf(s_update.release.notes,sizeof(s_update.release.notes),"1. 优化图文混排\n2. 支持滑动翻页\n3. 新增自动休眠\n4. 优化蓝牙翻页器\n5. 优化图标与界面\n6. 优化文件管理排版");
  draw_upgrade_notes(NULL);assert(note_count==6&&!strcmp(note_lines[0],"1. 优化图文混排")&&!strcmp(note_lines[5],"6. 优化文件管理排版"));
  note_count=0;s_update.release.notes[0]=0;draw_upgrade_notes(NULL);assert(note_count==1&&!strcmp(note_lines[0],"本次更新暂无说明"));
  const char *cursor="\n\r;；  一；二;三\n四";char line[384];

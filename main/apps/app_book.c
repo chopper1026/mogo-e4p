@@ -2439,13 +2439,16 @@ _Static_assert(CHROME_PICK_TOP + CHROME_PICK_VIEW_HEIGHT < 1112, "chrome picker 
 static EpdRect chrome_row_rect(int row) {
     return (EpdRect){36, CHROME_ROW_TOP - s_chrome_scroll + row * CHROME_ROW_PITCH, 612, CHROME_ROW_HEIGHT};
 }
+static bool chrome_row_visible(EpdRect card, int top, int height) {
+    return card.y >= top && card.y + card.height <= top + height;
+}
 // 视口外的整行不画；滚动量总是整行，所以不会出现半张卡片。
 // Rows outside the viewport are skipped; the offset is always whole rows, so no card is partial.
 static void draw_chrome_row(uint8_t *fb, int row) {
     static const char *const names[] = {"页眉左侧", "页眉中间", "页眉右侧",
                                         "页脚左侧", "页脚中间", "页脚右侧"};
     EpdRect card = chrome_row_rect(row);
-    if (card.y < CHROME_ROW_TOP || card.y + card.height > CHROME_ROW_TOP + CHROME_ROW_VIEW_HEIGHT) return;
+    if (!chrome_row_visible(card, CHROME_ROW_TOP, CHROME_ROW_VIEW_HEIGHT)) return;
     ui_fill_round_rect(fb, card, 20, 0xf0);
     ui_draw_control_frame(fb, card, 20, 0x58);
     if (row == CHROME_ROW_COUNT - 1) {
@@ -2461,7 +2464,7 @@ static void draw_chrome_settings(uint8_t *fb) {
     draw_sheet(fb, KEY_SETTINGS_TOP, "页眉页脚");
     draw_sheet_back(fb, KEY_SETTINGS_TOP);
     for (int row = 0; row < CHROME_ROW_COUNT; ++row) draw_chrome_row(fb, row);
-    reader_panel_text_vc(fb, 342, 1112, 21, "上下滑动查看更多", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 1112, 21, s_chrome_error[0] ? s_chrome_error : "上下滑动查看更多", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2480,7 +2483,7 @@ static void draw_chrome_picker(uint8_t *fb) {
     for (int i = 0; i < READER_CHROME_ITEM_ROWS; ++i) {
         const app_reader_slot_item_t item = s_chrome_item_order[i];
         EpdRect card = chrome_pick_card(i);
-        if (card.y < CHROME_PICK_TOP || card.y + card.height > CHROME_PICK_TOP + CHROME_PICK_VIEW_HEIGHT) continue;
+        if (!chrome_row_visible(card, CHROME_PICK_TOP, CHROME_PICK_VIEW_HEIGHT)) continue;
         ui_fill_round_rect(fb, card, 20, current == item ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
         reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_chrome_item_label(item), EPD_DRAW_ALIGN_LEFT, false);
@@ -5047,6 +5050,7 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_reader_panel = READER_PANEL_CHROME_SETTINGS;
         s_chrome_scroll = 0;
         s_chrome_drag = false;
+        s_chrome_error[0] = 0;
     } else {
         for (int i = 0; i < 3; ++i)
             if (ui_rect_hit(reading_setting_rect(4 + i), x, y)) return apply_reader_option(ctx, i);
@@ -5220,11 +5224,12 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (picker) {
             for (int i = 0; i < READER_CHROME_ITEM_ROWS; ++i) {
                 EpdRect card = chrome_pick_card(i);
-                if (card.y < CHROME_PICK_TOP || !ui_rect_hit(card, x, y)) continue;
+                if (!chrome_row_visible(card, CHROME_PICK_TOP, CHROME_PICK_VIEW_HEIGHT) || !ui_rect_hit(card, x, y)) continue;
                 if (!app_settings_set_reader_chrome_item(s_chrome_pick_bar, s_chrome_pick_slot, s_chrome_item_order[i])) {
                     copy_text(s_chrome_error, sizeof(s_chrome_error), "保存失败，请重试");
                     return APP_REDRAW_PAGE;
                 }
+                s_chrome_error[0] = 0;
                 s_reader_panel = READER_PANEL_CHROME_SETTINGS;
                 invalidate_prep();
                 return APP_REDRAW_PAGE;
@@ -5233,9 +5238,13 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         } else {
             for (int row = 0; row < CHROME_ROW_COUNT; ++row) {
                 EpdRect card = chrome_row_rect(row);
-                if (card.y < CHROME_ROW_TOP || !ui_rect_hit(card, x, y)) continue;
+                if (!chrome_row_visible(card, CHROME_ROW_TOP, CHROME_ROW_VIEW_HEIGHT) || !ui_rect_hit(card, x, y)) continue;
                 if (row == CHROME_ROW_COUNT - 1) {
-                    app_settings_set_reader_chrome_default();
+                    if (!app_settings_set_reader_chrome_default()) {
+                        copy_text(s_chrome_error, sizeof(s_chrome_error), "保存失败，请重试");
+                        return APP_REDRAW_PAGE;
+                    }
+                    s_chrome_error[0] = 0;
                     invalidate_prep();
                     return APP_REDRAW_PAGE;
                 }

@@ -82,22 +82,29 @@ static bool same_rect(EpdRect a, EpdRect b) {
 int main(void) {
     const unsigned scales[] = {0, 80, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 240};
     const unsigned intervals[] = {0, 5, 10, 15, 30, 77, UINT_MAX};
+#ifdef LEGACY
+    const int setting_count=7;
+    const unsigned flag_count=32;
+#else
+    const int setting_count=8;
+    const unsigned flag_count=64;
+#endif
     for (unsigned si = 0; si < sizeof(scales) / sizeof(*scales); ++si) {
         scale = scales[si];
         int top = reading_settings_top();
         record("top %u %d\n", scale, top);
-        for (int i = -1; i <= 7; ++i) {
+        for (int i = -1; i <= setting_count; ++i) {
             EpdRect r = reading_setting_rect(i);
             record("cell %d %d %d %d %d\n", i, r.x, r.y, r.width, r.height);
 #ifndef LEGACY
             assert(same_rect(r, ui_reader_settings_rect(scale, i)));
 #endif
-            if (i < 0 || i >= 7) assert(!r.width && !r.height);
+            if (i < 0 || i >= setting_count) assert(!r.width && !r.height);
             else assert(r.y >= top + 100 && r.y + r.height < 1141);
         }
         for (unsigned pi = 0; pi < sizeof(intervals) / sizeof(*intervals); ++pi) {
             pages = intervals[pi];
-            for (flags = 0; flags < 32; ++flags) {
+            for (flags = 0; flags < flag_count; ++flags) {
                 record("case %u %u %u\n", scale, pages, flags);
                 draw_reading_settings(framebuffer);
                 draw_turn_settings(framebuffer);

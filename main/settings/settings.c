@@ -1047,16 +1047,17 @@ bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader
     if (err == ESP_OK) s_reader_chrome[bar * 3 + slot] = item;
     return err == ESP_OK;
 }
-void app_settings_set_reader_chrome_default(void) {
-    if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome))) return;
+bool app_settings_set_reader_chrome_default(void) {
+    if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome))) return true;
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
-    if (err != ESP_OK) return;
+    if (err != ESP_OK) return false;
     for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
         err = nvs_set_u8(h, s_reader_chrome_names[i], s_reader_chrome_defaults[i]);
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
     if (err == ESP_OK) memcpy(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome));
+    return err == ESP_OK;
 }
 
 bool app_settings_reader_hold_refresh(void) { return s_reader_hold_refresh; }

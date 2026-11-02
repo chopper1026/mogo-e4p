@@ -54,6 +54,8 @@ static char *s_text="book";
 static bool s_reader_fullscreen,statusbar=true,wallpaper;
 static int64_t s_reader_clock_minute=-1,minute=100;
 static int s_reader_power=-1;
+static uint32_t chrome=1,s_reader_chrome_fp;
+static bool s_reader_chrome_fp_valid;
 typedef struct {int percent;bool charging;}pmu_snapshot_t;
 static pmu_snapshot_t power={.percent=-1};
 static const pmu_snapshot_t *device_power_get(void){return &power;}
@@ -82,10 +84,13 @@ static EpdRect reader_area(void);
 static bool s_reader_cleanup,s_water_turn_pending,s_reader_turn_pending,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm,s_reader_footer_pending;
 '''
 for name in ('reader_status_area','reader_status_visible','reader_status_paint','reader_status_power','reader_status_prepare'):
- unit+=function(name,book)+'\n'
+ code=function(name,book)
+ if name=='reader_status_prepare':code=code.replace('reader_status_prepare(', 'reader_status_prepare_actual(', 1)
+ unit+=code+'\n'
+unit+='static bool reader_status_prepare(app_ctx_t *ctx,app_redraw_t redraw,int64_t minute,int power){return reader_status_prepare_actual(ctx,redraw,minute,power,chrome);}\n'
 present=function('present',book)
 ack=present[present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()'):present.index('    const bool reader_frame_ok')]
-unit+='static void frame_ack(int err,app_redraw_t redraw,bool tools_band,bool status_updated,int64_t frame_minute,int frame_power){\nstruct {bool status_updated;} output={status_updated};\n'+ack+'}\n'
+unit+='static void frame_ack(int err,app_redraw_t redraw,bool tools_band,bool status_updated,int64_t frame_minute,int frame_power){\nuint32_t frame_chrome=chrome;struct {bool status_updated;} output={status_updated};\n'+ack+'}\n'
 # Actual prefetched-page path; freshness is checked after copying, before any push.
 unit+=r'''
 static uint8_t *s_page_images;
@@ -150,6 +155,12 @@ int main(void){
  frame_ack(OK,APP_REDRAW_AREA,true,true,minute,power_value);assert(s_reader_power==-1);
  frame_ack(OK,APP_REDRAW_AREA,false,true,minute,power_value);assert(s_reader_power==power_value&&s_reader_clock_minute==minute);
  assert(!reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,power_value));
+ // 页码槽位变化单独触发顶部，成功输出前不确认指纹。/ Page-slot changes alone refresh the top; acknowledge only successful output.
+ ++chrome;assert(reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,power_value));
+ frame_ack(FAULT,APP_REDRAW_AREA,false,true,minute,power_value);
+ assert(s_reader_chrome_fp!=chrome&&reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,power_value));
+ frame_ack(OK,APP_REDRAW_AREA,false,true,minute,power_value);
+ assert(s_reader_chrome_fp==chrome&&!reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,power_value));
  // 电量未知恢复、百分比和充电状态独立触发下一次翻页重画，不需分钟变化。
  // Unknown recovery, percentage and charging changes independently prepare the next turn within the same minute.
  for(int pct=-1;pct<=68;pct+=23)for(int charging=0;charging<2;++charging){

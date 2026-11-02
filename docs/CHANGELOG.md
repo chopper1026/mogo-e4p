@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 亚克力书架挡板高度减半，保留底边位置以露出更多封面；设置预览同步调整。
   Halve acrylic shelf guard height while retaining its bottom edge to reveal more cover art; update the settings preview accordingly.
+- 修复页眉页脚中间为空或隐藏时两侧文字重叠、列表视口外选项仍可点击；恢复默认布局保存失败时显示提示。
+  Fix overlapping side slots when the center is empty or hidden and taps on off-viewport options; report failures when saving the default layout.
 
 ## v1.0.1 · 本地测试 / Local testing · 2026-10-31
 
