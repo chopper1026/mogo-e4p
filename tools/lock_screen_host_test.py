@@ -80,7 +80,7 @@ static bool ui_builtin_image_draw(uint8_t *fb,int image){assert(image==UI_BUILTI
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void app_lock_wait_key_idle(int ms){(void)ms;}
-static int app_light_sleep_wait(void *acc){(void)acc;++waits;return waits%2?APP_WAKE_KEY:APP_WAKE_PICKUP;}
+static int app_lock_sleep_wait(EpdiyHighlevelState *hl,void *acc){assert(hl);(void)acc;++waits;return waits%2?APP_WAKE_KEY:APP_WAKE_PICKUP;}
 static int64_t esp_timer_get_time(void){return now*1000;}
 static int device_power_poll(void){return 0;}
 static int device_power_take_key_action(void){int action=power_pending;power_pending=0;return action;}

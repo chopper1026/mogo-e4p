@@ -830,6 +830,14 @@ static void back_header(uint8_t *fb, const char *title) {
     settings_divider(fb, 174, 36, 612);
 }
 
+static EpdRect standby_mode_rect(unsigned row, bool timed) {
+    return (EpdRect){36, 300 + (int)row * 154, 612, row == 2 && timed ? 222 : 132};
+}
+
+static EpdRect standby_duration_rect(unsigned column) {
+    return (EpdRect){64 + (int)column * 188, 738, 172, 66};
+}
+
 static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
     // 每个设置项对应一个 Lucide 图标；索引顺序由各分组传入的 icons[] 数组决定。
     // One Lucide icon per setting row; the index order comes from each group's icons[] array.
@@ -1357,7 +1365,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
         }
         ui_text(fb, 48, 760, 23, "操作后重新计时，传输和升级期间暂停", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 810, 23, "「彻底关机」锁屏即断电；「仅浅睡」永不断电", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 810, 23, "待机方式可选仅浅睡、定时关机或立即关机", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1396,16 +1404,26 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "待机方式");
         section(fb, 248, "选择锁屏后的待机方式");
-        const char *labels[] = {"彻底关机", "仅浅睡"};
+        bool timed = app_settings_shutdown_minutes() != 0;
+        const char *labels[] = {"彻底关机", "仅浅睡", "浅睡后关机"};
         const char *details[] = {"锁屏即彻底断电；画面保留，长按电源键约 1 秒开机",
-                                 "锁屏画面保留；不断电，按键返回关机前页面"};
-        for (int i = 0; i < 2; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
-            bool active = app_settings_shutdown_style() == (i ? APP_SHUTDOWN_LIGHT : APP_SHUTDOWN_STAGED);
+                                 "锁屏画面保留；不断电，按键返回关机前页面",
+                                 "锁屏后开始计时；提前唤醒取消本轮计时"};
+        for (int i = 0; i < 3; ++i) {
+            EpdRect box = standby_mode_rect((unsigned)i, timed);
+            bool active = i == 2 ? timed :
+                app_settings_shutdown_style() == (app_shutdown_style_t)(APP_SHUTDOWN_STAGED + i);
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
             ui_text(fb, 64, box.y + 23, 29, labels[i], EPD_DRAW_ALIGN_LEFT, false);
             ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
+        }
+        if (timed) {
+            const char *durations[] = {"10 分钟", "30 分钟", "60 分钟"};
+            for (unsigned i = 0; i < 3; ++i) {
+                bool active = app_settings_shutdown_style() == (app_shutdown_style_t)(APP_SHUTDOWN_LIGHT_10 + i);
+                ui_draw_button(fb, standby_duration_rect(i), durations[i], active);
+            }
         }
         ui_nav_draw(fb, 3);
         return;
@@ -1618,16 +1636,19 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int connection_icons[]={0,1,6};
     setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
                   connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
-    char font_name[96],contrast[24],idle[24],signature[96];
+    char font_name[96],contrast[24],idle[24],signature[96],standby[48];
     snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
     unsigned minutes=app_settings_auto_lock_minutes();
     if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else strcpy(idle,"关闭");
+    unsigned shutdown_minutes=app_settings_shutdown_minutes();
+    if(shutdown_minutes)snprintf(standby,sizeof(standby),"浅睡 %u 分钟后关机",shutdown_minutes);
+    else snprintf(standby,sizeof(standby),"%s",app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底关机");
     const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","待机方式"};
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
-        app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底关机"};
+        standby};
     const int display_icons[]={2,7,15,11,14,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
@@ -2428,12 +2449,21 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_POWER_SLEEP) {
-        if (y >= 300 && y < 432) {
-            app_settings_set_shutdown_style(APP_SHUTDOWN_STAGED);
-            return APP_REDRAW_PAGE;
+        bool timed = app_settings_shutdown_minutes() != 0;
+        if (timed) {
+            for (unsigned i = 0; i < 3; ++i) {
+                if (!ui_rect_hit(standby_duration_rect(i), ev->x0, y)) continue;
+                app_settings_set_shutdown_style((app_shutdown_style_t)(APP_SHUTDOWN_LIGHT_10 + i));
+                return APP_REDRAW_PAGE;
+            }
         }
-        if (y >= 454 && y < 586) {
-            app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT);
+        for (int i = 0; i < 3; ++i) {
+            EpdRect box = standby_mode_rect((unsigned)i, timed);
+            if (!ui_rect_hit(box, ev->x0, y)) continue;
+            if (i < 2)
+                app_settings_set_shutdown_style((app_shutdown_style_t)(APP_SHUTDOWN_STAGED + i));
+            else if (!timed)
+                app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT_10);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;

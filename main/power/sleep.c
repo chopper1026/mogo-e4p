@@ -24,6 +24,8 @@
  * User revision: after pulse power-off the hardware only boots on a long hold, so the ten-minute lock deep stage is now a true host deep sleep--EXT1 watches the expander interrupt and a short power-key press reboots back to the checkpoint; pulse power-off remains for explicit shutdown (APP_SLEEP_OFF).
  * 用户修订：待机方式「先浅后深」更名为「彻底关机」——锁屏出图后立即按 f326902 的原厂电源键脉冲彻底断电，不再有十分钟浅睡阶梯；此后长按电源键约 1 秒开机。
  * User revision: the standby style "staged" is renamed "full off" and locks pulse off factory-style (f326902) right after the lock art with no ten-minute stage; booting afterwards takes a one-second power-key hold.
+ * 用户 2026-11-02 新增：独立的 10/30/60 分钟浅睡后关机档，不改变仅浅睡与立即关机；提前唤醒取消本轮倒计时。
+ * User addition of 2026-11-02: separate 10/30/60-minute light-sleep-then-off styles preserve light-only and immediate off; an early wake cancels this countdown.
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
@@ -123,6 +125,7 @@ static bool s_acc_was_on;
 typedef enum {
     SLEEP_TRACE_KEY, SLEEP_TRACE_PICKUP, SLEEP_TRACE_JOBS_BUSY,
     SLEEP_TRACE_IRQ_STUCK, SLEEP_TRACE_TIMER_ERROR, SLEEP_TRACE_SLEEP_ERROR,
+    SLEEP_TRACE_TIMEOUT,
 } sleep_trace_exit_t;
 
 typedef struct {
@@ -162,7 +165,7 @@ static void sleep_trace_replay(void) {
     nvs_close(handle);
     if (error != ESP_OK) return;
     if (size != sizeof(trace) || trace.version != 1 || trace.elf[16] != '\0' ||
-        trace.exit > SLEEP_TRACE_SLEEP_ERROR || trace.wake > APP_WAKE_TIMEOUT ||
+        trace.exit > SLEEP_TRACE_TIMEOUT || trace.wake > APP_WAKE_TIMEOUT ||
         (uint64_t)trace.successes + trace.failures != trace.attempts ||
         trace.total_us < 0 || trace.ok_call_us < 0 || trace.rejected_call_us < 0 ||
         trace.ok_call_us > trace.total_us || trace.rejected_call_us > trace.total_us - trace.ok_call_us) {
@@ -346,7 +349,7 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
     return false;
 }
 
-app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
+static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t deadline_us) {
     sleep_trace_t trace = {.start_us = esp_timer_get_time()};
     const app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
     if (!handoff.jobs_ready) {
@@ -435,6 +438,11 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             ESP_LOGI(TAG, "pickup wake");
             break;
         }
+        if (deadline_us && now_us >= deadline_us) {
+            wake = APP_WAKE_TIMEOUT;
+            exit = SLEEP_TRACE_TIMEOUT;
+            break;
+        }
         board_clear_ioe_int();
         if (gpio_get_level((gpio_num_t)BOARD_IOE_INT_GPIO) == 0) {
             ++trace.irq_low_polls;
@@ -464,6 +472,11 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             continue;
         }
         int64_t sleep_us = APP_LOCK_KEY_POLL_US;
+        if (deadline_us) {
+            int64_t remaining_us = deadline_us - esp_timer_get_time();
+            if (remaining_us <= 0) continue;
+            if (remaining_us < sleep_us) sleep_us = remaining_us;
+        }
         esp_err_t timer_error = esp_sleep_enable_timer_wakeup((uint64_t)sleep_us);
         if (timer_error != ESP_OK) {
             ++trace.timer_errors;
@@ -559,6 +572,22 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     (void)device_power_key_sampler_enable(key_sampling);
     sleep_trace_finish(&trace, exit, wake);
     return wake;
+}
+
+app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
+    return light_sleep_wait_until(acc, 0);
+}
+
+app_wake_source_t app_lock_sleep_wait(EpdiyHighlevelState *hl, sc7a20h_handle_t acc) {
+    uint8_t minutes = app_settings_shutdown_minutes();
+    int64_t deadline_us = minutes ? esp_timer_get_time() + (int64_t)minutes * 60 * 1000000 : 0;
+    app_wake_source_t wake = light_sleep_wait_until(acc, deadline_us);
+    if (wake != APP_WAKE_TIMEOUT) return wake;
+    if (lock_screen_save(epd_hl_get_framebuffer(hl))) (void)pico_boot_mark_frame_cached();
+    (void)app_enter_host_sleep(APP_SLEEP_OFF);
+    // 下电失败后不反复打脉冲，也不把定时唤醒当解锁；沿用无期限锁屏等待及其故障恢复。
+    // Do not repeat failed power pulses or treat timer wakes as unlocks; retain the untimed locked wait and its fault recovery.
+    return app_light_sleep_wait(acc);
 }
 
 esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
@@ -723,11 +752,11 @@ void enter_lock_and_sleep(
         (long long)((lock_t_panel - lock_t_clear) / 1000), (long long)((lock_t_panel - lock_t_art) / 1000),
         (long long)((lock_t_key - lock_t_panel) / 1000), (long long)((lock_t_key - lock_t_start) / 1000));
     // 彻底关机档锁屏出图后立即断电交接——有 PMU EN 的板走软睡，没有的板自动升级为原厂脉冲断电（长按电源键约 1 秒开机），
-    // 墨水屏保留这张锁屏图，检查点恢复原页面，开机后的密码由启动验证把关；仅浅睡无期限浅睡不断电。
+    // 墨水屏保留这张锁屏图，检查点恢复原页面，开机后的密码由启动验证把关；仅浅睡无期限，定时档到时关机。
     // Full off hands off to power-down right after the lock art--soft sleep with PMU EN, an
     // automatic factory pulse power-off without it (a one-second power-key hold boots). The
     // e-paper keeps this lock image, the checkpoint restores the page and cold boots are PIN-gated;
-    // "light-only" sleeps without a deadline and never powers off.
+    // "light-only" has no deadline; timed styles power off after their selected light-sleep interval.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
     if (!light_only) {
@@ -744,7 +773,7 @@ void enter_lock_and_sleep(
     } else if (lock_pin_enabled()) {
         lock_screen_authenticate(hl, touch, acc, false);
     } else {
-        (void)app_light_sleep_wait(acc);
+        (void)app_lock_sleep_wait(hl, acc);
     }
     pico_boot_clear_resume();
     if (system_lock) app_font_end_lock(&lock_font);

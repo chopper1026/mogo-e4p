@@ -104,6 +104,7 @@ static bool has_keys[3];
 static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
 static uint8_t loaded_idle;static bool has_idle;
+static uint8_t loaded_shutdown;static bool has_shutdown;
 static int loaded_margin=-1,loaded_margin_l=-1,loaded_margin_r=-1,loaded_margin_t=-1,loaded_margin_b=-1;
 esp_err_t board_sd_get_info(board_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
@@ -111,8 +112,8 @@ esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; if (mode == NVS_READWRITE) assert(flash_depth); *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
 static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=(uint8_t)loaded_margin;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_L)&&loaded_margin_l>=0){*value=(uint8_t)loaded_margin_l;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_R)&&loaded_margin_r>=0){*value=(uint8_t)loaded_margin_r;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_T)&&loaded_margin_t>=0){*value=(uint8_t)loaded_margin_t;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_B)&&loaded_margin_b>=0){*value=(uint8_t)loaded_margin_b;return ESP_OK;} return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)&&has_shutdown){*value=loaded_shutdown;return ESP_OK;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=(uint8_t)loaded_margin;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_L)&&loaded_margin_l>=0){*value=(uint8_t)loaded_margin_l;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_R)&&loaded_margin_r>=0){*value=(uint8_t)loaded_margin_r;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_T)&&loaded_margin_t>=0){*value=(uint8_t)loaded_margin_t;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_B)&&loaded_margin_b>=0){*value=(uint8_t)loaded_margin_b;return ESP_OK;} return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){loaded_shutdown=value;has_shutdown=true;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
  if(!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR)) {
@@ -1099,6 +1100,43 @@ int main(void) {
     }
     app_settings_set_book_px(17);assert(app_settings_book_px()==48);
     app_settings_set_book_px(91);assert(app_settings_book_px()==48);
+    // 新旧档位均能重启读取和备份往返，未知值与旧 FULL 仍回落立即关机。
+    // Old/new styles survive reboot reads and backup round-trips; unknown values and legacy FULL still fall back to immediate off.
+    const uint8_t durations[] = {0, 0, 0, 10, 30, 60};
+    for(unsigned style=APP_SHUTDOWN_STAGED;style<=APP_SHUTDOWN_LIGHT_60;++style){
+        app_settings_set_shutdown_style((app_shutdown_style_t)style);
+        s_shutdown_style=APP_SHUTDOWN_FULL;app_settings_init();
+        assert(app_settings_shutdown_style()==(app_shutdown_style_t)style);
+        assert(app_settings_shutdown_minutes()==durations[style]);
+        assert(app_settings_backup_save()==ESP_OK);
+        app_settings_set_shutdown_style(style==APP_SHUTDOWN_STAGED?APP_SHUTDOWN_LIGHT:APP_SHUTDOWN_STAGED);
+        assert(app_settings_backup_restore()==ESP_OK);
+        assert(app_settings_shutdown_style()==(app_shutdown_style_t)style&&loaded_shutdown==style);
+        s_shutdown_style=APP_SHUTDOWN_FULL;app_settings_init();
+        assert(app_settings_shutdown_minutes()==durations[style]);
+    }
+    const unsigned invalid_styles[]={APP_SHUTDOWN_FULL,6,255};
+    for(unsigned i=0;i<sizeof(invalid_styles)/sizeof(invalid_styles[0]);++i){
+        loaded_shutdown=invalid_styles[i];has_shutdown=true;app_settings_init();
+        assert(app_settings_shutdown_style()==APP_SHUTDOWN_STAGED&&!app_settings_shutdown_minutes());
+        app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT);
+        app_settings_set_shutdown_style((app_shutdown_style_t)invalid_styles[i]);
+        assert(app_settings_shutdown_style()==APP_SHUTDOWN_STAGED&&loaded_shutdown==APP_SHUTDOWN_STAGED);
+    }
+    settings_backup_shutdown_style_t bad_shutdown={.style=6};
+    uint32_t bad_hash=backup_shutdown_style_checksum(&bad_shutdown);
+    for(unsigned i=0;i<4;++i)bad_shutdown.checksum[i]=(uint8_t)(bad_hash>>(8*i));
+    assert(!backup_shutdown_style_valid(&bad_shutdown));
+    saved=fopen(BACKUP_FILE,"r+b");assert(saved);
+    const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t));
+    assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
+    assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
+    int commits_before_bad_shutdown=commit_count;
+    unsigned imports_before_bad_shutdown=wifi_imports;
+    assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE);
+    assert(commit_count==commits_before_bad_shutdown&&wifi_imports==imports_before_bad_shutdown&&
+           app_settings_shutdown_style()==APP_SHUTDOWN_STAGED);
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
     return 0;
 }

@@ -533,6 +533,7 @@ enum { DEVICE_POWER_BATT_LOG_LOCK=128, DEVICE_POWER_BATT_LOG_WAKE=256 };
 static unsigned log_locks, log_wakes;
 static void device_power_batt_log_event(int event){if(event==128)++log_locks;else {assert(event==256);++log_wakes;}}
 static bool key_sampling=true;
+static uint64_t timer_us;
 static bool device_power_key_sampler_enable(bool enabled){bool previous=key_sampling;key_sampling=enabled;return previous;}
 static app_lifecycle_light_t app_lifecycle_prepare_light(void){return (app_lifecycle_light_t){jobs_ready,ble_stopped};}
 static void cache_wake_restore_snapshot(void){}
@@ -545,22 +546,22 @@ static int gpio_wakeup_disable(int pin){assert(pin==2);return ESP_OK;}
 static void board_clear_ioe_int(void){devices[0x20].latched[0]=devices[0x20].latched[1]=false;}
 static bool device_power_take_key_wakeup(void){
     assert(!key_sampling);
-    assert(++key_polls<1000);
+    assert(++key_polls<10000);
     if(scenario==1 && key_polls==1)devices[0x19].regs[0x31]=0x40;
     if(scenario==2 && key_polls==1){devices[0x19].regs[0x31]=0x40;devices[0x20].latched[1]=true;}
     if(scenario==4 && key_polls==3)key_pending=true;
-    if(scenario>=9 && key_polls>1)devices[0x20].regs[1]=0xff;
+    if(scenario>=9 && scenario<=16 && key_polls>1)devices[0x20].regs[1]=0xff;
     bool key=key_pending;key_pending=false;return key;
 }
-static int esp_sleep_enable_timer_wakeup(uint64_t usec){assert(usec==APP_LOCK_KEY_POLL_US);return scenario==7?ESP_FAIL:ESP_OK;}
+static int esp_sleep_enable_timer_wakeup(uint64_t usec){assert(usec>0&&usec<=APP_LOCK_KEY_POLL_US);timer_us=usec;return scenario==7?ESP_FAIL:ESP_OK;}
 static int esp_sleep_disable_wakeup_source(int source){assert(source==ESP_SLEEP_WAKEUP_TIMER);return ESP_OK;}
 static int app_s31_light_sleep_start(void){
     assert(!key_sampling);
-    ++sleep_count;assert(sleep_count<10 && ble_stopped);
+    ++sleep_count;assert(sleep_count<2000 && ble_stopped);
     assert(!nvs_reads&&!nvs_writes&&!nvs_commits&&!live_logs&&!saved_logs);
-    now_us+=(scenario==3 && sleep_count==1)?10000:100000;
+    now_us+=scenario>=20?(int64_t)timer_us:((scenario==3 && sleep_count==1)?10000:100000);
     wake_causes=1UL<<ESP_SLEEP_WAKEUP_TIMER;
-    if(scenario>=9){
+    if(scenario>=9 && scenario<=16){
         if(sleep_count==1){
             wake_causes=1UL<<ESP_SLEEP_WAKEUP_GPIO;
             if(scenario==9||scenario==12||scenario==14||scenario==15)devices[0x20].regs[1]=0x7f;
@@ -573,14 +574,16 @@ static int app_s31_light_sleep_start(void){
         return scenario==12?ESP_FAIL:ESP_OK;
     }
     if(scenario==0 || scenario==6)key_pending=true;
-    else if(scenario!=8)devices[0x19].regs[0x31]=0x40;
+    else if(scenario==21)key_pending=true;
+    else if(scenario==22)devices[0x19].regs[0x31]=0x40;
+    else if(scenario<8)devices[0x19].regs[0x31]=0x40;
     return scenario==8?ESP_FAIL:ESP_OK;
 }
 static uint32_t esp_sleep_get_wakeup_causes(void){return wake_causes;}
 """
     code += '#if CONFIG_APP_SLEEP_DIAGNOSTICS\n' + function('sleep_trace_log', path) + '\n#endif\n'
     for name in ['sleep_trace_replay','sleep_trace_record','sleep_trace_finish','lock_capture_power_key',
-                 'lock_arm_ioe_wakeup','pickup_ack','pickup_ia','pickup_wait_quiet','app_light_sleep_wait']:
+                 'lock_arm_ioe_wakeup','pickup_ack','pickup_ia','pickup_wait_quiet','light_sleep_wait_until','app_light_sleep_wait']:
         code += function(name,path)+'\n'
     return code
 
@@ -591,7 +594,7 @@ static void reset_sleep(int next){
     key_sampling=true;
     wake_causes=0;parked=no_ioe=false;
     suspend_count=resume_count=sleep_count=key_polls=cache_restores=last_wake=0;
-    log_locks=log_wakes=0;
+    log_locks=log_wakes=0;timer_us=0;
     nvs_fault=0;saved_size=pending_size=0;
     nvs_reads=nvs_writes=nvs_commits=nvs_closes=live_logs=saved_logs=0;
     summary[0]=0;devices[0x20].regs[1]=0xff;
@@ -711,6 +714,43 @@ int main(void){
     assert(counters.other_wakes==1&&counters.short_calls==1&&!counters.min_call_us&&counters.max_call_us==2000000);
 #else
     sleep_trace_replay();assert(!nvs_reads);
+#endif
+    // 分钟档用虚拟时钟跑完整时长，诊断开关均不得增加切片内落盘。
+    // Run complete intervals with diagnostics on/off, never adding in-slice persistence.
+    for(unsigned minutes=10;minutes<=60;minutes=minutes==10?30:minutes+30){
+        reset_sleep(20);pickup_setting=false;
+        int64_t deadline=now_us+(int64_t)minutes*60*1000000;
+        assert(light_sleep_wait_until(acc,deadline)==APP_WAKE_TIMEOUT);
+        assert(now_us==deadline+30000+(CONFIG_APP_SLEEP_DIAGNOSTICS?70000:0));
+        assert(sleep_count==minutes*30&&cache_restores==sleep_count&&last_wake==APP_WAKE_NONE);
+        assert(key_sampling&&resume_count==1);
+        check_trace(sleep_count,sleep_count,0,SLEEP_TRACE_TIMEOUT);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+        sleep_trace_t timeout=saved_trace();
+        assert(timeout.wake==APP_WAKE_TIMEOUT&&timeout.timer_wakes==sleep_count);
+        sleep_trace_replay();assert(saved_logs==1&&strstr(summary,"origin=saved"));
+#endif
+    }
+    reset_sleep(20);pickup_setting=false;
+    assert(light_sleep_wait_until(acc,1501000)==APP_WAKE_TIMEOUT&&timer_us==1500000);
+    assert(now_us==1501000+30000+(CONFIG_APP_SLEEP_DIAGNOSTICS?70000:0));
+    check_trace(1,1,0,SLEEP_TRACE_TIMEOUT);
+    reset_sleep(21);pickup_setting=false;
+    assert(light_sleep_wait_until(acc,now_us+600000000)==APP_WAKE_KEY&&sleep_count==1);
+    check_trace(1,1,0,SLEEP_TRACE_KEY);
+    // 截止同一轮真实按键/拿起优先，保留按键锁存与诊断退出类型。
+    // Key/pickup events at expiry win, preserving key capture and diagnostic exit types.
+    reset_sleep(21);pickup_setting=false;
+    assert(light_sleep_wait_until(acc,now_us+2000000)==APP_WAKE_KEY);
+    check_trace(1,1,0,SLEEP_TRACE_KEY);
+    reset_sleep(22);
+    assert(light_sleep_wait_until(acc,now_us+2000000)==APP_WAKE_PICKUP);
+    check_trace(1,1,0,SLEEP_TRACE_PICKUP);
+    reset_sleep(14);pickup_setting=false;
+    assert(light_sleep_wait_until(acc,now_us+100000)==APP_WAKE_KEY&&sleep_count==1);
+    check_trace(1,1,0,SLEEP_TRACE_KEY);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    assert(saved_trace().key_latched==1);
 #endif
     puts("PASS: actual sleep/SC shared IRQ key and pickup, prelatched motion before IOE checks, short-sleep filtering, arm/config failures, bounded stuck line, BLE/jobs fallback and sleep errors");
     puts("PASS: GPIO P17 capture before release, motion-only/unknown/read-error/stale wake causes, diagnostic on/off, summary accounting and NVS/replay failure boundaries");
