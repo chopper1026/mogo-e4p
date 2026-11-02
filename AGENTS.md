@@ -104,6 +104,12 @@ Deliver implementation, reproducible tests, feature documentation and necessary 
 计划、检查点、过程审查、验收结果和调试日志在 `docs/local/` 或被忽略的构建目录内部闭环，不加入提交。长期有效的行为与限制整理进对应功能文档，不要求读者查内部计划。只有需要交接未完功能或责任时才按 `docs/HANDOFF.md` 提供最小必要摘要；本机账本仍不入库。
 Keep plans, checkpoints, review records, acceptance results and debug logs in ignored `docs/local/` or build directories. Put lasting behavior and limits in feature documentation without dependencies on internal plans. Use `docs/HANDOFF.md` for the minimal necessary handoff of unfinished work or responsibility; the local ledger remains untracked.
 
+用户2026-11-02要求持续记录夜间阅读显示/残影试验：每轮先读 `docs/local/reader-night-mode-experiments.md`，按连续编号追加基准、变量、授权、检查/刷入过程、实际样本、用户反馈、结果与设备最终状态；每次尝试或收到反馈后及时更新。区分候选、失效试验、软件验证与实屏结论，未采集/未确认项如实留空；该本地记录不入库，持续记录不代表持续刷机授权。接手入口保留在 `docs/HANDOFF.local.md`。
+Per the user's 2026-11-02 request, maintain the local night-reader display/ghosting log at `docs/local/reader-night-mode-experiments.md`: read it before each trial and append sequential IDs, baseline, variable, authorization, checks/flashing procedure, actual samples, user feedback, outcome and final device state. Update after every attempt or subsequent feedback. Distinguish proposals, invalid trials, software evidence and optical results; leave unmeasured items explicit. Keep this log uncommitted and linked from `docs/HANDOFF.local.md`; ongoing logging does not authorize ongoing flashing.
+
+用户同日最终决定撤回夜间模式，不作为正式功能上线；N00–N21归档后停止试验。后续必须重新取得明确授权，不得沿用旧许可继续刷机或恢复实验功能。
+The user's final decision that day withdraws night mode from release and stops experiments after archiving N00–N21. Any future trial requires renewed explicit authorization; do not reuse prior permission to flash or restore the experimental feature.
+
 ### 产品页 / Product pages
 
 页面入口以 `main/CMakeLists.txt` 和 `app_registry.c` 为准；旧板演示页已移除。每页导出 `app_desc_t`，页面之间不直接依赖。
