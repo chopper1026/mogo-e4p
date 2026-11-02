@@ -61,7 +61,8 @@ void app_settings_set_haptic_intensity(uint8_t intensity);
 /// device-local and is not part of config backups.
 bool app_settings_batt_log(void);
 void app_settings_set_batt_log(bool on);
-/// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
+/// 已撤下的首页组件与目标，仅为旧 NVS/配置备份保留；首页不再使用。
+/// Retired Home widget/goal fields kept for legacy NVS/profile compatibility; Home no longer consumes them.
 typedef enum {
     APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,
     // 3为旧组件的保留编号，不能重排已有配置。/ ID 3 is retired; preserve existing persisted IDs.

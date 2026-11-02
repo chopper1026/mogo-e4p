@@ -117,7 +117,7 @@ Use `main/CMakeLists.txt` and `app_registry.c` as page entry points; legacy boar
 
 | 文件 / File | 职责 / Role |
 | --- | --- |
-| `app_dashboard.c` | 首页组件、时钟与最近阅读。/ Home widgets, clocks and recent books. |
+| `app_dashboard.c` | 首页题头、头像与最近阅读；卡片下方留白。/ Home header, avatar and recent reading; blank below the card. |
 | `app_book.c` | 书架与 TXT / EPUB 阅读。/ Shelf and TXT / EPUB reading. |
 | `app_files.c` | 文件浏览与传输入口。/ Files and transfer entry points. |
 | `app_device_settings.c` | 设备设置、蓝牙翻页与维护。/ Settings, Bluetooth page-turners and maintenance. |

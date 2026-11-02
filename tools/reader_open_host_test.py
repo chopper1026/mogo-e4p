@@ -102,7 +102,6 @@ static int test_stat(const char *path,struct stat *st){(void)path;memset(st,0,si
 #define stat(path,st) test_stat(path,st)
 static void wifi_transfer_get_status(wifi_transfer_status_t *s){s->network_ready=network_ready;}
 static void invalidate_covers(void){event('c');}
-static void app_home_release_clock_cache(void){event('h');}
 static void lock_draw(void){assert(!locked);locked=true;event('[');}
 static void unlock_draw(void){assert(locked);locked=false;event(']');}
 static void reader_prefetch_discard(void){assert(locked);prefetch_borrowed=false;event('p');}
@@ -182,7 +181,7 @@ int main(void){
     reset();assert(open_book_impl(&ctx,a));assert(!strcmp(s_reader_session.book.title,"测试书"));
     assert(loaded_chapter==0&&loaded_offset==0&&s_px==59&&s_view==READING);
     assert(s_reader_entry_full&&s_reader_image_refresh_pending&&s_stats_last_ms==ctx.now_ms);
-    assert(!strcmp(events,"ch[p]gRSFYAROETPXLHSB"));report("first");
+    assert(!strcmp(events,"c[p]gRSFYAROETPXLHSB"));report("first");
     // 同书重开会交还干净预留；第二次预留不能合并。/ Reopening drops a clean reservation, so the second reserve cannot be merged.
     reserve_calls=0;fail_reserve=2;events[0]=0;assert(!open_book_impl(&ctx,a));
     assert(!reader_session_has_source(&s_reader_session)&&!pending_find(a)&&reserve_calls==2);

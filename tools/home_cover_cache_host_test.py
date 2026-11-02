@@ -41,7 +41,6 @@ if __name__ == '__main__':
 typedef struct {int x,y,width,height;} EpdRect;
 
 typedef struct {int unused;} book_progress_t;
-static uint8_t *s_folder;static uint32_t s_folder_key;static bool s_folder_attempted;
 static bool fast, alloc_fail, asset_allowed=true, disk_hit, corrupt_disk;
 static unsigned loads,disk_reads,disk_writes;
 static size_t psram=4*1024*1024;

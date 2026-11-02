@@ -25,5 +25,5 @@ with tempfile.TemporaryDirectory(prefix="display-refresh-") as directory:
     subprocess.run([str(binary)], cwd=ROOT, check=True)
 
 # 页面测试保留原物理出口断言；专项矩阵检查它们表达的意图。/ Page tests retain physical-exit assertions; the dedicated matrix checks their intents.
-for name in ("dashboard_clock_host_test.py", "settings_scroll_host_test.py", "input_editors_host_test.py", "pager_host_test.py"):
+for name in ("dashboard_home_host_test.py", "settings_scroll_host_test.py", "input_editors_host_test.py", "pager_host_test.py"):
     subprocess.run([sys.executable, str(ROOT / "tools" / name)], cwd=ROOT, check=True)

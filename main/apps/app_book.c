@@ -4210,7 +4210,6 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     // 书架封面和上一本书的预渲染缓冲可以重建；先释放，再解析 EPUB。
     // Cover and previous-page caches are rebuildable; release them before EPUB parsing.
     invalidate_covers();
-    app_home_release_clock_cache();
     lock_draw();
     reader_prefetch_discard();
     unlock_draw();

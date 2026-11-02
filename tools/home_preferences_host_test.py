@@ -27,6 +27,10 @@ static esp_err_t nvs_open(const char *ns,int mode,int *h){assert(!strcmp(ns,NVS_
 static esp_err_t nvs_set_u8(int h,const char *key,uint8_t value){assert(h==1&&key&&value<=180);++writes;return fail_set?ESP_FAIL:ESP_OK;}
 static esp_err_t nvs_commit(int h){assert(h==1);++commits;return fail_commit?ESP_FAIL:ESP_OK;}
 static void nvs_close(int h){assert(h==1);}
+// 此处只测旧字段的持久化；真实显示写入保护由设置备份专项覆盖。
+// Test legacy-field persistence here; the settings-backup suite covers the real display write guard.
+static esp_err_t settings_write_open(nvs_handle_t *h){return nvs_open(NVS_NS,NVS_READWRITE,h);}
+static void settings_write_close(nvs_handle_t h){nvs_close(h);}
 '''+functions+backup+r'''
 int main(void){
  assert(app_settings_home_component()==APP_HOME_FOLDER&&app_settings_home_goal_minutes()==30);

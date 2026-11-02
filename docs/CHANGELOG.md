@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
+- 移除首页最近阅读卡片下方的书夹、时钟与样式选择、月阅读记录及闭环目标，顶部关联圆环一并撤下；下半区留白，保留续读、头像、状态栏时钟与底部导航，不清除阅读进度或票根统计。
+  Remove the old folder/clock widgets, style picker, monthly reading view and daily goal with its header ring. Leave the lower Home area blank while retaining resume, avatar, status clock and navigation; preserve reading progress and ticket statistics.
 - 传书网页文件列表增加左右留白，避免选中与悬停底色紧贴复选框和更多按钮；表头同步对齐。
   Add horizontal padding to transfer file rows so selected and hovered backgrounds leave space around checkboxes and action buttons; align the header to match.
 - WiFi 与热点传书网页改为纯白文件工作台：桌面并排显示目录与上传记录，壁纸和签名单独切换，手机首屏可添加文件；保留分页和覆盖确认，增加本页搜索/排序、批量删除及失败重试。尚未发布，真实设备传输待验收。

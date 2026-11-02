@@ -19,25 +19,14 @@ typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} a
 enum {HOME_ROOT,HOME_COMPONENT,HOME_GOAL,HOME_TIME,READING,SHELF};
 enum {UI_GESTURE_PRESS,UI_GESTURE_MOVE,UI_GESTURE_TAP,UI_GESTURE_LONG_PRESS,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U};
 typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
-typedef int app_home_component_t;
-#define APP_HOME_FOLDER 7
-#define HOME_COMPONENT_OPTIONS 2
 #define ESP_OK 0
-static app_home_component_t s_components[]={0,7};
-static int s_view=HOME_ROOT,s_component_browse,s_goal_draft,s_time_stamp;
-static bool s_press_pending,s_save_error,s_component_pending,s_widget_pending,s_time_pending;
-static struct {bool valid;} s_time_trail;
+static int s_view=HOME_ROOT;
+static bool s_press_pending;
 static EpdRect s_pressed,s_area;
 typedef struct {char path[32];} home_book_t;
 static home_book_t book={"/sdcard/books/Novel/a.epub"};
 static home_book_t *featured(void){return &book;}
 static int open_calls,nav=-1;static bool fail_open;
-static int app_settings_home_component(void){return 0;}
-static int app_settings_set_home_component(int i){(void)i;return 0;}
-static int app_settings_home_goal_minutes(void){return 30;}
-static int app_settings_set_home_goal_minutes(int i){(void)i;return 0;}
-static unsigned component_index(int c){(void)c;return 0;}
-static void refresh_days(void){}
 static int ui_nav_hit(int x,int y){(void)x;return y>=1096?2:-1;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;nav=tab;}
 static bool app_book_request_open_from_home(const char *path){assert(!strcmp(path,book.path));++open_calls;return !fail_open;}
