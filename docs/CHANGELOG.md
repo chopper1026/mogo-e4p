@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
+- 传书网页文件列表增加左右留白，避免选中与悬停底色紧贴复选框和更多按钮；表头同步对齐。
+  Add horizontal padding to transfer file rows so selected and hovered backgrounds leave space around checkboxes and action buttons; align the header to match.
 - WiFi 与热点传书网页改为纯白文件工作台：桌面并排显示目录与上传记录，壁纸和签名单独切换，手机首屏可添加文件；保留分页和覆盖确认，增加本页搜索/排序、批量删除及失败重试。尚未发布，真实设备传输待验收。
   Redesign WiFi/AP transfer as a white file workspace with side-by-side desktop browsing and transfer history, separate wallpaper/signature views and first-screen mobile upload. Retain paging and overwrite confirmation; add current-page search/sort, bulk deletion and failed-upload retry. Unreleased; real-device transfer awaits acceptance.
 - 阅读设置的页眉页脚增加独立高度调节，正文与刷新区域同步调整，保持阅读位置；默认布局与全屏排版不变，支持保存、备份和恢复默认。
