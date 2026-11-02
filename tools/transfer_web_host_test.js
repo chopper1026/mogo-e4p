@@ -1,183 +1,178 @@
 /* SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
- * 执行实际网页脚本，验证目录操作与三类上传。/ Exercise the real page script for browsing, editing, and three uploads.
+ * 执行实际网页脚本，验证工作台与设备接口。/ Exercise the real workspace script and device API contracts.
  */
-const fs = require('node:fs');
-const vm = require('node:vm');
-const assert = require('node:assert/strict');
-const html = fs.readFileSync('components/wifi_transfer/upload.html', 'utf8');
-const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-const flush = () => new Promise(resolve => setImmediate(resolve));
-
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const html=fs.readFileSync('components/wifi_transfer/upload.html','utf8');
+const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
 class Element {
-  constructor() {
-    this.children = []; this.dataset = {}; this.value = ''; this.files = [];
-    this.classList = {toggle() {}};
+  constructor(tag='div') {
+    this.tagName=tag;this.children=[];this.dataset={};this.attributes={};this.value='';this.files=[];this.style={};this.className='';
+    this.classList={toggle:(name,on)=>{const set=new Set(this.className.split(' ').filter(Boolean));if(on===undefined)on=!set.has(name);on?set.add(name):set.delete(name);this.className=[...set].join(' ');},add:name=>this.classList.toggle(name,true),remove:name=>this.classList.toggle(name,false)};
   }
-  set textContent(text) { this.text = String(text); this.children = []; }
-  get textContent() { return this.text || ''; }
-  set innerHTML(_) { throw Error('Do not parse file names as HTML'); }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
-  showModal() { this.open = true; }
-  close() { this.open = false; }
-  focus() {}
-  getContext() { return {setTransform() {}, fillRect() {}, drawImage() {}, fillText() {}}; }
-  getBoundingClientRect() { return {width: 260}; }
-  setPointerCapture() {}
-  toBlob(resolve) { assert.equal(this.width, 684); assert.equal(this.height, 1216); resolve({size: 120000}); }
+  set textContent(value){this.text=String(value);this.children=[];}
+  get textContent(){return (this.text||'')+this.children.map(c=>c.textContent).join('');}
+  set innerHTML(_){throw Error('Never parse file names as HTML');}
+  append(...children){this.children.push(...children);}
+  replaceChildren(...children){this.text='';this.children=children;}
+  setAttribute(key,value){this.attributes[key]=String(value);}
+  removeAttribute(key){delete this.attributes[key];}
+  get firstElementChild(){return this.children[0];}
+  showModal(){this.open=true;}
+  close(){this.open=false;}
+  focus(){}
+  click(){return this.onclick?.();}
+  getContext(){return {setTransform(){},fillRect(){},drawImage(){},fillText(){}};}
+  getBoundingClientRect(){return {width:260,right:600,bottom:200};}
+  setPointerCapture(){}
+  toBlob(resolve){assert.equal(this.width,684);assert.equal(this.height,1216);resolve({size:120000});}
 }
-
-async function setup({responses = [], confirmations = [true], mode = 'ap'} = {}) {
-  const nodes = new Map();
-  const sections = ['book', 'font', 'picture', 'file'].map(kind => {
-    const section = new Element();
-    section.dataset.kind = kind;
-    const input = new Element(), result = new Element(), send = new Element();
-    section.querySelector = selector => selector === 'input' ? input : selector === '.result' ? result : send;
-    section.input = input; section.result = result; section.send = send;
-    return section;
-  });
-  const document = {
-    getElementById(id) { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); },
-    createElement() { return new Element(); },
-    querySelectorAll(selector) { return selector === '.upload' ? sections : [...nodes.values(), ...sections.flatMap(s => [s.input, s.send])]; },
-  };
-  const state = {gets: [], mutations: [], sent: [], signature: '慢慢阅读', signatures: []};
-  const fetch = async (url, options = {}) => {
-    if(url === '/signature') { if(options.method === 'POST') {state.signature=options.body;state.signatures.push(options.body);}return {status:200,json:async()=>({signature:state.signature,ok:true})}; }
-    if (url === '/info') return {status: 200, json: async () => ({
-      mode, is_flash: false, free_bytes: 100000000, file_limit: 0,
-    })};
-    if (url.startsWith('/files?')) {
-      state.gets.push(url);
-      const path = new URL('http://pico' + url).searchParams.get('path') || '';
-      const items = path ? [{name: '封面.jpg', directory: false, size: 1200000}]
-        : [{name: 'books', directory: true, size: 0}, {name: 'readme.txt', directory: false, size: 12}];
-      return {status: 200, json: async () => ({path, total: items.length, pages: 1, items})};
+async function setup(options={}) {
+  const nodes=new Map(),all=[],responses=options.responses||[],confirmations=options.confirmations||[true];
+  const create=tag=>{const el=new Element(tag);all.push(el);return el;};
+  for(const match of html.matchAll(/<([a-z][a-z0-9-]*)\b([^>]*)>/gi)){
+    const attrs=match[2],id=attrs.match(/\bid="([^"]+)"/),view=attrs.match(/\bdata-view="([^"]+)"/),folder=attrs.match(/\bdata-folder="([^"]*)"/);
+    if(!id&&!view&&!folder)continue;
+    const el=create(match[1]);el.className=attrs.match(/\bclass="([^"]+)"/)?.[1]||'';el.hidden=/\bhidden\b/.test(attrs);
+    if(id){el.id=id[1];nodes.set(el.id,el);}if(view)el.dataset.view=view[1];if(folder)el.dataset.folder=folder[1];
+  }
+  const document={
+    getElementById(id){assert.ok(nodes.has(id),'Missing HTML id '+id);return nodes.get(id);},
+    createElement:create,createElementNS:(_,tag)=>create(tag),addEventListener(){},
+    querySelectorAll(selector){
+      if(selector==='[data-view]')return all.filter(el=>'view' in el.dataset);
+      if(selector==='[data-folder]')return all.filter(el=>'folder' in el.dataset);
+      if(selector==='.view')return all.filter(el=>el.className.split(' ').includes('view'));
+      if(selector==='[data-file-action]')return all.filter(el=>'data-file-action' in el.attributes);
+      return all.filter(el=>el.tagName==='button'||el.tagName==='input');
     }
-    if (url === '/files' && options.method === 'POST') {
-      state.mutations.push(JSON.parse(options.body));
-      return {status: 200, json: async () => ({ok: true})};
-    }
-    throw Error('Unexpected fetch: ' + url);
   };
-  class XHR {
-    constructor() { this.upload = {}; }
-    open(method, url) { assert.equal(method, 'PUT'); this.url = url; }
-    send(file) {
-      state.sent.push({url: this.url, file});
-      this.upload.onprogress({loaded: file.size, total: file.size});
-      const response = responses.shift() || {status: 200, body: {ok: true}};
-      queueMicrotask(() => {
-        this.status = response.status; this.responseText = JSON.stringify(response.body);
-        this.onload();
-      });
+  const state={gets:[],mutations:[],sent:[],signature:'慢慢阅读',signatures:[],infoReads:0};
+  const json=(body,status=200)=>({status,json:async()=>body});
+  const fetch=async(url,request={})=>{
+    if(url==='/signature'){
+      if(options.signatureError)return json({error:'签名读取失败'},500);
+      if(request.method==='POST'){state.signature=request.body;state.signatures.push(request.body);}
+      return json({signature:state.signature});
+    }
+    if(url==='/info'){
+      ++state.infoReads;
+      if(options.infoError||(options.infoErrorAfter&&state.infoReads>=options.infoErrorAfter))throw Error('offline');
+      return json({mode:options.mode||'ap',is_flash:!!options.isFlash,free_bytes:options.freeBytes??100000000,file_limit:options.fileLimit||0});
+    }
+    if(url.startsWith('/files?')){
+      state.gets.push(url);const query=new URL('http://pico'+url).searchParams,path=query.get('path')||'',page=Number(query.get('page'));
+      if(options.directory)return options.directory(path,page,json);
+      const items=path?[{name:'封面.jpg',size:1200000}]:[{name:'books',directory:true,size:0},{name:'readme.txt',size:12}];
+      return json({path,total:items.length,pages:1,items});
+    }
+    if(url==='/files'&&request.method==='POST'){
+      state.mutations.push(JSON.parse(request.body));const response=options.mutations?.shift();return json(response?.body||{ok:true},response?.status||200);
+    }
+    throw Error('Unexpected fetch '+url);
+  };
+  class XHR{
+    constructor(){this.upload={};}
+    open(method,url){assert.equal(method,'PUT');this.url=url;}
+    abort(){this.onabort();}
+    send(file){
+      state.sent.push({url:this.url,file});this.upload.onprogress({loaded:file.size,total:file.size});
+      const response=responses.shift()||{status:200,body:{ok:true}};
+      queueMicrotask(()=>{if(response.network)return this.onerror();this.status=response.status;this.responseText=response.invalidJson?'invalid':JSON.stringify(response.body);this.onload();});
     }
   }
-  class ImageMock {
-    naturalWidth = 1200;
-    naturalHeight = 1600;
-    set src(value) { this.url = value; queueMicrotask(() => this.onload()); }
-  }
-  const context = vm.createContext({document, fetch, XMLHttpRequest: XHR, TextEncoder, URL,
-    Image: ImageMock, confirm: () => confirmations.length ? confirmations.shift() : true});
-  context.URL = {createObjectURL: () => 'blob:test', revokeObjectURL() {}};
-  vm.runInContext(source, context);
-  await flush(); await flush();
-  return {nodes, sections, state, context};
+  class ImageMock{naturalWidth=1200;naturalHeight=1600;set src(value){this.url=value;queueMicrotask(()=>this.onload());}}
+  const context=vm.createContext({document,fetch,XMLHttpRequest:XHR,TextEncoder,AbortController,setTimeout,clearTimeout,
+    location:{host:'192.168.4.1',hash:''},innerWidth:1440,innerHeight:900,window:{addEventListener(){},scrollTo(){}},Image:ImageMock,
+    confirm:()=>confirmations.length?confirmations.shift():true,URL:{createObjectURL:()=> 'blob:test',revokeObjectURL(){}},console});
+  // 查询参数使用标准 URL；页面内仅需要对象 URL 接口。/ Parse queries with standard URL; the page needs only object URLs.
+  vm.runInContext(source,context);await flush();await flush();
+  return {state,context,get:id=>nodes.get(id),run:code=>vm.runInContext(code,context)};
 }
-
-(async () => {
-  assert.match(html, /浏览 TF 卡/);
-  assert.doesNotMatch(html, /图片对比|编辑书架名称/);
-  let t = await setup();
-  assert.match(t.nodes.get('storage').textContent, /TF 卡已就绪/);
-  assert.equal(t.nodes.get('entries').children.length, 2);
-  const folder = t.nodes.get('entries').children[0];
-  folder.children[0].children[0].onclick();
-  await flush(); await flush();
-  assert.equal(t.nodes.get('path').textContent, '/books');
-  assert.match(t.state.gets.at(-1), /path=books/);
-  const item = t.nodes.get('entries').children[0];
-  const rename = item.children[1].children[0];
-  rename.onclick();
-  t.nodes.get('editorName').value = '新封面.jpg';
-  await t.nodes.get('editorConfirm').onclick();
-  assert.deepEqual(t.state.mutations[0], {action: 'rename', path: 'books/封面.jpg', target: 'books/新封面.jpg'});
-  t.nodes.get('newFolder').onclick();
-  t.nodes.get('editorName').value = '新目录';
-  await t.nodes.get('editorConfirm').onclick();
-  assert.deepEqual(t.state.mutations[1], {action: 'mkdir', path: 'books', target: 'books/新目录'});
-  item.children[1].children[1].onclick();
-  t.nodes.get('editorName').value = '封面副本.jpg';
-  await t.nodes.get('editorConfirm').onclick();
-  assert.deepEqual(t.state.mutations[2], {action: 'copy', path: 'books/封面.jpg', target: 'books/封面副本.jpg'});
-  item.children[1].children[2].onclick();
-  await t.nodes.get('editorConfirm').onclick();
-  assert.deepEqual(t.state.mutations[3], {action: 'delete', path: 'books/封面.jpg'});
-  for (const [kind, name, endpoint] of [
-    ['book', '海边的信.epub', '/upload'],
-    ['font', '思源宋体.otf', '/font-upload'],
-    ['picture', '封面.jpeg', '/image-upload'],
-  ]) {
-    const section = t.sections.find(s => s.dataset.kind === kind);
-    section.input.files = [{name, size: 1200000}];
-    await section.send.onclick();
-    assert.match(t.state.sent.at(-1).url, new RegExp('^' + endpoint));
-    assert.match(section.result.textContent, /已保存/);
+const file=(name,size=1200000)=>({name,size});
+async function edit(t,action,name){
+  t.context.openEditor(action,t.run('directoryItems[0]'));if(name!==undefined)t.get('editorName').value=name;await t.context.submitEditor();
+}
+(async()=>{
+  assert.match(html,/浏览 TF 卡/);assert.doesNotMatch(html,/图片对比|编辑书架名称/);
+  assert.doesNotMatch(html,/(?:src|href)="https?:/);
+  let t=await setup();
+  assert.match(t.get('storage').textContent,/TF 卡已就绪/);assert.equal(t.get('entries').children.length,2);
+  t.get('entries').children[0].children[0].children[2].onclick();await flush();await flush();
+  assert.equal(t.get('path').textContent,'/books');assert.match(t.state.gets.at(-1),/path=books/);
+  await edit(t,'rename','新封面.jpg');
+  t.get('newFolder').onclick();t.get('editorName').value='新目录';await t.context.submitEditor();
+  await edit(t,'copy','封面副本.jpg');await edit(t,'delete');
+  assert.deepEqual(t.state.mutations,[
+    {action:'rename',path:'books/封面.jpg',target:'books/新封面.jpg'},
+    {action:'mkdir',path:'books',target:'books/新目录'},
+    {action:'copy',path:'books/封面.jpg',target:'books/封面副本.jpg'},
+    {action:'delete',path:'books/封面.jpg'}]);
+  for(const [kind,name,endpoint]of[['book','海边的信.epub','/upload'],['font','思源宋体.otf','/font-upload'],['picture','封面.jpeg','/image-upload']]){
+    await t.context.sendFiles([file(name)],kind,{book:'books',font:'fonts',picture:'pictures'}[kind]);
+    assert.ok(t.state.sent.at(-1).url.startsWith(endpoint+'?name='));assert.match(t.get('uploadResult').textContent,/已保存 1 个文件/);
   }
-  t = await setup({responses: [{status: 409, body: {error: '同名文件已存在'}}, {status: 200, body: {ok: true}}]});
-  t.sections[2].input.files = [{name: '同名.png', size: 100}];
-  await t.sections[2].send.onclick();
-  assert.match(t.state.sent[1].url, /overwrite=1/);
-  // 热点/已有 WiFi 共用入口，目录目标与多文件串行上传保持一致。
-  // AP/STA share the same entry, directory target and serial multi-file uploads.
-  for (const mode of ['ap', 'sta']) {
-    t = await setup({mode});
-    assert.equal(t.nodes.get('signatureText').value,'慢慢阅读');
-    t.nodes.get('signatureText').value='我的 Pico';await t.nodes.get('signatureSave').onclick();assert.equal(t.state.signature,'我的 Pico');
-    t.nodes.get('signatureText').value='';await t.nodes.get('signatureSave').onclick();assert.equal(t.state.signature,'');
-    t.nodes.get('signatureText').value='字'.repeat(32);await t.nodes.get('signatureSave').onclick();assert.equal(t.state.signatures.length,2);
-
-    const generic = t.sections.find(s => s.dataset.kind === 'file');
-    generic.input.files = [{name: 'README', size: 0}, {name: '升级 包%+#.bin', size: 32}, {name: '.env', size: 17}];
-    await generic.send.onclick();
-    assert.equal(t.state.sent.length, 3);
-    assert.deepEqual(t.state.sent.map(s => new URL('http://pico' + s.url).searchParams.get('path')), ['README', '升级 包%+#.bin', '.env']);
-    assert.match(generic.result.textContent, /已保存 3 个文件到 \/$/);
-    t.nodes.get('entries').children[0].children[0].children[0].onclick();
-    await flush(); await flush();
-    generic.input.files = [{name: '文件 没有扩展名', size: 100}];
-    await generic.send.onclick();
-    assert.equal(new URL('http://pico' + t.state.sent.at(-1).url).searchParams.get('path'), 'books/文件 没有扩展名');
-    assert.match(generic.result.textContent, /已保存 \/books\/文件 没有扩展名/);
+  for(const mode of ['ap','sta']){
+    t=await setup({mode});assert.equal(t.get('signatureText').value,'慢慢阅读');
+    for(const value of ['我的 Pico','']){t.get('signatureText').value=value;await t.get('signatureSave').onclick();assert.equal(t.state.signature,value);}
+    for(const value of ['字'.repeat(32),'换行\n签名','\u007f']){t.get('signatureText').value=value;await t.get('signatureSave').onclick();}
+    assert.equal(t.state.signatures.length,2);
+    await t.context.sendFiles([file('README',0),file('升级 包%+#.bin',32),file('.env',17)],'file','');
+    assert.deepEqual(t.state.sent.map(s=>new URL('http://pico'+s.url).searchParams.get('path')),['README','升级 包%+#.bin','.env']);
+    await t.context.navigate('books/子目录');await t.context.sendFiles([file('没有扩展名',100)],'file','books/子目录');
+    assert.equal(new URL('http://pico'+t.state.sent.at(-1).url).searchParams.get('path'),'books/子目录/没有扩展名');
   }
-  t = await setup({responses: [{status: 409, body: {error: '同名文件已存在'}}, {status: 200, body: {ok: true}}]});
-  const generic = t.sections.find(s => s.dataset.kind === 'file');
-  generic.input.files = [{name: '升级.bin', size: 32}];
-  await generic.send.onclick();
-  assert.match(t.state.sent[1].url, /^\/file-upload\?path=.+&overwrite=1$/);
-  t = await setup({mode: 'sta'});
-  assert.equal(t.nodes.get('entries').children.length, 2);
-  t.nodes.get('entries').children[1].children[1].children[1].onclick();
-  t.nodes.get('editorName').value = 'readme 副本.txt';
-  await t.nodes.get('editorConfirm').onclick();
-  assert.deepEqual(t.state.mutations[0], {action: 'copy', path: 'readme.txt', target: 'readme 副本.txt'});
-  t.nodes.get('wallpaperFile').files = [{name: 'photo.heic', size: 3000000}];
-  t.nodes.get('wallpaperFile').onchange();
-  await flush();
-  assert.equal(t.nodes.get('wallpaperSend').disabled, false);
-  t.nodes.get('cropZoom').value = '1.5';
-  t.nodes.get('cropZoom').oninput();
-  const beforeDrag = vm.runInContext('[cropX,cropY]', t.context);
-  t.nodes.get('cropPreview').onpointerdown({pointerId: 1, clientX: 100, clientY: 100});
-  t.nodes.get('cropPreview').onpointermove({pointerId: 1, clientX: 120, clientY: 90});
-  t.nodes.get('cropPreview').onpointerup();
-  const afterDrag = vm.runInContext('[cropX,cropY]', t.context);
-  assert.notDeepEqual(afterDrag, beforeDrag);
-  await t.nodes.get('wallpaperSend').onclick();
-  assert.match(t.state.sent.at(-1).url, /^\/image-upload\?name=pico-wallpaper-.+&wallpaper=1$/);
-  assert.match(t.nodes.get('wallpaperResult').textContent, /已设为壁纸锁屏/);
+  t=await setup({responses:[{status:409,body:{error:'重名'}},{status:200,body:{ok:true}}]});
+  await t.context.sendFiles([file('同名.png')],'picture','pictures');assert.match(t.state.sent[1].url,/overwrite=1/);
+  t=await setup({responses:[{status:409,body:{error:'重名'}}],confirmations:[false]});
+  await t.context.sendFiles([file('同名.txt')],'file','');assert.equal(t.state.sent.length,1);assert.equal(t.run('records[0].status'),'skipped');
+  t=await setup({responses:[{status:409,body:{error:'重名'}},{status:200,body:{ok:true}}]});
+  await t.context.sendFiles([file('升级.bin')],'file','');assert.match(t.state.sent[1].url,/^\/file-upload\?path=.+&overwrite=1$/);
+  t=await setup({freeBytes:100});await t.context.sendFiles([file('太大.epub',101),file('空.epub',0),file('不支持.pdf',1)],'book','books');assert.equal(t.state.sent.length,0);
+  t=await setup();
+  await t.context.sendFiles([file('大字体.ttf',33554433)],'font','fonts');await t.context.sendFiles([file('大图片.png',20971521)],'picture','pictures');
+  await t.context.sendFiles([file('a'.repeat(239))],'file','');assert.equal(t.state.sent.length,0);
+  t=await setup({fileLimit:100});await t.context.sendFiles([file('超限.txt',101)],'book','books');assert.equal(t.state.sent.length,0);
+  t=await setup();await t.context.navigate('books');t.get('genericPicker').files=[file('其他格式.bin',0)];await t.get('genericPicker').onchange();
+  assert.match(t.state.sent[0].url,/^\/file-upload\?path=books%2F/);assert.equal(t.state.sent[0].file.size,0);
+  t=await setup({responses:[{network:true}]});await t.context.sendFiles([file('一.txt'),file('二.txt')],'file','');
+  assert.equal(t.state.sent.length,1);assert.equal(t.run('records[1].status'),'error');assert.equal(t.run('busy'),false);
+  assert.equal(t.get('chooseFiles').disabled,true);assert.equal(t.get('refresh').disabled,false);
+  await t.context.refresh();await t.context.sendFiles([file('重试.txt')],'file','');assert.equal(t.state.sent.length,2);
+  t=await setup({responses:[{status:507,body:{error:'空间不足'}},{status:200,body:{ok:true}}]});
+  await t.context.sendFiles([file('重试原目录.bin')],'file','books/原目录');await t.context.navigate('pictures');
+  await t.context.sendFiles([t.run('records[0].file')],'file','books/原目录',t.run('records[0]'));
+  assert.equal(t.state.sent[0].url,t.state.sent[1].url);assert.equal(t.run('records.length'),1);assert.equal(t.run('records[0].status'),'complete');
+  t=await setup({infoErrorAfter:3});await t.context.sendFiles([file('已保存.txt')],'file','');
+  assert.equal(t.run('records[0].status'),'complete');assert.match(t.get('uploadResult').textContent,/已保存 1 个文件/);
+  t=await setup({isFlash:true});assert.equal(t.get('chooseFiles').disabled,true);assert.equal(t.state.gets.length,0);assert.equal(t.get('signatureSave').disabled,false);
+  t=await setup({signatureError:true});assert.equal(t.get('signatureSave').disabled,true);assert.equal(t.get('signatureRetry').hidden,false);
+  t=await setup({directory:(path,page,json)=>json({pages:2,total:21,items:[file('第'+page+'页.txt',12)]})});
+  await t.get('next').onclick();assert.match(t.state.gets.at(-1),/page=1/);assert.equal(t.get('pageState').textContent,'2 / 2');
+  t.get('search').value='无匹配';t.get('search').oninput();assert.equal(t.get('entries').children.length,0);assert.match(t.get('listState').textContent,/本页/);
+  let release;
+  t=await setup({directory:(path,page,json)=>path==='slow'?new Promise(resolve=>release=()=>resolve(json({pages:1,total:1,items:[file('过时.txt')]}))):json({pages:1,total:1,items:[file('当前.txt')]})});
+  const stale=t.context.navigate('slow');await t.context.navigate('fast');release();await stale;
+  assert.equal(t.get('path').textContent,'/fast');assert.match(t.get('entries').textContent,/当前/);assert.doesNotMatch(t.get('entries').textContent,/过时/);
+  t=await setup({directory:(path,page,json)=>json({pages:1,total:1,items:[file('<img src=x onerror=alert(1)>.txt',12)]})});
+  assert.match(t.get('entries').textContent,/<img src=x/);assert.equal(t.get('entries').children[0].children[0].children[2].tagName,'div');
+  t=await setup();t.get('selectAll').checked=true;t.get('selectAll').onchange();t.get('deleteSelected').onclick();await t.context.submitEditor();
+  assert.deepEqual(t.state.mutations,[{action:'delete',path:'books'},{action:'delete',path:'readme.txt'}]);
+  t=await setup({mutations:[{status:200},{status:500,body:{error:'删除失败'}},{status:200}]});
+  t.get('selectAll').checked=true;t.get('selectAll').onchange();t.get('deleteSelected').onclick();await t.context.submitEditor();
+  assert.equal(t.get('editor').open,true);assert.match(t.get('editorError').textContent,/readme.txt/);await t.context.submitEditor();
+  assert.deepEqual(t.state.mutations.map(item=>item.path),['books','readme.txt','readme.txt']);assert.equal(t.get('editor').open,false);
+  t=await setup();await t.context.sendFiles(Array.from({length:41},(_,i)=>file(i+'.txt',1)),'file','');assert.equal(t.run('records.length'),40);
+  assert.equal(t.run('records[39].name'),'40.txt');assert.equal(t.run('records.every(record=>record.file===null)'),true);
+  t=await setup({mode:'sta'});t.get('wallpaperFile').files=[file('photo.heic',3000000)];t.get('wallpaperFile').onchange();await flush();
+  assert.equal(t.get('wallpaperSend').disabled,false);t.get('cropZoom').value='1.5';t.get('cropZoom').oninput();
+  const before=t.run('[cropX,cropY]');t.get('cropPreview').onpointerdown({pointerId:1,clientX:100,clientY:100});
+  t.get('cropPreview').onpointermove({pointerId:1,clientX:120,clientY:90});t.get('cropPreview').onpointerup();assert.notDeepEqual(t.run('[cropX,cropY]'),before);
+  await t.get('wallpaperSend').onclick();assert.match(t.state.sent.at(-1).url,/^\/image-upload\?name=pico-wallpaper-.+&wallpaper=1$/);assert.match(t.get('wallpaperResult').textContent,/已设为壁纸锁屏/);
+  t.run("location.hash='#signature';route()");assert.equal(t.get('files-view').hidden,true);assert.equal(t.get('signature-view').hidden,false);
+  t.get('signatureText').value='<b>纯文本</b>';t.get('signatureText').oninput();assert.equal(t.get('signaturePreview').textContent,'<b>纯文本</b>');
+  const symbols=new Set([...html.matchAll(/<symbol id="([^"]+)"/g)].map(match=>match[1]));
+  for(const match of html.matchAll(/<use href="#([^"]+)"/g))assert.ok(symbols.has(match[1]),'Missing symbol '+match[1]);
   console.log('transfer web interaction tests passed');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.2 · 本地测试 / Local testing · 2026-11-02
+
+- WiFi 与热点传书网页改为纯白文件工作台：桌面并排显示目录与上传记录，壁纸和签名单独切换，手机首屏可添加文件；保留分页和覆盖确认，增加本页搜索/排序、批量删除及失败重试。尚未发布，真实设备传输待验收。
+  Redesign WiFi/AP transfer as a white file workspace with side-by-side desktop browsing and transfer history, separate wallpaper/signature views and first-screen mobile upload. Retain paging and overwrite confirmation; add current-page search/sort, bulk deletion and failed-upload retry. Unreleased; real-device transfer awaits acceptance.
+
 ## v1.0.2 · 2026-11-02
 
 - 优化浅睡时钟兼容与待机电量读取，减少重复总线访问；实际待机电流与节电比例尚未测量。

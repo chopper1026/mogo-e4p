@@ -72,6 +72,16 @@ Settings → Display → Standby offers immediate off, light-only, or light-slee
 
 Expiry reuses the existing shutdown flow, preserving lock art and the reader checkpoint. Booting afterwards requires holding the power key for about one second, followed by PIN verification when enabled. If shutdown fails, the device returns to the existing untimed locked wait and fault-recovery path, without timer-based unlocking or repeated shutdown attempts; enabled PINs still require verification. The power menu's shutdown remains immediate. NVS and settings backups preserve the choice; new firmware reads legacy backups, but old firmware cannot restore backups containing timed styles. On-device timing and power-off remain unverified.
 
+## 传书网页 / Transfer Workspace
+
+本地开发版的 WiFi/热点网页采用纯白文件工作台，目录与上传记录在桌面并排，壁纸和签名单独切换。书籍、字体、图片快捷目录对应 `books`、`fonts`、`pictures`，默认上传校验对应格式；「添加其他文件」保留向当前目录上传任意格式和空文件的入口，根目录及其他子目录默认接受任意文件。目录每页最多 20 项，搜索/排序仅作用于本页。文件菜单提供重命名、复制和删除，勾选后可确认批量删除；文件夹删除包含其内容。
+
+The local development WiFi/AP page uses a white file workspace: desktop browsing and transfer history sit side by side, with separate wallpaper and signature views. Quick folders target `books`, `fonts` and `pictures` with matching format checks by default; Add other files preserves arbitrary-format and empty-file uploads to the current folder. Root and other subfolders accept arbitrary files by default. Paging keeps at most 20 entries per page, and search/sort apply only to that page. Row menus rename, copy or delete; selection enables confirmed bulk deletion, including folder contents.
+
+上传保留原文件、逐个发送，同名替换需确认；记录只保留本次网页会话的最近 40 条，失败可重试。断连后先核对文件是否已保存，再决定是否替换。字体上限 32 MiB，图片 20 MiB；书籍限制由设备返回。壁纸裁剪输出 684 × 1216 JPG（不超过 2 MiB），签名效果为示意，点击保存才写入设备。资源全部内嵌，热点模式无需外网；传输期间保持设备停留在传输页面。
+
+Uploads send original files serially and require overwrite confirmation. The session retains the latest 40 transfer records with retry for failures. After disconnection, check whether the file was saved before replacing it. Fonts are limited to 32 MiB and images to 20 MiB; the device supplies any book limit. Wallpaper cropping produces a 684 × 1216 JPG of at most 2 MiB. The signature preview is illustrative; only Save writes the setting. All web assets are embedded, requiring no internet in AP mode. Keep the device on its transfer page.
+
 ## 关键文件
 
 - `components/epdiy/src/output_lcd/lcd_driver.c`：S31 LCD/GPU/RMT 后端（来自 Metalio 已验证实现）+ Mogo 行时序。

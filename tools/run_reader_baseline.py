@@ -29,6 +29,7 @@ SUITES = {
     "ota_auto": [sys.executable, "tools/ota_auto_host_test.py"],
     "ota_auto_ui": [sys.executable, "tools/ota_auto_ui_host_test.py"],
     "storage": ["bash", "tools/run_storage_host_tests.sh"],
+    "transfer_web": ["node", "tools/transfer_web_host_test.js"],
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "metalio_drivers": [sys.executable, "tools/metalio_drivers_host_test.py"],
     "sleep_compat": [sys.executable, "tools/s31_sleep_compat_host_test.py"],
