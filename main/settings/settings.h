@@ -89,6 +89,9 @@ void app_settings_set_auto_lock_minutes(uint8_t minutes);
 /// the interval, and only while the host runs; deep sleep cannot reach the network at all.
 bool app_settings_auto_time_sync(void);
 void app_settings_set_auto_time_sync(bool on);
+/// 自动 OTA 检查默认开启；设备本地保存，不随配置备份迁移。/ Automatic OTA checks default on; device-local, excluded from config backups.
+bool app_settings_auto_ota(void);
+void app_settings_set_auto_ota(bool on);
 /// 上次成功对时的 UTC 秒与上次尝试的 UTC 秒（0 = 从未）。设备本地运行记录，不随设置备份迁移。
 /// Last successful and last attempted sync in UTC seconds (zero means never). Device-local runtime
 /// records; they deliberately stay out of the settings backup.

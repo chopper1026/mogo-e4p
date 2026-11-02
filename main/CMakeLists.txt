@@ -65,6 +65,7 @@ idf_component_register(
         "apps/app_boot_recovery.c"
         "ota/ota_update.c"
         "ota/ota_online.c"
+        "ota/ota_auto.c"
         "ota/ota_release.c"
         "display/display.c"
         "display/display_refresh.c"

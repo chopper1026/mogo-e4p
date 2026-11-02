@@ -30,10 +30,13 @@ static void enter(app_ctx_t*);
 static void leave(app_ctx_t*);
 static void render(app_ctx_t*,uint8_t*);
 static app_redraw_t transfer_return_tick(app_ctx_t*);
+static app_redraw_t auto_update_return_tick(app_ctx_t*);
+static bool auto_update_pending, auto_update_return;
+static unsigned auto_update_offers, auto_update_acks;
 
 const app_desc_t app_book = {.title="book",.render=render,.on_enter=enter,.on_exit=leave};
 const app_desc_t app_transfer = {.title="transfer",.on_tick=transfer_return_tick};
-const app_desc_t app_device_settings = {.title="settings"};
+const app_desc_t app_device_settings = {.title="settings",.on_tick=auto_update_return_tick};
 // 快捷栏长按直达设置页只记录请求；页面本身的进入由 app_navigation_switch_to 计数。
 // Quick-bar holds only record their request; entering the page is counted by app_navigation_switch_to.
 static int wifi_setup_requests, bt_settings_requests;
@@ -67,6 +70,10 @@ bool app_book_request_return_to_body(const char *p,bool f) {
 }
 static app_redraw_t transfer_return_tick(app_ctx_t *c) {
     if (transfer_returns) c->request_return = true;
+    return APP_REDRAW_NONE;
+}
+static app_redraw_t auto_update_return_tick(app_ctx_t *c) {
+    if (auto_update_return) c->request_return = true;
     return APP_REDRAW_NONE;
 }
 static int power_open_draws, power_controls_draws, power_final_draws;
@@ -421,6 +428,7 @@ static void reset(void) {
     reader_body=reader_resume_ok=reader_resume_fullscreen=false;
     reader_resume_path[0]=0;
     reader_returns=0;reader_return_path[0]=0;reader_return_fullscreen=false;
+    auto_update_pending=auto_update_return=false;auto_update_offers=auto_update_acks=0;
     transfer_returns=false;
     haptic_pulses=haptic_stops=0;
     fl_ready=fl_on=false;fl_bri=40;fl_cct=50;fl_applies=fl_control_draws=fl_sweep_draws=fl_drag_pushes=fl_white_pushes=fl_gray_pushes=fl_key_gl=quick_gl_height=0;
@@ -475,6 +483,18 @@ static app_redraw_t key_sampling_tick(app_ctx_t *ctx) {
 }
 #endif
 int main(void) {
+    // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。
+    // Automatic offers retain the body resume point through real navigation; touch and existing requests win.
+    reset();start_book=reader_body=reader_resume_ok=reader_resume_fullscreen=true;
+    strcpy(reader_resume_path,"/sdcard/books/OTA.txt");auto_update_pending=auto_update_return=true;
+    for(int i=0;i<3;++i)add(0,0,0,0);
+    run();assert(auto_update_offers==1&&auto_update_acks==1&&reader_returns==1);
+    assert(!strcmp(reader_return_path,reader_resume_path)&&reader_return_fullscreen);
+    reset();start_book=reader_body=true;auto_update_pending=true;
+    add(200,400,1,0);run();assert(!auto_update_offers&&auto_update_pending);
+    reset();enable_main_tabs();auto_update_pending=true;request_on_tick=true;
+    add(0,0,0,0);run();assert(!auto_update_offers&&auto_update_pending);
+    puts("PASS: automatic OTA offer restores reading/fullscreen once and never overrides touch or an existing route");
 #ifdef POWER_KEY_SAMPLER_USB_TEST
     // USB独占期间暂停，退出后恢复；设备独占页保持直读归属。/ Pause for USB ownership, resume afterwards, and leave exclusive pages in control.
     reset();battery_test=true;first.on_tick=key_sampling_tick;
@@ -947,6 +967,11 @@ void crash_note_log(void){}
 
 void app_time_service_poll(bool idle) { (void)idle; }
 void app_time_service_cancel(void) {}
+void pico_ota_auto_poll(bool idle) { (void)idle; }
+void pico_ota_auto_cancel(void) {}
+bool pico_ota_auto_pending(void) { return auto_update_pending; }
+void pico_ota_auto_acknowledge(void) { auto_update_pending=false; ++auto_update_acks; }
+bool app_device_settings_offer_update(bool already_in_settings) { (void)already_in_settings; ++auto_update_offers; return true; }
 
 // 开机分段计时只写崩溃日志，替身忽略；本页不验证它。/ Boot-phase marks only feed the crash log; the shim ignores them.
 void rp_boot_mark(const char *name) { (void)name; }

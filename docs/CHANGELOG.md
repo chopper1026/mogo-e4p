@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.1 · 本地测试 / Local testing · 2026-11-02
 
+- 系统升级隐藏 TF 卡升级入口，新增默认开启的自动 OTA 检查：固定每 12 小时在可用空闲窗口检查，发现新版本提示确认，不自动下载安装；待机不主动唤醒。
+  Hide the TF upgrade entry and add on-by-default automatic OTA checks every twelve hours in an available idle window, offering new versions without automatic download, installation or wake.
+
 - 浅睡成功 GPIO 唤醒后保全实际读到的电源键按下，避免复查期间松手丢失；不将来源不明的共享中断当成电源键，保留 2 秒定时兜底。首次读取前已经松手的判源限制仍保留。
   Preserve an observed power-key press after successful GPIO wake so release during rechecking cannot lose it; do not treat unknown shared interrupts as POWER, retaining the two-second timer fallback. A press released before the first read may still be unidentifiable.
 - 增加默认关闭的浅睡诊断：会话内仅 RAM 计数，退出后保存一份汇总供重启读回，不新增唤醒或逐切片落盘。统计不是电流测量，尚无实测省电结论。

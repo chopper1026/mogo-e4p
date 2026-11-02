@@ -72,6 +72,7 @@
 #include "sleep.h"
 #include "frontlight.h"
 #include "time_service.h"
+#include "ota_auto.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
 #include "ui_nav.h"
@@ -660,6 +661,11 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", wifi_transfer_service_poll());
+            pico_ota_auto_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+                !current->holds_pmu && !usb_storage_active() && !ble_pt_connected() &&
+                current != &app_transfer && !power_dialog_open && !menu_open &&
+                (current != &app_device_settings || app_navigation_main_page_ready(&ctx, current)) &&
+                !app_quick_layer_is_open() && !ctx.request_app && !ctx.request_return && !ctx.request_menu);
             // 后台对时是系统服务（同 app_media_poll / 字体重试），守卫在 time_service 内部；
             // 空闲门控沿用上游：触压、近期输入、独占 PMU 的页面、USB 与联网升级期间不动。
             // Background sync is a system service like app_media_poll or the font retry, with its
@@ -1145,6 +1151,20 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_return = false;
             ctx.request_app = NULL;
             ctx.request_menu = false;
+        }
+        if (pico_ota_auto_pending() && !power_dialog_open && !menu_open && !quick_input_owned &&
+            !app_quick_layer_is_open() && !touch.touched && !ui_click_feedback_active() &&
+            !usb_storage_active() && !ble_pt_connected() && !current->holds_pmu && current != &app_transfer &&
+            (current == &app_device_settings || app_navigation_main_page_ready(&ctx, current) ||
+             (current == &app_book && app_book_reader_body_visible())) &&
+            !ctx.request_return && !ctx.request_app && !ctx.request_menu &&
+            app_device_settings_offer_update(current == &app_device_settings)) {
+            pico_ota_auto_acknowledge();
+            if (current == &app_device_settings) present_page(&ctx, current, &gesture, APP_REDRAW_PAGE);
+            else {
+                app_navigation_capture_reader_return(current);
+                ctx.request_app = &app_device_settings;
+            }
         }
         if (!power_dialog_open && (ctx.request_return || ctx.request_app || ctx.request_menu)) {
             if (ui_click_feedback_release(ctx.fb, &click_area))

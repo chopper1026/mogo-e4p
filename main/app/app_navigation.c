@@ -12,6 +12,7 @@
 #include "app_font_context.h"
 #include "display.h"
 #include "time_service.h"
+#include "ota_auto.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
 #include "ui_nav.h"
@@ -50,6 +51,7 @@ static void app_navigation_switch_to(
     app_ctx_t* ctx, const app_desc_t** current, const app_desc_t* next
 ) {
     if (next == NULL || next == *current) return;
+    pico_ota_auto_cancel();
 #ifdef KIIKO_LOCAL_LATENCY
     const int64_t probe_start=esp_timer_get_time();
     const int probe_from=app_index_of(*current);

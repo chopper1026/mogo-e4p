@@ -23,6 +23,8 @@
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  * 用户 2026-10-27 修订：设置「升级和恢复」恢复系统升级入口，BOOT 刷机入口仍撤下。
  * User revision of 2026-10-27: restore system upgrade in maintenance; keep the BOOT flashing entry withdrawn.
+ * 用户 2026-11-02 修订：隐藏 TF 卡升级入口；自动 OTA 默认开启，每十二小时只检查清单并提示确认。
+ * User revision of 2026-11-02: hide the TF upgrade entry; automatic OTA defaults on, checking only the manifest every twelve hours before offering confirmation.
  * 用户新增：个性化功能新增「触摸震动」入口，页内包含开关与强度档位，打开或改档即时震一记作预览。
  * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
  * 用户 2026-10-25 新增：个性化功能在触摸震动下方新增「阅读背景」入口；列表加预览对齐壁纸选择，
@@ -76,6 +78,7 @@
 #include "book_cover.h"
 #include "ota_update.h"
 #include "ota_online.h"
+#include "ota_auto.h"
 #include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_system.h"
@@ -178,6 +181,7 @@ static bool s_config_confirm;
 static bool s_panel_repair_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
+static bool s_upgrade_shortcut_back;
 static pico_ota_info_t s_local_update;
 static EXT_RAM_BSS_ATTR pico_update_status_t s_update;
 static char s_upgrade_notice[96];
@@ -317,7 +321,6 @@ static EpdRect upgrade_confirm_button(bool online, bool accept) {
     return (EpdRect){accept ? 364 : 60, online ? 842 : 613, 260, 64};
 }
 static void upgrade_open(void) {
-    (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
     pico_online_get_status(&s_update);
     s_upgrade_confirm = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = false;
@@ -326,6 +329,17 @@ static void upgrade_open(void) {
     upgrade_remember(esp_timer_get_time() / 1000);
     s_upgrade_notice[0] = 0;
     s_page = SETTINGS_UPGRADE;
+}
+bool app_device_settings_offer_update(bool already_in_settings) {
+    if (already_in_settings) {
+        if ((s_page != SETTINGS_MAIN && s_page != SETTINGS_UPGRADE) || s_upgrade_confirm) return false;
+        pico_online_get_status(&s_update);
+        if (s_update.busy || s_update.state != PICO_UPDATE_AVAILABLE) return false;
+        upgrade_open();
+        s_upgrade_confirm = s_upgrade_online = true;
+        s_upgrade_shortcut_back = false;
+    } else s_enter_page = SETTINGS_UPGRADE;
+    return true;
 }
 static const char *const TAG = "device_settings";
 // 主设置始终单行；大字号只改变字形，字体预览单独保留足够空间。
@@ -1467,12 +1481,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
             ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
-            settings_card(fb, (EpdRect){36, 662, 612, 262}, 22, UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 60, 689, 29, "TF 卡升级", EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 60, 739, 23, "升级包放在 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 60, 786, 21, s_local_update.ready ? s_local_update.candidate_version : "把官网升级包放入 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
-            ui_draw_button(fb, (EpdRect){60, 840, 564, 62}, s_local_pending ? "正在安装，请勿断电" :
-                s_local_update.ready ? "安装 TF 卡升级包" : "重新检查 TF 卡", s_local_update.ready);
+            setting_toggle(fb, 662, "自动检查 OTA 更新", "每 12 小时检查一次", app_settings_auto_ota());
         }
         if (s_upgrade_notice[0]) ui_text(fb, 48, 957, 21, s_upgrade_notice, EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 48, 1010, 20, "首次安装或修复，请通过官网完整刷机", EPD_DRAW_ALIGN_LEFT, false);
@@ -1734,6 +1743,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
+    s_upgrade_shortcut_back = false;
     (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
     settings_prepare_profile();
     // 每次进页先清掉上一次直达的返回目标，避免离开时未经过主列表而留下旧值。
@@ -1753,6 +1763,11 @@ static void on_enter(app_ctx_t *ctx) {
         // A direct visit from another page sends the top-left back to that origin;
         // re-entering from inside Settings keeps the main-list back.
         s_ble_shortcut_back = s_enter_ble_from_quick;
+    }
+    if (s_enter_page == SETTINGS_UPGRADE) {
+        upgrade_open();
+        s_upgrade_confirm = s_upgrade_online = s_update.state == PICO_UPDATE_AVAILABLE && !s_update.busy;
+        s_upgrade_shortcut_back = true;
     }
     s_enter_page = SETTINGS_MAIN;
     s_enter_ble_from_quick = false;
@@ -2073,6 +2088,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (y < 190 && ev->x0 < 170) {
             s_upgrade_job = UPGRADE_JOB_NONE;
             s_upgrade_offer_pending = false;
+            if (s_upgrade_shortcut_back) { ctx->request_return = true; return APP_REDRAW_NONE; }
             if (s_upgrade_confirm) s_upgrade_confirm = false;
             else { pico_online_cancel_join(); s_page = SETTINGS_MAIN; }
             return APP_REDRAW_PAGE;
@@ -2088,7 +2104,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                     if (s_upgrade_online) {
                         upgrade_schedule(true, esp_timer_get_time() / 1000);
                     } else s_local_pending = true;
-                }
+                } else if (s_upgrade_shortcut_back) { ctx->request_return = true; return APP_REDRAW_NONE; }
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
@@ -2106,10 +2122,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             upgrade_remember(esp_timer_get_time() / 1000);
             return APP_REDRAW_PAGE;
         }
-        if (y >= 840 && y < 902 && !s_update.busy) {
-            (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
-            if (s_local_update.ready) { s_upgrade_confirm = true; s_upgrade_online = false; }
-            else snprintf(s_upgrade_notice, sizeof(s_upgrade_notice), "%s", s_local_update.message);
+        if (y >= 662 && y < 788) {
+            app_settings_set_auto_ota(!app_settings_auto_ota());
+            pico_ota_auto_poll(false);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -2700,6 +2715,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         s_upgrade_job = UPGRADE_JOB_NONE;
         if (s_local_pending || s_upgrade_restart) return APP_REDRAW_NONE;
         pico_online_cancel_join(); s_upgrade_confirm = false;
+        if (s_upgrade_shortcut_back && key != 1) { ctx->request_return = true; return APP_REDRAW_NONE; }
     }
     if (s_page == SETTINGS_BLE_SCAN) {
         ble_pt_scan_stop();

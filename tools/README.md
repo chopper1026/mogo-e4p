@@ -22,6 +22,7 @@ Run commands from the repository root and keep outputs in ignored build director
 | 资源生成 / Asset generation | `gen_builtin_font.py`、`compress_builtin_images.py`、`gen_ui_icons.py` | 更新对应源资源后再生成，不手改生成表；具体参数见脚本帮助。/ Regenerate after source changes instead of hand-editing tables; see each script's help. |
 | 性能采集 / Performance | `capture_reader_perf.py`、`summarize_reader_perf.py`、`summarize_reader_memory.py` | 使用方式与结论边界见 docs/READER_PERFORMANCE.md。/ See the performance guide for usage and interpretation limits. |
 | OTA 与包校验 / OTA and bundles | `prepare_platform_submission.py`、`verify_flash_bundle.py` | 准备草稿或校验包；不会代替管理员发布审核。/ Prepare drafts or verify bundles, without replacing administrator publication review. |
+| 自动 OTA / Automatic OTA | `python3 tools/run_reader_baseline.py ota_auto ota_auto_ui loop lifecycle routing` | 验证 12 小时边界、跨重启间隔、时钟调整、联网守卫、取消交接、入口与确认返回；不连接网络或刷写设备。/ Check twelve-hour boundaries, reboot cadence, clock changes, network guards, cancellation, entry and offer return without networking or flashing hardware. |
 
 新增宿主回归应接入统一入口；公共测试替身按所属领域放入 *_stubs。重命名或迁移脚本时同步 CI、调用方和文档，避免复制一份旧实现维持兼容。
 Register new host regressions in the shared runner and group doubles under the matching *_stubs directory. Update CI, callers and docs when moving scripts instead of duplicating old implementations.

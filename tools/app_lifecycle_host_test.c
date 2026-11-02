@@ -46,6 +46,7 @@ esp_err_t pico_boot_save_resume(const pico_resume_t *resume) {
     event('S'); saved = *resume; return save_error;
 }
 void app_time_service_cancel(void) { event('T'); }
+void pico_ota_auto_cancel(void) { event('U'); }
 bool pico_online_busy(void) { event('O'); return ota; }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('C'); return cover_ok; }
 bool ui_avatar_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('A'); return avatar_ok; }
@@ -80,11 +81,11 @@ int main(void) {
         reset(); ota = bits & 1; cover_ok = bits & 2; avatar_ok = bits & 4;
         transfer_ok = bits & 8; ble_error = bits & 16 ? ESP_FAIL : ESP_OK;
         bool admitted = app_lifecycle_prepare_poweroff();
-        if (ota) { expect("TO"); assert(!admitted); }
-        else if (!cover_ok) { expect("TOC"); assert(!admitted); }
-        else if (!avatar_ok) { expect("TOCA"); assert(!admitted); }
-        else if (!transfer_ok) { expect("TOCAW"); assert(!admitted); }
-        else { expect("TOCAWB"); assert(admitted); }
+        if (ota) { expect("UTO"); assert(!admitted); }
+        else if (!cover_ok) { expect("UTOC"); assert(!admitted); }
+        else if (!avatar_ok) { expect("UTOCA"); assert(!admitted); }
+        else if (!transfer_ok) { expect("UTOCAW"); assert(!admitted); }
+        else { expect("UTOCAWB"); assert(admitted); }
     }
     for (unsigned bits = 0; bits < 8; ++bits) {
         reset(); cover_ok = bits & 1; avatar_ok = bits & 2; ble_error = bits & 4 ? ESP_FAIL : ESP_OK;
@@ -95,7 +96,7 @@ int main(void) {
     }
     for (unsigned i = 0; i < 100; ++i) {
         reset(); transfer_ok = i & 1;
-        assert(app_lifecycle_pause_for_lock() == transfer_ok); expect("TW");
+        assert(app_lifecycle_pause_for_lock() == transfer_ok); expect("UTW");
     }
     puts("app_lifecycle: PASS (checkpoint, short-circuit, budgets, awake fallback, repeat handoff)");
 }

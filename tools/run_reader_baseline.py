@@ -26,6 +26,8 @@ SUITES = {
     "clock": [sys.executable, "tools/time_service_host_test.py"],
     "time_policy": ["bash", "tools/run_time_sync_host_test.sh"],
     "ota": ["bash", "tools/run_ota_host_tests.sh"],
+    "ota_auto": [sys.executable, "tools/ota_auto_host_test.py"],
+    "ota_auto_ui": [sys.executable, "tools/ota_auto_ui_host_test.py"],
     "storage": ["bash", "tools/run_storage_host_tests.sh"],
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "metalio_drivers": [sys.executable, "tools/metalio_drivers_host_test.py"],

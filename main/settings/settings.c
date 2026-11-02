@@ -63,6 +63,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_MAIN_REFRESH "main_mode"
 #define NVS_KEY_AUTO_LOCK "idle_lock"
 #define NVS_KEY_AUTO_TIME "auto_time"
+#define NVS_KEY_AUTO_OTA "auto_ota"
 #define NVS_KEY_TSYNC_AT "tsync_at"
 #define NVS_KEY_TSYNC_TRY "tsync_try"
 #define NVS_KEY_DEVICE_NAME "dev_name"
@@ -257,6 +258,7 @@ static uint8_t s_auto_lock_minutes = 5;
 // 自动对时默认开：与设置页开关、time_sync 服务共用同一份运行状态。
 // Auto sync defaults on and shares one runtime copy with the settings page and time_sync.
 static bool s_auto_time_sync = true;
+static bool s_auto_ota = true;
 static uint32_t s_time_sync_last;
 static uint32_t s_time_sync_try;
 static uint8_t s_shelf_style = 2;
@@ -331,6 +333,7 @@ void app_settings_init(void) {
         s_auto_lock_minutes = raw;
     if (nvs_get_u8(h, NVS_KEY_AUTO_TIME, &raw) == ESP_OK) s_auto_time_sync = raw != 0;
     else s_auto_time_sync = true;
+    s_auto_ota = nvs_get_u8(h, NVS_KEY_AUTO_OTA, &raw) != ESP_OK || raw != 0;
     if (nvs_get_u32(h, NVS_KEY_TSYNC_AT, &s_time_sync_last) != ESP_OK) s_time_sync_last = 0;
     if (nvs_get_u32(h, NVS_KEY_TSYNC_TRY, &s_time_sync_try) != ESP_OK) s_time_sync_try = 0;
     size_t value_len = sizeof(s_device_name);
@@ -643,6 +646,12 @@ void app_settings_set_auto_lock_minutes(uint8_t minutes) {
 }
 
 bool app_settings_auto_time_sync(void) { return s_auto_time_sync; }
+bool app_settings_auto_ota(void) { return s_auto_ota; }
+void app_settings_set_auto_ota(bool on) {
+    if (s_auto_ota == on) return;
+    s_auto_ota = on;
+    nvs_put_u8(NVS_KEY_AUTO_OTA, on ? 1 : 0);
+}
 void app_settings_set_auto_time_sync(bool on) {
     if (s_auto_time_sync == on) return;
     s_auto_time_sync = on;
