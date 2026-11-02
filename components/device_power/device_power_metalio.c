@@ -96,6 +96,7 @@
 // recheck only delays confirmation; the press time stays at the first low sample.
 #define KEY_CONFIRM_DELAY_MS 20
 #define KEY_SAMPLE_PERIOD_MS 10
+#define KEY_WAKE_BATT_REUSE_US (10LL * 1000)
 
 // TCA9555 P17 = Port1 bit7。 / TCA9555 P17 = Port1 bit7.
 #define KEY_POWER_MASK 0x80
@@ -739,6 +740,8 @@ static int64_t s_batt_last_save_us;
 // 涓流判满的确认窗口起点（µs，-1 表示未在窗口内）。 / Start of the taper-full
 // confirmation window (µs; -1 when outside the window).
 static int64_t s_batt_full_since_us = -1;
+static int64_t s_batt_poll_us;
+static bool s_batt_poll_reusable;
 
 static esp_err_t rtc_init(void) {
     uint8_t ctrl[2] = {0};
@@ -894,6 +897,7 @@ bool device_power_key_sampler_enable(bool enabled) {
 
 static void poll_battery(void) {
     const int64_t now = esp_timer_get_time();
+    s_batt_poll_reusable = false;
 
     uint16_t mv = 0;
     int16_t ma = 0;
@@ -988,6 +992,19 @@ static void poll_battery(void) {
         portEXIT_CRITICAL(&s_batt_log_mux);
         if (pending) batt_log_notify();
     }
+    s_batt_poll_us = now;
+    s_batt_poll_reusable = have_v && have_i && (s_cx == NULL || have_chg);
+}
+
+// 只合并浅睡检查中紧邻的成功采样；到期维护、失败或时钟回退必须重读。
+// Coalesce only adjacent successful sleep-check samples; due maintenance, failures and clock rollback force a read.
+static bool wake_battery_snapshot_reusable(int64_t now) {
+    if (!s_batt_poll_reusable || now < s_batt_poll_us ||
+        now - s_batt_poll_us >= KEY_WAKE_BATT_REUSE_US) return false;
+    if (s_charger_configured &&
+        ((s_charger_resume_us != 0 && now >= s_charger_resume_us) ||
+         (s_charger_resume_us == 0 && now >= s_charger_next_us))) return false;
+    return true;
 }
 
 esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
@@ -995,6 +1012,7 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
     (void)config;
     if (bus_handle == NULL) return ESP_ERR_INVALID_ARG;
     if (s_ready) return ESP_OK;
+    s_batt_poll_reusable = false;
     s_bus = bus_handle;
     memset(&s_snap, 0, sizeof(s_snap));
 
@@ -1197,7 +1215,15 @@ bool device_power_take_key_short(void) {
 }
 
 bool device_power_take_key_wakeup(void) {
-    (void)device_power_poll();
+    if (s_ready) {
+        key_lock();
+        poll_key();
+        s_snap.pending_events = (uint8_t)(s_key_short_pending || s_key_long_pending);
+        key_unlock();
+        // 按键每次都读，只有电量允许短暂复用；活动页的完整轮询不变。
+        // Always read the key; only battery samples may be briefly reused, leaving active-page polls unchanged.
+        if (!wake_battery_snapshot_reusable(esp_timer_get_time())) poll_battery();
+    }
     key_lock();
     const bool got = s_key_short_pending || s_key_down;
     s_key_short_pending = false;

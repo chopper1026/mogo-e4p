@@ -27,6 +27,39 @@ The loop starts an initially paused task which reads only P17 on active pages an
 `device_power_key_sampler_enable(false)` 等待在途读取结束，丢弃旧动作及当前按住状态的释放；浅睡、下电和 USB/设备独占前必须完成此交接，避免 TCA Input 读操作清掉唤醒中断。嵌套调用按返回的原状态恢复。锁屏保留直读唤醒，解锁先消费唤醒键再恢复快采；任务创建失败保留原轮询，反初始化暂停任务，后续初始化可复用。页面导航暂停快采，下一轮按新页面归属恢复。
 `device_power_key_sampler_enable(false)` joins in-flight reads and discards stale actions and the current held press's release. Complete this handoff before sleep, power-off or USB/device-exclusive use so TCA Input reads cannot clear wake interrupts. Nested callers restore the returned previous state. Locks retain direct wake reads and consume the wake press before resuming sampling. Failed task creation retains direct polling; deinit pauses the reusable task. Navigation pauses sampling until the next iteration establishes the new page's ownership.
 
+浅睡专用的 `device_power_take_key_wakeup()` 每次仍读取电源键，但可复用采样起点距今不足 10 ms、且电压/电流/现有充电芯片状态全部有效的电量样本，减少同一轮等待边界内的重复总线访问。样本过期、读取失败、时钟回退或充电维护/恢复已经到期时立即重新采样。活动页的 `device_power_poll()` 不复用；2 秒浅睡定时兜底、充电寄存器策略和欠压阈值不变。减少访问次数不是已测得的节电比例。
+
+The sleep-only `device_power_take_key_wakeup()` still reads POWER on every call, but may reuse a battery sample whose start is less than 10 ms old with valid voltage, current and status from any present charger. This avoids duplicate bus access at the same wait boundary. Expiry, read failure, clock rollback or due charger maintenance/resume forces a fresh sample. Active-page `device_power_poll()` never reuses samples; the two-second sleep timer, charger register policy and undervoltage threshold remain unchanged. Fewer accesses are not a measured power-saving percentage.
+
+## 主机浅睡诊断 / Host light-sleep diagnostics
+
+主机等待入口在 `main/power/sleep.c`。排查构建可开启 `CONFIG_APP_SLEEP_DIAGNOSTICS`（默认关闭）：每次等待只在 RAM 累计，退出并恢复外设后，向 NVS `sleep_diag/last` 覆盖保存一份汇总，并输出 `SLEEP_SUMMARY origin=live`。不逐切片写 Flash/TF，不新增唤醒定时器，定时切片仍为 2 秒；保存失败仅记录 `save_error`，不阻止恢复。
+
+The host wait entry lives in `main/power/sleep.c`. Investigation builds can enable `CONFIG_APP_SLEEP_DIAGNOSTICS` (off by default): each wait accumulates in RAM, then overwrites one NVS `sleep_diag/last` summary after leaving the wait and restoring peripherals, logging `SLEEP_SUMMARY origin=live`. There are no per-slice flash/card writes or extra wake timers; slices remain two seconds. Save failures only set `save_error` and never block recovery.
+
+同一诊断构建启动时读取记录，校验格式后输出 `origin=saved`。这是上一份成功保存的等待记录，**不是本次启动已完成浅睡的证据**；记录的 `elf` 是采集固件 ELF SHA-256 前缀（最多 16 位，长度受 SDK 配置影响），`unix_s` 依赖设备校时，`start_us` 是当次启动的单调时钟。保存失败时旧记录仍可能存在。无记录、读取失败或格式不符时不伪造记录，不清空原 NVS。
+
+The same diagnostic build reads and validates the record at boot, logging `origin=saved`. This is the last successfully saved wait, **not evidence that the current boot has already slept**. `elf` identifies the collecting firmware with an ELF SHA-256 prefix (up to 16 hexadecimal characters, depending on SDK configuration); `unix_s` depends on device clock synchronization, and `start_us` belongs to that boot's monotonic clock. A failed save can leave an older record. Missing, unreadable or invalid records are never fabricated or used to erase NVS.
+
+| 字段 / Fields | 含义 / Meaning |
+| --- | --- |
+| `attempts`, `ok`, `failed` | 实际浅睡调用次数及返回结果；资源交还失败不计为已睡。/ Actual sleep calls and results; rejected resource handoff is not sleep. |
+| `timer`, `gpio`, `other` | 仅统计成功调用的唤醒原因；混合原因分别计数，和可能大于 `ok`。/ Causes from successful calls only; combined causes count separately, so the sum can exceed `ok`. |
+| `lt80ms`, `min_call_us`, `max_call_us` | 成功调用的短返回次数和时长范围；电源键及时唤醒也可能短于 80 ms，并非都属异常。/ Short successful returns and duration bounds; prompt key wakes can legitimately be below 80 ms. |
+| `ok_call_us`, `rejected_call_us` | SDK 调用的累计停留时间，包含进出开销，不是精确硬件睡眠时间或电流测量。/ Accumulated SDK call residence including entry/exit overhead, not exact hardware sleep time or current. |
+| `total_us`, `outside_call_us` | 总等待入口耗时及调用外耗时，含前置准备、轮询与恢复；不含最终保存/汇总日志，不等同于单次唤醒开销。/ Total entry duration and time outside calls, including preparation, polling and recovery; excludes final save/summary logging and is not per-wake overhead. |
+| `ble_blocked`, `timer_errors`, `irq_low` | 蓝牙未停栈、定时器配置失败、共享中断清除后仍低的轮询次数。/ Bluetooth teardown block, timer setup failures and polls with shared IRQ still low after clearing. |
+| `key_latched`, `key_read_errors`, `unresolved_gpio` | 唤醒后保全的 P17 低、输入读取失败，以及未判明为按键或有效拿起的 GPIO 返回。/ Captured post-wake P17 lows, input read failures and GPIO returns not identified as a key or accepted pickup. |
+| `exit` | 0 按键，1 拿起，2 文件任务未归还，3 共享中断持续低，4 定时器连续失败，5 浅睡连续失败。恢复活动页不表示真的按了电源键。/ 0 key, 1 pickup, 2 file jobs busy, 3 stuck IRQ, 4 repeated timer failures, 5 repeated sleep failures. Recovery exits do not prove a physical key press. |
+
+成功 GPIO 唤醒后，先保全实际读到的 TCA P17 低电平，再沿用原按键复查及拿起判断，避免已读到按下却因复查期间松手而丢失；睡眠失败不使用陈旧的唤醒原因，其他共享中断不直接变成电源键。如果按键在第一次读取前已经释放，仍可能无法判明来源，本轮没有消除这个硬件信息缺口，因此不延长定时切片、不改变 IO 方向或拿起设置。
+
+After a successful GPIO wake, preserve an actually observed TCA P17 low before the existing key recheck and pickup decision, avoiding loss when release occurs during rechecking. Rejected sleep never consumes stale wake causes, and unrelated shared interrupts never become keys solely from the GPIO cause. A key released before the first read can still be unidentifiable; this hardware-information gap remains, so this change does not lengthen slices or alter IO directions or pickup settings.
+
+仅有 USB 数据线时，可先连线采集短期行为日志，再拔线等待、主动按电源键唤醒后重连；如果重连丢失串口输出，可在连接稳定后重新启动并采集 `origin=saved`。重连本身不会自动补发，保存尚未完成就复位仍可能丢本次记录。USB 供电/充电与纯电池条件分开记录；串口掉线不能证明低功耗，板载电量计或等待时长也不能证明节电百分比。诊断关闭后不读写这份记录、不输出汇总；恢复正式构建时应关闭本开关及独立的逐次 `KIIKO_SLEEP_DIAG`。
+
+With only a USB cable, first capture short-term connected behavior, then disconnect, wait, wake with POWER and reconnect. If serial output is lost, restart after the connection is stable and capture `origin=saved`. Reconnection alone does not replay it, and a reset before saving finishes can lose the current record. Label USB-powered/charging and battery-only conditions separately: serial loss, gauge readings and wait durations do not establish a power-saving percentage. With diagnostics off, this record is neither read nor written and no summary is emitted; disable this option and the independent per-return `KIIKO_SLEEP_DIAG` for production builds.
+
 ## 充电与 RTC / Charging and RTC
 
 CX25601N 请求 1 A，经原厂 80 mA 档位量化为 960 mA，输入限流跟随量化值；VREG 为 4.4 V。轮询按有效电压切换终止，输入存在且空闲/近零电流时补充充电，无输入且有效电压 ≤3.1 V 时按原厂关 BATFET。配置不完整时报告失败，并尽力恢复硬件终止与停充。

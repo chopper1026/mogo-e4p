@@ -109,7 +109,12 @@ static int fca9555_read_input(fca9555_handle_t h, int port, uint8_t *out) {
 typedef enum { DEVICE_POWER_KEY_NONE, DEVICE_POWER_KEY_SHORT, DEVICE_POWER_KEY_LONG } device_power_key_action_t;
 static bool s_ready = true;
 static struct { uint8_t pending_events; } s_snap;
-static void poll_battery(void) { atomic_fetch_add(&battery_polls, 1); }
+static bool s_batt_poll_reusable, s_charger_configured;
+static int64_t s_batt_poll_us, s_charger_resume_us, s_charger_next_us;
+static void poll_battery(void) {
+    atomic_fetch_add(&battery_polls, 1);
+    s_batt_poll_us = esp_timer_get_time(); s_batt_poll_reusable = true;
+}
 '''
 
 
@@ -120,7 +125,8 @@ def source():
     for name in ("poll_key", "key_sampler_task", "device_power_key_sampler_start",
                  "device_power_key_sampler_enable", "device_power_poll", "device_power_drain_events",
                  "device_power_take_key_action", "device_power_take_key_short",
-                 "device_power_take_key_wakeup", "device_power_consume_key_press"):
+                 "wake_battery_snapshot_reusable", "device_power_take_key_wakeup",
+                 "device_power_consume_key_press"):
         code += function(name, DRIVER) + "\n"
     return code
 

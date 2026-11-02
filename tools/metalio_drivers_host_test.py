@@ -353,19 +353,182 @@ int main(void){
 '''
 
 
-def sleep_source():
+def wake_poll_source():
+    path = ROOT / 'components/device_power/device_power_metalio.c'
+    text = path.read_text()
+    code = power_source() + '#include "' + str(ROOT / 'components/device_power/battery_log.h') + '"\n#include "fca9555.h"\n'
+    code += '\n'.join(line for line in text.splitlines()
+                      if re.match(r'#define (?:BATT_|BQ_REG_|KEY_)', line)) + '\n'
+    code += re.search(r'static const int32_t s_soc_curve\[.*?\};', text, re.S)[0] + '\n'
+    code += re.search(r'typedef struct \{[^}]*\} batt_filter_t;', text, re.S)[0] + '\n'
+    start = text.index('static batt_filter_t s_batt_filter;')
+    code += text[start:text.index('static esp_err_t rtc_init', start)]
+    tca = ROOT / 'components/fca9555/fca9555.c'
+    raw = tca.read_text()
+    start = raw.index('struct fca9555_dev_t {')
+    code += raw[start:raw.index('};', start) + 2] + '\n'
+    for name in ('port_ok', 'xfer_read', 'fca9555_read_input'):
+        code += function(name, tca) + '\n'
+    code += r'''
+static i2c_master_dev_handle_t s_bq;
+static struct fca9555_dev_t wake_ioe={.dev=&devices[0x20],.timeout_ms=100};
+static fca9555_handle_t board_fca9555(void){return &wake_ioe;}
+static bool s_key_down,s_key_long_fired,s_key_short_pending,s_key_long_pending;
+static int64_t s_key_down_us;
+static bool key_locked,logging;
+static unsigned observations;
+static void key_lock(void){assert(!key_locked);key_locked=true;}
+static void key_unlock(void){assert(key_locked);key_locked=false;}
+static batt_log_state_t s_batt_log;
+static portMUX_TYPE s_batt_log_mux=portMUX_INITIALIZER_UNLOCKED;
+static int8_t s_batt_ic_soc;
+static int64_t s_batt_ic_us;
+static bool batt_log_enabled(void){return logging;}
+static int64_t batt_log_wall(void){return 0;}
+static void batt_log_notify(void){}
+static void batt_save(int32_t value){(void)value;}
+void batt_log_observe(batt_log_state_t *state,const batt_log_sample_t *sample){
+    assert(state==&s_batt_log && sample);++observations;
+}
+'''
+    for name in ('bq_read_voltage', 'bq_read_current', 'bq_read_soc',
+                 'batt_curve_soc', 'batt_filter_step', 'batt_full_now',
+                 'poll_key', 'poll_battery', 'wake_battery_snapshot_reusable',
+                 'device_power_poll', 'device_power_take_key_wakeup'):
+        code += function(name, path) + '\n'
+    return code
+
+
+WAKE_POLL_TEST = r'''
+static void reset_wake_poll(void){
+    model_reset();now_us=1000000;s_ready=true;
+    s_bq=&devices[0x55];s_cx=&devices[0x6b];s_charger_configured=true;
+    s_charger_resume_us=0;s_charger_next_us=10000000;s_charger_uv_shutdown=false;
+    memset(&s_snap,0,sizeof(s_snap));memset(&s_batt_filter,0,sizeof(s_batt_filter));
+    s_batt_poll_reusable=false;s_batt_poll_us=0;s_batt_saved_permille=-1;
+    s_batt_full_since_us=-1;s_batt_last_save_us=now_us;s_batt_charging_last=false;
+    s_key_down=s_key_long_fired=s_key_short_pending=s_key_long_pending=false;
+    key_locked=logging=false;observations=0;
+    devices[0x20].regs[1]=0xff;
+    devices[0x55].regs[8]=0x3c;devices[0x55].regs[9]=0x0f;
+}
+int main(void){
+    reset_wake_poll();assert(!device_power_take_key_wakeup() && s_batt_poll_reusable);
+    unsigned before=combined_count,reads=rx_count;
+    assert(!device_power_take_key_wakeup());
+    assert(combined_count==before && rx_count==reads+1);
+    now_us=s_batt_poll_us+KEY_WAKE_BATT_REUSE_US-1;
+    assert(wake_battery_snapshot_reusable(now_us));
+    ++now_us;assert(!wake_battery_snapshot_reusable(now_us));
+    assert(!device_power_take_key_wakeup() && combined_count>before);
+    now_us+=2000000;before=combined_count;
+    assert(!device_power_take_key_wakeup() && combined_count>before);
+    before=combined_count;assert(device_power_poll()==ESP_OK && combined_count>before);
+    before=combined_count;assert(device_power_poll()==ESP_OK && combined_count>before);
+    reset_wake_poll();poll_battery();before=combined_count;
+    devices[0x20].regs[1]&=0x7f;assert(device_power_take_key_wakeup() && s_key_down);
+    assert(combined_count>before);
+    reset_wake_poll();poll_battery();s_key_short_pending=true;before=combined_count;
+    assert(device_power_take_key_wakeup() && !s_key_short_pending && combined_count==before);
+    reset_wake_poll();poll_battery();now_us=s_batt_poll_us-1;before=combined_count;
+    assert(!device_power_take_key_wakeup() && combined_count>before);
+    reset_wake_poll();poll_battery();s_charger_next_us=now_us;before=combined_count;
+    assert(!device_power_take_key_wakeup() && combined_count>before);
+    reset_wake_poll();poll_battery();s_charger_resume_us=now_us;before=combined_count;
+    assert(!device_power_take_key_wakeup() && combined_count>before && !s_charger_resume_us);
+    reset_wake_poll();poll_battery();s_charger_resume_us=now_us+200000;before=combined_count;
+    assert(!device_power_take_key_wakeup() && combined_count==before);
+    now_us=s_charger_resume_us;assert(!device_power_take_key_wakeup() && !s_charger_resume_us);
+    for(unsigned field=0;field<4;++field){
+        reset_wake_poll();
+        if(field==0)fail_read_reg=BQ_REG_VOLTAGE;
+        if(field==1)fail_read_reg=BQ_REG_CURRENT;
+        if(field==2)fail_read_reg=CX_REG_STATUS1;
+        if(field==3)devices[0x55].regs[9]=0;
+        assert(!device_power_take_key_wakeup() && !s_batt_poll_reusable);
+        fail_read_reg=-1;devices[0x55].regs[9]=0x0f;before=combined_count;
+        assert(!device_power_take_key_wakeup() && combined_count>before && s_batt_poll_reusable);
+    }
+    reset_wake_poll();logging=true;poll_battery();before=observations;
+    assert(!device_power_take_key_wakeup() && observations==before);
+    now_us+=2000000;assert(!device_power_take_key_wakeup() && observations==before+1);
+    reset_wake_poll();s_ready=false;before=rx_count;
+    assert(!device_power_take_key_wakeup() && rx_count==before);
+    puts("PASS: real wake key/battery/charger paths, adjacent sample reuse, exact expiry, key reads, active polls, error retries, clock rollback, charger deadlines and logging");
+}
+'''
+
+
+def sleep_source(diagnostics=True):
     path = ROOT / 'main/power/sleep.c'
-    defines = '\n'.join(line for line in path.read_text().splitlines() if line.startswith('#define APP_LOCK_'))
-    code = '#include "' + str(ROOT/'components/sc7a20h/sc7a20h.c') + '"\n' + defines + '\n'
+    text = path.read_text()
+    defines = '\n'.join(line for line in text.splitlines() if line.startswith('#define APP_LOCK_'))
+    code = '#define CONFIG_APP_SLEEP_DIAGNOSTICS ' + str(int(diagnostics)) + '\n'
+    code += '#include "' + str(ROOT/'components/sc7a20h/sc7a20h.c') + '"\n' + defines + '\n'
+    code += '#include "fca9555.h"\n'
+    tca = ROOT/'components/fca9555/fca9555.c'
+    tca_text = tca.read_text()
+    start = tca_text.index('struct fca9555_dev_t {')
+    code += tca_text[start:tca_text.index('};', start)+2] + '\n'
+    for name in ('port_ok', 'xfer_read', 'fca9555_read_input'):
+        code += function(name, tca) + '\n'
+    start = text.index('typedef enum {\n    SLEEP_TRACE_KEY')
+    code += text[start:text.index('#if CONFIG_APP_SLEEP_DIAGNOSTICS\n//', start)]
     code += r"""
 #define BOARD_IOE_INT_GPIO 2
-#define ESP_SLEEP_WAKEUP_TIMER 0
+#define ESP_SLEEP_WAKEUP_TIMER 4
+#define ESP_SLEEP_WAKEUP_GPIO 7
 #define TAG "sleep-test"
 typedef enum {APP_WAKE_NONE,APP_WAKE_KEY,APP_WAKE_PICKUP,APP_WAKE_TIMEOUT} app_wake_source_t;
 typedef struct {bool jobs_ready,ble_stopped;} app_lifecycle_light_t;
 static bool jobs_ready=true, ble_stopped=true, pickup_setting=true, key_pending;
 static unsigned suspend_count,resume_count,sleep_count,key_polls,cache_restores,last_wake;
 static int scenario;
+static uint32_t wake_causes;
+static bool parked, no_ioe;
+static struct fca9555_dev_t ioe_storage={.dev=&devices[0x20],.int_gpio=2,.timeout_ms=100};
+static fca9555_handle_t board_fca9555(void){return no_ioe?NULL:&ioe_storage;}
+typedef int nvs_handle_t;
+#define NVS_READONLY 0
+#define NVS_READWRITE 1
+static uint8_t saved_blob[512],pending_blob[512];
+static size_t saved_size,pending_size;
+static unsigned nvs_reads,nvs_writes,nvs_commits,nvs_closes,live_logs,saved_logs;
+static int nvs_fault;
+static char summary[2048];
+static int nvs_open(const char *ns,int mode,nvs_handle_t *handle){
+    assert(!parked && !strcmp(ns,"sleep_diag"));
+    if(mode==NVS_READONLY)++nvs_reads;else {assert(mode==NVS_READWRITE);++nvs_writes;}
+    if(nvs_fault==1)return ESP_FAIL;
+    *handle=mode;return ESP_OK;
+}
+static int nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size){
+    assert(h==NVS_READONLY&&!strcmp(key,"last"));
+    if(nvs_fault==4||!saved_size||saved_size>*size)return ESP_FAIL;
+    memcpy(out,saved_blob,saved_size);*size=saved_size;return ESP_OK;
+}
+static int nvs_set_blob(nvs_handle_t h,const char *key,const void *data,size_t size){
+    assert(!parked&&h==NVS_READWRITE&&!strcmp(key,"last")&&size<=sizeof(pending_blob));
+    if(nvs_fault==2)return ESP_FAIL;
+    memcpy(pending_blob,data,size);pending_size=size;return ESP_OK;
+}
+static int nvs_commit(nvs_handle_t h){
+    assert(!parked&&h==NVS_READWRITE);++nvs_commits;
+    now_us+=70000;
+    if(nvs_fault==3)return ESP_FAIL;
+    memcpy(saved_blob,pending_blob,pending_size);saved_size=pending_size;return ESP_OK;
+}
+static void nvs_close(nvs_handle_t h){assert(h==NVS_READONLY||h==NVS_READWRITE);++nvs_closes;}
+static int esp_app_get_elf_sha256(char *out,size_t size){assert(size==17);memcpy(out,"0123456789abcdef",17);return 17;}
+static void sleep_test_log(const char *tag,const char *fmt,...) __attribute__((format(printf,2,3)));
+static void sleep_test_log(const char *tag,const char *fmt,...){
+    (void)tag;
+    if(strncmp(fmt,"SLEEP_SUMMARY ",14))return;
+    assert(!parked);va_list args;va_start(args,fmt);vsnprintf(summary,sizeof(summary),fmt,args);va_end(args);
+    if(strstr(summary,"origin=live"))++live_logs;else if(strstr(summary,"origin=saved"))++saved_logs;
+}
+#undef ESP_LOGI
+#define ESP_LOGI(...) sleep_test_log(__VA_ARGS__)
 enum { DEVICE_POWER_BATT_LOG_LOCK=128, DEVICE_POWER_BATT_LOG_WAKE=256 };
 static unsigned log_locks, log_wakes;
 static void device_power_batt_log_event(int event){if(event==128)++log_locks;else {assert(event==256);++log_wakes;}}
@@ -376,8 +539,8 @@ static void cache_wake_restore_snapshot(void){}
 static void cache_wake_restore_apply(void){++cache_restores;}
 static bool app_settings_pickup_wake(void){return pickup_setting;}
 static void app_settings_set_last_wake(uint8_t value){last_wake=value;}
-static void periph_suspend(bool off){assert(!off&&!key_sampling);++suspend_count;}
-static void periph_resume(void){assert(log_locks==1 && log_wakes==1);++resume_count;}
+static void periph_suspend(bool off){assert(!off&&!key_sampling);++suspend_count;parked=true;}
+static void periph_resume(void){assert(log_locks==1 && log_wakes==1);++resume_count;parked=false;now_us+=30000;}
 static int gpio_wakeup_disable(int pin){assert(pin==2);return ESP_OK;}
 static void board_clear_ioe_int(void){devices[0x20].latched[0]=devices[0x20].latched[1]=false;}
 static bool device_power_take_key_wakeup(void){
@@ -386,6 +549,7 @@ static bool device_power_take_key_wakeup(void){
     if(scenario==1 && key_polls==1)devices[0x19].regs[0x31]=0x40;
     if(scenario==2 && key_polls==1){devices[0x19].regs[0x31]=0x40;devices[0x20].latched[1]=true;}
     if(scenario==4 && key_polls==3)key_pending=true;
+    if(scenario>=9 && key_polls>1)devices[0x20].regs[1]=0xff;
     bool key=key_pending;key_pending=false;return key;
 }
 static int esp_sleep_enable_timer_wakeup(uint64_t usec){assert(usec==APP_LOCK_KEY_POLL_US);return scenario==7?ESP_FAIL:ESP_OK;}
@@ -393,13 +557,30 @@ static int esp_sleep_disable_wakeup_source(int source){assert(source==ESP_SLEEP_
 static int app_s31_light_sleep_start(void){
     assert(!key_sampling);
     ++sleep_count;assert(sleep_count<10 && ble_stopped);
+    assert(!nvs_reads&&!nvs_writes&&!nvs_commits&&!live_logs&&!saved_logs);
     now_us+=(scenario==3 && sleep_count==1)?10000:100000;
+    wake_causes=1UL<<ESP_SLEEP_WAKEUP_TIMER;
+    if(scenario>=9){
+        if(sleep_count==1){
+            wake_causes=1UL<<ESP_SLEEP_WAKEUP_GPIO;
+            if(scenario==9||scenario==12||scenario==14||scenario==15)devices[0x20].regs[1]=0x7f;
+            if(scenario==10)devices[0x19].regs[0x31]=0x40;
+            if(scenario==13)fail_read_reg=1;
+            if(scenario==14)wake_causes|=1UL<<ESP_SLEEP_WAKEUP_TIMER;
+            if(scenario==15)wake_causes=1UL<<ESP_SLEEP_WAKEUP_TIMER;
+            if(scenario==16)wake_causes=1UL<<3;
+        }else {key_pending=true;fail_read_reg=-1;}
+        return scenario==12?ESP_FAIL:ESP_OK;
+    }
     if(scenario==0 || scenario==6)key_pending=true;
     else if(scenario!=8)devices[0x19].regs[0x31]=0x40;
     return scenario==8?ESP_FAIL:ESP_OK;
 }
+static uint32_t esp_sleep_get_wakeup_causes(void){return wake_causes;}
 """
-    for name in ['lock_arm_ioe_wakeup','pickup_ack','pickup_ia','pickup_wait_quiet','app_light_sleep_wait']:
+    code += '#if CONFIG_APP_SLEEP_DIAGNOSTICS\n' + function('sleep_trace_log', path) + '\n#endif\n'
+    for name in ['sleep_trace_replay','sleep_trace_record','sleep_trace_finish','lock_capture_power_key',
+                 'lock_arm_ioe_wakeup','pickup_ack','pickup_ia','pickup_wait_quiet','app_light_sleep_wait']:
         code += function(name,path)+'\n'
     return code
 
@@ -408,31 +589,131 @@ static void reset_sleep(int next){
     model_reset();now_us=1000;shared_irq=true;scenario=next;
     jobs_ready=ble_stopped=pickup_setting=true;key_pending=false;
     key_sampling=true;
+    wake_causes=0;parked=no_ioe=false;
     suspend_count=resume_count=sleep_count=key_polls=cache_restores=last_wake=0;
     log_locks=log_wakes=0;
+    nvs_fault=0;saved_size=pending_size=0;
+    nvs_reads=nvs_writes=nvs_commits=nvs_closes=live_logs=saved_logs=0;
+    summary[0]=0;devices[0x20].regs[1]=0xff;
+}
+static sleep_trace_t saved_trace(void){
+    sleep_trace_t trace={0};assert(saved_size==sizeof(trace));memcpy(&trace,saved_blob,sizeof(trace));return trace;
+}
+static void check_trace(unsigned attempts,unsigned ok,unsigned failed,int exit){
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    sleep_trace_t trace=saved_trace();
+    assert(trace.attempts==attempts&&trace.successes==ok&&trace.failures==failed&&trace.exit==(unsigned)exit);
+    assert(trace.version==1&&trace.ok_call_us+trace.rejected_call_us<=trace.total_us);
+    assert(nvs_writes==1&&nvs_commits==1&&nvs_closes==1&&live_logs==1&&!nvs_reads&&!saved_logs);
+    assert(strstr(summary,"elf=0123456789abcdef")&&strstr(summary,"save_error=0"));
+    assert(trace.start_us+trace.total_us+70000==now_us);
+#else
+    (void)attempts;(void)ok;(void)failed;(void)exit;
+    assert(!nvs_reads&&!nvs_writes&&!nvs_commits&&!live_logs&&!saved_logs);
+#endif
 }
 int main(void){
     struct sc7a20h_dev_t storage={.dev=&devices[0x19],.int1_gpio=2,.cfg=SC7A20H_CONFIG_IDLE};
     sc7a20h_handle_t acc=&storage;
+    // 清中断/复查前读到按下，随后已松手也只需一次浅睡；旧函数必须在此失败。
+    // Preserve the observed press before clearing/rechecking even after release; the old loop must fail here.
+    reset_sleep(9);pickup_setting=false;
+    assert(app_light_sleep_wait(acc)==APP_WAKE_KEY&&sleep_count==1);
+    check_trace(1,1,0,SLEEP_TRACE_KEY);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    assert(saved_trace().key_latched==1&&saved_trace().gpio_wakes==1);
+#endif
     reset_sleep(0);assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1 && cache_restores==1);
+    check_trace(1,1,0,SLEEP_TRACE_KEY);
     assert(suspend_count==1 && resume_count==1 && !acc->powered && irq_type==GPIO_INTR_LOW_LEVEL);
     assert(key_sampling);
     for(int n=1;n<=2;++n){reset_sleep(n);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP && !sleep_count && last_wake==APP_WAKE_PICKUP);}
     reset_sleep(3);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP && sleep_count==2);
     reset_sleep(4);ble_stopped=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !sleep_count);
+    check_trace(0,0,0,SLEEP_TRACE_KEY);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    assert(saved_trace().ble_blocked);
+#endif
     reset_sleep(0);jobs_ready=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !suspend_count && !resume_count && !wake_calls);
+    check_trace(0,0,0,SLEEP_TRACE_JOBS_BUSY);
     reset_sleep(0);fail_reg=0x25;fail_writes=1;
     assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1 && irq_type==GPIO_INTR_LOW_LEVEL && !acc->powered);
     reset_sleep(0);wake_fail_call=2;
     assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1 && irq_type==GPIO_INTR_LOW_LEVEL && !devices[0x19].regs[0x30]);
     reset_sleep(5);stuck_irq=true;
     assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !sleep_count && now_us<10000000 && resume_count==1);
+    check_trace(0,0,0,SLEEP_TRACE_IRQ_STUCK);
     reset_sleep(6);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==1);
     reset_sleep(7);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && !sleep_count);
+    check_trace(0,0,0,SLEEP_TRACE_TIMER_ERROR);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    assert(saved_trace().timer_errors==APP_LOCK_SLEEP_ERROR_LIMIT);
+#endif
     reset_sleep(8);pickup_setting=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY && sleep_count==APP_LOCK_SLEEP_ERROR_LIMIT && !cache_restores);
+    check_trace(APP_LOCK_SLEEP_ERROR_LIMIT,0,APP_LOCK_SLEEP_ERROR_LIMIT,SLEEP_TRACE_SLEEP_ERROR);
     assert(key_sampling);
     reset_sleep(0);key_sampling=false;assert(app_light_sleep_wait(acc)==APP_WAKE_KEY&&!key_sampling);
+    reset_sleep(10);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP&&sleep_count==1);
+    check_trace(1,1,0,SLEEP_TRACE_PICKUP);
+    for(int n=11;n<=16;++n){
+        reset_sleep(n);pickup_setting=false;
+        assert(app_light_sleep_wait(acc)==APP_WAKE_KEY&&sleep_count==(n==14?1u:2u));
+        check_trace(n==14?1:2,n==12?0:(n==14?1:2),n==12?2:0,SLEEP_TRACE_KEY);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+        sleep_trace_t trace=saved_trace();
+        assert(trace.key_latched==(n==14?1u:0u));
+        assert(trace.unresolved_gpio==((n==11||n==13)?1u:0u));
+        assert(trace.key_read_errors==(n==13?1u:0u));
+        assert(trace.gpio_wakes==((n==11||n==13||n==14)?1u:0u));
+        assert(trace.other_wakes==(n==16?1u:0u));
+#endif
+    }
+    reset_sleep(11);pickup_setting=false;no_ioe=true;
+    assert(app_light_sleep_wait(NULL)==APP_WAKE_KEY&&sleep_count==2);
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    assert(saved_trace().key_read_errors==1&&!saved_trace().key_latched);
+    reset_sleep(3);assert(app_light_sleep_wait(acc)==APP_WAKE_PICKUP);
+    assert(saved_trace().short_calls==1&&saved_trace().min_call_us==10000&&saved_trace().max_call_us==100000);
+    sleep_trace_t trace=saved_trace();assert(trace.ok_call_us==110000);
+    sleep_trace_replay();assert(saved_logs==1&&nvs_reads==1&&nvs_writes==1&&nvs_commits==1&&nvs_closes==2);
+    assert(strstr(summary,"origin=saved")&&strstr(summary,"ok_call_us=110000"));
+    unsigned replays=saved_logs;
+    nvs_fault=4;sleep_trace_replay();assert(saved_logs==replays);nvs_fault=0;
+    for(int kind=0;kind<7;++kind){
+        sleep_trace_t invalid=trace;
+        if(kind==0)invalid.version=2;
+        if(kind==1)invalid.elf[16]='x';
+        if(kind==2)invalid.attempts++;
+        if(kind==3)invalid.ok_call_us=invalid.total_us+1;
+        if(kind==4)invalid.rejected_call_us=-1;
+        if(kind==5)invalid.exit=99;
+        memcpy(saved_blob,&invalid,sizeof(invalid));saved_size=sizeof(invalid)-(kind==6);
+        sleep_trace_replay();assert(saved_logs==replays);
+    }
+    for(int fault=1;fault<=3;++fault){
+        reset_sleep(0);nvs_fault=fault;
+        assert(app_light_sleep_wait(acc)==APP_WAKE_KEY&&resume_count==1&&key_sampling);
+        assert(live_logs==1&&!saved_size&&strstr(summary,"save_error=-1"));
+        assert(nvs_closes==(fault==1?0u:1u));
+    }
+    reset_sleep(0);assert(app_light_sleep_wait(acc)==APP_WAKE_KEY);
+    trace=saved_trace();trace.elf[0]='a';memcpy(saved_blob,&trace,sizeof(trace));
+    parked=true;now_us+=50000;parked=false;
+    sleep_trace_t next={.start_us=now_us};nvs_fault=3;
+    sleep_trace_finish(&next,SLEEP_TRACE_JOBS_BUSY,APP_WAKE_KEY);
+    nvs_fault=0;sleep_trace_replay();assert(strstr(summary,"elf=a123456789abcdef"));
+    sleep_trace_t counters={0};
+    sleep_trace_record(&counters,ESP_FAIL,1UL<<ESP_SLEEP_WAKEUP_GPIO,10000);
+    assert(counters.failures==1&&!counters.gpio_wakes&&!counters.short_calls&&!counters.min_call_us);
+    sleep_trace_record(&counters,ESP_OK,(1UL<<ESP_SLEEP_WAKEUP_TIMER)|(1UL<<ESP_SLEEP_WAKEUP_GPIO),2000000);
+    sleep_trace_record(&counters,ESP_OK,0,0);
+    assert(counters.attempts==3&&counters.successes==2&&counters.timer_wakes==1&&counters.gpio_wakes==1);
+    assert(counters.other_wakes==1&&counters.short_calls==1&&!counters.min_call_us&&counters.max_call_us==2000000);
+#else
+    sleep_trace_replay();assert(!nvs_reads);
+#endif
     puts("PASS: actual sleep/SC shared IRQ key and pickup, prelatched motion before IOE checks, short-sleep filtering, arm/config failures, bounded stuck line, BLE/jobs fallback and sleep errors");
+    puts("PASS: GPIO P17 capture before release, motion-only/unknown/read-error/stale wake causes, diagnostic on/off, summary accounting and NVS/replay failure boundaries");
 }
 """
 
@@ -463,7 +744,9 @@ def main():
                  ('touch', '#include "'+str(ROOT/'components/cst836u/cst836u.c')+'"\n', TOUCH_TEST),
                  ('accel', '#include "'+str(ROOT/'components/sc7a20h/sc7a20h.c')+'"\n', ACCEL_TEST),
                  ('power', power_source(), POWER_TEST),
-                 ('sleep', sleep_source(), SLEEP_TEST)]
+                 ('wake_poll', wake_poll_source(), WAKE_POLL_TEST),
+                 ('sleep', sleep_source(), SLEEP_TEST),
+                 ('sleep_off', sleep_source(False), SLEEP_TEST)]
         for name, source, test in cases:
             c, binary = work/(name+'.c'), work/name
             c.write_text(MODEL + bus + source + test)

@@ -65,6 +65,10 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+#include "esp_app_desc.h"
+#include "nvs.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "pmu_selftest.h"
@@ -116,6 +120,115 @@ static cst836u_handle_t s_tp;
 static sc7a20h_handle_t s_acc;
 static bool s_acc_was_on;
 
+typedef enum {
+    SLEEP_TRACE_KEY, SLEEP_TRACE_PICKUP, SLEEP_TRACE_JOBS_BUSY,
+    SLEEP_TRACE_IRQ_STUCK, SLEEP_TRACE_TIMER_ERROR, SLEEP_TRACE_SLEEP_ERROR,
+} sleep_trace_exit_t;
+
+typedef struct {
+    uint32_t version, exit, wake, ble_blocked;
+    int64_t start_us, total_us, ok_call_us, rejected_call_us, min_call_us, max_call_us, unix_s;
+    uint32_t attempts, successes, failures, timer_wakes, gpio_wakes, other_wakes;
+    uint32_t short_calls, timer_errors, irq_low_polls, unresolved_gpio, key_latched, key_read_errors;
+    int32_t last_error;
+    char elf[17];
+} sleep_trace_t;
+
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+// 只在浅睡会话外读写一份汇总；调用停留时间不是电流或精确睡眠时间。
+// Read/write one summary outside the sleep session; call residence is neither current nor exact sleep time.
+static void sleep_trace_log(const sleep_trace_t *trace, const char *origin, esp_err_t save_error) {
+    ESP_LOGI(TAG, "SLEEP_SUMMARY origin=%s elf=%s unix_s=%lld start_us=%lld exit=%lu wake=%lu ble_blocked=%lu attempts=%lu ok=%lu failed=%lu timer=%lu gpio=%lu other=%lu lt80ms=%lu timer_errors=%lu irq_low=%lu unresolved_gpio=%lu key_latched=%lu key_read_errors=%lu last_error=%ld total_us=%lld ok_call_us=%lld rejected_call_us=%lld outside_call_us=%lld min_call_us=%lld max_call_us=%lld save_error=%d",
+        origin, trace->elf, (long long)trace->unix_s, (long long)trace->start_us,
+        (unsigned long)trace->exit, (unsigned long)trace->wake, (unsigned long)trace->ble_blocked,
+        (unsigned long)trace->attempts, (unsigned long)trace->successes, (unsigned long)trace->failures,
+        (unsigned long)trace->timer_wakes, (unsigned long)trace->gpio_wakes, (unsigned long)trace->other_wakes,
+        (unsigned long)trace->short_calls, (unsigned long)trace->timer_errors, (unsigned long)trace->irq_low_polls,
+        (unsigned long)trace->unresolved_gpio, (unsigned long)trace->key_latched, (unsigned long)trace->key_read_errors,
+        (long)trace->last_error, (long long)trace->total_us, (long long)trace->ok_call_us,
+        (long long)trace->rejected_call_us,
+        (long long)(trace->total_us - trace->ok_call_us - trace->rejected_call_us),
+        (long long)trace->min_call_us, (long long)trace->max_call_us, (int)save_error);
+}
+#endif
+
+static void sleep_trace_replay(void) {
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    nvs_handle_t handle;
+    if (nvs_open("sleep_diag", NVS_READONLY, &handle) != ESP_OK) return;
+    sleep_trace_t trace = {0};
+    size_t size = sizeof(trace);
+    esp_err_t error = nvs_get_blob(handle, "last", &trace, &size);
+    nvs_close(handle);
+    if (error != ESP_OK) return;
+    if (size != sizeof(trace) || trace.version != 1 || trace.elf[16] != '\0' ||
+        trace.exit > SLEEP_TRACE_SLEEP_ERROR || trace.wake > APP_WAKE_TIMEOUT ||
+        (uint64_t)trace.successes + trace.failures != trace.attempts ||
+        trace.total_us < 0 || trace.ok_call_us < 0 || trace.rejected_call_us < 0 ||
+        trace.ok_call_us > trace.total_us || trace.rejected_call_us > trace.total_us - trace.ok_call_us) {
+        ESP_LOGW(TAG, "SLEEP_SUMMARY saved record invalid");
+        return;
+    }
+    sleep_trace_log(&trace, "saved", ESP_OK);
+#endif
+}
+
+static void sleep_trace_record(sleep_trace_t *trace, esp_err_t error, uint32_t causes, int64_t elapsed_us) {
+    ++trace->attempts;
+    if (error != ESP_OK) {
+        ++trace->failures;
+        trace->last_error = error;
+        trace->rejected_call_us += elapsed_us;
+        return;
+    }
+    ++trace->successes;
+    trace->ok_call_us += elapsed_us;
+    if (trace->successes == 1 || elapsed_us < trace->min_call_us) trace->min_call_us = elapsed_us;
+    if (elapsed_us > trace->max_call_us) trace->max_call_us = elapsed_us;
+    if (elapsed_us < 80000) ++trace->short_calls;
+    if (causes & (1UL << ESP_SLEEP_WAKEUP_TIMER)) ++trace->timer_wakes;
+    if (causes & (1UL << ESP_SLEEP_WAKEUP_GPIO)) ++trace->gpio_wakes;
+    if (!causes || (causes & ~((1UL << ESP_SLEEP_WAKEUP_TIMER) | (1UL << ESP_SLEEP_WAKEUP_GPIO))))
+        ++trace->other_wakes;
+}
+
+static void sleep_trace_finish(sleep_trace_t *trace, sleep_trace_exit_t exit, app_wake_source_t wake) {
+#if CONFIG_APP_SLEEP_DIAGNOSTICS
+    trace->version = 1;
+    trace->exit = exit;
+    trace->wake = wake;
+    trace->total_us = esp_timer_get_time() - trace->start_us;
+    trace->unix_s = time(NULL);
+    (void)esp_app_get_elf_sha256(trace->elf, sizeof(trace->elf));
+    nvs_handle_t handle;
+    esp_err_t error = nvs_open("sleep_diag", NVS_READWRITE, &handle);
+    if (error == ESP_OK) {
+        error = nvs_set_blob(handle, "last", trace, sizeof(*trace));
+        if (error == ESP_OK) error = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    sleep_trace_log(trace, "live", error);
+#else
+    (void)trace;
+    (void)exit;
+    (void)wake;
+#endif
+}
+
+// 只保全成功 GPIO 唤醒后实际读到的 P17 低；共享中断本身不证明电源键。
+// Preserve only a P17 low observed after successful GPIO wake; shared IRQ alone never proves POWER.
+static bool lock_capture_power_key(esp_err_t error, uint32_t causes, bool *read_failed) {
+    *read_failed = false;
+    if (error != ESP_OK || !(causes & (1UL << ESP_SLEEP_WAKEUP_GPIO))) return false;
+    fca9555_handle_t ioe = board_fca9555();
+    uint8_t input = 0xff;
+    if (!ioe || fca9555_read_input(ioe, 1, &input) != ESP_OK) {
+        *read_failed = true;
+        return false;
+    }
+    return !(input & (FCA9555_P17 >> 8));
+}
+
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc) {
     s_tp = tp;
     s_acc = acc;
@@ -126,6 +239,7 @@ void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc) {
     esp_err_t err = sleep_cpu_configure(true);
     if (err != ESP_OK) ESP_LOGW(TAG, "CPU light-sleep power-down off: %s", esp_err_to_name(err));
 #endif
+    sleep_trace_replay();
 }
 
 // 触摸、加速度计都在常开 3V3 上，ESP 浅睡或 EN 拉低都不会断它们的电，必须主动送进最低功耗态。
@@ -233,8 +347,12 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 }
 
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
+    sleep_trace_t trace = {.start_us = esp_timer_get_time()};
     const app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
-    if (!handoff.jobs_ready) return APP_WAKE_KEY;
+    if (!handoff.jobs_ready) {
+        sleep_trace_finish(&trace, SLEEP_TRACE_JOBS_BUSY, APP_WAKE_KEY);
+        return APP_WAKE_KEY;
+    }
     const bool key_sampling = device_power_key_sampler_enable(false);
     // 蓝牙控制器不能带着活动状态进浅睡：醒来后的第一条 HCI 命令会踩到 BTDM 控制器内部的
     // 链表断言（ble_hw.c）。锁屏不是用户关蓝牙，停栈时保留重连目标，解锁后主循环重新起栈
@@ -245,6 +363,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     // restarts the stack after unlock. If the teardown fails, never light-sleep; keep polling
     // awake rather than handing an active controller to the sleep path.
     const bool ble_stopped = handoff.ble_stopped;
+    trace.ble_blocked = !ble_stopped;
     if (!ble_stopped) ESP_LOGW(TAG, "BLE stop before light sleep failed; staying awake");
     // 首次浅睡前抓 CACHE_L1 配置快照；之后每次醒来写回，喂行产能才回得来。
     // Snapshot CACHE_L1 before the first light sleep; restore on every wake so
@@ -295,6 +414,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     }
 
     app_wake_source_t wake = APP_WAKE_NONE;
+    sleep_trace_exit_t exit = SLEEP_TRACE_KEY;
     int64_t ioe_low_since_us = 0;
     unsigned sleep_errors = 0;
     esp_err_t last_sleep_error = ESP_OK;
@@ -311,11 +431,13 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         }
         if (pickup && pickup_ia(acc)) {
             wake = APP_WAKE_PICKUP;
+            exit = SLEEP_TRACE_PICKUP;
             ESP_LOGI(TAG, "pickup wake");
             break;
         }
         board_clear_ioe_int();
         if (gpio_get_level((gpio_num_t)BOARD_IOE_INT_GPIO) == 0) {
+            ++trace.irq_low_polls;
             if (!ioe_low_since_us) ioe_low_since_us = now_us;
             if (now_us - ioe_low_since_us >= APP_LOCK_STUCK_IRQ_US) {
                 // Return to the active page instead of leaving an inert lock
@@ -323,6 +445,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
                 // 非按键中断一直清不掉时，退回可操作页面，避免像死机一样停在锁屏。
                 ESP_LOGW(TAG, "lock IOE_INT stuck low; recover active page");
                 wake = APP_WAKE_KEY;
+                exit = SLEEP_TRACE_IRQ_STUCK;
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -343,9 +466,12 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         int64_t sleep_us = APP_LOCK_KEY_POLL_US;
         esp_err_t timer_error = esp_sleep_enable_timer_wakeup((uint64_t)sleep_us);
         if (timer_error != ESP_OK) {
+            ++trace.timer_errors;
+            trace.last_error = timer_error;
             ESP_LOGW(TAG, "lock sleep timer rejected: %s", esp_err_to_name(timer_error));
             if (++sleep_errors >= APP_LOCK_SLEEP_ERROR_LIMIT) {
                 wake = APP_WAKE_KEY;
+                exit = SLEEP_TRACE_TIMER_ERROR;
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -353,20 +479,27 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
         }
         int64_t t0 = esp_timer_get_time();
         esp_err_t sleep_error = app_s31_light_sleep_start();
-        int64_t dt_ms = (esp_timer_get_time() - t0) / 1000;
+        int64_t elapsed_us = esp_timer_get_time() - t0;
+        int64_t dt_ms = elapsed_us / 1000;
         // 唤醒路径不恢复 CACHE_L1 仲裁/门控配置，必须在任何刷新前写回。
         // The wake path never restores the CACHE_L1 arbitration/gating words;
         // write them back before any refresh can run.
         if (sleep_error == ESP_OK) {
             cache_wake_restore_apply();
         }
+        const uint32_t causes = sleep_error == ESP_OK ? esp_sleep_get_wakeup_causes() : 0;
+        bool key_read_failed = false;
+        const bool key_latched = lock_capture_power_key(sleep_error, causes, &key_read_failed);
+        trace.key_latched += key_latched;
+        trace.key_read_errors += key_read_failed;
+        sleep_trace_record(&trace, sleep_error, causes, elapsed_us);
 #ifdef KIIKO_SLEEP_DIAG
         // 缓存恢复后才输出，避免诊断本身干扰唤醒。/ Log only after cache restore to avoid disturbing wake.
         ESP_LOGI(TAG, "sleep result=%d causes=0x%lx elapsed_ms=%lld", (int)sleep_error,
                  (unsigned long)esp_sleep_get_wakeup_causes(), (long long)dt_ms);
 #endif
-        board_clear_ioe_int();
-        if (device_power_take_key_wakeup()) {
+        const bool key_polled = device_power_take_key_wakeup();
+        if (key_latched || key_polled) {
             wake = APP_WAKE_KEY;
             break;
         }
@@ -378,9 +511,12 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
                 continue;
             }
             wake = APP_WAKE_PICKUP;
+            exit = SLEEP_TRACE_PICKUP;
             ESP_LOGI(TAG, "pickup wake");
             break;
         }
+        if (causes & (1UL << ESP_SLEEP_WAKEUP_GPIO)) ++trace.unresolved_gpio;
+        board_clear_ioe_int();
         if (pickup && sc7a20h_int1_level(acc) == 0) {
             pickup_ack(acc);
             pickup_wait_quiet(acc, 400, 1500);
@@ -397,6 +533,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
             if (++sleep_errors >= APP_LOCK_SLEEP_ERROR_LIMIT) {
                 ESP_LOGE(TAG, "lock light sleep repeatedly rejected; recover active page");
                 wake = APP_WAKE_KEY;
+                exit = SLEEP_TRACE_SLEEP_ERROR;
                 break;
             }
             // A rejected sleep must not spin at full CPU speed behind the static e-paper image.
@@ -420,6 +557,7 @@ app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
     periph_resume();
     app_settings_set_last_wake((uint8_t)(wake == APP_WAKE_TIMEOUT ? APP_WAKE_NONE : wake));
     (void)device_power_key_sampler_enable(key_sampling);
+    sleep_trace_finish(&trace, exit, wake);
     return wake;
 }
 

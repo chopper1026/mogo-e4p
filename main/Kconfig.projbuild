@@ -26,6 +26,18 @@ endmenu
 # Panel self-test for bring-up; keep disabled in production images.
 menu "Bring-up diagnostics"
 
+    config APP_SLEEP_DIAGNOSTICS
+        bool "Save one light-sleep summary after wake and replay at boot"
+        default n
+        help
+            浅睡会话只在 RAM 累计调用时间、失败和唤醒原因；退出并恢复外设后
+            仅保存一次到 NVS sleep_diag/last，下次启动重放以便 USB 重连读取。
+            不新增唤醒或逐切片日志。时间统计不是电流测量，保存失败不阻断唤醒。
+            Accumulate call times, failures and wake causes in RAM; after leaving
+            sleep and restoring peripherals, save once to NVS sleep_diag/last
+            and replay at boot for USB reconnection. No extra wakeups or per-slice
+            logs. Timings are not current measurements; save errors never block wake.
+
     config DISPLAY_POWER_DIAG
         bool "Log panel power requests and idle deadlines"
         default n

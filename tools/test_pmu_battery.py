@@ -38,6 +38,8 @@ static int s_batt_log_mux;
 static int32_t s_batt_saved_permille;
 static bool s_batt_charging_last;
 static int64_t s_batt_last_save_us, s_batt_ic_us, s_batt_full_since_us;
+static int64_t s_batt_poll_us;
+static bool s_batt_poll_reusable;
 static int8_t s_batt_ic_soc;
 static int64_t now_us;
 static int64_t batt_log_wall(void) { return 1793415600 + now_us / 1000000; }

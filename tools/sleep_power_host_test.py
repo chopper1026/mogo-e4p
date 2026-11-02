@@ -86,6 +86,8 @@ static int cst836u_set_mode(void *h, int m) { assert(h == s_tp); tp_mode = m; re
 static int cst836u_wake(void *h);
 static int sleep_cpu_configure(bool enabled) { assert(enabled); ++cpu_requests; return ESP_OK; }
 static void app_s31_sleep_init(void) {}
+static int trace_replays;
+static void sleep_trace_replay(void) { ++trace_replays; }
 static bool pico_online_busy(void) { return ota; }
 static bool wifi_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
 static void wifi_transfer_resume_after_sleep(void) { ++resumes; }
@@ -141,7 +143,7 @@ static void reset(void) {
     fl_pauses = fl_resumes = 0;
 }
 int main(void) {
-    reset(); app_sleep_bind((void *)2, (void *)3); assert(cpu_requests == 1);
+    reset(); app_sleep_bind((void *)2, (void *)3); assert(cpu_requests == 1 && trace_replays == 1);
     // 浅睡与下电均关闭 P14、马达和关机脉冲；P12 触摸复位保持高。
     // Both light sleep and power-off cut P14, motor and power pulse while keeping touch reset P12 high.
     for (int off = 0; off < 2; ++off) {

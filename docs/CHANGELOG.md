@@ -3,6 +3,15 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.1 · 本地测试 / Local testing · 2026-11-02
+
+- 浅睡成功 GPIO 唤醒后保全实际读到的电源键按下，避免复查期间松手丢失；不将来源不明的共享中断当成电源键，保留 2 秒定时兜底。首次读取前已经松手的判源限制仍保留。
+  Preserve an observed power-key press after successful GPIO wake so release during rechecking cannot lose it; do not treat unknown shared interrupts as POWER, retaining the two-second timer fallback. A press released before the first read may still be unidentifiable.
+- 增加默认关闭的浅睡诊断：会话内仅 RAM 计数，退出后保存一份汇总供重启读回，不新增唤醒或逐切片落盘。统计不是电流测量，尚无实测省电结论。
+  Add off-by-default light-sleep diagnostics: RAM-only counters during waits and one saved summary after exit for boot replay, without extra wakeups or per-slice writes. Timings are not current measurements; no measured power-saving result is available.
+- 浅睡按键检查短暂复用不足 10 ms 的完整有效电量样本，减少紧邻检查的重复总线访问；按键每次读取，到期充电维护与采样失败仍重读，活动页完整轮询不变。
+  Sleep key checks briefly reuse complete valid battery samples younger than 10 ms to avoid adjacent duplicate bus accesses; keys are always read, due charger maintenance and sampling failures force refresh, and active-page full polls are unchanged.
+
 ## v1.0.1 · 本地测试 / Local testing · 2026-11-01
 
 - 亚克力书架挡板高度减半，保留底边位置以露出更多封面；设置预览同步调整。
