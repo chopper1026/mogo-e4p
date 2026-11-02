@@ -29,17 +29,24 @@ const char* app_sleep_mode_name(app_sleep_mode_t mode);
 /// 锁屏睡眠方式，默认仅浅睡。彻底关机：锁屏出图后立即按原厂脉冲彻底断电，长按电源键约 1 秒冷开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
 /// 电源菜单「关机」固定立即断电，与本设置无关。
 /// APP_SHUTDOWN_FULL 是旧档位：仅为 NVS/备份兼容保留编号，读取时并入彻底关机，界面不再提供。
+/// 定时档在每次锁屏浅睡开始后计时，唤醒取消本轮计时；到时彻底关机，长按电源键约 1 秒开机。
 /// Lock sleep style, light-only by default. Full off: the lock pulses off factory-style right after the lock art (a one-second power-key hold cold-boots); light-only: lock sleeps forever without powering off, key/pickup returns.
 /// The power menu's 关机 always powers off immediately and ignores this setting.
 /// APP_SHUTDOWN_FULL is a legacy value kept for NVS/backup compatibility; loads merge into full off and the UI no longer offers it.
+/// Timed styles count from each locked light-sleep entry; waking cancels that countdown. Expiry powers off fully, requiring a one-second power-key hold to boot.
 typedef enum {
     /// 旧档位保留编号，读取时并入彻底关机。/ Legacy ID; loads merge into full off.
     APP_SHUTDOWN_FULL = 0,
     APP_SHUTDOWN_STAGED = 1,
     APP_SHUTDOWN_LIGHT = 2,
+    APP_SHUTDOWN_LIGHT_10 = 3,
+    APP_SHUTDOWN_LIGHT_30 = 4,
+    APP_SHUTDOWN_LIGHT_60 = 5,
 } app_shutdown_style_t;
 app_shutdown_style_t app_settings_shutdown_style(void);
 void app_settings_set_shutdown_style(app_shutdown_style_t style);
+/// 定时浅睡分钟数；非定时档返回 0。/ Timed light-sleep minutes; zero for untimed styles.
+uint8_t app_settings_shutdown_minutes(void);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);

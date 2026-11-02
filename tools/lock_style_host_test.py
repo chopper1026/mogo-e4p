@@ -82,6 +82,7 @@ static void wifi_transfer_resume_after_sleep(void){++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
 static app_wake_source_t app_light_sleep_wait(void *acc){(void)acc;assert(!key_sampling);return APP_WAKE_KEY;}
+static app_wake_source_t app_lock_sleep_wait(EpdiyHighlevelState *hl,void *acc){assert(hl);return app_light_sleep_wait(acc);}
 static int app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);if(deep_fail)return -1;longjmp(deep,1);}
 static void device_power_drain_events(void){}
 static void device_power_consume_key_press(void){assert(!key_sampling);++key_consumes;}

@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.1 · 本地测试 / Local testing · 2026-11-02
+
+- 设置「待机方式」新增「浅睡后关机」，选中后在卡片内选择 10/30/60 分钟，保留原有立即关机与仅浅睡。每次锁屏浅睡重新计时，提前按键或拿起唤醒取消本轮计时；密码锁屏同样生效，关机失败仍保持锁屏。设置随配置备份保存，实际定时与断电行为待真机验证。
+  Standby settings add light-sleep-then-off with inline 10/30/60-minute buttons when selected, retaining immediate off and light-only. Each locked sleep starts a fresh countdown; an early key/pickup wake cancels it. PIN locks follow the same policy, and failed shutdowns stay locked. The choice is included in settings backups; physical timing and power-off await device validation.
+
 ## v1.0.1 · 本地测试 / Local testing · 2026-11-01
 
 - 亚克力书架挡板高度减半，保留底边位置以露出更多封面；设置预览同步调整。

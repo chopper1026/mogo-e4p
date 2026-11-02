@@ -104,9 +104,9 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         if(waiting){
             restore_art(fb,original);present(hl,ui_pinpad_full());
             app_lock_wait_key_idle(800);epd_poweroff();
-            // 待机方式已无十分钟阶梯：这里只服务「仅浅睡」，等待无期限、不断电。
-            // The standby ladder is gone: this path now serves light-only only, waiting without a deadline and never powering off.
-            app_light_sleep_wait(acc);
+            // 定时关机失败回退原有锁屏等待及故障恢复；超时不能绕过密码验证。
+            // A failed timed power-off falls back to existing locked wait/recovery; expiry cannot bypass PIN verification.
+            app_lock_sleep_wait(hl,acc);
         }
         app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");

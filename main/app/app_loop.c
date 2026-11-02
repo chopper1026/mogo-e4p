@@ -310,10 +310,10 @@ static touch_frame_t s_last_frame;
 // Save the current page first, then settle a clock-free static frame so shutdown never leaves a misleading frozen time.
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
-// 待机方式选「仅浅睡」时，所有锁屏入口都无期限浅睡、永不断电；「彻底关机」则锁屏出图后立即断电交接。
-// With standby style "light-only" every lock entry sleeps without a deadline and never powers off; "full off" hands off to power-down right after the lock art.
+// 仅浅睡和定时档先浅睡；只有彻底关机档在锁屏出图后立即断电交接。
+// Light-only and timed styles start with light sleep; only immediate-off hands off right after the lock art.
 static bool lock_light_only(void) {
-    return app_settings_shutdown_style() == APP_SHUTDOWN_LIGHT;
+    return app_settings_shutdown_style() >= APP_SHUTDOWN_LIGHT;
 }
 
 static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {

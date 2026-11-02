@@ -304,9 +304,9 @@ void app_settings_init(void) {
     }
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
-        // 「彻底断电」档已移除：旧值与未知值并入彻底关机（非仅浅睡一律锁屏即断电）。
-        // The full-off style is gone: legacy and unknown values merge into full off (anything but light-only powers off at lock).
-        s_shutdown_style = raw == APP_SHUTDOWN_LIGHT ? APP_SHUTDOWN_LIGHT : APP_SHUTDOWN_STAGED;
+        // 保留仅浅睡和定时档，旧值与未知值仍并入彻底关机。/ Keep light-only and timed styles; legacy/unknown values still merge into immediate off.
+        s_shutdown_style = raw >= APP_SHUTDOWN_LIGHT && raw <= APP_SHUTDOWN_LIGHT_60
+            ? (app_shutdown_style_t)raw : APP_SHUTDOWN_STAGED;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -584,11 +584,19 @@ void app_settings_set_sleep_mode(app_sleep_mode_t mode) {
 }
 
 app_shutdown_style_t app_settings_shutdown_style(void) { return s_shutdown_style; }
+uint8_t app_settings_shutdown_minutes(void) {
+    switch (s_shutdown_style) {
+        case APP_SHUTDOWN_LIGHT_10: return 10;
+        case APP_SHUTDOWN_LIGHT_30: return 30;
+        case APP_SHUTDOWN_LIGHT_60: return 60;
+        default: return 0;
+    }
+}
 void app_settings_set_shutdown_style(app_shutdown_style_t style) {
-    if (style != APP_SHUTDOWN_STAGED && style != APP_SHUTDOWN_LIGHT) style = APP_SHUTDOWN_STAGED;
+    if (style < APP_SHUTDOWN_STAGED || style > APP_SHUTDOWN_LIGHT_60) style = APP_SHUTDOWN_STAGED;
     if (style == s_shutdown_style) return;
     s_shutdown_style = style;
-    // 旧固件把值 2（仅浅睡）读成 false（彻底关机），降级安全。/ Old firmware reads 2 (light-only) as false (full off): a safe downgrade.
+    // 旧固件将仅浅睡/定时档回落为彻底关机。/ Older firmware falls back from light-only/timed styles to immediate off.
     nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, (uint8_t)style);
 }
 
@@ -1402,7 +1410,7 @@ static uint32_t backup_shutdown_style_checksum(const settings_backup_shutdown_st
 static bool backup_shutdown_style_valid(const settings_backup_shutdown_style_t *style) {
     uint32_t stored = 0;
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)style->checksum[i] << (8 * i);
-    return style->style <= APP_SHUTDOWN_LIGHT && stored == backup_shutdown_style_checksum(style);
+    return style->style <= APP_SHUTDOWN_LIGHT_60 && stored == backup_shutdown_style_checksum(style);
 }
 // v28 追加触摸震动开关与强度；旧备份回落开启、弱档。
 // V28 appends the touch-vibration switch and intensity; older backups fall back to on and weak.
@@ -1581,8 +1589,8 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(backup.fonts_dir, s_fonts_dir, sizeof(backup.fonts_dir));
     backup_seal(&backup);
     uint8_t idle_index = s_auto_lock_minutes == 1 ? 1 : s_auto_lock_minutes == 5 ? 2 : s_auto_lock_minutes == 10 ? 3 : 0;
-    // 扩展字节 bit0 仍按旧义记「非彻底断电」供旧固件读取（现恒为 1）；v27 独立块只写彻底关机/仅浅睡。
-    // Extension bit 0 still records "not the removed full-off style" for older firmware (always 1 now); the v27 block only writes full-off/light-only.
+    // 扩展字节 bit0 仍按旧义记「非彻底断电」供旧固件读取（现恒为 1）；v27 独立块保存完整待机档位。
+    // Extension bit 0 still records "not the removed full-off style" for older firmware (always 1 now); the v27 block preserves the complete standby style.
     uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_shutdown_style != APP_SHUTDOWN_FULL ? 1 : 0) | (idle_index << 1) | ((uint8_t)s_main_refresh << 3)};
     uint32_t extension_hash = backup_shutdown_checksum(&backup, s_book_indent,
                                                         s_book_rule_offset, extension[2]);
@@ -1950,13 +1958,14 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
     strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
     // v27 用独立块保存关机方式；旧备份仍按扩展 bit0 回落（仅浅睡降级为彻底关机）。
-    // 「彻底断电」档已移除：备份里读到的旧值并入彻底关机，仅浅睡原样保留。
+    // 「彻底断电」档已移除：备份里读到的旧值并入彻底关机，仅浅睡和定时档原样保留。
     // V27 keeps the shutdown style in its own block; older backups still read extension bit 0,
     // where light-only degrades to full off. The removed full-off style merges into full off from
-    // any backup; light-only survives as is.
+    // any backup; light-only and timed styles survive as is.
     app_shutdown_style_t shutdown_mode = version >= 27 ? (app_shutdown_style_t)shutdown_style.style
         : ((staged_shutdown & 1) ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL);
-    if (shutdown_mode != APP_SHUTDOWN_LIGHT) shutdown_mode = APP_SHUTDOWN_STAGED;
+    if (shutdown_mode < APP_SHUTDOWN_LIGHT || shutdown_mode > APP_SHUTDOWN_LIGHT_60)
+        shutdown_mode = APP_SHUTDOWN_STAGED;
 
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);

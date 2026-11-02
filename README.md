@@ -62,6 +62,16 @@ python3 tools/run_reader_baseline.py
 宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
 Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrounds, the event loop, books, display, navigation and ripple effects. See the performance guide for measurement setup; CI builds do not replace device acceptance.
 
+## 定时待机关机 / Timed Standby Power-Off
+
+在设置 → 显示 → 待机方式中，可选「彻底关机」「仅浅睡」或「浅睡后关机」。选中「浅睡后关机」后，在同一张卡片内选择 10/30/60 分钟，不再将时长列成三个重复待机选项；从非定时方式切入时默认选 10 分钟，已保存的定时档打开页面时原样显示。默认待机方式仍为仅浅睡。定时档从锁屏画面显示完成、开始浅睡时计时；自动锁屏与手动锁屏均生效，与无操作自动锁屏的等待时间分别计算。提前按电源键或拿起唤醒（需开启拿起唤醒）会取消本轮计时，再次进入锁屏浅睡重新计时；密码输入期间不计时，重新等待唤醒时开始新一轮。
+
+Settings → Display → Standby offers immediate off, light-only, or light-sleep-then-off. Selecting the timed mode reveals 10/30/60-minute buttons within that card instead of three duplicate standby choices. Switching from an untimed mode initially selects ten minutes; opening the page preserves a saved timed choice. Light-only remains the default standby mode. The countdown begins after presenting the lock art, on entry to light sleep, for both manual and idle locks; it is separate from the inactivity timeout. An early power-key or enabled pickup wake cancels that countdown. Returning to locked sleep starts a new interval; PIN-entry time is excluded.
+
+到时沿用现有关机流程，保留锁屏画面和阅读恢复检查点；之后需长按电源键约 1 秒开机，有密码仍需验证。关机失败则回退原有无期限锁屏浅睡及故障恢复路径，不把定时器唤醒当作解锁，也不连续重试关机；有密码时始终先验证。电源菜单中的「关机」始终立即关机。设置会保存到 NVS 和配置备份；新版可读取原备份，旧固件不支持恢复含新增定时档的备份。本功能尚待真机定时与断电验证。
+
+Expiry reuses the existing shutdown flow, preserving lock art and the reader checkpoint. Booting afterwards requires holding the power key for about one second, followed by PIN verification when enabled. If shutdown fails, the device returns to the existing untimed locked wait and fault-recovery path, without timer-based unlocking or repeated shutdown attempts; enabled PINs still require verification. The power menu's shutdown remains immediate. NVS and settings backups preserve the choice; new firmware reads legacy backups, but old firmware cannot restore backups containing timed styles. On-device timing and power-off remain unverified.
+
 ## 关键文件
 
 - `components/epdiy/src/output_lcd/lcd_driver.c`：S31 LCD/GPU/RMT 后端（来自 Metalio 已验证实现）+ Mogo 行时序。

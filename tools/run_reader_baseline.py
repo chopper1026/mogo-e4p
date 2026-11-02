@@ -30,6 +30,7 @@ SUITES = {
     "capture": [sys.executable, "tools/capture_reader_perf_host_test.py"],
     "metalio_drivers": [sys.executable, "tools/metalio_drivers_host_test.py"],
     "sleep_compat": [sys.executable, "tools/s31_sleep_compat_host_test.py"],
+    "sleep_power": [sys.executable, "tools/sleep_power_host_test.py"],
     "board": [sys.executable, "tools/s31_board_host_test.py"],
     "hv_guard": [sys.executable, "tools/epd_power_guard_host_test.py"],
     "hv_bus": [sys.executable, "tools/board_hv_concurrency_host_test.py"],
