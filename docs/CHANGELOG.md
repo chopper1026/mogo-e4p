@@ -3,6 +3,21 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.2 · 2026-11-02
+
+- 优化浅睡时钟兼容与待机电量读取，减少重复总线访问；实际待机电流与节电比例尚未测量。
+  Improve light-sleep clock compatibility and battery sampling, reducing duplicate bus access; standby current and savings have not been measured.
+- 增加默认关闭的晃动翻页，可在翻页模式中开启，并过滤触摸、回弹与缓慢倾斜。
+  Add off-by-default shake page turning in turn-mode settings, filtering touch, rebounds and slow tilts.
+- 增加页眉页脚左、中、右三格内容自定义，并修复空中格时两侧文字重叠。
+  Add customizable left, center and right header/footer slots and fix side-text overlap with an empty center.
+- 调整亚克力书架挡板高度及设置界面，隐藏系统升级中的 TF 卡入口，保留底层升级能力。
+  Adjust acrylic shelf guard height and settings UI; hide the TF upgrade entry while retaining its underlying support.
+- 待机方式增加「浅睡后关机」，支持 10/30/60 分钟；每轮锁屏重新计时，提前唤醒取消。实际定时与断电行为尚待真机验收。
+  Add light-sleep-then-off after 10/30/60 minutes, restarting on each lock and cancelling on early wake; physical timing and shutdown await device acceptance.
+- 增加默认开启的自动 OTA 检查开关，每 12 小时在可用空闲窗口检查，发现新版提示确认，不自动下载安装或主动唤醒待机设备。
+  Add on-by-default automatic OTA checks every twelve hours in an available idle window, prompting for new versions without automatic download, installation or standby wake.
+
 ## v1.0.1 · 本地测试 / Local testing · 2026-11-02
 
 - 系统升级隐藏 TF 卡升级入口，新增默认开启的自动 OTA 检查：固定每 12 小时在可用空闲窗口检查，发现新版本提示确认，不自动下载安装；待机不主动唤醒。
