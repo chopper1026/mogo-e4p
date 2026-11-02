@@ -54,6 +54,7 @@ typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GE
 #include "book_shelf_category_state.h"
 #include "book_shelf_model.h"
 #include "book_file_path.h"
+#include "book_policy.h"
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NVS_NOT_FOUND -2
@@ -79,7 +80,7 @@ static ble_pt_action_t ble_pt_action_for_frame(const ble_pt_frame_t *frame){
 typedef int esp_err_t;
 typedef struct app_desc {int unused;} app_desc_t;
 typedef struct {bool touched;} test_touch_t;
-typedef struct {int leaf;bool request_menu,consumed;int64_t now_ms;uint8_t *fb;const app_desc_t *request_app;test_touch_t *touch;} app_ctx_t;
+typedef struct {int leaf;bool request_menu,consumed;int64_t now_ms;uint8_t *fb;const app_desc_t *request_app;test_touch_t *touch;void *acc;} app_ctx_t;
 typedef enum {APP_REDRAW_PAGE,APP_REDRAW_AREA,APP_REDRAW_NONE,APP_REDRAW_FULL} app_redraw_t;
 typedef struct {int x,y,width,height;} EpdRect;
 static EpdRect ui_bar_rect(int i,int count){int width=(508-(count-1)*12)/count;return(EpdRect){40+i*(width+12),1096,width,96};}
@@ -271,6 +272,11 @@ static EpdRect s_area;
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;++test_cover_prepares;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++test_shelf_renders;}
 static bool s_resume_pending,s_reader_cleanup,s_shake_enabled,s_reader_entry_full;
+static bool s_shake_sensor_on,s_shake_cfg_pending,test_sensor_powered,test_sensor_sleep_fail;
+static int64_t s_shake_touch_ms;
+static book_shake_gate_t s_shake_gate;
+static void board_sensor_sleep(void *acc){assert(acc);if(!test_sensor_sleep_fail)test_sensor_powered=false;}
+static bool sc7a20h_powered(void *acc){return acc&&test_sensor_powered;}
 static bool s_reader_fullscreen,test_reader_statusbar=true,test_hold_refresh,test_hide_images,test_power_turn;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_shelf_key_pressed;
 static int s_shelf_key_delta;
@@ -848,7 +854,11 @@ int main(void) {
     assert(test_open_calls==calls+1&&s_view==READING&&!s_scan_pending&&s_reader_return_home);
     test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
-    book_on_exit(&ctx);assert(!s_reader_return_home);
+    ctx.acc=&ctx;s_shake_sensor_on=test_sensor_powered=test_sensor_sleep_fail=true;
+    s_shake_touch_ms=123;s_shake_gate.ready=true;
+    book_on_exit(&ctx);assert(!s_reader_return_home&&s_shake_sensor_on&&s_shake_cfg_pending&&!s_shake_gate.ready&&!s_shake_touch_ms);
+    test_sensor_sleep_fail=false;book_on_exit(&ctx);assert(!s_shake_sensor_on&&!test_sensor_powered);
+    ctx.acc=NULL;
     s_view=READING;test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
     // 屏幕返回仍回来源，中键长按始终全刷。/ Screen back returns to source; middle holds always refresh.

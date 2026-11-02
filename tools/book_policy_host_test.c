@@ -50,6 +50,30 @@ int main(void) {
     // 慢倾斜：基线跟随，永远不触发。/ Slow tilt: the baseline follows and nothing ever fires.
     g = (book_shake_gate_t){0};
     for (int t = 0; t <= 10000; t += 50) assert(!feed(&g, (t - 5000) / 8, (t - 5000) / 16, -1000, false, t));
+    // 恒定 1g 的纯旋转，50ms 转 1.5 度；两秒转过 60 度不应翻页。
+    // Pure constant-1g rotation at 1.5 degrees per 50ms must not turn over a 60-degree tilt.
+    for (int sign=-1;sign<=1;sign+=2) {
+        g=(book_shake_gate_t){0};
+        for(int t=0;t<=500;t+=50)assert(!feed(&g,0,0,-1000,false,t));
+        int64_t x=0,z=-1000000;
+        for(int t=550;t<=2500;t+=50){
+            int64_t next_x=(x*999657-z*26177)/1000000;
+            z=(x*26177+z*999657)/1000000;x=next_x;
+            assert(!feed(&g,sign*(int)(x/1000),0,(int)(z/1000),false,t));
+        }
+    }
+    // 平滑甩动保留灵敏度，变化速率按真实间隔判定。/ Rounded swings retain sensitivity with time-normalized slew.
+    const int rounded[]={0,80,160,230,300,360,390,360,300,230,160,80,0};
+    for(int sign=-1;sign<=1;sign+=2){
+        g=(book_shake_gate_t){0};
+        for(int t=0;t<=400;t+=50)assert(!feed(&g,0,-900,-400,false,t));
+        int turns=0;
+        for(unsigned i=0;i<sizeof(rounded)/sizeof(*rounded);++i){
+            int dir=feed(&g,sign*rounded[i],-900,-400,false,450+(int)i*50);
+            if(dir){assert(dir==sign);++turns;}
+        }
+        assert(turns==1);
+    }
     // 纵向甩动不触发。/ Vertical swings never fire.
     g = (book_shake_gate_t){0};
     for (int i = 0; i < 6; ++i) {

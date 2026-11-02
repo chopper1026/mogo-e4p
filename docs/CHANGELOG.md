@@ -9,6 +9,8 @@ User-visible changes by release; see [README](../README.md) for usage.
   Halve acrylic shelf guard height while retaining its bottom edge to reveal more cover art; update the settings preview accordingly.
 - 修复页眉页脚中间为空或隐藏时两侧文字重叠、列表视口外选项仍可点击；恢复默认布局保存失败时显示提示。
   Fix overlapping side slots when the center is empty or hidden and taps on off-viewport options; report failures when saving the default layout.
+- 晃动翻页持续屏蔽单指与多指接触，抬手后保留静默期；增加按采样间隔归一的横向变化速率门槛，过滤缓慢倾斜，并在传感器休眠失败后退避重试。新判定仍需真机复测。
+  Shake turns stay suppressed during single/multiple contacts and briefly after release; add a time-normalized horizontal slew gate against slow tilts and back off/retry failed sensor sleep. The revised gate still needs device validation.
 
 ## v1.0.1 · 本地测试 / Local testing · 2026-10-31
 

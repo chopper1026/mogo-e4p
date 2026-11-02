@@ -5959,7 +5959,7 @@ static void book_on_exit(app_ctx_t* ctx) {
     // 离页恢复加速度计静默；门槛与静默窗口一并复位，下次进书重新起步。
     // Silence the accelerometer on exit; reset the gate and touch window so the next session starts clean.
     if (s_shake_sensor_on && ctx->acc) board_sensor_sleep(ctx->acc);
-    s_shake_sensor_on = false;
+    s_shake_sensor_on = ctx->acc && sc7a20h_powered(ctx->acc);
     s_shake_cfg_pending = true;
     s_shake_gate = (book_shake_gate_t){0};
     s_shake_touch_ms = 0;
@@ -6744,17 +6744,20 @@ static const sc7a20h_sensor_config_t READER_SHAKE_SENSOR_CONFIG = {
     .axis_mask = SC7A20H_AXIS_XYZ,
 };
 static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
-    static int64_t s_poll_ms, s_cfg_fail_ms;
+    static int64_t s_poll_ms, s_cfg_fail_ms, s_sleep_retry_ms;
+    if (ctx->touch && ctx->touch->touched) s_shake_touch_ms = ctx->now_ms;
     const bool active = app_settings_reader_shake_turn() &&
                         app_book_reader_body_visible() && ctx->acc != NULL;
     if (!active) {
-        if (s_shake_sensor_on && ctx->acc) {
+        if (s_shake_sensor_on && ctx->acc && ctx->now_ms >= s_sleep_retry_ms) {
             board_sensor_sleep(ctx->acc);
-            s_shake_sensor_on = false;
+            s_shake_sensor_on = sc7a20h_powered(ctx->acc);
+            s_sleep_retry_ms = s_shake_sensor_on ? ctx->now_ms + READER_SHAKE_CFG_BACKOFF_MS : 0;
             s_shake_cfg_pending = true;
         }
         return APP_REDRAW_NONE;
     }
+    s_sleep_retry_ms = 0;
     if (ctx->now_ms - s_poll_ms < READER_SHAKE_POLL_MS) return APP_REDRAW_NONE;
     s_poll_ms = ctx->now_ms;
     if (!sc7a20h_powered(ctx->acc) || s_shake_cfg_pending) {

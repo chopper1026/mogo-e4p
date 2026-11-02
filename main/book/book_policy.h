@@ -5,11 +5,12 @@
  * 阅读进度换算和晃动判定，不访问硬件。/ Reading position and shake policy without hardware access.
  * 用户修订（2026-11-01）：改为连续甩动检测。慢基线做高通，高通 x 上穿 +阈值翻下一页、
  * 下穿 -阈值翻上一页；y 轴高通须小于 x 减裕量，排除纵向抖动；不应期吸收回摆半程；
- * 采样断档或调用方压制（触摸）后重新锚定基线，不继承半个动作。阈值按竖持校准，见常量。
+ * 横轴变化速率过滤缓慢倾斜；采样断档或调用方压制（触摸）后重新锚定基线，不继承半个动作。
+ * 幅度阈值按竖持校准，见常量。
  * User revision (2026-11-01): continuous-shake detection. A slow per-axis baseline high-passes
  * the sample; the high-passed x crossing +threshold turns forward and -threshold turns back.
  * The high-passed y must stay below x minus a margin to reject vertical jiggle, a refractory
- * window swallows the rebound half-swing, and a sampling gap or caller suppression (touch)
+ * window swallows the rebound half-swing, a horizontal slew gate rejects slow tilts, and a sampling gap or caller suppression (touch)
  * re-anchors the baseline so no half gesture carries over. The threshold is calibrated for a
  * vertical hold; see the constants.
  */
@@ -36,6 +37,9 @@ enum {
     /// about half of a flat hold (vertical 250-350 vs flat 500-900), so the threshold is
     /// calibrated against the vertical hold.
     BOOK_SHAKE_THRESHOLD_MG = 250,
+    /// 横轴变化速率下限，按真实采样间隔归一，避免重力基线滞后被当作甩动。
+    /// Minimum horizontal slew in mg/s, normalized by sample time to reject gravity-baseline lag.
+    BOOK_SHAKE_MIN_SLEW_MG_S = 700,
     /// x 高通须高出 y 高通的裕量（mg），过滤纵向抖动。/ x must beat high-passed y by this much (mg).
     BOOK_SHAKE_Y_MARGIN_MG = 50,
     /// 触发后不应期（ms），覆盖回摆半程。/ Refractory after a turn (ms), covers the rebound.
@@ -50,7 +54,7 @@ enum {
 typedef struct {
     bool ready;
     int baseline_x, baseline_y; ///< 慢速跟踪的重力基准，作高通滤波 / Slow gravity baseline for the high pass
-    int previous_hpx;           ///< 上一帧高通 x，捕捉上穿沿 / Previous high-passed x for edge detection
+    int previous_hpx, previous_x; ///< 上一帧高通与原始 x / Previous high-passed and raw x
     int64_t last_ms;            ///< 上一帧时间，断档重新锚定 / Last feed time; a gap re-anchors
     int64_t anchor_ms;          ///< 最近一次锚定时刻，静置期从这起算 / Last re-anchor time; the settle window starts here
     int64_t cooldown_ms;        ///< 不应期截止 / Refractory deadline
@@ -70,9 +74,14 @@ static inline int book_shake_feed(book_shake_gate_t* g, int x, int y, int z,
         g->baseline_x = x;
         g->baseline_y = y;
         g->previous_hpx = 0;
+        g->previous_x = x;
         g->last_ms = g->anchor_ms = now;
         return 0;
     }
+    const int64_t elapsed = now - g->last_ms;
+    if (!elapsed) return 0;
+    const int slew = book_shake_abs(x - g->previous_x);
+    g->previous_x = x;
     g->last_ms = now;
     // 基线全时段慢速跟踪：连续甩动的对称摆动只轻微摆动基准，不会被拖走。
     // The baseline tracks all the time: a continuous shake's symmetric swings only wobble it
@@ -87,6 +96,7 @@ static inline int book_shake_feed(book_shake_gate_t* g, int x, int y, int z,
     // the refractory window do the gating here.
     if (now >= g->cooldown_ms && now - g->anchor_ms >= BOOK_SHAKE_SETTLE_MS &&
         book_shake_abs(hpx) >= BOOK_SHAKE_THRESHOLD_MG &&
+        (int64_t)slew * 1000 >= BOOK_SHAKE_MIN_SLEW_MG_S * elapsed &&
         book_shake_abs(hpx) > book_shake_abs(hpy) + BOOK_SHAKE_Y_MARGIN_MG) {
         if (g->previous_hpx < BOOK_SHAKE_THRESHOLD_MG && hpx >= BOOK_SHAKE_THRESHOLD_MG) dir = 1;
         else if (g->previous_hpx > -BOOK_SHAKE_THRESHOLD_MG && hpx <= -BOOK_SHAKE_THRESHOLD_MG) dir = -1;
