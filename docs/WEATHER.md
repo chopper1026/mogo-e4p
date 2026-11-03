@@ -14,13 +14,13 @@ The weather footer shows only a 36-pixel refresh icon centered at x=632 within t
 
 Weather settings has an independent Automatic refresh toggle, on by default at six-hour intervals. Turning it off preserves manual refresh, search and city selection. Automatic polling requires a placed weather widget and foreground Home or non-city component pages. Removing weather stops automatic requests; weather never interrupts reading or wakes standby. Missed refreshes resume on returning to these pages. Timing uses the original server timestamp across reboots. Earlier expiry, missing cache or a missing tomorrow can trigger an earlier fetch. Failures retain a five-minute minimum cooldown; expired data gains no extra lifetime.
 
-尚无城市时尝试平台 IP 城市估计，每次开机最多自动尝试一次，仅作参考。失败后点城市名称，输入中文或英文拼音，点「搜索」并选择带行政区的候选；城市页右上方统一提供一个「自动定位」入口。进入城市页不展开键盘，点输入框才展开，点空白处收起且保留文字及未确认拼音；有效搜索、自动定位及选择候选均可直接执行。城市持久保存，普通刷新不重新定位。当前支持中国范围、`Asia/Shanghai` 时区，不提供 GPS 或精确定位权限。
+尚无城市时尝试平台 IP 城市估计，每次开机最多自动尝试一次，仅作参考。失败后点城市名称，输入中文、英文、拼音或首字母，点「搜索」并选择带市、省行政区的候选；城市页右上方统一提供一个「自动定位」入口。结果每页五项，显示总数与页码，左右箭头翻页，不再只截取前五条。杭州可查到城市及 13 个区县，共 14 个地点。进入城市页不展开键盘，点输入框才展开，点空白处收起且保留文字及未确认拼音；有效搜索、自动定位及选择候选均可直接执行。城市以官方地点 ID 持久保存，普通刷新不重新定位。支持官方中国 CSV 中的 3577 个地点及其四种 UTC+8 时区，不提供 GPS 或精确定位权限。
 
-With no selected city, platform IP estimation is attempted automatically at most once per boot. It is approximate. Tap the city to search in Chinese or Pinyin, select a province/country-qualified result, or use the single automatic-location control at the top right. The keyboard starts hidden, opens on input-field taps, and dismisses on outside taps without losing text or unconfirmed Pinyin. Valid searches, location requests and result selection execute directly. City selection persists; ordinary refresh never relocates it. This version supports Chinese locations in `Asia/Shanghai`, not GPS or precise location.
+With no selected city, approximate platform IP estimation is attempted at most once per boot. Search Chinese, English, Pinyin or initials and select a prefecture/province-qualified result. Five rows per page, total counts and arrow paging expose all matches; Hangzhou has fourteen entries including thirteen districts/counties. The keyboard opens on field taps and dismisses without losing input. The official location ID persists; normal refresh never relocates it. All 3577 official China CSV entries and their four UTC+8 timezones are supported, without GPS permissions.
 
-IP结果或旧设置中的纯英文城市名会通过平台和风中文城市搜索补齐名称，只接受原坐标附近的候选并保留原坐标；不重新按IP定位已保存城市。旧英文名每次启动最多提前触发一次名称修正，失败保留原名称和有效天气，不因切日额外查询。已知中文名不重复查询。名称查询同样计入平台Geo额度和冷却保护。
+平台以和风官方公开 CSV 建立持久城市字典，城市搜索和英文转中文只查本站数据库，不访问和风 Geo、不消耗和风次数。IP 定位在平台内匹配标准地点并直接返回中文名、ID 和字典坐标；设备不再另发名称修正查询。字典包括市、区县等官方天气地点，不是完整行政区划名录。
 
-IP results and legacy ASCII names are localized through the platform's Chinese QWeather lookup, accepting nearby matches without changing selected coordinates or relocating by IP. Legacy names may trigger one early refresh per boot; failure preserves the original name and valid weather. Chinese names and day switching do not trigger additional lookups. Geo quotas and cooldowns still apply.
+The platform persists the official public CSV as a city dictionary. Search and English-to-Chinese mapping query only that database, without QWeather Geo calls or quota use. IP results are canonicalized there and already include Chinese labels, IDs and dictionary coordinates. Firmware never issues a separate relabel request. The dictionary is a weather-location list, not an exhaustive administrative register.
 
 温度为当日最低/最高摄氏温度，以 `/` 分隔；湿度为白天预报湿度，不是实时传感器读数。日出为地平线上的半轮太阳；日落为半空完整太阳及向地面的箭头。缺失事件显示 `--:--`。全区背景区分太阳、云、雨、雪、雾和雷雨，未知代码保持中性。
 
@@ -32,9 +32,13 @@ Temperatures are daily minimum/maximum °C separated by `/`, and humidity is day
 
 `CONFIG_PICO_COMPONENT_API_ORIGIN` is a trusted HTTPS origin, defaulting to `https://mogo.mantake.shop`, without a path/trailing slash. Only catalog and weather GET endpoints are used, without cookies, registration, provider credentials or direct QWeather calls. OTA sources are unchanged.
 
-第 1 版结构同时返回两日，太阳事件与期限为 UTC。核对版本、来源、所选坐标、时区、日期、数值范围和期限；拒绝超长、截断、过深嵌套或坏响应。搜索明确提交后才请求，最多五项，不持久缓存候选。查询须为2至64个字符，界面输入缓冲为128字节。
+产品配置使用系统可信证书束，不内置本地联调 CA；已移除联调用 USB 控制命令及页面/刷屏性能插桩。独立开发证书、配置和测试包仅保留在忽略目录，不进入源码或已发布下载。
 
-Schema 1 returns both days with UTC solar events/deadlines. Firmware validates version, source, selected coordinates, timezone, dates, ranges and deadlines. Oversized, truncated, deeply nested and invalid responses fail closed. Explicit search is capped at five transient results. Queries require 2–64 characters within the UI's 128-byte buffer.
+Product builds use the system trust bundle without local development CAs. Local USB control commands and page/display timing probes are removed. Development certificates, configurations and test images stay in ignored directories, outside source and published downloads.
+
+第 1 版结构同时返回两日，太阳事件与期限为 UTC。预报请求仅带 `locationId`，核对响应版本、来源、所选 ID、标准坐标、时区、日期、数值范围和期限；拒绝超长、截断、过深嵌套或坏响应。搜索明确提交后才请求，带 `page`（从零开始）及 `pageSize=5`，校验总数、页码及该页项数；只保留当前页。查询须为2至64个字符，界面输入缓冲为128字节。所有用户共享平台按地点 ID 的默认六小时预报缓存，不按个人坐标分散缓存。
+
+Schema 1 returns both days with UTC events/deadlines. Requests use only `locationId`; responses validate that ID, canonical coordinates, timezone, dates, ranges and deadlines. Explicit search requests a zero-based page with five entries, validating counts and keeping only the current page. Queries require 2-64 characters within 128 bytes. All users share the platform's default six-hour cache per location ID, never per personal coordinate.
 
 平台默认停用，须先配置合法凭据并完成平台测试。官网署名和特殊设备许可仍须向供应商确认，不能把“只在官网署名”视为已获许可。不在卡片中擅自添加来源文案，不生成样例预报冒充服务成功。
 
@@ -68,9 +72,9 @@ Weather preferences/city/forecast use `kiiko_weather` NVS with UI-only EPD-flash
 
 Home layout uses `read_pico/home_regions`, committing both choices together and retaining both on failure. Without a new setting, reading starts above and the old weather visibility determines the lower region, without a migration write. Version 33 settings backups include the layout, validating schema, uniqueness and checksum before writes and updating live choices only after commit. Versions 1–32 preserve the current layout on restore. Weather city, automatic refresh preference and forecast cache remain outside the backup.
 
-天气偏好schema 2保存自动刷新开关，兼容读取schema 1并默认开启；不改城市字段偏移，旧缓存及已选城市无需清除。仅在用户修改偏好或保存城市时写入新结构，不在每次轮询落盘。
+天气偏好schema 3保存地点 ID、行政区信息及自动刷新开关，缓存schema 2保存对应预报。该功能仍处本地开发，不迁移旧开发格式；首次使用新格式需要重新选城。仅在用户修改偏好或保存城市时写入，不在每次轮询落盘。
 
-Weather preference schema 2 persists the automatic toggle, reads schema 1 with automatic refresh on, and retains the original city-field offset. Existing city/cache need not be erased. New preferences are written only on preference/city changes, never each poll.
+Preference schema 3 stores official IDs, administrative metadata and the automatic toggle; cache schema 2 stores its forecast. This unreleased feature does not migrate earlier development formats, so select the city again. Writes happen on preference/city changes, never each poll.
 
 `ui_weather_draw()` 纯绘制，无联网、持久化或分配，显式接收684×472区域。首页两区从y=168开始，于y=1112直接接导航；公共导航仅绘制y=1112以下区域，不额外清白或保护上方24px内容。进入页面时准备684×472的4bpp暂存（161424字节PSRAM），离页释放，不另分配整屏缓冲。内存不足则保留清晰白底内容、略去装饰。复用系统字体，不增加内建字库。六种固定背景以1bpp只读资源保存，合计206976字节Flash，不额外占用PSRAM；设备直接绘制原纹理，文字留白按连续笔画合并。首页切日只重画并呈现天气所在区域，不重画页眉或最近阅读。分钟时钟仍独立局部更新，不改变波形或电源策略。
 

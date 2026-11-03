@@ -17,8 +17,6 @@
 #include "ui_menu.h"
 #include "ui_nav.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "settings.h"
 
 #define TAG "app_loop"
 extern const app_desc_t app_transfer;
@@ -52,10 +50,6 @@ static void app_navigation_switch_to(
 ) {
     if (next == NULL || next == *current) return;
     pico_ota_auto_cancel();
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_start=esp_timer_get_time();
-    const int probe_from=app_index_of(*current);
-#endif
     bool main_source = app_navigation_main_page_ready(ctx, *current);
     bool reader_source = *current == &app_book && !main_source;
     bool shelf_source = main_source && app_index_of(*current) == 1;
@@ -65,27 +59,13 @@ static void app_navigation_switch_to(
     // The transfer page owns the radio: an in-flight background sync cancels before entry, or the
     // page's own session cannot start.
     if (next == &app_transfer) app_time_service_cancel();
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_exit=esp_timer_get_time();
-#endif
     *current = next;
     app_font_activate_system();
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_font=esp_timer_get_time();
-#endif
     if (next->on_enter != NULL) next->on_enter(ctx);
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_enter=esp_timer_get_time();
-#endif
     if (main_source && app_navigation_main_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
     const bool reader_return = reader_source && app_navigation_main_page_ready(ctx, next);
     app_present(ctx, next, reader_return || next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
     display_main_transition_disarm();
-#ifdef KIIKO_LOCAL_LATENCY
-    ESP_LOGI("latency","SWITCH from=%d to=%d mode=%d exit_us=%lld font_us=%lld enter_us=%lld present_us=%lld total_us=%lld",probe_from,app_index_of(next),app_settings_main_refresh_mode(),
-        (long long)(probe_exit-probe_start),(long long)(probe_font-probe_exit),(long long)(probe_enter-probe_font),
-        (long long)(esp_timer_get_time()-probe_enter),(long long)(esp_timer_get_time()-probe_start));
-#endif
     ESP_LOGI(TAG, "page -> %s", next->title);
 }
 

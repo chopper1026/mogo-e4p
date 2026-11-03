@@ -122,21 +122,26 @@ void weather_time_text(int64_t utc, char *out, size_t cap) {
     snprintf(out, cap, "%02d:%02d", sec / 3600, sec / 60 % 60);
 }
 bool weather_location_valid(const weather_location_t *v) {
-    return v && memchr(v->name, 0, sizeof(v->name)) && memchr(v->admin1, 0, sizeof(v->admin1)) &&
+    return v && v->id[9] == 0 && strspn(v->id, "0123456789") == 9 &&
+        memchr(v->admin2, 0, sizeof(v->admin2)) && text_ok(v->admin2, sizeof(v->admin2), true) &&
+        memchr(v->name, 0, sizeof(v->name)) && memchr(v->admin1, 0, sizeof(v->admin1)) &&
         memchr(v->country, 0, sizeof(v->country)) && memchr(v->timezone, 0, sizeof(v->timezone)) &&
         text_ok(v->name, sizeof(v->name), false) && text_ok(v->admin1, sizeof(v->admin1), true) &&
-        text_ok(v->country, sizeof(v->country), false) && !strcmp(v->timezone, "Asia/Shanghai") &&
-        isfinite(v->lat) && isfinite(v->lon) && v->lat >= 18 && v->lat <= 54 && v->lon >= 73 && v->lon <= 135;
+        text_ok(v->country, sizeof(v->country), false) &&
+        (!strcmp(v->timezone, "Asia/Shanghai") || !strcmp(v->timezone, "Asia/Hong_Kong") ||
+         !strcmp(v->timezone, "Asia/Macau") || !strcmp(v->timezone, "Asia/Taipei")) &&
+        isfinite(v->lat) && isfinite(v->lon) && v->lat >= 0 && v->lat <= 54 && v->lon >= 73 && v->lon <= 135;
 }
 static bool point(cJSON *root, weather_location_t *v) {
-    return cJSON_IsObject(root) && number(root, "lat", 18, 54, &v->lat) &&
+    return cJSON_IsObject(root) && number(root, "lat", 0, 54, &v->lat) &&
         number(root, "lon", 73, 135, &v->lon) && string_field(root, "timezone", v->timezone, sizeof(v->timezone), false) &&
-        !strcmp(v->timezone, "Asia/Shanghai");
+        string_field(root, "locationId", v->id, sizeof(v->id), false);
 }
 static bool location(cJSON *root, weather_location_t *v) {
     memset(v, 0, sizeof(*v));
     return point(root, v) && string_field(root, "name", v->name, sizeof(v->name), false) &&
         string_field(root, "admin1", v->admin1, sizeof(v->admin1), true) &&
+        string_field(root, "admin2", v->admin2, sizeof(v->admin2), true) &&
         string_field(root, "country", v->country, sizeof(v->country), false) && weather_location_valid(v);
 }
 bool weather_location_parse(const char *json, size_t length, weather_location_t *out) {
@@ -145,13 +150,18 @@ bool weather_location_parse(const char *json, size_t length, weather_location_t 
     if (ok) *out = v;
     cJSON_Delete(root); return ok;
 }
-bool weather_locations_parse(const char *json, size_t length, weather_location_t *out, unsigned *count) {
-    *count = 0; cJSON *root = document(json, length);
+bool weather_locations_parse(const char *json, size_t length, weather_location_t *out,
+                             unsigned *count, unsigned *total, unsigned *page) {
+    *count = *total = *page = 0; cJSON *root = document(json, length);
     cJSON *list = cJSON_GetObjectItemCaseSensitive(root, "locations");
     int n = cJSON_GetArraySize(list);
-    bool ok = root && cJSON_IsArray(list) && n <= WEATHER_CITY_LIMIT;
+    int size = 0, all = 0, current = 0;
+    bool ok = root && cJSON_IsArray(list) && n <= WEATHER_CITY_LIMIT &&
+        integer(root, "pageSize", WEATHER_CITY_LIMIT, WEATHER_CITY_LIMIT, &size) &&
+        integer(root, "total", 0, 4000, &all) && integer(root, "page", 0, 799, &current) &&
+        (all ? current * size < all && n == (all - current * size < size ? all - current * size : size) : !current && !n);
     for (int i = 0; ok && i < n; ++i) ok = location(cJSON_GetArrayItem(list, i), &out[i]);
-    if (ok) *count = (unsigned)n;
+    if (ok) { *count = (unsigned)n; *total = (unsigned)all; *page = (unsigned)current; }
     cJSON_Delete(root); return ok;
 }
 bool weather_catalog_parse(const char *json, size_t length, bool *enabled, bool *available) {
@@ -208,6 +218,8 @@ bool weather_forecast_parse(const char *json, size_t length, int64_t now,
     bool ok = root && weather_location_valid(selected) && integer(root, "schemaVersion", 1, 1, &schema) &&
         string_field(root, "source", source, sizeof(source), false) && !strcmp(source, "QWeather") &&
         point(cJSON_GetObjectItemCaseSensitive(root, "location"), &f.location) &&
+        !strcmp(f.location.id, selected->id) &&
+        !strcmp(f.location.timezone, selected->timezone) &&
         fabs(f.location.lat - selected->lat) <= .011 && fabs(f.location.lon - selected->lon) <= .011 &&
         cJSON_IsArray(days) && cJSON_GetArraySize(days) == 2 &&
         timestamp_field(root, "fetchedAt", false, &f.fetched) && timestamp_field(root, "freshUntil", false, &f.fresh) &&

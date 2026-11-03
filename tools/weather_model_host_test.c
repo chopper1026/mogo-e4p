@@ -74,6 +74,20 @@ int main(void) {
     assert(weather_url_encode("杭州 &?",text,sizeof(text))&&!strcmp(text,"%E6%9D%AD%E5%B7%9E%20%26%3F"));
     assert(!weather_url_encode("杭州",text,5)&&!text[0]);
     assert(weather_query_valid("杭州")&&weather_query_valid("hangzhou")&&!weather_query_valid("杭")&&!weather_query_valid("\xff\xff"));
+    weather_location_t results[WEATHER_CITY_LIMIT];unsigned count,total,page;
+    const char *last="{\"total\":6,\"page\":1,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
+    assert(weather_locations_parse(last,strlen(last),results,&count,&total,&page)&&count==1&&total==6&&page==1);
+    const char *bad_page="{\"total\":6,\"page\":0,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
+    assert(!weather_locations_parse(bad_page,strlen(bad_page),results,&count,&total,&page)&&!count);
+    weather_location_t wrong=city;strcpy(wrong.id,"101210113");
+    assert(!weather_forecast_parse(WEATHER_TEST_FORECAST,strlen(WEATHER_TEST_FORECAST),
+        weather_timestamp("2026-11-02T00:30:00Z"),&wrong,&f));
+    strcpy(wrong.id,"bad");assert(!weather_location_valid(&wrong));
+    wrong=city;wrong.lat=9.55;assert(weather_location_valid(&wrong));
+    strcpy(wrong.timezone,"Asia/Taipei");assert(weather_location_valid(&wrong));
+    wrong=city;strcpy(wrong.timezone,"Asia/Taipei");
+    assert(!weather_forecast_parse(WEATHER_TEST_FORECAST,strlen(WEATHER_TEST_FORECAST),
+        weather_timestamp("2026-11-02T00:30:00Z"),&wrong,&f));
     char nested[100];memset(nested,'[',40);memset(nested+40,']',40);nested[80]=0;
     weather_error_code(nested,80,text,sizeof(text));assert(!text[0]);
     f.stale=255;assert(!weather_forecast_valid(&f,now));

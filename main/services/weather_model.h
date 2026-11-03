@@ -10,6 +10,7 @@
 #define WEATHER_CITY_LIMIT 5
 #define WEATHER_BODY_LIMIT 8192
 typedef struct {
+    char id[10], admin2[97]; ///< 官方地点标识与地级行政区 / Official location ID and prefecture
     char name[97], admin1[97], country[49], timezone[33]; ///< 展示信息 / Display metadata
     double lat, lon; ///< 代理归一化坐标 / Proxy-normalized coordinates
 } weather_location_t;
@@ -33,7 +34,8 @@ typedef enum {
 
 bool weather_location_valid(const weather_location_t *location);
 bool weather_location_parse(const char *json, size_t length, weather_location_t *location);
-bool weather_locations_parse(const char *json, size_t length, weather_location_t *locations, unsigned *count);
+bool weather_locations_parse(const char *json, size_t length, weather_location_t *locations,
+                             unsigned *count, unsigned *total, unsigned *page);
 bool weather_catalog_parse(const char *json, size_t length, bool *enabled, bool *available);
 void weather_error_code(const char *json, size_t length, char *code, size_t capacity);
 bool weather_forecast_parse(const char *json, size_t length, int64_t now,

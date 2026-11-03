@@ -110,10 +110,18 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
         ui_draw_control_frame(fb,(EpdRect){540,270,108,68},16,0);
         text(fb,594,304,26,"搜索",EPD_DRAW_ALIGN_CENTER);
         for(unsigned i=0;i<v->result_count;i++) {
-            const weather_location_t *city=&v->results[i];int y=365+(int)i*38;char value[256];
-            snprintf(value,sizeof(value),"%s · %s · %s",city->name,city->admin1,city->country);
+            const weather_location_t *city=&v->results[i];int y=359+(int)i*34;char value[256];
+            snprintf(value,sizeof(value),"%s · %s · %s",city->name,city->admin2,city->admin1);
             fitted(fb,48,y,23,value,570);
             ui_draw_icon(fb,635,y,22,UI_ICON_CHEVRON_RIGHT,0);
+        }
+        if(v->result_total) {
+            char page[64];snprintf(page,sizeof(page),"%u / %u   共%u个地点",v->result_page+1,
+                (v->result_total+WEATHER_CITY_LIMIT-1)/WEATHER_CITY_LIMIT,v->result_total);
+            text(fb,342,540,20,page,EPD_DRAW_ALIGN_CENTER);
+            if(v->result_page)ui_draw_icon(fb,70,540,24,UI_ICON_CHEVRON_LEFT,0);
+            if((v->result_page+1)*WEATHER_CITY_LIMIT<v->result_total)
+                ui_draw_icon(fb,614,540,24,UI_ICON_CHEVRON_RIGHT,0);
         }
         if(s_keyboard_visible)ui_keyboard_draw(fb,560);
     }
@@ -179,14 +187,23 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
             return opened?APP_REDRAW_PAGE:keyboard_paint(ctx,true);
         }
         if(x>=540&&x<648&&y>=270&&y<338)return submit();
+        const app_weather_view_t *page=app_weather_view();
+        if(y>=522&&y<560&&page->result_total&&((x>=36&&x<108)||(x>=576&&x<648))) {
+            unsigned next=page->result_page;
+            if(x<108&&next)--next;
+            else if(x>=576&&(next+1)*WEATHER_CITY_LIMIT<page->result_total)++next;
+            if(next!=page->result_page&&!app_weather_search(s_query,next))
+                snprintf(s_notice,sizeof(s_notice),"暂不能搜索，请稍后重试并检查网络与时间");
+            return APP_REDRAW_PAGE;
+        }
         bool hidden=keyboard_hide();
         if(y>=165&&y<221&&x>=440&&x<648) {
             s_notice[0]=0;
             if(!app_weather_request(APP_WEATHER_LOCATE,NULL))snprintf(s_notice,sizeof(s_notice),"暂不能定位，请稍后重试并检查网络与时间");
             return APP_REDRAW_PAGE;
         }
-        if(x>=36&&x<648&&y>=346&&y<536) {
-            unsigned index=(unsigned)(y-346)/38;
+        if(x>=36&&x<648&&y>=342&&y<512) {
+            unsigned index=(unsigned)(y-342)/34;
             const app_weather_view_t *v=app_weather_view();
             if(index<v->result_count) {
                 weather_location_t city=v->results[index];

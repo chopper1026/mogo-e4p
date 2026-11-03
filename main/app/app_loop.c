@@ -88,7 +88,6 @@
 #if CONFIG_TOUCH_DIAG && CONFIG_TOUCH_DIAG_BEEP
 #include "board_buzzer.h"
 #endif
-#include "local_latency_probe.h"
 
 #define TAG "app_loop"
 
@@ -157,18 +156,6 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
 #else
 void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
 #endif
-#ifdef KIIKO_LOCAL_LATENCY
-    const int64_t probe_start=esp_timer_get_time();
-    extern int64_t local_display_elapsed_us;
-    const int64_t probe_display=local_display_elapsed_us;
-#define LATENCY_PRESENT_DONE() do { if(redraw==APP_REDRAW_PAGE||redraw==APP_REDRAW_FULL) \
-    ESP_LOGI("latency","PRESENT page=%d redraw=%d total_us=%lld display_us=%lld paint_us=%lld", \
-    app_index_of(app),redraw,(long long)(esp_timer_get_time()-probe_start), \
-    (long long)(local_display_elapsed_us-probe_display), \
-    (long long)(esp_timer_get_time()-probe_start-(local_display_elapsed_us-probe_display))); } while(0)
-#else
-#define LATENCY_PRESENT_DONE() do {} while(0)
-#endif
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active()) {
         // 切页固定底栏之前先复位真实按压像素，避免按下底色留在新页。
@@ -191,7 +178,6 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
         s_presented_main == app && app_navigation_main_page_ready(ctx, app)) display_main_transition_arm(app, false, false);
     if (app->present != NULL && app->present(ctx, redraw)) {
         main_present_finished(ctx, app, redraw);
-        LATENCY_PRESENT_DONE();
         return;
     }
     switch (redraw) {
@@ -222,8 +208,6 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
     }
     guard_draw_result(ctx->hl, result);
     main_present_finished(ctx, app, redraw);
-    LATENCY_PRESENT_DONE();
-#undef LATENCY_PRESENT_DONE
 }
 
 #if CONFIG_TOUCH_DIAG
@@ -482,9 +466,6 @@ void app_loop_run(const app_loop_config_t* config) {
     // 上次崩溃的现场（异常类型与触发地址）：有的话打一遍，串口和屏幕各有一份。
     // The previous panic scene, when there was one: logged here, and shown on the home screen.
     crash_note_log();
-#ifdef KIIKO_LOCAL_LATENCY
-    local_latency_init();
-#endif
 
     // F4：主循环被刷屏等操作阻塞期间由采样任务持续读触摸，恢复后逐帧回放，边沿
     // 不丢；任务创建失败时 active() 为假，循环内自动回退直读（原行为）。
@@ -1136,14 +1117,6 @@ void app_loop_run(const app_loop_config_t* config) {
             feedback.updates = 0;
         }
         if (!menu_open) feedback.updates = 0;
-#ifdef KIIKO_LOCAL_LATENCY
-        static int64_t probe_heartbeat;
-        if(ctx.now_ms-probe_heartbeat>5000){probe_heartbeat=ctx.now_ms;ESP_LOGI("latency","STATE touch=%d menu=%d dialog=%d usb=%d",touch.touched,menu_open,power_dialog_open,usb_storage_active());}
-        if(!menu_open&&!power_dialog_open&&!usb_storage_active()&&!touch.touched) {
-            app_redraw_t probe=local_latency_poll(&ctx,current);
-            if(probe!=APP_REDRAW_NONE)app_present(&ctx,current,probe);
-        }
-#endif
         // 返回来源优先；普通请求仍按切页优先处理。
         // Return requests win; ordinary requests still prioritize page switches.
         // USB MSC 持有 TF 卡时禁止任何页面切换；必须先安全停止并重新挂载。

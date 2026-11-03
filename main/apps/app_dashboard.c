@@ -1,7 +1,3 @@
-#ifdef KIIKO_LOCAL_LATENCY
-#include "esp_timer.h"
-#include "esp_log.h"
-#endif
 /*
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
@@ -444,22 +440,13 @@ static app_redraw_t redraw_widgets(app_home_widget_t widget) {
     return s_widget_dirty?APP_REDRAW_AREA:APP_REDRAW_NONE;
 }
 static void render_root(uint8_t *fb) {
-#ifdef KIIKO_LOCAL_LATENCY
-    int64_t probe_home=esp_timer_get_time();
-#define HOME_STAGE(name) do { int64_t probe_now=esp_timer_get_time();ESP_LOGI("latency","HOME stage=%s us=%lld",name,(long long)(probe_now-probe_home));probe_home=probe_now; } while(0)
-#else
-#define HOME_STAGE(name) do {} while(0)
-#endif
     ui_nav_status(fb);ui_text(fb,36,91,52,"首页",EPD_DRAW_ALIGN_LEFT,false);
     if(s_avatar_ready)ui_wallpaper_draw_avatar(fb,s_avatar,(EpdRect){588,88,60,60},30);
     else {epd_fill_circle(618,118,30,UI_GRAY_BLACK,fb);label(fb,618,118,30,"K",EPD_DRAW_ALIGN_CENTER,0xff);}
-    HOME_STAGE("header");
     // 公共导航仅绘制实际底栏，组件直接铺到它的上沿。
     // Shared navigation paints only its actual footer; widgets meet its top edge.
     ui_nav_draw(fb,0);
     for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)render_widget(fb,slot);
-    HOME_STAGE("nav");
-#undef HOME_STAGE
 }
 
 static void render(app_ctx_t *ctx,uint8_t *fb) {

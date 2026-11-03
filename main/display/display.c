@@ -837,15 +837,6 @@ static void guard_draw_result_unlocked(EpdiyHighlevelState* hl, enum EpdDrawErro
     ESP_LOGW(TAG, "line queue underrun, pclk back to %d MHz, recovery=%d", DISPLAY_PCLK_SAFE_MHZ, recovered);
 }
 
-#ifdef KIIKO_LOCAL_LATENCY
-int64_t local_display_elapsed_us;
-#define LATENCY_DISPLAY_BEGIN() const int64_t local_display_start=esp_timer_get_time()
-#define LATENCY_DISPLAY_END() (local_display_elapsed_us+=esp_timer_get_time()-local_display_start)
-#else
-#define LATENCY_DISPLAY_BEGIN() do {} while(0)
-#define LATENCY_DISPLAY_END() do {} while(0)
-#endif
-
 // 固定锁顺序：显示/OTA锁→供电锁→I2C；组内保留独立空闲期限，最外层结束即关电。
 // Lock order is display/OTA -> power -> I2C; groups retain independent idle deadlines and shut down at their outermost end.
 bool display_present_begin(void) {
@@ -863,12 +854,10 @@ void display_present_end(bool held) {
 static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
 
 enum EpdDrawError update_display_white_restore(EpdiyHighlevelState* hl, EpdRect area) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_white_restore_unlocked(hl, area);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -876,87 +865,71 @@ enum EpdDrawError update_display_white_restore(EpdiyHighlevelState* hl, EpdRect 
 enum EpdDrawError update_display_mode(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_unlocked(hl, mode);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_mode_diff(
     EpdiyHighlevelState* hl, enum EpdDrawMode mode
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_diff_unlocked(hl, mode);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_mode_diff_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_mode_diff_with_unlocked(hl, waveform, mode);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_fast_page_unlocked(hl);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_from_white_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_from_white_with_unlocked(hl, waveform, mode);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_from_white(EpdiyHighlevelState* hl) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_from_white_unlocked(hl);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_white(EpdiyHighlevelState* hl) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     s_full_refresh_requested = false;
     enum EpdDrawError result = update_display_white_unlocked(hl);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = update_display_full_unlocked(hl);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -979,7 +952,6 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl) {
 // on white.
 enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if (!hl || !hl->front_fb || !hl->back_fb) return EPD_DRAW_INVALID_CROP;
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     s_full_refresh_requested = false;
     display_main_transition_cancel();
@@ -990,7 +962,6 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     use_scan_for(&E0470_WAVEFORM, MODE_GC16);
     if (!display_power_ready()) {
         display_present_end(held);
-        LATENCY_DISPLAY_END();
         return DISPLAY_DRAW_POWER_NOT_READY;
     }
     // 盲刷黑/白：与 framebuffer 无关；每轮之间让出 CPU，整段要几秒。
@@ -1019,29 +990,24 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     if (s_main_fault) s_full_refresh_requested = true;
     display_power_recovered(result);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     s_full_refresh_requested = false;
     enum EpdDrawError result = update_display_image_gray_unlocked(hl);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_with_unlocked(hl, waveform, mode);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -1049,12 +1015,10 @@ enum EpdDrawError update_display_area_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_with_unlocked(hl, waveform, mode, area);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -1062,12 +1026,10 @@ enum EpdDrawError update_display_area_diff_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_diff_with_unlocked(hl, waveform, mode, area);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -1075,18 +1037,15 @@ enum EpdDrawError update_display_area_diff_padded(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area, int pad_lines, int pad_col_bytes
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl)
         : update_display_area_diff_padded_unlocked(hl, waveform, mode, area, pad_lines, pad_col_bytes);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area) {
-    LATENCY_DISPLAY_BEGIN();
     bool held=display_present_begin();
     // 控件只扫自身；显示成功后还原未消费的主页许可，不缓存或回放页面像素。
     // Scan only the control, then restore the unused main permission without caching or replaying page pixels.
@@ -1103,7 +1062,6 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
         s_main_changing_page=changing;s_main_band_count=count;memcpy(s_main_bands,bands,sizeof(bands));
     }
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
@@ -1111,30 +1069,24 @@ enum EpdDrawError update_display_area_full_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 ) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_area_full_with_unlocked(hl, waveform, mode, area);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     enum EpdDrawError result = display_needs_full()
         ? update_display_full_unlocked(hl) : update_display_water_turn_unlocked(hl, area, dir);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
     return result;
 }
 
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result) {
-    LATENCY_DISPLAY_BEGIN();
     bool held = display_present_begin();
     guard_draw_result_unlocked(hl, result);
     display_present_end(held);
-    LATENCY_DISPLAY_END();
 }

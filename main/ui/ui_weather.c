@@ -8,10 +8,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef KIIKO_LOCAL_LATENCY
-#include "esp_timer.h"
-#include "esp_log.h"
-#endif
 #define WEATHER_WIDTH 612
 #define WEATHER_HEIGHT 448
 #define WEATHER_REGION_WIDTH 684
@@ -116,9 +112,6 @@ static EpdRect refresh_button(EpdRect region) {
 void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weather_view_t *view, int64_t now) {
     if (!f || !view || !valid_region(region)) return;
     const int left=region.x,top=region.y;
-#ifdef KIIKO_LOCAL_LATENCY
-    int64_t profile_started=esp_timer_get_time(),profile_foreground,profile_background;
-#endif
     const weather_day_t *day = view->has_forecast ? weather_day_for(&view->forecast, now, tomorrow) : NULL;
     EpdRect tabs = {left+448,top+20,200,44};
     epd_fill_rect(region,255,f);
@@ -166,9 +159,6 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
     const int footer=refresh.y+refresh.height/2;
     fit_label(value,21,400);tx(f,left+36,footer,21,value);
     ui_draw_icon(f,refresh.x+refresh.width/2,footer,36,UI_ICON_REFRESH_CW,0);
-#ifdef KIIKO_LOCAL_LATENCY
-    profile_foreground=esp_timer_get_time();
-#endif
     if (!day || !s_scratch) return;
     // 按逻辑坐标暂存，兼容面板旋转；不额外分配整屏缓冲。
     // Save logical coordinates to support panel rotation without another full-screen buffer.
@@ -177,9 +167,6 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
             ui_read_pixel(f,left+x,y+top) | (ui_read_pixel(f,left+x+1,y+top)<<4);
     epd_fill_rect(region,255,f);
     draw_background(f,region,weather_scene(day->code));
-#ifdef KIIKO_LOCAL_LATENCY
-    profile_background=esp_timer_get_time();
-#endif
     epd_fill_rect(tabs,255,f);
     clear_foreground_halo(f,region);
     for(int y=0;y<region.height;y++)for(int x=0;x<region.width;x+=2){
@@ -189,12 +176,6 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
         if(low<240)epd_draw_pixel(left+x,y+top,low,f);
         if(high<240)epd_draw_pixel(left+x+1,y+top,high,f);
     }
-#ifdef KIIKO_LOCAL_LATENCY
-    int64_t profile_finished=esp_timer_get_time();
-    ESP_LOGI("latency","WEATHER foreground=%lld background=%lld compose=%lld total=%lld us",
-        (long long)(profile_foreground-profile_started),(long long)(profile_background-profile_foreground),
-        (long long)(profile_finished-profile_background),(long long)(profile_finished-profile_started));
-#endif
 }
 ui_weather_action_t ui_weather_hit(EpdRect region, int x, int y) {
     if (!valid_region(region)||x<region.x||x>=region.x+region.width||

@@ -15,7 +15,7 @@ typedef struct {
     weather_location_t city; ///< 当前城市 / Selected city
     weather_forecast_t forecast; ///< 两日原始预报 / Original two-day forecast
     weather_location_t results[WEATHER_CITY_LIMIT]; ///< 仅当前搜索 / Current search only
-    unsigned result_count, revision; ///< 搜索数量与UI版本 / Search size and UI revision
+    unsigned result_count, result_total, result_page, revision; ///< 搜索分页与UI版本 / Search pagination and UI revision
     app_weather_state_t state; ///< 当前请求状态 / Current request state
     char notice[97]; ///< 本地提示，不展示上游原始错误 / Local message, never raw upstream errors
 } app_weather_view_t;
@@ -28,6 +28,8 @@ bool app_weather_set_enabled(bool enabled);
 bool app_weather_set_auto_refresh(bool enabled);
 bool app_weather_select(const weather_location_t *city);
 bool app_weather_request(app_weather_request_t request, const char *query);
+/// 使用相同关键词读取指定页；页码从零开始。/ Read a zero-based result page for the same query.
+bool app_weather_search(const char *query, unsigned page);
 /// automatic由前台页面按首页槽位决定，旧enabled字段不再决定新布局。/ The foreground page gates automatic work by Home slots, not the legacy enabled field.
 bool app_weather_poll(bool automatic);
 /// 取消后等待真正交还无线与HTTP，不删除仍运行的任务。/ Cancel and await actual radio/HTTP handoff; never delete a running worker.

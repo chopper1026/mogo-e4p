@@ -19,9 +19,7 @@ static unsigned starts,stops,requests,auto_calls,forecast_calls,search_calls,ns_
 static int network_state,scenario;
 static int64_t monotonic;
 static unsigned pending_opens,header_calls;
-static bool stall_http_connect,cancel_http_connect,english_city,fail_label,far_label;
-static unsigned label_calls;
-#define ENGLISH_CITY "{\"name\":\"Hangzhou\",\"admin1\":\"Zhejiang\",\"country\":\"China\",\"lat\":30.27,\"lon\":120.15,\"timezone\":\"Asia/Shanghai\"}"
+static bool stall_http_connect,cancel_http_connect;
 static unsigned char prefs_bytes[1024],cache_bytes[2048];
 static size_t prefs_size,cache_size;
 static pmu_snapshot_t battery={80};
@@ -81,22 +79,17 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
     assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
     struct FakeHttp *h=calloc(1,sizeof(*h));h->status=200;++requests;
     if(strstr(c->url,"/auto-location")) {
-        ++auto_calls;h->body=english_city?ENGLISH_CITY:WEATHER_TEST_CITY;
+        ++auto_calls;h->body=WEATHER_TEST_CITY;
         if(scenario==1){h->body="{\"code\":\"CITY_SELECTION_REQUIRED\"}";h->status=503;}
     } else if(strstr(c->url,"/forecast?")) {
-        assert(strstr(c->url,"lat=30.27&lon=120.15&timezone=Asia%2FShanghai"));++forecast_calls;h->body=WEATHER_TEST_FORECAST;
+        assert(strstr(c->url,"locationId=101210101")&&!strstr(c->url,"lat="));++forecast_calls;h->body=WEATHER_TEST_FORECAST;
         if(scenario==3){h->body="{\"code\":\"WEATHER_UPSTREAM_UNAVAILABLE\"}";h->status=503;}
         if(scenario==4){h->body="{}";}
         if(scenario==5){h->body="{\"code\":\"BUDGET_EXHAUSTED\"}";h->status=429;}
     } else if(strstr(c->url,"/locations?")) {
-        if(strstr(c->url,"q=Hangzhou")) {
-            ++label_calls;h->body="{\"locations\":[" WEATHER_TEST_CITY "]}";
-            if(fail_label){h->body="{\"code\":\"WEATHER_COOLDOWN\"}";h->status=503;}
-            if(far_label)h->body="{\"locations\":[{\"name\":\"石家庄\",\"admin1\":\"河北\",\"country\":\"中国\",\"lat\":38.04,\"lon\":114.51,\"timezone\":\"Asia/Shanghai\"}]}";
-        }else {
-            ++search_calls;assert(strstr(c->url,"q=%E6%9D%AD%E5%B7%9E"));
-            h->body="{\"locations\":[" WEATHER_TEST_CITY "]}";
-        }
+        ++search_calls;assert(strstr(c->url,"q=%E6%9D%AD%E5%B7%9E")&&strstr(c->url,"pageSize=5"));
+        h->body="{\"total\":1,\"page\":0,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
+        if(strstr(c->url,"page=1&"))h->body="{\"total\":6,\"page\":1,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
     } else {
         h->body=WEATHER_TEST_CATALOG;
         if(scenario==2)h->body="{\"schemaVersion\":1,\"components\":[{\"code\":\"weather\",\"schemaVersion\":1,\"enabled\":false,\"available\":false}]}";
@@ -139,16 +132,13 @@ int main(void) {
     assert(app_weather_set_enabled(true));
     const time_t base_time=wall_time;
     weather_forecast_t original_forecast=s_view.forecast;
-    struct {uint32_t schema;uint8_t enabled,has_city;weather_location_t city;} legacy_prefs={1,1,1,s_view.city};
-    assert(sizeof(legacy_prefs)==sizeof(weather_preferences_t));
-    memcpy(prefs_bytes,&legacy_prefs,sizeof(legacy_prefs));prefs_size=sizeof(legacy_prefs);
     unsigned writes_before=ns_writes;
     s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
     assert(s_view.enabled&&s_view.has_city&&s_view.has_forecast&&s_view.auto_refresh&&ns_writes==writes_before);
     fail_flash=true;assert(!app_weather_set_auto_refresh(false)&&s_view.auto_refresh);fail_flash=false;
     assert(app_weather_set_auto_refresh(false)&&!s_view.auto_refresh);
     weather_preferences_t stored;memcpy(&stored,prefs_bytes,sizeof(stored));
-    assert(stored.schema==2&&!stored.auto_refresh&&stored.has_city&&stored.enabled);
+    assert(stored.schema==3&&!stored.auto_refresh&&stored.has_city&&stored.enabled);
     s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();assert(!s_view.auto_refresh&&s_view.has_forecast);
     wall_time=original_forecast.fetched+WEATHER_REFRESH_SECONDS;monotonic+=WEATHER_RETRY_US+1;
     app_weather_poll(true);assert(!pending);
@@ -162,7 +152,7 @@ int main(void) {
     assert(app_weather_set_auto_refresh(false)&&!pending&&!s_pending&&starts==starts_before);
     assert(app_weather_set_auto_refresh(true));
     s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();assert(s_view.auto_refresh&&s_view.has_forecast);
-    wall_time=original_forecast.fresh+1;monotonic+=WEATHER_RETRY_US+1;
+    wall_time=original_forecast.fetched+3601;monotonic+=WEATHER_RETRY_US+1;
     app_weather_poll(true);assert(!pending);
     wall_time=original_forecast.fetched+WEATHER_REFRESH_SECONDS-1;app_weather_poll(true);assert(!pending);
     wall_time++;app_weather_poll(false);assert(!pending);
@@ -172,6 +162,7 @@ int main(void) {
     monotonic++;app_weather_poll(true);assert(pending);app_weather_cancel_join();scenario=0;
     wall_time=base_time;s_view.forecast=original_forecast;
     s_view.forecast.serve=s_view.forecast.fetched+7200;
+    s_view.forecast.fresh=s_view.forecast.fetched+3600;
     monotonic+=WEATHER_RETRY_US+1;wall_time=s_view.forecast.serve-1;app_weather_poll(true);assert(!pending);
     wall_time++;app_weather_poll(true);assert(pending);app_weather_cancel_join();
     s_view.forecast=original_forecast;
@@ -199,6 +190,8 @@ int main(void) {
     scenario=1;request(APP_WEATHER_LOCATE,NULL);assert(s_view.state==APP_WEATHER_CITY_REQUIRED);
     monotonic+=WEATHER_RETRY_US+1;before=auto_calls;app_weather_poll(true);assert(!pending&&auto_calls==before);
     scenario=0;request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==1&&search_calls==1);
+    assert(app_weather_search("杭州",1));run_worker();assert(app_weather_poll(false));
+    assert(s_view.result_page==1&&s_view.result_total==6&&s_view.result_count==1);
     assert(app_weather_request(APP_WEATHER_SEARCH,"杭州"));app_weather_clear_search();run_worker();
     assert(app_weather_poll(false)&&s_view.result_count==0);
     request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==1);
@@ -223,26 +216,15 @@ int main(void) {
     ota_busy=true;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));ota_busy=false;
     ble_connected=true;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));ble_connected=false;
     battery.battery=5;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));battery.battery=80;
-    scenario=0;english_city=true;before=auto_calls;request(APP_WEATHER_LOCATE,NULL);
-    assert(auto_calls==before+1&&label_calls==1&&s_view.has_forecast&&!strcmp(s_view.city.name,"杭州"));
-    weather_location_t legacy;assert(weather_location_parse(ENGLISH_CITY,strlen(ENGLISH_CITY),&legacy));
-    assert(app_weather_select(&legacy));request(APP_WEATHER_FETCH,NULL);
-    assert(label_calls==2&&!strcmp(s_view.city.name,"杭州")&&s_view.city.lat==legacy.lat&&s_view.city.lon==legacy.lon);
-    assert(auto_calls==before+1);
-    assert(app_weather_select(&legacy));fail_label=true;request(APP_WEATHER_FETCH,NULL);fail_label=false;
-    assert(s_view.has_forecast&&!strcmp(s_view.city.name,"Hangzhou"));
-    s_label_attempted=false;monotonic+=WEATHER_RETRY_US+1;
-    assert(app_weather_poll(true)&&pending);run_worker();assert(app_weather_poll(false));
-    assert(!strcmp(s_view.city.name,"杭州")&&s_view.has_forecast&&auto_calls==before+1);
-    assert(app_weather_select(&legacy));far_label=true;request(APP_WEATHER_FETCH,NULL);far_label=false;
-    assert(!strcmp(s_view.city.name,"Hangzhou")&&s_view.has_forecast);
-    unsigned labels_before=label_calls;
+    scenario=0;before=auto_calls;unsigned searches_before=search_calls;request(APP_WEATHER_LOCATE,NULL);
+    assert(auto_calls==before+1&&search_calls==searches_before&&s_view.has_forecast&&!strcmp(s_view.city.name,"杭州"));
+    assert(!strcmp(s_view.city.id,"101210101"));
     for(int i=0;i<20;i++){monotonic+=WEATHER_RETRY_US+1;app_weather_poll(true);assert(!pending);}
-    assert(label_calls==labels_before);
-    fail_flash=true;request(APP_WEATHER_FETCH,NULL);fail_flash=false;
-    assert(!strcmp(s_view.city.name,"Hangzhou")&&s_view.notice[0]);
+    assert(search_calls==searches_before);
+    fail_flash=true;request(APP_WEATHER_LOCATE,NULL);fail_flash=false;
+    assert(!strcmp(s_view.city.name,"杭州")&&s_view.notice[0]);
     wall_time=0;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));
     assert(!weather_day_for(&s_view.forecast,wall_time,false));
     assert(starts==stops&&time_cancels>0);
-    puts("PASS: weather proxy session, caller-gated placement, six-hour boundary, shorter expiry, midnight, automatic toggle/legacy persistence, manual override, owned cleanup, cancellation/connect/read, disabled, stale fallback, manual/IP city, NVS main-only, retry and resource guards");
+    puts("PASS: weather proxy session, six-hour boundary, shorter expiry, midnight, toggle persistence, city-ID fetch, paginated search, no device relabeling, owned cleanup, cancellation, NVS main-only and resource guards");
 }

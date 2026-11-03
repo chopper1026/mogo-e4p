@@ -6,9 +6,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
 - 修正天气正式接口为 `https://mogo.mantake.shop`，同步 OTA 平台地址说明；OTA 主源与下载校验保持使用该平台。/ Correct the production weather origin to `https://mogo.mantake.shop` and align OTA documentation with the existing platform feed and download validation.
+- 天气城市搜索改用平台官方 CSV 城市字典，支持中文、英文、拼音及首字母，完整结果分页并展示市、省归属；预报统一按官方地点 ID 共享六小时缓存，自动定位直接返回中文，不再逐次查询和风修正名称。本地开发旧选城格式不迁移。/ Use the persistent official city dictionary with bilingual/Pinyin/initial search, full pagination and administrative labels; share six-hour forecasts by official ID and return Chinese IP results directly, without repeated Geo relabeling or development-format migration.
 
 - 新增首页组件库与可选天气卡片：城市自动识别/手动搜索、今日明日本地切换、最低最高温度、白天湿度及图标日出日落；通过平台代理访问和风，缓存过期不展示旧数值。平台默认停用，正式启用仍须完成凭据、许可与设备验证。/ Add opt-in proxy weather with local day switching and bounded cache; activation still requires credentials, licensing and device validation.
-- 天气城市名称优先使用中文并兼容修正旧英文名，补齐默认字体的「庄」字；首页入口改为长按天气卡片，设置页阅读背景下方增加组件库入口，组件库底栏只保留首页按钮。/ Localize weather city names and add the missing default-font city glyph; enter the library by holding the Home card or from Settings below Reading background, and keep only Home in the library footer.
+- 天气城市名称优先使用中文，补齐默认字体的「庄」字；首页入口改为长按天气卡片，设置页阅读背景下方增加组件库入口，组件库底栏只保留首页按钮。/ Use Chinese weather city names and add the missing default-font city glyph; enter the library by holding the Home card or from Settings below Reading background, and keep only Home in the library footer.
 - 所在城市页合并自动定位入口，键盘改为点输入框展开、点空白收起并保留输入，底栏移除两侧返回图标及热区。/ Unify automatic location in the city picker, show its keyboard only on field taps and preserve input when dismissed, and remove both side footer buttons and hit areas.
 - 天气组件增加默认开启、可保存的六小时自动刷新开关，保留手动刷新并在到期/跨日缺预报时补取，不主动唤醒待机；最低最高温度改用斜杠分隔。/ Add a persisted, on-by-default six-hour weather refresh toggle with manual updates and expiry/midnight recovery without standby wake; separate minimum/maximum temperatures with a slash.
 - 首页改为上下等高组件区，可选择最近阅读、天气或留白，同类组件自动交换而不重复；天气去除边框、圆角及导航前白条。新版设置备份支持组件布局，恢复旧备份保留当前布局。/ Add two equal Home regions with unique reading/weather widgets and repeatable empty choices; remove weather frames, rounded corners and the footer gap. New settings backups include layout; old backups preserve current choices.

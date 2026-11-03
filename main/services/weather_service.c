@@ -37,9 +37,6 @@ typedef struct {
     uint8_t enabled, has_city, auto_refresh;
     weather_location_t city;
 } weather_preferences_t;
-// 新开关使用旧布局的填充字节，schema 1仍按原城市偏移读取。
-// Store the new flag in legacy padding, preserving schema-1 city offsets.
-_Static_assert(offsetof(weather_preferences_t, city) == 8, "weather preferences layout");
 typedef struct {
     uint32_t schema;
     weather_forecast_t forecast;
@@ -50,7 +47,7 @@ typedef struct {
     bool has_city, has_forecast, clear_cache;
     weather_location_t city, results[WEATHER_CITY_LIMIT];
     weather_forecast_t forecast;
-    unsigned count;
+    unsigned count, total, page;
 } weather_result_t;
 static app_weather_view_t s_view;
 static weather_result_t s_result;
@@ -59,8 +56,7 @@ static char s_query[193];
 static weather_location_t s_requested_city;
 static bool s_requested_has_city, s_loaded, s_pending;
 static bool s_auto_attempted;
-static bool s_label_attempted;
-static unsigned s_search_generation, s_requested_search_generation;
+static unsigned s_search_generation, s_requested_search_generation, s_requested_page;
 static atomic_bool s_busy, s_cancel;
 static SemaphoreHandle_t s_done;
 static int64_t s_next_attempt, s_deadline;
@@ -81,7 +77,7 @@ static bool write_blob(const char *key, const void *value, size_t size) {
     return err == ESP_OK;
 }
 static bool save_preferences(bool enabled, bool auto_refresh, bool has_city, const weather_location_t *city) {
-    weather_preferences_t p = {.schema = 2, .enabled = enabled, .has_city = has_city, .auto_refresh = auto_refresh};
+    weather_preferences_t p = {.schema = 3, .enabled = enabled, .has_city = has_city, .auto_refresh = auto_refresh};
     if (has_city) p.city = *city;
     return write_blob("prefs", &p, sizeof(p));
 }
@@ -93,17 +89,16 @@ void app_weather_init(void) {
     nvs_handle_t h;
     if (nvs_open("kiiko_weather", NVS_READONLY, &h) == ESP_OK) {
         weather_preferences_t p = {0}; size_t size = sizeof(p);
-        if (nvs_get_blob(h, "prefs", &p, &size) == ESP_OK && size == sizeof(p) && (p.schema == 1 || p.schema == 2) &&
-            p.enabled <= 1 && p.has_city <= 1 && (p.schema == 1 || p.auto_refresh <= 1) &&
+        if (nvs_get_blob(h, "prefs", &p, &size) == ESP_OK && size == sizeof(p) && p.schema == 3 &&
+            p.enabled <= 1 && p.has_city <= 1 && p.auto_refresh <= 1 &&
             (!p.has_city || weather_location_valid(&p.city))) {
             s_view.enabled = p.enabled; s_view.has_city = p.has_city; s_view.city = p.city;
-            s_view.auto_refresh = p.schema == 1 || p.auto_refresh;
+            s_view.auto_refresh = p.auto_refresh;
         }
         weather_cache_t cache = {0};size = sizeof(cache);
         if (s_view.has_city && nvs_get_blob(h, "cache", &cache, &size) == ESP_OK &&
-            size == sizeof(cache) && cache.schema == 1 && weather_forecast_valid(&cache.forecast, time(NULL)) &&
-            !strcmp(s_view.city.name, cache.forecast.location.name) &&
-            s_view.city.lat == cache.forecast.location.lat && s_view.city.lon == cache.forecast.location.lon) {
+            size == sizeof(cache) && cache.schema == 2 && weather_forecast_valid(&cache.forecast, time(NULL)) &&
+            !strcmp(s_view.city.id, cache.forecast.location.id)) {
             s_view.forecast = cache.forecast;s_view.has_forecast = true;
         }
         nvs_close(h);
@@ -183,35 +178,6 @@ static bool http_get(const char *path, char *body) {
     esp_http_client_cleanup(client);
     return ok && !cancelled();
 }
-static bool city_needs_label(const weather_location_t *city) {
-    for(const unsigned char *p=(const unsigned char *)city->name;*p;++p)
-        if(*p>=128)return false;
-    return city->name[0]!=0;
-}
-static bool localize_city(weather_location_t *city,char *body) {
-    if(!city_needs_label(city))return true;
-    char escaped[577],path[640];
-    if(!weather_url_encode(city->name,escaped,sizeof(escaped)))return false;
-    snprintf(path,sizeof(path),"/components/weather/locations?q=%s",escaped);
-    if(!http_get(path,body))return false;
-    weather_location_t found[WEATHER_CITY_LIMIT];unsigned count=0;
-    if(!weather_locations_parse(body,strlen(body),found,&count))return true;
-    int best=-1;double distance=1.0;
-    for(unsigned i=0;i<count;++i) {
-        double lat=found[i].lat-city->lat,lon=found[i].lon-city->lon;
-        double current=lat*lat+lon*lon;
-        if(!city_needs_label(&found[i])&&current<distance) {best=(int)i;distance=current;}
-    }
-    if(best>=0) {
-        // 只修正展示名称，匹配附近候选；不改变已选坐标或重新按IP定位。
-        // Relabel from a nearby match without changing selected coordinates or relocating by IP.
-        memcpy(city->name,found[best].name,sizeof(city->name));
-        memcpy(city->admin1,found[best].admin1,sizeof(city->admin1));
-        memcpy(city->country,found[best].country,sizeof(city->country));
-        s_result.has_city=true;s_result.city=*city;
-    }
-    return true;
-}
 static void weather_worker(void *arg) {
     (void)arg; bool owned = false;
     char *body = heap_caps_malloc(WEATHER_BODY_LIMIT + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -247,8 +213,9 @@ static void weather_worker(void *arg) {
     if (s_request == APP_WEATHER_SEARCH) {
         char escaped[577], path[640];
         if (!weather_url_encode(s_query, escaped, sizeof(escaped))) goto done;
-        snprintf(path, sizeof(path), "/components/weather/locations?q=%s", escaped);
-        if (!http_get(path, body) || !weather_locations_parse(body, strlen(body), s_result.results, &s_result.count)) goto done;
+        snprintf(path, sizeof(path), "/components/weather/locations?q=%s&page=%u&pageSize=%u", escaped, s_requested_page, WEATHER_CITY_LIMIT);
+        if (!http_get(path, body) || !weather_locations_parse(body, strlen(body), s_result.results,
+                &s_result.count, &s_result.total, &s_result.page) || s_result.page != s_requested_page) goto done;
         result_notice(APP_WEATHER_READY, s_result.count ? "请选择城市（自动识别仅作参考）" : "未找到城市，请换个名称"); goto done;
     }
     weather_location_t city = s_requested_city;
@@ -263,12 +230,8 @@ static void weather_worker(void *arg) {
         }
         s_result.has_city = true; s_result.city = city;
     }
-    if(!localize_city(&city,body)) {
-        if(cancelled()||s_result.clear_cache)goto done;
-        s_result.notice[0]=0;
-    }
     char path[256];
-    snprintf(path, sizeof(path), "/components/weather/forecast?lat=%.2f&lon=%.2f&timezone=Asia%%2FShanghai", city.lat, city.lon);
+    snprintf(path, sizeof(path), "/components/weather/forecast?locationId=%s", city.id);
     if (!http_get(path, body) || !weather_forecast_parse(body, strlen(body), time(NULL), &city, &s_result.forecast)) goto done;
     s_result.has_forecast = true; result_notice(APP_WEATHER_READY, "");
 done:
@@ -296,10 +259,11 @@ static bool collect_result(void) {
     if (s_result.clear_cache) { s_view.has_forecast = false; (void)write_blob("cache", NULL, 0); }
     else if (s_result.has_forecast) {
         s_view.forecast = s_result.forecast; s_view.has_forecast = true;
-        weather_cache_t cache = {.schema=1,.forecast=s_view.forecast};
+        weather_cache_t cache = {.schema=2,.forecast=s_view.forecast};
         (void)write_blob("cache", &cache, sizeof(cache));
     }
     s_view.result_count = s_result.count;
+    s_view.result_total = s_result.total; s_view.result_page = s_result.page;
     memcpy(s_view.results, s_result.results, sizeof(s_view.results));
     ++s_view.revision; return true;
 }
@@ -327,16 +291,18 @@ bool app_weather_select(const weather_location_t *city) {
     app_weather_init(); app_weather_cancel_join();
     if (!save_preferences(s_view.enabled, s_view.auto_refresh, true, city)) return false;
     s_view.city = *city; s_view.has_city = true; s_view.has_forecast = false;
-    s_view.result_count = 0; s_view.state = APP_WEATHER_IDLE; s_view.notice[0] = 0;
+    s_view.result_count = s_view.result_total = s_view.result_page = 0;
+    s_view.state = APP_WEATHER_IDLE; s_view.notice[0] = 0;
     (void)write_blob("cache", NULL, 0);
     s_next_attempt = 0; ++s_view.revision; return true;
 }
 void app_weather_clear_search(void) {
     ++s_search_generation;
     if(s_view.state!=APP_WEATHER_LOADING)s_view.notice[0]=0;
-    s_view.result_count = 0; memset(s_view.results, 0, sizeof(s_view.results)); ++s_view.revision;
+    s_view.result_count = s_view.result_total = s_view.result_page = 0;
+    memset(s_view.results, 0, sizeof(s_view.results)); ++s_view.revision;
 }
-bool app_weather_request(app_weather_request_t request, const char *query) {
+static bool request_page(app_weather_request_t request, const char *query, unsigned page) {
     app_weather_init(); (void)collect_result();
     if (s_pending || pico_online_busy()) return false;
     if (!weather_clock_valid(time(NULL))) {
@@ -354,9 +320,10 @@ bool app_weather_request(app_weather_request_t request, const char *query) {
         snprintf(s_view.notice, sizeof(s_view.notice), "电量较低，请充电后更新天气"); ++s_view.revision; return false;
     }
     if (request == APP_WEATHER_SEARCH) {
-        if (!weather_query_valid(query)) return false;
+        if (!weather_query_valid(query) || page > 799) return false;
         snprintf(s_query, sizeof(s_query), "%s", query);
     }
+    s_requested_page = page;
     if (!s_done) s_done = xSemaphoreCreateBinary();
     if (!s_done) return false;
     s_request = request; s_requested_city = s_view.city; s_requested_has_city = s_view.has_city;
@@ -374,10 +341,15 @@ bool app_weather_request(app_weather_request_t request, const char *query) {
         snprintf(s_view.notice, sizeof(s_view.notice), "内存不足，请稍后重试"); ++s_view.revision; return false;
     }
     s_pending = true; s_view.state = APP_WEATHER_LOADING; s_view.notice[0] = 0;
-    if(request!=APP_WEATHER_SEARCH)s_label_attempted=true;
     if (request == APP_WEATHER_SEARCH) app_weather_clear_search();
     s_requested_search_generation = s_search_generation;
     ++s_view.revision; return true;
+}
+bool app_weather_request(app_weather_request_t request, const char *query) {
+    return request_page(request, query, 0);
+}
+bool app_weather_search(const char *query, unsigned page) {
+    return request_page(APP_WEATHER_SEARCH, query, page);
 }
 bool app_weather_poll(bool automatic) {
     app_weather_init(); unsigned revision = s_view.revision;
@@ -389,8 +361,7 @@ bool app_weather_poll(bool automatic) {
     }
     if (automatic && s_view.auto_refresh && (s_view.has_city||!s_auto_attempted) && !s_pending && esp_timer_get_time() >= s_next_attempt &&
         s_view.state != APP_WEATHER_CITY_REQUIRED &&
-        (!valid || now >= s_view.forecast.fetched + WEATHER_REFRESH_SECONDS || !weather_day_for(&s_view.forecast, now, true) ||
-         (!s_label_attempted&&s_view.has_city&&city_needs_label(&s_view.city)))) {
+        (!valid || now >= s_view.forecast.fetched + WEATHER_REFRESH_SECONDS || !weather_day_for(&s_view.forecast, now, true))) {
         s_next_attempt = esp_timer_get_time() + WEATHER_RETRY_US;
         (void)app_weather_request(APP_WEATHER_FETCH, NULL);
     }

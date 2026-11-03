@@ -204,10 +204,6 @@ target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
 # S31 浅睡时钟交接与唤醒校准。/ S31 sleep clock handoff and wake calibration.
 include("${CMAKE_CURRENT_LIST_DIR}/power/s31_sleep_compat.cmake")
 
-# 本地 USB 测时入口，普通构建不包含。/ Local USB timing probe, omitted from ordinary product builds.
-if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_LOCAL_LATENCY=1)
-endif()
 # 本地 A/B：强制软件封面解码，用来对比同一构建的硬件路径。
 # Local A/B: force software cover decode to compare against the hardware path in the same build.
 if("$ENV{KIIKO_DISABLE_HW_JPEG}" STREQUAL "1")

@@ -37,6 +37,7 @@ static bool s_requested_city,s_city,s_weather_settings,s_tomorrow,s_keyboard_vis
 static const int app_components=7;
 static char s_query[129],s_notice[97];
 static int s_edit,nav=-1,icons,cancels,ends,keys,begins,paints,pages,holds,idles,draws,requests,locates,searches,fields,location_controls;
+static unsigned search_page;
 static bool pending,request_ok=true,save_ok=true,poll_changed;
 static ui_keyboard_result_t key_result;
 static app_weather_view_t view;
@@ -60,11 +61,12 @@ bool app_weather_request(app_weather_request_t type,const char *query){
     ++requests;if(type==APP_WEATHER_LOCATE){assert(!query);++locates;}
     if(type==APP_WEATHER_SEARCH){assert(query==s_query);++searches;}return request_ok;
 }
+bool app_weather_search(const char *query,unsigned page){assert(query==s_query);++searches;search_page=page;return request_ok;}
 bool app_weather_set_enabled(bool enabled){view.enabled=enabled;return true;}
 bool app_weather_set_auto_refresh(bool enabled){if(save_ok)view.auto_refresh=enabled;return save_ok;}
 bool app_weather_select(const weather_location_t *city){if(save_ok)view.city=*city;return save_ok;}
 void app_weather_cancel_join(void){++cancels;}
-void app_weather_clear_search(void){view.result_count=0;view.notice[0]=0;}
+void app_weather_clear_search(void){view.result_count=view.result_total=view.result_page=0;view.notice[0]=0;}
 bool app_weather_poll(bool automatic){assert(automatic==(!s_city&&app_home_has_widget(APP_HOME_WIDGET_WEATHER)));return poll_changed;}
 bool weather_query_valid(const char *query){return strlen(query)>=2;}
 static void ui_draw_separator(uint8_t *fb,int y,int x,int width,int gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
@@ -208,6 +210,15 @@ int main(void){
     save_ok=false;event=(ui_gesture_event_t){UI_GESTURE_TAP,100,365};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_city&&!s_keyboard_visible&&s_notice[0]);
     save_ok=true;assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_city&&!strcmp(view.city.name,"上海"));
+    city_begin();strcpy(s_query,"杭州");view.result_count=5;view.result_total=14;view.result_page=0;
+    event=(ui_gesture_event_t){UI_GESTURE_TAP,614,540};
+    assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&search_page==1&&s_city);
+    view.result_page=2;int old_searches=searches;
+    assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&searches==old_searches);
+    event.x0=70;assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&search_page==1);
+    view.result_page=0;old_searches=searches;
+    assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&searches==old_searches);
+    render(&ctx,NULL);
     for(int x=0;x<684;++x){
         city_begin();s_keyboard_visible=true;nav=-1;
         event=(ui_gesture_event_t){UI_GESTURE_TAP,x,1164};
