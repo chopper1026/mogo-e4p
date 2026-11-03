@@ -49,6 +49,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event.repository.has_pages
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -52,8 +52,8 @@ For each OTA version tag, summarize actual changes since the appropriate previou
 
 ### 正式版发布 / Official releases
 
-用户 2026-10-09 确认：之后每次发布正式版，都在 `wegooo-cell/read-pico-reader` 创建对应版本的 Git tag 和 GitHub Release，附上经验证的 TF/OTA 应用 Bin、完整 USB 刷机包、SHA-256 校验值和简要更新日志；所有附件来自同一次正式构建。
-Per the user's 2026-10-09 decision, publish every future official firmware version with a matching Git tag and GitHub Release in `wegooo-cell/read-pico-reader`. Attach the verified TF/OTA application Bin, complete USB flash bundle, SHA-256 checksums and brief release notes, all from the same official build.
+用户 2026-11-03 确认：今后提到「发布版本」，均指发布到本仓库当前 `origin` 远端，替代此前固定的旧发布仓库；发布前核对 `git remote get-url origin`，当前为 `chopper1026/mogo-e4p`。推送代码，创建并推送对应版本的 Git tag，触发 OTA 网站的固件草稿构建与提交，并在同一远端创建 GitHub Release。附上经验证的 TF/OTA 应用 Bin、完整 USB 刷机包、SHA-256 校验值和简要更新日志；所有附件与 OTA 提交必须来自同一次正式构建。OTA 草稿仍须管理员审核发布，不得把草稿提交成功视为已经上线。
+Per the user's 2026-11-03 decision, "publish a version" means publishing to this repository's current `origin`, replacing the previously fixed legacy release repository. Check `git remote get-url origin` before publishing; it currently points to `chopper1026/mogo-e4p`. Push the code and a matching Git tag to trigger the OTA website's draft build/submission, and create a GitHub Release in the same remote repository. Attach the verified TF/OTA application Bin, complete USB flash bundle, SHA-256 checksums and brief release notes; all attachments and the OTA submission must come from the same official build. OTA drafts still require administrator review and publication; successful submission does not mean they are live.
 
 GitHub Release 与官网刷机、TF 下载和联网 OTA 同步发布。保留官网现有刷机清单、固件及版本下载地址；OTA 清单继续使用固件允许的官方 HTTPS 域名。核对三种交付的版本、大小、校验值和基础包兼容性，避免影响正在刷机或升级的用户。本地测试仍只生成本地包，不创建正式 Release。
 Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. Preserve existing website manifests, firmware and versioned download URLs; keep OTA URLs on the official HTTPS origin accepted by the firmware. Verify matching versions, sizes, checksums and base-layout compatibility across the deliveries so ongoing flashes and updates remain valid. Local tests remain local bundles without official Releases.
@@ -192,7 +192,7 @@ Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_presen
 
 ## 硬约束 / Hard rules
 
-- 用户 2026-10-09 确认项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白。保留 `wegooo-cell/read-pico-reader` 仓库网址与已发布下载/OTA地址、备份文件名和内部协议标识。用户要求固件界面也统一命名，并于2026-11-03确认天气和 OTA 的正式接口域名均为 `mogo.mantake.shop`，保留 GitHub OTA 回退源。/ Per the user’s 2026-10-09 decision, use lowercase `kiikoread` for the project and “墨水屏” for devices on the bright-white website. Preserve repository/download/OTA URLs, backup filenames and protocol identifiers. The firmware UI uses the same brand. On 2026-11-03 the user confirmed `mogo.mantake.shop` as the production host for both weather and OTA, retaining the GitHub OTA fallback.
+- 用户 2026-10-09 确认项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白。源码与新版本发布使用本仓库当前 `origin`（现为 `chopper1026/mogo-e4p`）；保留已发布下载/OTA地址、备份文件名和内部协议标识。用户要求固件界面也统一命名，并于2026-11-03确认天气和 OTA 的正式接口域名均为 `mogo.mantake.shop`，保留 GitHub OTA 回退源。/ Per the user’s 2026-10-09 decision, use lowercase `kiikoread` for the project and “墨水屏” for devices on the bright-white website. Use this repository's current `origin` (now `chopper1026/mogo-e4p`) for source and new releases; preserve published download/OTA URLs, backup filenames and protocol identifiers. The firmware UI uses the same brand. On 2026-11-03 the user confirmed `mogo.mantake.shop` as the production host for both weather and OTA, retaining the GitHub OTA fallback.
 
 `冻结 / Frozen:` 段落是产品决策，不是建议。改行为前必须先改这段，并说明为什么决策变了。
 

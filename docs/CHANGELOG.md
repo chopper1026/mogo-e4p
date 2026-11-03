@@ -3,6 +3,15 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.3 · 2026-11-03
+
+- WiFi/热点传书页面重构，更加美观便捷。
+  Redesign the WiFi/hotspot transfer page for a cleaner, more convenient file workspace.
+- 页眉页脚增加自定义高度调节。
+  Add independent custom height controls for the reader header and footer.
+- 重构组件库，移除时钟、阅读记录等组件，新增天气组件。
+  Rework the component library, remove the old clock and reading-record widgets, and add weather.
+
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-03
 
 - 天气响应等待放宽至5秒并保留分段取消；城市搜索按20条批次暂存，界面每页8条本地切换，仅在缺少结果批次时补取，避免每次翻页重连查询。/ Allow a cancellable five-second weather response window and cache 20-result city batches for local eight-row paging, fetching only missing batches.
