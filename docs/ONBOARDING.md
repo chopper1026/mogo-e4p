@@ -36,6 +36,9 @@ idf.py --preview build
 GitHub CI 先构建以准备锁定的 IDF 组件，再用 Clang 执行宿主回归，保留 ASan/UBSan。已有 OTA 标签可通过 `Build and submit OTA firmware` 的手动入口输入原标签重试；构建与提交记录使用该标签的源码提交，不移动标签。失败时保留宿主测试日志附件。
 GitHub CI builds first to prepare locked IDF components, then runs host regressions with Clang and ASan/UBSan. Retry an existing OTA tag through the manual entry of `Build and submit OTA firmware`; the build and submission use that tag's source commit without moving it. Failed host logs are retained as artifacts.
 
+天气绘制回归需要 `fonttools==4.63.0` 和 `Pillow==12.2.0`，分别校验内置字体覆盖与背景位图。CI 在激活的 ESP-IDF Python 环境安装这两项测试依赖，本机运行回归也须在实际执行测试的 Python 环境中提供它们。
+Weather raster regressions require `fonttools==4.63.0` and `Pillow==12.2.0` for built-in font coverage and background masks. CI installs these test dependencies in the activated ESP-IDF Python environment; local runs must provide them in the Python environment actually running the tests.
+
 CI 等价命令 / CI-equivalent commands:
 
 ```sh
