@@ -78,7 +78,7 @@ void wifi_transfer_stop(void){assert(worker);++stops;network_state=WIFI_TRANSFER
 int esp_crt_bundle_attach(void *p){(void)p;return 0;}
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c){
     assert(worker&&c->disable_auto_redirect&&c->crt_bundle_attach&&c->timeout_ms==6000&&c->is_async);
-    assert(!strncmp(c->url,"https://kiikoread.com/api/v2/components",strlen("https://kiikoread.com/api/v2/components")));
+    assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
     struct FakeHttp *h=calloc(1,sizeof(*h));h->status=200;++requests;
     if(strstr(c->url,"/auto-location")) {
         ++auto_calls;h->body=english_city?ENGLISH_CITY:WEATHER_TEST_CITY;

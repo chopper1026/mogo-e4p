@@ -28,9 +28,9 @@ Temperatures are daily minimum/maximum °C separated by `/`, and humidity is day
 
 ## 平台接口 / Platform Contract
 
-`CONFIG_PICO_COMPONENT_API_ORIGIN` 配置可信 HTTPS 平台源，默认 `https://kiikoread.com`，不带路径或末尾斜杠。仅访问该源的 `/api/v2/components` 及天气 `locations`、`auto-location`、`forecast` GET 接口。无 Cookie、设备注册或供应商密钥，不直连和风，不改变 OTA 下载源。
+`CONFIG_PICO_COMPONENT_API_ORIGIN` 配置可信 HTTPS 平台源，默认 `https://mogo.mantake.shop`，不带路径或末尾斜杠。仅访问该源的 `/api/v2/components` 及天气 `locations`、`auto-location`、`forecast` GET 接口。无 Cookie、设备注册或供应商密钥，不直连和风，不改变 OTA 下载源。
 
-`CONFIG_PICO_COMPONENT_API_ORIGIN` is a trusted HTTPS origin, defaulting to `https://kiikoread.com`, without a path/trailing slash. Only catalog and weather GET endpoints are used, without cookies, registration, provider credentials or direct QWeather calls. OTA sources are unchanged.
+`CONFIG_PICO_COMPONENT_API_ORIGIN` is a trusted HTTPS origin, defaulting to `https://mogo.mantake.shop`, without a path/trailing slash. Only catalog and weather GET endpoints are used, without cookies, registration, provider credentials or direct QWeather calls. OTA sources are unchanged.
 
 第 1 版结构同时返回两日，太阳事件与期限为 UTC。核对版本、来源、所选坐标、时区、日期、数值范围和期限；拒绝超长、截断、过深嵌套或坏响应。搜索明确提交后才请求，最多五项，不持久缓存候选。查询须为2至64个字符，界面输入缓冲为128字节。
 

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
+- 修正天气正式接口为 `https://mogo.mantake.shop`，同步 OTA 平台地址说明；OTA 主源与下载校验保持使用该平台。/ Correct the production weather origin to `https://mogo.mantake.shop` and align OTA documentation with the existing platform feed and download validation.
+
 - 新增首页组件库与可选天气卡片：城市自动识别/手动搜索、今日明日本地切换、最低最高温度、白天湿度及图标日出日落；通过平台代理访问和风，缓存过期不展示旧数值。平台默认停用，正式启用仍须完成凭据、许可与设备验证。/ Add opt-in proxy weather with local day switching and bounded cache; activation still requires credentials, licensing and device validation.
 - 天气城市名称优先使用中文并兼容修正旧英文名，补齐默认字体的「庄」字；首页入口改为长按天气卡片，设置页阅读背景下方增加组件库入口，组件库底栏只保留首页按钮。/ Localize weather city names and add the missing default-font city glyph; enter the library by holding the Home card or from Settings below Reading background, and keep only Home in the library footer.
 - 所在城市页合并自动定位入口，键盘改为点输入框展开、点空白收起并保留输入，底栏移除两侧返回图标及热区。/ Unify automatic location in the city picker, show its keyboard only on field taps and preserve input when dismissed, and remove both side footer buttons and hit areas.

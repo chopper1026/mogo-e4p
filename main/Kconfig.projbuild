@@ -1,7 +1,7 @@
 menu "Built-in components"
     config PICO_COMPONENT_API_ORIGIN
         string "HTTPS platform origin for built-in components (no trailing slash)"
-        default "https://kiikoread.com"
+        default "https://mogo.mantake.shop"
         help
             Weather uses only the platform proxy. Never configure a provider
             endpoint or put provider credentials in firmware. Public activation
