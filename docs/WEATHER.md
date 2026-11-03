@@ -40,6 +40,10 @@ Product builds use the system trust bundle without local development CAs. Local 
 
 Schema 1 returns both days with UTC events/deadlines. Requests use only `locationId`; responses validate that ID, canonical coordinates, timezone, dates, ranges and deadlines. Explicit search requests a zero-based page with five entries, validating counts and keeping only the current page. Queries require 2-64 characters within 128 bytes. All users share the platform's default six-hour cache per location ID, never per personal coordinate.
 
+地点 ID 为 1 至 16 位大写字母或数字的字符串，不限定九位数字；官方 `F4F1`、`CA3` 等地点可正常选择、请求和保存。平台仍须核对 ID 存在于官方字典中。
+
+Location IDs are strings of 1-16 uppercase ASCII letters or digits, not necessarily nine digits. Official IDs such as `F4F1` and `CA3` can be selected, requested and persisted. The platform still requires dictionary membership.
+
 平台默认停用，须先配置合法凭据并完成平台测试。官网署名和特殊设备许可仍须向供应商确认，不能把“只在官网署名”视为已获许可。不在卡片中擅自添加来源文案，不生成样例预报冒充服务成功。
 
 Activation requires legal credentials and successful platform checks. Website attribution and special-device permission still require supplier confirmation; website-only attribution is not assumed approved. Device attribution text is not silently added and fixtures never substitute for unavailable weather.

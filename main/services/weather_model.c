@@ -122,7 +122,8 @@ void weather_time_text(int64_t utc, char *out, size_t cap) {
     snprintf(out, cap, "%02d:%02d", sec / 3600, sec / 60 % 60);
 }
 bool weather_location_valid(const weather_location_t *v) {
-    return v && v->id[9] == 0 && strspn(v->id, "0123456789") == 9 &&
+    return v && memchr(v->id, 0, sizeof(v->id)) && v->id[0] &&
+        strspn(v->id, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") == strlen(v->id) &&
         memchr(v->admin2, 0, sizeof(v->admin2)) && text_ok(v->admin2, sizeof(v->admin2), true) &&
         memchr(v->name, 0, sizeof(v->name)) && memchr(v->admin1, 0, sizeof(v->admin1)) &&
         memchr(v->country, 0, sizeof(v->country)) && memchr(v->timezone, 0, sizeof(v->timezone)) &&

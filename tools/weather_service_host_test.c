@@ -3,6 +3,7 @@
  * English: Real service with deterministic HTTP/tasks/NVS covering ownership, cancellation and cache handoff.
  */
 #include "weather_test_data.h"
+#include "cJSON.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@ static unsigned starts,stops,requests,auto_calls,forecast_calls,search_calls,ns_
 static int network_state,scenario;
 static int64_t monotonic;
 static unsigned pending_opens,header_calls;
+static char *alphanumeric_forecast;
 static bool stall_http_connect,cancel_http_connect;
 static unsigned char prefs_bytes[1024],cache_bytes[2048];
 static size_t prefs_size,cache_size;
@@ -82,7 +84,8 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
         ++auto_calls;h->body=WEATHER_TEST_CITY;
         if(scenario==1){h->body="{\"code\":\"CITY_SELECTION_REQUIRED\"}";h->status=503;}
     } else if(strstr(c->url,"/forecast?")) {
-        assert(strstr(c->url,"locationId=101210101")&&!strstr(c->url,"lat="));++forecast_calls;h->body=WEATHER_TEST_FORECAST;
+        assert(strstr(c->url,scenario==6?"locationId=F4F1":"locationId=101210101")&&!strstr(c->url,"lat="));
+        ++forecast_calls;h->body=scenario==6?alphanumeric_forecast:WEATHER_TEST_FORECAST;
         if(scenario==3){h->body="{\"code\":\"WEATHER_UPSTREAM_UNAVAILABLE\"}";h->status=503;}
         if(scenario==4){h->body="{}";}
         if(scenario==5){h->body="{\"code\":\"BUDGET_EXHAUSTED\"}";h->status=429;}
@@ -223,6 +226,16 @@ int main(void) {
     assert(search_calls==searches_before);
     fail_flash=true;request(APP_WEATHER_LOCATE,NULL);fail_flash=false;
     assert(!strcmp(s_view.city.name,"杭州")&&s_view.notice[0]);
+    assert(weather_location_parse(WEATHER_TEST_ALPHA_CITY,strlen(WEATHER_TEST_ALPHA_CITY),&city));
+    assert(app_weather_select(&city));
+    cJSON *alpha=cJSON_Parse(WEATHER_TEST_FORECAST);
+    cJSON_ReplaceItemInObject(alpha,"location",cJSON_Parse(WEATHER_TEST_ALPHA_CITY));
+    alphanumeric_forecast=cJSON_PrintUnformatted(alpha);cJSON_Delete(alpha);assert(alphanumeric_forecast);
+    scenario=6;before=search_calls;request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.has_forecast&&!strcmp(s_view.forecast.location.id,"F4F1")&&search_calls==before);
+    s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
+    assert(s_view.has_city&&s_view.has_forecast&&!strcmp(s_view.city.id,"F4F1"));
+    free(alphanumeric_forecast);alphanumeric_forecast=NULL;
     wall_time=0;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));
     assert(!weather_day_for(&s_view.forecast,wall_time,false));
     assert(starts==stops&&time_cancels>0);

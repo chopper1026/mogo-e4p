@@ -7,6 +7,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 修正天气正式接口为 `https://mogo.mantake.shop`，同步 OTA 平台地址说明；OTA 主源与下载校验保持使用该平台。/ Correct the production weather origin to `https://mogo.mantake.shop` and align OTA documentation with the existing platform feed and download validation.
 - 天气城市搜索改用平台官方 CSV 城市字典，支持中文、英文、拼音及首字母，完整结果分页并展示市、省归属；预报统一按官方地点 ID 共享六小时缓存，自动定位直接返回中文，不再逐次查询和风修正名称。本地开发旧选城格式不迁移。/ Use the persistent official city dictionary with bilingual/Pinyin/initial search, full pagination and administrative labels; share six-hour forecasts by official ID and return Chinese IP results directly, without repeated Geo relabeling or development-format migration.
+- 修正官方字母数字地点 ID 的校验，避免部分台湾地点能搜到却无法选择或保存。/ Accept official alphanumeric location IDs so listed Taiwan locations can be selected and persisted.
 
 - 新增首页组件库与可选天气卡片：城市自动识别/手动搜索、今日明日本地切换、最低最高温度、白天湿度及图标日出日落；通过平台代理访问和风，缓存过期不展示旧数值。平台默认停用，正式启用仍须完成凭据、许可与设备验证。/ Add opt-in proxy weather with local day switching and bounded cache; activation still requires credentials, licensing and device validation.
 - 天气城市名称优先使用中文，补齐默认字体的「庄」字；首页入口改为长按天气卡片，设置页阅读背景下方增加组件库入口，组件库底栏只保留首页按钮。/ Use Chinese weather city names and add the missing default-font city glyph; enter the library by holding the Home card or from Settings below Reading background, and keep only Home in the library footer.

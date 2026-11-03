@@ -83,6 +83,22 @@ int main(void) {
     assert(!weather_forecast_parse(WEATHER_TEST_FORECAST,strlen(WEATHER_TEST_FORECAST),
         weather_timestamp("2026-11-02T00:30:00Z"),&wrong,&f));
     strcpy(wrong.id,"bad");assert(!weather_location_valid(&wrong));
+    const char *invalid_ids[]={"", "abcD", "F4F1?x=1", "../F4F1", "123?", "F4 F1", "F4_F1", "F4F1%20"};
+    for(unsigned i=0;i<sizeof(invalid_ids)/sizeof(*invalid_ids);++i) {
+        wrong=city;snprintf(wrong.id,sizeof(wrong.id),"%s",invalid_ids[i]);
+        assert(!weather_location_valid(&wrong));
+    }
+    wrong=city;memset(wrong.id,'A',sizeof(wrong.id));assert(!weather_location_valid(&wrong));
+    wrong=city;strcpy(wrong.id,"CA3");assert(weather_location_valid(&wrong));
+    strcpy(wrong.id,"0123456789ABCDEF");assert(weather_location_valid(&wrong));
+    weather_location_t alpha;
+    assert(weather_location_parse(WEATHER_TEST_ALPHA_CITY,strlen(WEATHER_TEST_ALPHA_CITY),&alpha));
+    assert(!strcmp(alpha.id,"F4F1")&&!strcmp(alpha.timezone,"Asia/Taipei"));
+    root=cJSON_Parse(WEATHER_TEST_FORECAST);
+    cJSON_ReplaceItemInObject(root,"location",cJSON_Parse(WEATHER_TEST_ALPHA_CITY));
+    json=cJSON_PrintUnformatted(root);
+    assert(weather_forecast_parse(json,strlen(json),weather_timestamp("2026-11-02T00:30:00Z"),&alpha,&f));
+    assert(!strcmp(f.location.id,"F4F1"));free(json);cJSON_Delete(root);
     wrong=city;wrong.lat=9.55;assert(weather_location_valid(&wrong));
     strcpy(wrong.timezone,"Asia/Taipei");assert(weather_location_valid(&wrong));
     wrong=city;strcpy(wrong.timezone,"Asia/Taipei");

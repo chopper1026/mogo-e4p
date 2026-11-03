@@ -4,6 +4,7 @@
  */
 #pragma once
 #define WEATHER_TEST_CITY "{\"locationId\":\"101210101\",\"name\":\"杭州\",\"admin1\":\"浙江省\",\"admin2\":\"杭州市\",\"country\":\"中国\",\"lat\":30.25,\"lon\":120.21,\"timezone\":\"Asia/Shanghai\"}"
+#define WEATHER_TEST_ALPHA_CITY "{\"locationId\":\"F4F1\",\"name\":\"盐埔乡\",\"admin1\":\"台湾省\",\"admin2\":\"屏东县\",\"country\":\"中国台湾省\",\"lat\":22.74,\"lon\":120.57,\"timezone\":\"Asia/Taipei\"}"
 #define WEATHER_TEST_CATALOG "{\"schemaVersion\":1,\"components\":[{\"code\":\"weather\",\"schemaVersion\":1,\"enabled\":true,\"available\":true}]}"
 #define WEATHER_TEST_FORECAST \
     "{\"schemaVersion\":1,\"source\":\"QWeather\",\"stale\":false," \

@@ -10,7 +10,7 @@
 #define WEATHER_CITY_LIMIT 5
 #define WEATHER_BODY_LIMIT 8192
 typedef struct {
-    char id[10], admin2[97]; ///< 官方地点标识与地级行政区 / Official location ID and prefecture
+    char id[17], admin2[97]; ///< 官方地点标识与地级行政区 / Official location ID and prefecture
     char name[97], admin1[97], country[49], timezone[33]; ///< 展示信息 / Display metadata
     double lat, lon; ///< 代理归一化坐标 / Proxy-normalized coordinates
 } weather_location_t;
