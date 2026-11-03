@@ -55,6 +55,19 @@ For each OTA version tag, summarize actual changes since the appropriate previou
 用户 2026-11-03 确认：今后提到「发布版本」，均指发布到本仓库当前 `origin` 远端，替代此前固定的旧发布仓库；发布前核对 `git remote get-url origin`，当前为 `chopper1026/mogo-e4p`。推送代码，创建并推送对应版本的 Git tag，触发 OTA 网站的固件草稿构建与提交，并在同一远端创建 GitHub Release。附上经验证的 TF/OTA 应用 Bin、完整 USB 刷机包、SHA-256 校验值和简要更新日志；所有附件与 OTA 提交必须来自同一次正式构建。OTA 草稿仍须管理员审核发布，不得把草稿提交成功视为已经上线。
 Per the user's 2026-11-03 decision, "publish a version" means publishing to this repository's current `origin`, replacing the previously fixed legacy release repository. Check `git remote get-url origin` before publishing; it currently points to `chopper1026/mogo-e4p`. Push the code and a matching Git tag to trigger the OTA website's draft build/submission, and create a GitHub Release in the same remote repository. Attach the verified TF/OTA application Bin, complete USB flash bundle, SHA-256 checksums and brief release notes; all attachments and the OTA submission must come from the same official build. OTA drafts still require administrator review and publication; successful submission does not mean they are live.
 
+用户 2026-11-04 确认 GitHub Release 的展示与命名规范如下；`<版本号>` 不含 `v`，Git tag 仍使用 `v<版本号>`（例如 `v1.0.3`）。
+Per the user's 2026-11-04 decision, use the following GitHub Release presentation and naming rules. `<version>` excludes `v`; Git tags remain `v<version>` (for example, `v1.0.3`).
+
+| 项目 / Item | 格式 / Format | 1.0.3 示例 / Example |
+| --- | --- | --- |
+| Release 标题 / Release title | `mogo E4p <版本号>` / `mogo E4p <version>` | `mogo E4p 1.0.3` |
+| TF/OTA 应用镜像 / TF/OTA application | `mogo-e4p-update-<版本号>.bin` / `mogo-e4p-update-<version>.bin` | `mogo-e4p-update-1.0.3.bin` |
+| USB 单文件整机镜像 / Single-file USB image | `mogo-e4p-<版本号>-full.bin` / `mogo-e4p-<version>-full.bin` | `mogo-e4p-1.0.3-full.bin` |
+| 完整 USB 刷机包 / Complete USB bundle | `mogo-e4p-<版本号>-usb.zip` / `mogo-e4p-<version>-usb.zip` | `mogo-e4p-1.0.3-usb.zip` |
+
+Release 说明按更新日志、下载、验证组织，下载文件名与实际附件、包外 `README.txt`、`SHA256SUMS` 保持一致，保留 `release-provenance.json` 构建来源。保留当前目标硬件与刷写方式说明，不再添加「不适用于旧ESP32-S3设备」一句。以上仅调整 GitHub Release 的标题、下载文件名及说明，不改变固件界面品牌、目标硬件、构建部件名、备份文件名、内部协议或官网/OTA 地址；未经用户明确要求，不更名或替换已经发布的附件。
+Organize Release descriptions as updates, downloads and verification. Keep download names consistent across assets, the outer `README.txt` and `SHA256SUMS`, and retain build provenance in `release-provenance.json`. Describe the current target hardware and flashing methods without adding the old ESP32-S3 exclusion sentence. These rules affect only GitHub Release titles, download filenames and descriptions, not firmware UI branding, hardware targets, build component names, backup filenames, internal protocols or website/OTA URLs. Do not rename or replace published assets without an explicit user request.
+
 GitHub Release 与官网刷机、TF 下载和联网 OTA 同步发布。保留官网现有刷机清单、固件及版本下载地址；OTA 清单继续使用固件允许的官方 HTTPS 域名。核对三种交付的版本、大小、校验值和基础包兼容性，避免影响正在刷机或升级的用户。本地测试仍只生成本地包，不创建正式 Release。
 Publish GitHub Releases alongside the web flasher, TF downloads and online OTA. Preserve existing website manifests, firmware and versioned download URLs; keep OTA URLs on the official HTTPS origin accepted by the firmware. Verify matching versions, sizes, checksums and base-layout compatibility across the deliveries so ongoing flashes and updates remain valid. Local tests remain local bundles without official Releases.
 
@@ -192,7 +205,7 @@ Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_presen
 
 ## 硬约束 / Hard rules
 
-- 用户 2026-10-09 确认项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白。源码与新版本发布使用本仓库当前 `origin`（现为 `chopper1026/mogo-e4p`）；保留已发布下载/OTA地址、备份文件名和内部协议标识。用户要求固件界面也统一命名，并于2026-11-03确认天气和 OTA 的正式接口域名均为 `mogo.mantake.shop`，保留 GitHub OTA 回退源。/ Per the user’s 2026-10-09 decision, use lowercase `kiikoread` for the project and “墨水屏” for devices on the bright-white website. Use this repository's current `origin` (now `chopper1026/mogo-e4p`) for source and new releases; preserve published download/OTA URLs, backup filenames and protocol identifiers. The firmware UI uses the same brand. On 2026-11-03 the user confirmed `mogo.mantake.shop` as the production host for both weather and OTA, retaining the GitHub OTA fallback.
+- 用户 2026-10-09 确认项目品牌为小写 `kiikoread`，网页设备称「墨水屏」，页面底色采用明亮纯白；GitHub Release 的标题和下载文件名按上述 `mogo` 发布规范执行，不据此批量更名固件界面。源码与新版本发布使用本仓库当前 `origin`（现为 `chopper1026/mogo-e4p`）；除用户明确要求的 Release 附件更名外，保留已发布下载/OTA地址、备份文件名和内部协议标识。用户要求固件界面也统一命名，并于2026-11-03确认天气和 OTA 的正式接口域名均为 `mogo.mantake.shop`，保留 GitHub OTA 回退源。/ Per the user’s 2026-10-09 decision, use lowercase `kiikoread` for the project and “墨水屏” for devices on the bright-white website. GitHub Release titles and download filenames follow the `mogo` release rules above; this does not authorize bulk firmware UI renaming. Use this repository's current `origin` (now `chopper1026/mogo-e4p`) for source and new releases; preserve published download/OTA URLs except for explicitly requested Release asset renames, and retain backup filenames and protocol identifiers. The firmware UI uses the same brand. On 2026-11-03 the user confirmed `mogo.mantake.shop` as the production host for both weather and OTA, retaining the GitHub OTA fallback.
 
 `冻结 / Frozen:` 段落是产品决策，不是建议。改行为前必须先改这段，并说明为什么决策变了。
 
