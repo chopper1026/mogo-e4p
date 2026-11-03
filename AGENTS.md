@@ -117,7 +117,8 @@ Use `main/CMakeLists.txt` and `app_registry.c` as page entry points; legacy boar
 
 | 文件 / File | 职责 / Role |
 | --- | --- |
-| `app_dashboard.c` | 首页题头、头像与最近阅读；卡片下方留白。/ Home header, avatar and recent reading; blank below the card. |
+| `app_dashboard.c` | 首页题头、头像及上下等高组件区；最近阅读/天气唯一，天气直角铺满。/ Home header, avatar and equal widget regions; reading/weather are unique, with edge-to-edge rectangular weather. |
+| `app_components.c` | 组件库与天气城市选择，契约见 `docs/WEATHER.md`。/ Component library and weather city picker; see the weather contract. |
 | `app_book.c` | 书架与 TXT / EPUB 阅读。/ Shelf and TXT / EPUB reading. |
 | `app_files.c` | 文件浏览与传输入口。/ Files and transfer entry points. |
 | `app_device_settings.c` | 设备设置、蓝牙翻页与维护。/ Settings, Bluetooth page-turners and maintenance. |

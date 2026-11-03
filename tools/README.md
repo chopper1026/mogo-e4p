@@ -5,6 +5,8 @@ Run commands from the repository root and keep outputs in ignored build director
 
 | 类别 / Category | 入口 / Entry | 用途 / Purpose |
 | --- | --- | --- |
+| 天气 / Weather | `python3 tools/weather_host_test.py` | 真实解析、缓存、代理任务/取消、NVS交接及原生绘图边界；不联网。/ Real parsing, cache, proxy jobs/cancellation, NVS handoff and native raster bounds, without networking. |
+| 天气背景 / Weather masks | `python3 tools/generate_weather_backgrounds.py` | 无损打包已确认的六张1bpp背景；`--check` 核对源图与资源一致。/ Losslessly pack six approved 1bpp backgrounds; `--check` verifies source/asset consistency. |
 | 目录与依赖 / Structure | `python3 tools/check_architecture.py` | 检查模块依赖、构建清单和测试入口。/ Check module boundaries, build registration and test entry points. |
 | 完整阅读回归 / Reader regression | `python3 tools/run_reader_baseline.py` | 统一执行阅读、字体、显示、存储、OTA 与应用循环回归，保留 ASan/UBSan。/ Run reader/font/display/storage/OTA/app-loop suites with ASan/UBSan. |
 | 指定领域 / Selected suites | `python3 tools/run_reader_baseline.py session chapter open turn reflow` | 只执行指定领域；完整列表见 `--help`。/ Run selected domains; see --help for all suites. |

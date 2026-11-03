@@ -35,6 +35,8 @@
  * 用户 2026-10-26 新增：设置列表最底部一行居中的版本号与固件构建日期，随列表滚动露出。
  * User addition of 2026-10-26: the settings list ends with a centred version and firmware build
  * date line, revealed by scrolling to the bottom.
+ * 用户 2026-11-03 新增：阅读背景下面保留组件库入口，天气隐藏后仍可重新添加。
+ * User addition of 2026-11-03: keep Components below Reading background so hidden weather can be enabled again.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +51,7 @@
 #include "app.h"
 #include "app_content_open.h"
 #include "app_device_settings_mode.h"
+#include "app_components_mode.h"
 #include "app_registry.h"
 #include "app_transfer_mode.h"
 #include "settings.h"
@@ -352,7 +355,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
-#define SETTINGS_PERSONAL_ROWS 6
+#define SETTINGS_PERSONAL_ROWS 7
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
 #define SETTINGS_MAINTENANCE_ROWS 3
@@ -877,6 +880,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_VIBRATE,           // 18 触摸震动 / touch vibration
         UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
         UI_ICON_ZAP,               // 20 电源管理 / power management
+        UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1662,7 +1666,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","触摸震动","阅读背景"};
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名","触摸震动","阅读背景","组件库"};
     char haptic_value[24];
     if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),"不支持");
     else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),"关闭");
@@ -1676,8 +1680,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         background_path[0]?(background_base?background_base+1:background_path):"无");
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value};
-    const int personal_icons[]={4,5,16,10,18,19};
+        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value,""};
+    const int personal_icons[]={4,5,16,10,18,19,21};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"保存与恢复","屏幕修复","系统升级"};
@@ -2678,6 +2682,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             s_reading_bg_notice[0]=0;
             s_page=SETTINGS_READING_BG;
         }
+        else if(row==6){app_components_open(ctx,false);return APP_REDRAW_NONE;}
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {

@@ -10,7 +10,10 @@
 #define UI_NAV_TOUCH_TOP (UI_NAV_TOP - 16)
 #define UI_NAV_MARKER_TOP (UI_NAV_TOP + 3)
 #define UI_NAV_MARKER_BOTTOM (UI_NAV_TOP + 8)
-// 内容向内收至32列边界；横条单独短刷或并入快刷，外扩范围均止于图标首笔之前。
-// Round content inward to 32 columns; marker-only or fused fast scans end before any icon ink.
-#define UI_NAV_REFRESH_END (UI_NAV_TOP & ~31)
+// 内容截止与实际导航顶部一致，固定区域不再占用上方24px。
+// Content ends at the actual navigation top, without an extra 24px fixed region.
+#define UI_NAV_REFRESH_END UI_NAV_TOP
+// 仅全像素清理向内对齐，防止扩列驱动导航；普通内容差分不受此限制。
+// Only full-pixel cleanup aligns inward to avoid driving navigation; ordinary content differences use the actual boundary.
+#define UI_NAV_CLEAN_END (UI_NAV_TOP & ~31)
 #define UI_NAV_MARKER_SCAN_END ((UI_NAV_MARKER_BOTTOM + 31) & ~31)

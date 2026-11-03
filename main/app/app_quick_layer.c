@@ -6,6 +6,7 @@
  * English: Top quick layer extracted from the loop, owning previews, local presentation and service actions; the loop retains scheduling and lock gates.
  */
 #include "app_quick_layer.h"
+#include "weather_service.h"
 #include "app_navigation.h"
 #include "app_device_settings_mode.h"
 #include "app_transfer_mode.h"
@@ -155,6 +156,7 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
 }
 
 static void quick_toggle_wifi(void) {
+    app_weather_cancel_join();
     wifi_transfer_status_t status;
     wifi_transfer_get_status(&status);
     if (status.state != WIFI_TRANSFER_STOPPED) {

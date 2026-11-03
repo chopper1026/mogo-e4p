@@ -1,3 +1,13 @@
+menu "Built-in components"
+    config PICO_COMPONENT_API_ORIGIN
+        string "HTTPS platform origin for built-in components (no trailing slash)"
+        default "https://kiikoread.com"
+        help
+            Weather uses only the platform proxy. Never configure a provider
+            endpoint or put provider credentials in firmware. Public activation
+            requires a configured platform and confirmed attribution/license.
+endmenu
+
 # 触摸丢点诊断开关；仅排查构建启用，正式版保持关闭。
 # Touch tap-drop diagnostics; enable only on investigation builds.
 menu "Touch diagnostics"

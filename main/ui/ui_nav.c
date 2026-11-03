@@ -8,8 +8,8 @@
  * User revision: only shared backs register local hits; footer icon taps just navigate, never enlarging or shifting.
  * 变更原因：底栏放大后复位被读成图标跳动，底栏改为完全静止。
  * Why it changed: enlarge-then-settle read as the icon jumping, so the footer now stays completely still.
- * 用户修订：所有模式把内容扫描截止到分隔线之间的24行固定为白色留白；滚动不能把列表画进这条扫描保护带。
- * User revision: every mode keeps the 24 rows between content scans and the divider blank white; scrolling must not paint list content into this guard.
+ * 用户2026-11-03修订：固定导航从实际顶部开始，不再额外清白或保护上方24行内容；图标及分隔线位置不变。
+ * User revision 2026-11-03: fixed navigation starts at its actual top without clearing or protecting 24 extra content rows; icons and divider retain their positions.
  * 用户修订：状态栏签名按系统字体和内建界面字体的共同安全宽度截断，阅读页复用小型字宽表，不重载系统字体。
  * User revision: fit status signatures to widths safe for the system and built-in UI faces; reading reuses a small metrics table without reloading the system font.
  * 用户修订：底栏去掉文字，只保留四枚图标和选中横条，高104像素，分隔线使用0x90灰。
@@ -146,7 +146,6 @@ static void icon(uint8_t *fb, int tab, int cx, int y) {
 void ui_nav_draw(uint8_t *fb, int active) {
     ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_LOCK_HEIGHT - UI_NAV_TOP}, UI_GRAY_WHITE, fb);
     ui_fill_rect_fast((EpdRect){0, UI_NAV_TOP, UI_LOCK_WIDTH, UI_NAV_DIVIDER_H}, UI_GRAY_LIGHT, fb);
-    ui_fill_rect_fast((EpdRect){0, UI_NAV_REFRESH_END, UI_LOCK_WIDTH, UI_NAV_TOP - UI_NAV_REFRESH_END}, UI_GRAY_WHITE, fb);
     if (app_settings_main_refresh_mode() != APP_MAIN_REFRESH_NORMAL) {
         // 快刷内容边界预留空白；横条在白底上单独短刷，图标保持固定。
         // Reserve a blank fast-refresh boundary; short-update the marker on white while retaining icons.

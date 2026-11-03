@@ -5,6 +5,13 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
+- 新增首页组件库与可选天气卡片：城市自动识别/手动搜索、今日明日本地切换、最低最高温度、白天湿度及图标日出日落；通过平台代理访问和风，缓存过期不展示旧数值。平台默认停用，正式启用仍须完成凭据、许可与设备验证。/ Add opt-in proxy weather with local day switching and bounded cache; activation still requires credentials, licensing and device validation.
+- 天气城市名称优先使用中文并兼容修正旧英文名，补齐默认字体的「庄」字；首页入口改为长按天气卡片，设置页阅读背景下方增加组件库入口，组件库底栏只保留首页按钮。/ Localize weather city names and add the missing default-font city glyph; enter the library by holding the Home card or from Settings below Reading background, and keep only Home in the library footer.
+- 所在城市页合并自动定位入口，键盘改为点输入框展开、点空白收起并保留输入，底栏移除两侧返回图标及热区。/ Unify automatic location in the city picker, show its keyboard only on field taps and preserve input when dismissed, and remove both side footer buttons and hit areas.
+- 天气组件增加默认开启、可保存的六小时自动刷新开关，保留手动刷新并在到期/跨日缺预报时补取，不主动唤醒待机；最低最高温度改用斜杠分隔。/ Add a persisted, on-by-default six-hour weather refresh toggle with manual updates and expiry/midnight recovery without standby wake; separate minimum/maximum temperatures with a slash.
+- 首页改为上下等高组件区，可选择最近阅读、天气或留白，同类组件自动交换而不重复；天气去除边框、圆角及导航前白条。新版设置备份支持组件布局，恢复旧备份保留当前布局。/ Add two equal Home regions with unique reading/weather widgets and repeatable empty choices; remove weather frames, rounded corners and the footer gap. New settings backups include layout; old backups preserve current choices.
+- 天气刷新改为靠右的单图标，移除「刷新」文字、天气底部及最近阅读右上角的设置图标；固定导航区缩到实际导航顶部，释放上方24px为内容，修复切页和局部刷新残留。/ Use a right-aligned refresh icon without a label, remove weather/reading settings icons, and shrink fixed navigation to its actual top so all content updates include the formerly protected 24px.
+
 - 移除首页最近阅读卡片下方的书夹、时钟与样式选择、月阅读记录及闭环目标，顶部关联圆环一并撤下；下半区留白，保留续读、头像、状态栏时钟与底部导航，不清除阅读进度或票根统计。
   Remove the old folder/clock widgets, style picker, monthly reading view and daily goal with its header ring. Leave the lower Home area blank while retaining resume, avatar, status clock and navigation; preserve reading progress and ticket statistics.
 - 传书网页文件列表增加左右留白，避免选中与悬停底色紧贴复选框和更多按钮；表头同步对齐。

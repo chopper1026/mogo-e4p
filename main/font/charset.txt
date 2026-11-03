@@ -89,3 +89,5 @@ NVS
 原
 右
 全
+# 中文天气城市回归样本。/ Chinese weather-city regression sample.
+石家庄

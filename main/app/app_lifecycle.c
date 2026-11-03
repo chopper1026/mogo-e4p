@@ -7,6 +7,7 @@
 #include "app_registry.h"
 #include "boot_state.h"
 #include "time_service.h"
+#include "weather_service.h"
 #include "storage_jobs.h"
 #include "ota_online.h"
 #include "ota_auto.h"
@@ -26,12 +27,14 @@ void app_lifecycle_checkpoint(app_ctx_t *ctx, const app_desc_t *current) {
 }
 
 bool app_lifecycle_pause_for_lock(void) {
+    app_weather_cancel_join();
     pico_ota_auto_cancel();
     app_time_service_cancel();
     return wifi_transfer_pause_for_sleep();
 }
 
 bool app_lifecycle_prepare_poweroff(void) {
+    app_weather_cancel_join();
     pico_ota_auto_cancel();
     app_time_service_cancel();
     if (pico_online_busy() || !storage_jobs_quiesce(2000) || !wifi_transfer_pause_for_sleep()) return false;

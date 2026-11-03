@@ -96,7 +96,7 @@ enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* state, EpdRect area, e047
     assert(ota_display_depth);
     (void)dir; ++water_calls;
     last_water_area=area;
-    assert(area.y>=0 && area.y%32==0 && (area.y+area.height==UI_NAV_REFRESH_END || area.y+area.height==UI_NAV_MARKER_SCAN_END) && scan==BOARD_EPD_SCAN_FAST);
+    assert(area.y>=0 && area.y%32==0 && (area.y+area.height==UI_NAV_CLEAN_END || area.y+area.height==UI_NAV_MARKER_SCAN_END) && scan==BOARD_EPD_SCAN_FAST);
     if(water_fails)return (enum EpdDrawError)water_fails;
     const size_t stride=W/2;
     for(int y=0;y<H;++y){memcpy(panel+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);memcpy(state->back_fb+y*stride+area.y/2,state->front_fb+y*stride+area.y/2,area.height/2);}
@@ -130,8 +130,8 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
     if (!changed) return EPD_DRAW_SUCCESS;
     if(full&&protect_shelf_chrome&&!clears)assert(x0>=192&&x1<=992);
     ++calls; full_calls += full;
-    bool nav_driven = full && x1 > UI_NAV_REFRESH_END;
-    for (int y = 0; y < H; ++y) for (int x = UI_NAV_REFRESH_END; x < x1; ++x) {
+    bool nav_driven = full && x1 > UI_NAV_TOP;
+    for (int y = 0; y < H; ++y) for (int x = UI_NAV_TOP; x < x1; ++x) {
         const size_t at = (size_t)y * W / 2 + x / 2;
         const unsigned shift = (x & 1) ? 4 : 0;
         const bool delta = ((state->front_fb[at] ^ state->back_fb[at]) >> shift) & 15;
@@ -168,7 +168,7 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
         assert(scan == BOARD_EPD_SCAN_FULL);
         if (state->waveform==&main_acrylic_clean) {
             ++clean_calls;
-            assert(full && mode==MODE_GL16 && x1<=UI_NAV_REFRESH_END);
+            assert(full && mode==MODE_GL16 && x1<=UI_NAV_CLEAN_END);
         }
     }
     const bool fail = failures > 0 && fail_after == 0;
@@ -214,7 +214,7 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* state, EpdRect area,
     assert(ota_display_depth && scan==BOARD_EPD_SCAN_FULL);
     assert(soft==&main_water && calibrated==&main_acrylic);
     assert(area.y==0 && area.height==UI_NAV_MARKER_SCAN_END);
-    assert(strong.y>=0 && strong.y+strong.height<=UI_NAV_REFRESH_END && !(strong.y&31) && !(strong.height&31));
+    assert(strong.y>=0 && strong.y+strong.height<=UI_NAV_CLEAN_END && !(strong.y&31) && !(strong.height&31));
     if(protect_shelf_chrome)assert(strong.y==192 && strong.height==800);
     ++region_calls;last_strong_area=strong;
     if(region_unavailable)return EPD_DRAW_NO_PHASES_AVAILABLE;
@@ -241,7 +241,7 @@ static void target(unsigned seed) {
         // Mix both black/white nibbles independently; separate band cases cover all 16 gray levels.
         static const unsigned char values[] = {0x00, 0xff, 0x0f, 0xf0};
         int x = (int)(i % (W / 2)) * 2;
-        final[i] = x < UI_NAV_REFRESH_END ? values[(i + seed) % sizeof(values)] : back[i];
+        final[i] = x < UI_NAV_CLEAN_END ? values[(i + seed) % sizeof(values)] : back[i];
     }
     memcpy(front, final, BYTES);
 }
@@ -249,6 +249,10 @@ static void begin(void* owner) {
     display_main_transition_arm(owner, false, false);
     assert(update_display_fast_page(&hl) == EPD_DRAW_SUCCESS);
     display_main_transition_disarm();
+    if(memcmp(front,final,BYTES))for(size_t i=0;i<BYTES;++i)if(front[i]!=final[i]){
+        fprintf(stderr,"target mismatch: mode=%d calls=%d byte=%zu x=%zu y=%zu actual=%02x expected=%02x\n",
+                main_mode,calls,i,(i%(W/2))*2,i/(W/2),front[i],final[i]);break;
+    }
     assert(!memcmp(front, final, BYTES));
 }
 static void assert_final(void) {
@@ -258,7 +262,7 @@ static void assert_final(void) {
 // 按像素生成预期固定底栏，独立核对半字节边界及灰阶前态。
 // Build expected navigation pixel by pixel to independently check nibble edges and the actual gray baseline.
 static void expect_navigation(bool marker) {
-    for (int y = 0; y < H; ++y) for (int x = UI_NAV_REFRESH_END; x < W; ++x) {
+    for (int y = 0; y < H; ++y) for (int x = UI_NAV_TOP; x < W; ++x) {
         if (marker && x >= UI_NAV_MARKER_TOP && x < UI_NAV_MARKER_BOTTOM) continue;
         const size_t at = (size_t)y * W / 2 + x / 2;
         const unsigned mask = 15u << ((x & 1) ? 4 : 0);
@@ -284,11 +288,72 @@ static void gray_begin_for(bool changing_page) {
 }
 static void gray_begin(void) {gray_begin_for(false);}
 
+// 首页天气可占用对齐正文与底栏之间的24行；离页、回页及局部更新都必须呈现真实目标。
+// Home weather may fill the 24 rows between the aligned body and navigation; switches and partials must present the actual target.
+static void prime_normal_cleanup(void) {
+    reset();main_mode=APP_MAIN_REFRESH_NORMAL;
+    for(int i=1;i<APP_UI_FAST_GC16_EVERY;++i){target((unsigned)i);begin(&owner_a);}
+    calls=bw_calls=gray_calls=gc_calls=full_calls=nav_draws=0;
+}
+
+static void home_edge_cases(void) {
+    const int modes[]={APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_WATER,APP_MAIN_REFRESH_FAST};
+    for(unsigned m=0;m<sizeof(modes)/sizeof(*modes);++m){
+        reset();main_mode=modes[m];
+        for(int step=0;step<16;++step){
+            memcpy(front,back,BYTES);
+            front[0]=step&1?0x0f:0xf0;
+            const uint8_t ink=step&1?0xff:main_mode==APP_MAIN_REFRESH_FAST?0x00:0x57;
+            for(int y=0;y<H;++y)
+                memset(front+y*(W/2)+UI_NAV_CLEAN_END/2,ink,(UI_NAV_TOP-UI_NAV_CLEAN_END)/2);
+            memcpy(final,front,BYTES);
+            display_main_transition_arm(&owner_a,false,true);
+            assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+            assert(!nav_draws&&!allocations);
+        }
+        const EpdRect areas[]={{0,UI_NAV_CLEAN_END+2,H,UI_NAV_TOP-UI_NAV_CLEAN_END-2},
+                              {0,UI_NAV_CLEAN_END-16,H,UI_NAV_TOP-UI_NAV_CLEAN_END+16}};
+        for(unsigned i=0;i<2;++i){
+            memcpy(front,back,BYTES);
+            for(int y=0;y<H;++y){
+                front[y*(W/2)+UI_NAV_TOP/2-1]=0;
+                if(i)front[y*(W/2)+UI_NAV_CLEAN_END/2-1]=0;
+            }
+            memcpy(final,front,BYTES);
+            display_main_transition_arm(&owner_a,false,false);
+            assert(update_display_area_diff_with(&hl,&E0470_WAVEFORM,MODE_GL16,areas[i])==EPD_DRAW_SUCCESS);
+            assert_final();assert(!nav_draws&&!allocations);
+            memcpy(front,back,BYTES);
+            for(int y=0;y<H;++y){
+                front[y*(W/2)+UI_NAV_TOP/2-1]=0xff;
+                if(i)front[y*(W/2)+UI_NAV_CLEAN_END/2-1]=0xff;
+            }
+            memcpy(final,front,BYTES);
+            display_main_transition_arm(&owner_a,false,false);
+            assert(update_display_area_with(&hl,&E0470_WAVEFORM,MODE_GL16,areas[i])==EPD_DRAW_SUCCESS);
+            assert_final();assert(!nav_draws&&!allocations);
+        }
+    }
+    // 仅尾部改变也要输出；尾部失败同样从白底重建，不能把失败缓存当作已显示。
+    // Tail-only changes need output too; a failed tail rebuilds from white instead of accepting an unpainted cache.
+    for(int fail=0;fail<2;++fail){
+        reset();main_mode=APP_MAIN_REFRESH_NORMAL;
+        for(int y=0;y<H;++y)front[y*(W/2)+UI_NAV_TOP/2-1]=0x73;
+        memcpy(final,front,BYTES);failures=fail;fail_error=EPD_DRAW_OTHER_ERROR;
+        display_main_transition_arm(&owner_a,false,false);
+        assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
+        assert(clears==fail&&!allocations);
+    }
+    puts("PASS: Home weather edge enters/exits across normal/ripple/fast, tail-only repaint, partial/full-area clipping and failure recovery");
+}
+
 int main(void) {
+    assert(UI_NAV_REFRESH_END==UI_NAV_TOP && UI_NAV_TOP==1112);
+    home_edge_cases();
     // 所有256种双半字节都走真实批量规整；不同字节并排验证乘法不会串位，底栏保持原像素。
     // Exercise all 256 nibble pairs through real batch normalization, checking adjacent bytes for carries and preserving navigation.
     reset(); memcpy(final,back,BYTES);
-    for (int y=0;y<H;++y) for (int x=0;x<UI_NAV_REFRESH_END/2;++x) {
+    for (int y=0;y<H;++y) for (int x=0;x<UI_NAV_CLEAN_END/2;++x) {
         size_t at=(size_t)y*W/2+x;unsigned value=(unsigned)(x+y*17)&255u;
         front[at]=(uint8_t)value;
         final[at]=(uint8_t)(((value&15)>=8?15:0)|((value>>4)>=8?240:0));
@@ -340,11 +405,13 @@ int main(void) {
     // Repaint differences outside the marker cannot drive navigation; retain the divider nibble sharing the marker's odd starting byte.
     reset();
     memset(front, 0xee, BYTES); assert(update_display_full(&hl) == EPD_DRAW_SUCCESS);
+    for(int y=0;y<H;++y)memset(front+y*(W/2)+UI_NAV_CLEAN_END/2,255,(UI_NAV_TOP-UI_NAV_CLEAN_END)/2);
+    assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);
     calls = bw_calls = gray_calls = full_calls = gc_calls = nav_draws = 0;
     target(1);
     for (int y = 0; y < H; ++y) {
-        size_t offset = (size_t)y * W / 2 + UI_NAV_REFRESH_END / 2;
-        memset(front + offset, 0, (W - UI_NAV_REFRESH_END) / 2);
+        size_t offset = (size_t)y * W / 2 + UI_NAV_TOP / 2;
+        memset(front + offset, 0, (W - UI_NAV_TOP) / 2);
         const size_t row = (size_t)y * W / 2;
         for (int x = UI_NAV_MARKER_TOP; x < UI_NAV_MARKER_BOTTOM; ++x) {
             const size_t at = row + x / 2;
@@ -356,7 +423,7 @@ int main(void) {
     begin(&owner_a); assert_final();
     assert(calls == 1 && !nav_draws && !full_calls && !gc_calls);
     for (int y = 0; y < H; ++y) {
-        for (int x = UI_NAV_REFRESH_END / 2; x < W / 2; ++x)
+        for (int x = UI_NAV_TOP / 2; x < W / 2; ++x)
             assert(panel[y * W / 2 + x] == 0xee);
     }
 
@@ -379,11 +446,12 @@ int main(void) {
         memcpy(final, front, BYTES);
         const int old_calls = calls;
         begin(&owner_a); assert_final();
-        assert(calls == old_calls + (step == 0 && ordinary ? 2 : 1));
+        assert(calls == old_calls + 1);
         if (step == 0 && !ordinary)
             assert(last_area.y == 0 && last_area.height == UI_NAV_MARKER_SCAN_END);
+        else if(step==0)assert(last_area.y==0&&last_area.height==UI_NAV_REFRESH_END);
         else assert(last_area.y == UI_NAV_MARKER_TOP && last_area.height == 5);
-        assert(last_mode == MODE_DU && nav_draws == step + 1);
+        assert(last_mode == (step==0&&ordinary?MODE_GL16:MODE_DU) && nav_draws == step + 1);
         assert(UI_NAV_MARKER_SCAN_END == 1120 && !full_calls && !gc_calls && !clears);
         for (int y = 0; y < H; ++y) {
             const size_t row = (size_t)y * W / 2;
@@ -391,7 +459,7 @@ int main(void) {
             for (int x = UI_NAV_MARKER_BOTTOM / 2; x < W / 2; ++x) assert(panel[row + x] == 255);
         }
     }
-    assert(bw_calls == 12 && gray_calls == ordinary && !allocations);
+    assert(bw_calls == 12-ordinary && gray_calls == ordinary && !allocations);
     int unchanged = calls; begin(&owner_b); assert(calls == unchanged); assert_final();
     }
     reset();
@@ -399,12 +467,12 @@ int main(void) {
     // 后台完成与主页面滚动的局部范围不得因32列对齐越过固定边界。
     // Local background completion and main-page scrolling must not cross the frozen boundary after alignment.
     target(4); begin(&owner_a); int before = calls;
-    front[UI_NAV_REFRESH_END / 2 - 1] = final[UI_NAV_REFRESH_END / 2 - 1] = 0x00;
+    front[UI_NAV_CLEAN_END / 2 - 1] = final[UI_NAV_CLEAN_END / 2 - 1] = 0x00;
     front[UI_NAV_MARKER_BOTTOM / 2] = 0;
     display_main_transition_arm(&owner_a, false, false);
     assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
-                                        (EpdRect){0, UI_NAV_REFRESH_END - 11, H, 24}) == EPD_DRAW_SUCCESS);
-    assert(last_area.y + last_area.height == UI_NAV_REFRESH_END && calls == before + 1 && !nav_draws);
+                                        (EpdRect){0, UI_NAV_CLEAN_END - 11, H, 24}) == EPD_DRAW_SUCCESS);
+    assert(last_area.y + last_area.height == UI_NAV_CLEAN_END+13 && calls == before + 1 && !nav_draws);
     assert_final();
     display_main_transition_arm(&owner_a, false, false);
     front[UI_NAV_MARKER_BOTTOM / 2] = 0;
@@ -475,12 +543,13 @@ int main(void) {
 
     // 内容成功后横条失败，重建最新完整目标；不得继续显示旧横条或半张新页。
     // If the marker fails after successful content, rebuild the latest complete target rather than retaining an old marker or partial new page.
-    reset(); main_mode=APP_MAIN_REFRESH_NORMAL; target(5);
+    prime_normal_cleanup();target(5);
+    front[UI_NAV_TOP/2-1]=0x73;
     for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + UI_NAV_TOP / 2 + 2] = 0;
     memcpy(final, front, BYTES);
     failures = 1; fail_after = 1; fail_error = EPD_DRAW_OTHER_ERROR;
     begin(&owner_a); assert_final();
-    assert(calls == 3 && clears == 1 && bw_calls == 1 && gc_calls == 1);
+    assert(calls == 3 && clears == 1 && !bw_calls && gc_calls == 2);
 
     // 灰阶只缓存三条带：首遍保留旧亚克力，第二遍单向提交新UI灰阶；重画同图不做往返驱动。
     // Cache three gray bands: the first pass preserves old acrylic and the second commits directional UI grays; identical repaint does not round-trip pixels.
@@ -509,9 +578,9 @@ int main(void) {
     assert(last_area.y == 0 && last_area.height == UI_NAV_REFRESH_END && !nav_draws);
     int oom_calls = calls; display_main_transition_cancel(); assert(calls == oom_calls);
 
-    // 黑白遍、灰阶遍、横条遍分别失败均从最新最终图恢复；缓存不泄漏。
-    // Fail black/white, gray and marker passes separately; each recovers the latest final target without leaking the cache.
-    for (int stage = 0; stage < 3; ++stage) {
+    // 横条已合并内容遍；黑白遍或灰阶遍失败均恢复最新目标，缓存不泄漏。
+    // The marker joins content; either BW or gray-pass failure restores the latest target without leaking cache.
+    for (int stage = 0; stage < 2; ++stage) {
         reset(); gray_target(3);
         for (int y = 0; y < H; ++y) front[(size_t)y * W / 2 + UI_NAV_TOP / 2 + 2] = 0;
         memcpy(final, front, BYTES);
@@ -533,7 +602,7 @@ int main(void) {
 
     // 无效条带及取消许可不能泄漏到下一页；包括奇数、重叠和可能溢出的输入。
     // Invalid bands and cancelled permission cannot leak into another page, including odd, overlapping and potentially overflowing input.
-    const EpdRect invalid[] = {{0,361,H,90},{1,360,H,90},{0,UI_NAV_REFRESH_END-88,H,90},
+    const EpdRect invalid[] = {{0,361,H,90},{1,360,H,90},{0,UI_NAV_TOP-88,H,90},
                                {0,360,H,2147483646},{0,-2,H,90}};
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
         reset(); target(1);
@@ -567,7 +636,7 @@ int main(void) {
     assert(update_display_full(&hl) == EPD_DRAW_SUCCESS);
     memcpy(final, front, BYTES);
     for (int y = 0; y < H; ++y)
-        memset(final + (size_t)y * W / 2, 0x0f, UI_NAV_REFRESH_END / 2);
+        memset(final + (size_t)y * W / 2, 0x0f, UI_NAV_TOP / 2);
     begin(&owner_a); assert_final();
     // 普通模式一次输出柔和灰阶，不运行水波纹调度或黑白预刷。
     // Ordinary uses one soft grayscale pass without ripple scheduling or a monochrome prepass.
@@ -575,7 +644,7 @@ int main(void) {
     expect_navigation(true);
     display_main_transition_arm(&owner_a,true,false);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS); assert_final();
-    assert(bw_calls==1 && !complete_bw_calls && !exit_calls && !allocations && gray_calls==1 && nav_draws==1);
+    assert(!bw_calls && !complete_bw_calls && !exit_calls && !allocations && gray_calls==1 && nav_draws==1);
     // 普通灰阶周期清理、局部滚动与后台封面均止于内容扫描边界，重复目标不清屏，手动全刷仍含底栏。
     // Ordinary gray cleanup, scrolling and background covers stop at the content scan boundary; identical targets skip cleanup and manual full output still includes nav.
     reset(); main_mode=APP_MAIN_REFRESH_NORMAL; memset(front,0x73,BYTES);
@@ -584,35 +653,36 @@ int main(void) {
     for (int step=1;step<=24;++step) {
         gray_target((unsigned)step);begin(&owner_a);assert_final();
         assert(hl.waveform==&E0470_WAVEFORM && !bw_calls && !allocations && !nav_draws);
-        assert(last_area.y==0 && last_area.height==UI_NAV_REFRESH_END);
+        assert(last_area.y==0 && last_area.height==(step%APP_UI_FAST_GC16_EVERY?UI_NAV_REFRESH_END:UI_NAV_CLEAN_END));
         assert(gray_calls==step && full_calls==step/APP_UI_FAST_GC16_EVERY && !water_calls);
         assert(gc_calls==step/APP_UI_FAST_GC16_EVERY);
         assert(last_wave==(step%APP_UI_FAST_GC16_EVERY ? &main_water : &E0470_WAVEFORM));
         assert(last_mode==(step%APP_UI_FAST_GC16_EVERY ? MODE_GL16 : MODE_GC16));
-        for(int y=0;y<H;++y)for(int x=UI_NAV_REFRESH_END/2;x<W/2;++x)assert(back[y*(W/2)+x]==0x73);
+        for(int y=0;y<H;++y)for(int x=UI_NAV_CLEAN_END/2;x<W/2;++x)assert(back[y*(W/2)+x]==0x73);
     }
     int normal_before=calls;begin(&owner_a);assert(calls==normal_before);
-    front[UI_NAV_REFRESH_END/2-1]=final[UI_NAV_REFRESH_END/2-1]=0x28;
+    front[UI_NAV_CLEAN_END/2-1]=final[UI_NAV_CLEAN_END/2-1]=0x28;
     front[UI_NAV_MARKER_BOTTOM/2]=0;
     display_main_transition_arm(&owner_a,false,false);
     assert(update_display_area_diff_with(&hl,&E0470_WAVEFORM,MODE_GL16,
-        (EpdRect){0,UI_NAV_REFRESH_END-11,H,24})==EPD_DRAW_SUCCESS);
+        (EpdRect){0,UI_NAV_CLEAN_END-11,H,24})==EPD_DRAW_SUCCESS);
     assert_final();assert(calls==normal_before+1 && !nav_draws && last_mode==MODE_GL16);
-    assert(last_area.y+last_area.height==UI_NAV_REFRESH_END);
+    assert(last_area.y+last_area.height==UI_NAV_CLEAN_END+13);
     display_main_transition_arm(&owner_a,false,false);
     assert(update_display_area_with(&hl,&E0470_WAVEFORM,MODE_GL16,
-        (EpdRect){0,UI_NAV_REFRESH_END-11,H,24})==EPD_DRAW_SUCCESS);
+        (EpdRect){0,UI_NAV_CLEAN_END-11,H,24})==EPD_DRAW_SUCCESS);
     assert_final();assert(full_calls==2 && !nav_draws && last_wave==&main_water && last_mode==MODE_GL16);
     display_main_transition_arm(&owner_a,false,false);
     assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(nav_draws==1);
     // 普通柔和输出在内容或横条扫描失败时从白底重建，绝不提交半帧。
     // Soft ordinary output rebuilds from white after a body or marker scan failure instead of committing an intermediate frame.
     for(int stage=0;stage<2;++stage){
-        reset();main_mode=APP_MAIN_REFRESH_NORMAL;gray_target(3);front[UI_NAV_TOP/2+2]=0;memcpy(final,front,BYTES);
+        if(stage)prime_normal_cleanup();else {reset();main_mode=APP_MAIN_REFRESH_NORMAL;}
+        gray_target(3);front[UI_NAV_TOP/2-1]=0x73;front[UI_NAV_TOP/2+2]=0;memcpy(final,front,BYTES);
         failures=1;fail_after=stage;fail_error=EPD_DRAW_OTHER_ERROR;
         display_main_transition_arm(&owner_a,false,true);
         assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
-        assert(clears==1&&gc_calls==1&&!allocations&&!water_calls&&hl.waveform==&E0470_WAVEFORM);
+        assert(clears==1&&gc_calls==1+stage&&!allocations&&!water_calls&&hl.waveform==&E0470_WAVEFORM);
     }
     // 普通书架每相包含上下和中部，箭头与横条也并入；校准只限书架区。
     // Each ordinary shelf phase contains chrome and art, including pagination/marker; calibration remains confined to art.
@@ -644,7 +714,7 @@ int main(void) {
             display_main_transition_gray_bands(&settings_content,1);
             assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
             assert(region_calls==step&&calls==step&&!clears&&!nav_draws&&!allocations);
-        assert(last_strong_area.y==160&&last_strong_area.height==UI_NAV_REFRESH_END-160);
+        assert(last_strong_area.y==160&&last_strong_area.height==UI_NAV_CLEAN_END-160);
             assert(last_area.y==0&&last_area.height==UI_NAV_MARKER_SCAN_END);
         }
         assert(gc_calls==24/APP_UI_FAST_GC16_EVERY);
@@ -683,7 +753,7 @@ int main(void) {
     reset(); target(2); display_main_transition_arm(&owner_a,true,false); main_mode=APP_MAIN_REFRESH_NORMAL;
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS); assert_final(); assert(!exit_calls && !bw_calls);
     reset(); main_mode=APP_MAIN_REFRESH_WATER; memset(front,0x73,BYTES); memcpy(final,front,BYTES);
-    for(int y=0;y<H;++y)memcpy(final+y*(W/2)+UI_NAV_REFRESH_END/2,back+y*(W/2)+UI_NAV_REFRESH_END/2,(W-UI_NAV_REFRESH_END)/2);
+    for(int y=0;y<H;++y)memcpy(final+y*(W/2)+UI_NAV_TOP/2,back+y*(W/2)+UI_NAV_TOP/2,(W-UI_NAV_TOP)/2);
     memcpy(front,final,BYTES);display_main_transition_arm(&owner_a,false,true);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();
     assert(water_calls==1 && !calls && !allocations && !bw_calls && turn_tick_us==21000);

@@ -17,6 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "weather": [sys.executable, "tools/weather_host_test.py"],
     "architecture": [sys.executable, "tools/architecture_host_test.py"],
     "heading": [sys.executable, "tools/reader_title_style_host_test.py"],
     "font_policy": [sys.executable, "tools/lock_font_host_test.py"],

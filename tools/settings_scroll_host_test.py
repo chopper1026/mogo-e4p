@@ -56,8 +56,7 @@ typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} a
 enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
       SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
-#define UI_NAV_TOP 1096
-#define UI_NAV_REFRESH_END 1088
+#include "ui_nav_layout.h"
 #define UI_LOCK_WIDTH 684
 #define SETTINGS_SCROLL_MAX 833
 typedef int EpdWaveform;
@@ -123,7 +122,7 @@ int main(void){
   feed(300,800,true,true,0);feed(300,770,true,false,20);feed(300,770,false,false,40);assert(s_main_scroll==100&&pushes==before);
   reset(SETTINGS_MAIN,100);feed(300,800,true,true,0);feed(450,680,true,false,20);feed(450,680,false,false,40);assert(s_main_scroll==100);
   reset(SETTINGS_MAIN,100);feed(300,150,true,true,0);feed(300,20,true,false,20);feed(300,20,false,false,40);assert(s_main_scroll==100);
-  reset(SETTINGS_MAIN,100);feed(300,1100,true,true,0);feed(300,900,true,false,20);feed(300,900,false,false,40);assert(s_main_scroll==100);
+  reset(SETTINGS_MAIN,100);feed(300,UI_NAV_TOP,true,true,0);feed(300,900,true,false,20);feed(300,900,false,false,40);assert(s_main_scroll==100);
   reset(SETTINGS_MAIN,500);feed(300,300,true,true,0);assert(feed(300,410,true,false,20)==APP_REDRAW_AREA&&s_main_scroll==296);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,300,true,true,0);feed(300,410,true,false,20);assert(s_main_scroll==0);feed(300,410,false,false,40);
   reset(SETTINGS_MAIN,10);feed(300,800,true,true,0);feed(300,200,true,false,20);assert(s_main_scroll==460);feed(300,200,false,false,40);
@@ -135,17 +134,17 @@ int main(void){
   for(int i=0;i<80;++i){reset(SETTINGS_MAIN,400);before=pushes;feed(300,800,true,true,0);feed(300,680,true,false,20);feed(300,680,false,false,40);assert(pushes==before+1&&pushed_mode==MODE_GL16);}
   for(int page=SETTINGS_BLUETOOTH;page<=SETTINGS_BLE_SCAN;++page){
    reset(page,0);feed(300,800,true,true,0);assert(feed(300,680,true,false,20)==APP_REDRAW_AREA&&s_ble_scroll==204);
-   assert(pushed.y==190&&pushed.y+pushed.height==1088);feed(300,680,false,false,40);
+   assert(pushed.y==190&&pushed.y+pushed.height==UI_NAV_TOP);feed(300,680,false,false,40);
   }
   const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
   for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
    s_page=pages[i];s_scroll_present_pending=true;assert(settings_present(&ctx,APP_REDRAW_AREA));
-   assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==1088);
+   assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==UI_NAV_TOP);
   }
  }
  s_page=SETTINGS_UPGRADE;assert(settings_present(&ctx,APP_REDRAW_AREA)&&pushed.y==468&&pushed.height==64);
  assert(!settings_present(&ctx,APP_REDRAW_NONE));
- puts("PASS: actual generic gestures + restored settings handler/presenter: all three modes use one discrete step and one soft ordinary/original fast-water changed-gray update per swipe; no tracking, momentum, motion ink, extra release/idle frames or periodic full flash; 1088 crop preserves chrome; selectors and OTA remain");
+ puts("PASS: actual generic gestures + restored settings handler/presenter: all three modes use one discrete step and one soft ordinary/original fast-water changed-gray update per swipe; no tracking, momentum, motion ink, extra release/idle frames or periodic full flash; content reaches actual navigation top; selectors and OTA remain");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-settings-rollback-') as directory:

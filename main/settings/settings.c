@@ -14,11 +14,15 @@
  * User revision: backup v27 appends book fonts, vertical text and the full shutdown states; older backups fall back to on/horizontal/the extension bit.
  * 用户修订：备份v28追加触摸震动开关与强度；旧备份回落开启、弱档。
  * User revision: backup v28 appends the touch-vibration switch and intensity; older backups fall back to on and weak.
+ * 用户修订：备份v33追加首页上下组件；旧备份不改变当前组件布局。
+ * User revision: backup v33 appends Home regions; legacy backups preserve the current layout.
  * NVS load/store. A failed open keeps the deep-sleep default; the
  * partition is not erased.
  */
 
 #include "settings.h"
+#include "home_components.h"
+#include "weather_service.h"
 #include "../display/display_refresh_config.h"
 #include "book/book_font_size.h"
 
@@ -1423,6 +1427,17 @@ static bool backup_chrome_heights_valid(const settings_backup_chrome_heights_t *
     return reader_chrome_heights_valid(height->header, height->footer) &&
         stored == backup_chrome_heights_checksum(height);
 }
+// v33 追加版本化首页布局，独立校验且禁止重复实际组件。
+// V33 appends an independently checked, versioned Home layout with unique real widgets.
+typedef struct { uint8_t value, checksum[4]; } settings_backup_home_regions_t;
+static uint32_t backup_home_regions_checksum(const settings_backup_home_regions_t *regions) {
+    return (2166136261u ^ regions->value) * 16777619u;
+}
+static bool backup_home_regions_valid(const settings_backup_home_regions_t *regions) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)regions->checksum[i] << (8 * i);
+    return app_home_components_value_valid(regions->value) && stored == backup_home_regions_checksum(regions);
+}
 static uint32_t backup_chrome_checksum(const settings_backup_chrome_t *chrome) {
     uint32_t hash = 2166136261u;
     for (unsigned i = 0; i < 6; ++i) hash = (hash ^ chrome->items[i]) * 16777619u;
@@ -1527,10 +1542,10 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // W 追加 v32 信息栏高度。/ W appends v32 bar heights.
+    // W 追加 v32 信息栏高度；X 追加 v33 首页布局。/ W appends v32 bar heights; X appends v33 Home regions.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1609,6 +1624,8 @@ static bool backup_card_ready(void) {
 
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
+    app_weather_init();
+    app_home_components_init(app_weather_view()->enabled);
     settings_backup_v1_t backup = {0};
     // v27：在 v26 的上键单击尾部再追加书内字体、竖排正文与完整关机方式。
     // v27: appends embedded book fonts, vertical body text and the full shutdown style to v26.
@@ -1621,7 +1638,8 @@ esp_err_t app_settings_backup_save(void) {
     // v31：在 v30 尾部再追加页眉页脚六槽内容。
     // v31: appends the six header/footer chrome slots after the v30 tail.
     // v32：在 v31 尾部追加页眉页脚高度。/ V32 appends header/footer heights to v31.
-    memcpy(backup.magic, "PICOSETW", sizeof(backup.magic));
+    // v33：追加首页上下组件，不改变既有尾块顺序。/ V33 appends Home regions without reordering previous blocks.
+    memcpy(backup.magic, "PICOSETX", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1779,6 +1797,10 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t heights_hash = backup_chrome_heights_checksum(&heights);
     for (unsigned i = 0; i < 4; ++i) heights.checksum[i] = (uint8_t)(heights_hash >> (8 * i));
     if (ok) ok = fwrite(&heights, 1, sizeof(heights), file) == sizeof(heights);
+    settings_backup_home_regions_t regions = {.value = app_home_components_value()};
+    uint32_t regions_hash = backup_home_regions_checksum(&regions);
+    for (unsigned i = 0; i < 4; ++i) regions.checksum[i] = (uint8_t)(regions_hash >> (8 * i));
+    if (ok) ok = fwrite(&regions, 1, sizeof(regions), file) == sizeof(regions);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1877,6 +1899,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_haptic_t haptic = {.on = 1, .level = APP_HAPTIC_WEAK};
     settings_backup_margins_t margins = {0};
     settings_backup_shake_t shake = {.on = 0};
+    settings_backup_home_regions_t regions = {0};
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
@@ -1979,6 +2002,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 30) ok = fread(&shake, 1, sizeof(shake), file) == sizeof(shake) && backup_shake_valid(&shake);
     if (ok && version >= 31) ok = fread(&chrome, 1, sizeof(chrome), file) == sizeof(chrome) && backup_chrome_valid(&chrome);
     if (ok && version >= 32) ok = fread(&heights, 1, sizeof(heights), file) == sizeof(heights) && backup_chrome_heights_valid(&heights);
+    if (ok && version >= 33) ok = fread(&regions, 1, sizeof(regions), file) == sizeof(regions) && backup_home_regions_valid(&regions);
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -2062,6 +2086,7 @@ esp_err_t app_settings_backup_restore(void) {
         err = nvs_set_u8(h, s_reader_chrome_names[i], chrome.items[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, heights.header);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, heights.footer);
+    if (err == ESP_OK && version >= 33) err = nvs_set_u8(h, "home_regions", regions.value);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
@@ -2132,6 +2157,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_write_close(h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
 
+    if (version >= 33) app_home_components_apply(regions.value);
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;
     s_reader_double_action = double_action.action;

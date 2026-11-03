@@ -57,6 +57,10 @@ execute_process(COMMAND "${image_python}" "${CMAKE_CURRENT_LIST_DIR}/../tools/co
 if(NOT builtin_image_result EQUAL 0)
     message(FATAL_ERROR "Built-in image compression failed")
 endif()
+file(SIZE "${CMAKE_CURRENT_LIST_DIR}/assets/weather_backgrounds.bin" weather_background_size)
+if(NOT weather_background_size EQUAL 206976)
+    message(FATAL_ERROR "Weather masks must be regenerated with tools/generate_weather_backgrounds.py")
+endif()
 idf_component_register(
     SRCS
         "app_main.c"
@@ -79,12 +83,15 @@ idf_component_register(
         "power/cache_wake_restore.c"
         "power/s31_sleep_compat.c"
         "services/storage_jobs.c"
+        "services/weather_model.c"
+        "services/weather_service.c"
         "power/sleep.c"
         "time/time_service.c"
         "lock/lock_pin.c"
         "lock/lock_pin_flow.c"
         "lock/lock_screen.c"
         "settings/settings.c"
+        "settings/home_components.c"
         "services/haptics.c"
         "app/app_loop.c"
         "app/app_lifecycle.c"
@@ -97,6 +104,7 @@ idf_component_register(
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"
+        "ui/ui_weather.c"
         "ui/ui_reader_heading.c"
         "ui/ui_reader_settings.c"
         "ui/ui_builtin_image.c"
@@ -122,6 +130,7 @@ idf_component_register(
         "apps/app_book.c"
         "apps/book_toc.c"
         "apps/app_dashboard.c"
+        "apps/app_components.c"
         "apps/app_files.c"
         "apps/file_tree.c"
         "apps/app_device_settings.c"
@@ -180,6 +189,7 @@ idf_component_register(
         "${builtin_image_dir}/lock_4bpp.kbz"
         "${builtin_image_dir}/loading_4bpp.kbz"
         "assets/builtin.ttf"
+        "assets/weather_backgrounds.bin"
         "assets/ui-hanzi.bin"
         "assets/display-test.png"
 )

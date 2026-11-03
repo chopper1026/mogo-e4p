@@ -21,8 +21,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v32 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v32; legacy fixtures drop them all. */
+/* v15..v33 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v33; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,12 +30,27 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
 void epd_flash_end(void) { assert(flash_depth); --flash_depth; }
+#define nvs_open backup_nvs_open
+#define nvs_close backup_nvs_close
+#define nvs_get_u8 backup_nvs_get_u8
+#define nvs_set_u8 backup_nvs_set_u8
+#define nvs_commit backup_nvs_commit
 #include "../main/settings/settings.c"
+#include "../main/settings/home_components.c"
+#undef nvs_open
+#undef nvs_close
+#undef nvs_get_u8
+#undef nvs_set_u8
+#undef nvs_commit
+
+static app_weather_view_t weather_view;
+void app_weather_init(void) {}
+const app_weather_view_t *app_weather_view(void) { return &weather_view; }
 
 static wifi_transfer_wifi_backup_t saved_wifi = {
     .configured = 1, .ssid = "Home_2.4G", .password = "password123"
@@ -131,6 +146,34 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) { (void)h
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { assert(flash_depth); (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
+// 新布局桩模拟提交边界，旧设置桩的行为不变。
+// Model the new layout's commit boundary without changing existing settings stubs.
+static int durable_regions = -1, pending_regions = -1;
+static bool regions_write_fails;
+esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
+    assert(!strcmp(ns, "read_pico"));
+    pending_regions = -1;
+    return nvs_open(ns, mode, h);
+}
+void backup_nvs_close(nvs_handle_t h) { pending_regions = -1; nvs_close(h); }
+esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (strcmp(key, "home_regions")) return nvs_get_u8(h, key, value);
+    if (durable_regions < 0) return ESP_FAIL;
+    *value = (uint8_t)durable_regions;
+    return ESP_OK;
+}
+esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (strcmp(key, "home_regions")) return nvs_set_u8(h, key, value);
+    if (regions_write_fails) return ESP_FAIL;
+    pending_regions = value;
+    return ESP_OK;
+}
+esp_err_t backup_nvs_commit(nvs_handle_t h) {
+    esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_regions >= 0) durable_regions = pending_regions;
+    return err;
+}
+
 // 去掉 v24/v25/v26 才有的本地扩展块，把文件还原成上游 v20 及更早的尾部布局。
 // Drop the v24/v25/v26 local extension blocks to leave an upstream v20-or-earlier tail layout.
 static void strip_local_extension_blocks(FILE *f) {
@@ -144,7 +187,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -155,6 +198,129 @@ static void strip_local_extension_blocks(FILE *f) {
     assert(fseek(f, local_at, SEEK_SET) == 0 && fwrite(bytes, 1, tail, f) == tail);
     free(bytes);
     assert(fflush(f) == 0 && ftruncate(fileno(f), end - local_band) == 0);
+}
+
+static void test_home_regions_backup(void) {
+    // 导出先迁移旧开关；不要求首页已被打开过。
+    // Export migrates the legacy switch without requiring a prior Home visit.
+    s_loaded = false;
+    durable_regions = -1;
+    weather_view.enabled = true;
+    assert(app_settings_backup_save() == ESP_OK);
+    assert(app_home_components_value() == 0x14);
+    unsigned valid_count = 0;
+    for (unsigned value = 0; value < 256; ++value) {
+        if (!app_home_components_value_valid((uint8_t)value)) continue;
+        ++valid_count;
+        app_home_components_apply((uint8_t)value);
+        assert(app_settings_backup_save() == ESP_OK);
+        app_home_components_apply(0x1a);
+        durable_regions = 0x1a;
+        int commits = commit_count;
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(commit_count == commits + 1 && durable_regions == (int)value);
+        assert(app_home_components_value() == value);
+        s_loaded = false;
+        app_home_components_init(false);
+        assert(app_home_components_value() == value);
+    }
+    assert(valid_count == 7);
+
+    app_home_components_apply(0x11);
+    assert(app_settings_backup_save() == ESP_OK);
+    FILE *file = fopen(BACKUP_FILE, "rb");
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t)), SEEK_END) == 0);
+    long regions_at = ftell(file);
+    settings_backup_home_regions_t valid;
+    assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
+    assert(valid.value == 0x11 && backup_home_regions_valid(&valid));
+    app_home_components_apply(0x1a);
+    durable_regions = 0x1a;
+    // 校验和正确也不能接受未知版本、越界枚举或重复实际组件。
+    // A sealed checksum must not admit unknown schemas, invalid enums or duplicate real widgets.
+    for (unsigned value = 0; value < 256; ++value) {
+        if (app_home_components_value_valid((uint8_t)value)) continue;
+        settings_backup_home_regions_t bad = {.value = (uint8_t)value};
+        uint32_t hash = backup_home_regions_checksum(&bad);
+        for (unsigned i = 0; i < 4; ++i) bad.checksum[i] = (uint8_t)(hash >> (8 * i));
+        file = fopen(BACKUP_FILE, "r+b");
+        assert(file && fseek(file, regions_at, SEEK_SET) == 0);
+        assert(fwrite(&bad, 1, sizeof(bad), file) == sizeof(bad) && fclose(file) == 0);
+        int commits = commit_count;
+        unsigned imports = wifi_imports, history = history_restores;
+        assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE);
+        assert(commit_count == commits && wifi_imports == imports && history_restores == history);
+        assert(durable_regions == 0x1a && app_home_components_value() == 0x1a);
+    }
+    settings_backup_home_regions_t bad = valid;
+    bad.checksum[0] ^= 1;
+    file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, regions_at, SEEK_SET) == 0);
+    assert(fwrite(&bad, 1, sizeof(bad), file) == sizeof(bad) && fclose(file) == 0);
+    int commits = commit_count;
+    unsigned imports = wifi_imports, history = history_restores;
+    assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE);
+    assert(commit_count == commits && wifi_imports == imports && history_restores == history);
+    assert(durable_regions == 0x1a && app_home_components_value() == 0x1a);
+
+    for (unsigned cut = 0; cut < sizeof(valid); ++cut) {
+        app_home_components_apply(0x11);
+        assert(app_settings_backup_save() == ESP_OK);
+        file = fopen(BACKUP_FILE, "r+b");
+        assert(file && ftruncate(fileno(file), regions_at + cut) == 0 && fclose(file) == 0);
+        app_home_components_apply(0x1a);
+        commits = commit_count;
+        imports = wifi_imports; history = history_restores;
+        assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE);
+        assert(commit_count == commits && wifi_imports == imports && history_restores == history);
+        assert(durable_regions == 0x1a && app_home_components_value() == 0x1a);
+    }
+
+    app_home_components_apply(0x11);
+    assert(app_settings_backup_save() == ESP_OK);
+    app_home_components_apply(0x1a);
+    for (unsigned failure = 0; failure < 3; ++failure) {
+        regions_write_fails = failure == 0;
+        commit_fails = failure == 1;
+        flash_failure = failure == 2;
+        commits = commit_count;
+        imports = wifi_imports; history = history_restores;
+        assert(app_settings_backup_restore() != ESP_OK);
+        assert(commit_count == commits + (failure == 1) && wifi_imports == imports && history_restores == history);
+        assert(durable_regions == 0x1a && app_home_components_value() == 0x1a && !flash_depth);
+    }
+    regions_write_fails = commit_fails = flash_failure = false;
+    commits = commit_count;
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(commit_count == commits + 1 && durable_regions == 0x11 && app_home_components_value() == 0x11);
+
+    // v32 只移除新块并重封旧校验；恢复不触碰当前布局及对应持久值。
+    // Strip only the new block and reseal v32 checksums; restore preserves the live and durable layout.
+    file = fopen(BACKUP_FILE, "r+b");
+    settings_backup_v1_t header;
+    uint8_t extension[7];
+    settings_backup_profile_t profile;
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header));
+    assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
+    assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
+    memcpy(header.magic, "PICOSETW", 8);
+    backup_seal(&header);
+    uint32_t hash = backup_shutdown_checksum(&header, extension[0], extension[1], extension[2]);
+    for (unsigned i = 0; i < 4; ++i) extension[i + 3] = (uint8_t)(hash >> (8 * i));
+    hash = backup_profile_checksum(&header, extension[0], extension[1], extension[2], &profile);
+    for (unsigned i = 0; i < 4; ++i) profile.checksum[i] = (uint8_t)(hash >> (8 * i));
+    rewind(file);
+    assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
+    assert(fwrite(extension, 1, sizeof(extension), file) == sizeof(extension));
+    assert(fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile));
+    assert(fseek(file, regions_at, SEEK_SET) == 0 && fwrite("RPHIST1", 1, 8, file) == 8);
+    assert(fflush(file) == 0 && ftruncate(fileno(file), regions_at + 8) == 0 && fclose(file) == 0);
+    app_home_components_apply(0x19);
+    durable_regions = 0x19;
+    commits = commit_count;
+    assert(app_settings_backup_restore() == ESP_OK && commit_count == commits + 1);
+    assert(durable_regions == 0x19 && app_home_components_value() == 0x19);
+    assert(!flash_depth);
 }
 
 int main(void) {
@@ -559,7 +725,7 @@ int main(void) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -631,7 +797,7 @@ int main(void) {
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1046,7 +1212,7 @@ int main(void) {
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                               sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -1079,7 +1245,7 @@ int main(void) {
     for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t)),SEEK_END)==0);
     long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
     assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
     assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
@@ -1107,7 +1273,7 @@ int main(void) {
     assert(app_settings_set_reader_chrome_heights(96,73));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t)),SEEK_END)==0);
     long height_at=ftell(saved);settings_backup_chrome_heights_t valid_height;
     assert(fread(&valid_height,1,sizeof(valid_height),saved)==sizeof(valid_height)&&fclose(saved)==0);
     for(unsigned fault=0;fault<3;++fault){
@@ -1199,7 +1365,7 @@ int main(void) {
     assert(!backup_shutdown_style_valid(&bad_shutdown));
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
     const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
-        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t));
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t));
     assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
     assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
     int commits_before_bad_shutdown=commit_count;
@@ -1207,6 +1373,7 @@ int main(void) {
     assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE);
     assert(commit_count==commits_before_bad_shutdown&&wifi_imports==imports_before_bad_shutdown&&
            app_settings_shutdown_style()==APP_SHUTDOWN_STAGED);
-    puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
+    test_home_regions_backup();
+    puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;
 }

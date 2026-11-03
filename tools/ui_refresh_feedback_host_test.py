@@ -508,7 +508,7 @@ static void epd_fill_rect(EpdRect area,int gray,uint8_t *fb){
  if(area.y==UI_NAV_MARKER_TOP){assert(area.height==5);if(gray==UI_GRAY_BLACK){assert(area.width==56);++markers;}
  else {assert(gray==UI_GRAY_WHITE&&area.width==UI_LOCK_WIDTH);++tracks;}}
  if(area.y==UI_NAV_TOP&&area.height==UI_NAV_DIVIDER_H){assert(gray==UI_GRAY_LIGHT&&area.width==UI_LOCK_WIDTH&&area.height==2);++dividers;}
- if(area.y==UI_NAV_REFRESH_END){assert(area.height==UI_NAV_TOP-UI_NAV_REFRESH_END&&area.width==UI_LOCK_WIDTH&&gray==UI_GRAY_WHITE);++guards;}
+ if(area.y<UI_NAV_TOP){++guards;}
 }
 
 '''
@@ -525,18 +525,18 @@ int main(void){
    assert(ui_nav_hit(x,1216)==-1);
  }
  assert(ui_nav_hit(684,1141)==-1&&ui_nav_hit(UINT16_MAX,1141)==-1);
- assert(UI_NAV_TOUCH_TOP==1096&&UI_NAV_TOP==1112&&UI_NAV_REFRESH_END==1088);
+ assert(UI_NAV_TOUCH_TOP==1096&&UI_NAV_TOP==1112&&UI_NAV_REFRESH_END==UI_NAV_TOP&&UI_NAV_CLEAN_END==1088);
  assert(UI_LOCK_HEIGHT-UI_NAV_TOP==104);
  for(main_choice=0;main_choice<3;++main_choice)for(int active=0;active<4;++active){
    first_ink=2000;last_ink=0;markers=tracks=guards=dividers=0;ui_nav_draw(&fb,active);
-   assert(markers==1&&tracks==(main_choice!=0)&&guards==1&&dividers==1);
+   assert(markers==1&&tracks==(main_choice!=0)&&guards==0&&dividers==1);
    assert(abs((first_ink+last_ink)-(UI_NAV_TOP+UI_LOCK_HEIGHT))<=2);
    // 验证真实图标掩模的第一笔，单次刷新32列对齐后不能触碰图标。
    // Check actual mask ink: the 32-column-expanded single update must not reach an icon.
    assert(first_ink>=UI_NAV_MARKER_SCAN_END);
-   assert(UI_NAV_REFRESH_END%32==0&&UI_NAV_REFRESH_END<UI_NAV_TOP+1);
+   assert(UI_NAV_CLEAN_END%32==0&&UI_NAV_REFRESH_END==UI_NAV_TOP);
  }
- puts("PASS: aligned content refresh stops above marker and actual navigation masks; blank guard and production layout retained");
+ puts("PASS: aligned content refresh stops above marker and actual navigation masks; fixed region starts at actual footer, no extra cleared rows, icon layout retained");
 }
 '''
 

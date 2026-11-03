@@ -72,6 +72,7 @@
 #include "sleep.h"
 #include "frontlight.h"
 #include "time_service.h"
+#include "weather_service.h"
 #include "ota_auto.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
@@ -661,7 +662,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", wifi_transfer_service_poll());
-            pico_ota_auto_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+            pico_ota_auto_poll(!app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !ble_pt_connected() &&
                 current != &app_transfer && !power_dialog_open && !menu_open &&
                 (current != &app_device_settings || app_navigation_main_page_ready(&ctx, current)) &&
@@ -671,7 +672,7 @@ void app_loop_run(const app_loop_config_t* config) {
             // Background sync is a system service like app_media_poll or the font retry, with its
             // guards inside time_service; idle gating stays upstream: no touch, no recent input,
             // pages holding the PMU, USB or an online update.
-            app_time_service_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+            app_time_service_poll(!app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !pico_online_busy() && !ble_pt_connected());
         }
         // 只丢弃「上一轮切过屏」时残留的导航：那是用户在新界面就绪前点到旧界面的动作。

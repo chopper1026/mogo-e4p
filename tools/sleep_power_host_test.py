@@ -97,6 +97,7 @@ static int fl_pauses, fl_resumes;
 static void frontlight_suspend(void) { ++fl_pauses; }
 static void frontlight_resume(void) { ++fl_resumes; }
 static int app_sync_time_to_pmu(void) { ++syncs; return ESP_OK; }
+static void app_weather_cancel_join(void){}
 static void app_time_service_cancel(void) {}
 static void pico_ota_auto_cancel(void) {}
 static void pmu_selftest_prepare_powerdown(void) { ++prepared; rails_on = false; }

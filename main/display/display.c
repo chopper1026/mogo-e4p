@@ -19,6 +19,8 @@
 
  * 用户修订：普通书架上下文字区和中间书架区同一轮逐相输出，外侧柔和、封面/材质保留校准灰阶，留白仅向白擦除；不串行呈现分区。仅横条可变，底栏图标固定，保留统一故障恢复。
  * User revision: ordinary shelf chrome and art share each scan phase, with soft outer text, calibrated covers/furniture and directional whitespace erasure; never reveal regions serially. Only the marker may change within frozen navigation; retain common fault recovery.
+ * 用户2026-11-03修订：固定区缩到实际导航顶部，所有页面内容差分直接覆盖原先多保留的24行；仅全像素整理向内对齐，避免驱动固定导航。
+ * User revision 2026-11-03: shrink the fixed region to the actual navigation top, including the formerly protected 24 rows in every page's content differences; only full-pixel cleanup aligns inward to avoid driving fixed navigation.
  * 用户修订：纯文字水波纹改回面板原厂GL16表，保留每种灰阶转换的前导擦除；文字表只用于普通纯文字翻页，8带/11090us、目标灰阶和故障恢复保持。
  * User revision: pure-text ripple returns to the vendor GL16 table with each transition's leading erase; the text table serves ordinary text turns only, retaining eight bands/11090us, target grays and recovery.
  * 用户修订：高压轨不再保留8秒，前后光场景统一在每次刷新后只保留100ms，空闲即断VCOM/VSH。
@@ -85,10 +87,11 @@ static EpdRect s_main_bands[3];
 static unsigned s_main_band_count;
 static bool s_main_shelf_exit;
 static bool s_main_changing_page;
-_Static_assert((UI_NAV_REFRESH_END & 31) == 0, "fixed navigation begins on an aligned framebuffer column");
-_Static_assert(UI_NAV_REFRESH_END <= UI_NAV_TOP, "aligned refresh must stop above navigation and marker");
+_Static_assert((UI_NAV_CLEAN_END & 31) == 0, "full-pixel cleanup ends on an aligned framebuffer column");
+_Static_assert(UI_NAV_REFRESH_END == UI_NAV_TOP, "content and fixed navigation share one boundary");
 _Static_assert(UI_NAV_MARKER_SCAN_END <= UI_NAV_TOP + 27, "marker crop must stop before navigation icons");
 _Static_assert((UI_NAV_MARKER_TOP & 1) && !(UI_NAV_MARKER_BOTTOM & 1), "marker nibble guards match current geometry");
+_Static_assert((UI_NAV_TOP & 7) == 0, "content tail ends on an eight-pixel normalization word");
 
 static bool main_nav_geometry(void) {
     // 当前板为倒置竖屏：逻辑 y 对应物理 x。其他屏型保持原刷新路径。
@@ -98,8 +101,8 @@ static bool main_nav_geometry(void) {
 }
 
 static EpdRect main_body_area(void) {
-    // 内容止于分隔线上方的32列边界，扫描扩展不能触碰小横条。
-    // Content stops at the aligned 32-column boundary above the divider, so scan expansion cannot touch the marker.
+    // 内容直接到实际导航顶部；扩列中的固定像素来自真实back，仅驱动差异。
+    // Content reaches the actual navigation top; expanded fixed pixels retain real back and only differences are driven.
     return (EpdRect){0, 0, epd_rotated_display_width(), UI_NAV_REFRESH_END};
 }
 
@@ -119,7 +122,7 @@ static void main_normalize_body(EpdiyHighlevelState* hl) {
     for (int y = 0; y < epd_height(); ++y) {
         uint8_t* row = hl->front_fb + y * stride;
         if (!s_main_band_count) {
-            for (int x = 0; x < UI_NAV_REFRESH_END / 2; x += 4) {
+            for (int x = 0; x < UI_NAV_TOP / 2; x += 4) {
                 uint32_t value;
                 memcpy(&value, row + x, sizeof(value));
                 const uint32_t binary = ((value & UINT32_C(0x88888888)) >> 3) * 15u;
@@ -127,7 +130,7 @@ static void main_normalize_body(EpdiyHighlevelState* hl) {
             }
             continue;
         }
-        for (int x = 0; x < UI_NAV_REFRESH_END / 2; ++x)
+        for (int x = 0; x < UI_NAV_TOP / 2; ++x)
             if (!main_gray_column(x * 2)) row[x] = main_bw_byte(row[x]);
     }
 }
@@ -136,6 +139,15 @@ static bool main_body_changed(EpdiyHighlevelState* hl) {
     const size_t stride = (size_t)epd_width() / 2;
     for (int y = 0; y < epd_height(); ++y)
         if (memcmp(hl->front_fb + y * stride, hl->back_fb + y * stride, UI_NAV_REFRESH_END / 2)) return true;
+    return false;
+}
+
+static bool main_edge_changed(EpdiyHighlevelState* hl) {
+    const size_t stride = (size_t)epd_width() / 2;
+    for (int y = 0; y < epd_height(); ++y)
+        if (memcmp(hl->front_fb + y * stride + UI_NAV_CLEAN_END / 2,
+                   hl->back_fb + y * stride + UI_NAV_CLEAN_END / 2,
+                   (UI_NAV_TOP - UI_NAV_CLEAN_END) / 2)) return true;
     return false;
 }
 
@@ -165,14 +177,14 @@ static void main_freeze_navigation(EpdiyHighlevelState* hl, bool update_marker) 
         uint8_t* front = hl->front_fb + y * stride;
         const uint8_t* back = hl->back_fb + y * stride;
         if (!update_marker) {
-            memcpy(front + UI_NAV_REFRESH_END / 2, back + UI_NAV_REFRESH_END / 2,
-                   stride - UI_NAV_REFRESH_END / 2);
+            memcpy(front + UI_NAV_TOP / 2, back + UI_NAV_TOP / 2,
+                   stride - UI_NAV_TOP / 2);
             continue;
         }
         // 只保留目标横条的五行；起点为奇数像素，同行字节的分隔线半字节仍取真实 back。
         // Keep only the five target marker rows; at the odd first pixel retain the neighboring divider nibble from actual back.
-        memcpy(front + UI_NAV_REFRESH_END / 2, back + UI_NAV_REFRESH_END / 2,
-               (UI_NAV_MARKER_TOP - UI_NAV_REFRESH_END) / 2);
+        memcpy(front + UI_NAV_TOP / 2, back + UI_NAV_TOP / 2,
+               (UI_NAV_MARKER_TOP - UI_NAV_TOP) / 2);
         const int first = UI_NAV_MARKER_TOP / 2;
         front[first] = (front[first] & 0xf0) | (back[first] & 0x0f);
         memcpy(front + UI_NAV_MARKER_BOTTOM / 2, back + UI_NAV_MARKER_BOTTOM / 2,
@@ -263,6 +275,19 @@ static enum EpdDrawError main_recover(EpdiyHighlevelState* hl, enum EpdDrawError
     return result;
 }
 
+static enum EpdDrawError main_update_edge(EpdiyHighlevelState* hl) {
+    // 末24行与横条共用32列裁剪，保留灰阶差分；固定导航已从真实back恢复，不做全像素整理。
+    // Share the marker's aligned crop for the final 24 content rows using grayscale differences; fixed navigation is restored from real back, without full-pixel cleanup.
+    const EpdWaveform* wave = app_settings_main_refresh_mode() == APP_MAIN_REFRESH_NORMAL
+        ? display_main_normal_waveform() : display_main_gray_waveform();
+    use_scan_for(wave, MODE_GL16);
+    if (!display_power_ready()) return DISPLAY_DRAW_POWER_NOT_READY;
+    epd_hl_waveform(hl, wave);
+    return epd_hl_update_area_padded(hl, MODE_GL16, 25,
+        (EpdRect){0, UI_NAV_CLEAN_END, epd_rotated_display_width(),
+                  UI_NAV_MARKER_SCAN_END - UI_NAV_CLEAN_END}, 1, 1);
+}
+
 static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     const void* owner = s_main_armed;
     const bool shelf_exit = s_main_shelf_exit || s_main_shelf_page;
@@ -314,6 +339,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         }
     }
     const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
+    if(body_full)body_area.height=UI_NAV_CLEAN_END;
     if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
     use_scan_for(body_wave, body_mode);
     if (!display_power_ready()) {
@@ -334,7 +360,7 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         // Select soft/calibrated LUTs by columns in the same frame so chrome and art start together without three serial old-image regions.
         EpdRect last=s_main_bands[s_main_band_count-1];
         int top=s_main_bands[0].y&~31,bottom=(last.y+last.height+31)&~31;
-        if(bottom>UI_NAV_REFRESH_END)bottom=UI_NAV_REFRESH_END;
+        if(bottom>UI_NAV_CLEAN_END)bottom=UI_NAV_CLEAN_END;
         *result=e0470_update_regions(hl,body_area,(EpdRect){0,top,body_area.width,bottom-top},
             display_main_normal_waveform(),display_main_shelf_waveform(body_full?MODE_GC16:MODE_GL16),
             body_full?MODE_GC16:MODE_GL16);
@@ -388,13 +414,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     }
     s_main_band_count = 0;
     if (*result == EPD_DRAW_SUCCESS && !marker_with_body) {
-        const EpdRect marker = {0, UI_NAV_MARKER_TOP, epd_rotated_display_width(),
-                               UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP};
-        // 同页重绘横条无变化时 highlevel 自动跳过；32列扩展范围中其余像素来自 back，保持不驱动。
-        // Highlevel skips an unchanged marker; all other pixels in its expanded 32-column crop come from back and remain undriven.
-        epd_hl_waveform(hl, &E0470_FOLLOW_WAVEFORM);
-        use_scan_for(&E0470_FOLLOW_WAVEFORM, MODE_DU);
-        *result = epd_hl_update_area(hl, MODE_DU, 25, marker);
+        if (main_edge_changed(hl)) *result = main_update_edge(hl);
+        else {
+            const EpdRect marker = {0, UI_NAV_MARKER_TOP, epd_rotated_display_width(),
+                                   UI_NAV_MARKER_BOTTOM - UI_NAV_MARKER_TOP};
+            // 同页重绘横条无变化时 highlevel 自动跳过；32列扩展范围中其余像素来自 back，保持不驱动。
+            // Highlevel skips an unchanged marker; all other pixels in its expanded 32-column crop come from back and remain undriven.
+            epd_hl_waveform(hl, &E0470_FOLLOW_WAVEFORM);
+            use_scan_for(&E0470_FOLLOW_WAVEFORM, MODE_DU);
+            *result = epd_hl_update_area(hl, MODE_DU, 25, marker);
+        }
     }
     if (*result != EPD_DRAW_SUCCESS) *result = main_recover(hl, *result);
     epd_hl_waveform(hl, &E0470_WAVEFORM);
@@ -426,25 +455,34 @@ static enum EpdDrawError hl_update_padded(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode, bool full,
     const EpdRect* area, bool allow_gl16_diff, int pad_lines, int pad_col_bytes
 ) {
-    // 已显示主页面的局部封面或滚动更新同样向内裁剪，防止32列对齐带出小横条。
-    // Local cover or scroll updates on an already displayed main page use the same inward crop, excluding the marker after alignment.
+    // 局部差分到实际导航顶边；只有全像素更新向内对齐，再补余下内容差分。
+    // Partial differences reach the actual navigation top; only full-pixel updates align inward and finish the remaining content with differences.
     if (area && s_main_shelf_page && app_settings_main_fast_refresh()) {
         enum EpdDrawError result;
         if (main_begin(hl, &result)) return result;
     }
     EpdRect clipped;
     const bool protected_area = area && s_main_armed && !s_main_fault && main_nav_geometry();
+    bool update_edge = false, skip_body = false;
     if (protected_area) {
         main_freeze_navigation(hl, false);
         if (app_settings_main_fast_refresh()) main_normalize_body(hl);
+        const bool full_pixels = full || (mode & 0x0f) == MODE_GC16 ||
+            ((mode & 0x0f) == MODE_GL16 && !allow_gl16_diff);
+        const int content_end = full_pixels ? UI_NAV_CLEAN_END : UI_NAV_REFRESH_END;
+        update_edge = full_pixels && area->y < UI_NAV_TOP && (int64_t)area->y + area->height > UI_NAV_CLEAN_END &&
+                      main_edge_changed(hl);
         clipped = *area;
-        if ((int64_t)clipped.y + clipped.height > UI_NAV_REFRESH_END)
-            clipped.height = UI_NAV_REFRESH_END - clipped.y;
-        if (clipped.height <= 0) { display_main_transition_disarm(); return EPD_DRAW_SUCCESS; }
+        if ((int64_t)clipped.y + clipped.height > content_end)
+            clipped.height = content_end - clipped.y;
+        if (clipped.height <= 0) {
+            if (!update_edge) { display_main_transition_disarm(); return EPD_DRAW_SUCCESS; }
+            skip_body = true;
+        }
         area = &clipped;
         // 显式短局刷不被主页模式改写，猫眼/秒针在普通与水波纹中采用同一动效。
         // Preserve explicit short partial updates so cat eyes and seconds share ordinary-mode motion in ripple mode.
-        if (!full && waveform != &E0470_FOLLOW_WAVEFORM && (mode & 0x0f) != MODE_GC16 &&
+        if (!skip_body && !full && waveform != &E0470_FOLLOW_WAVEFORM && (mode & 0x0f) != MODE_GC16 &&
             (app_settings_main_refresh_mode()!=APP_MAIN_REFRESH_NORMAL || (mode & 0x0f)==MODE_GL16)) {
             bool has_gray = !app_settings_main_fast_refresh();
             for (unsigned i = 0; i < s_main_band_count; ++i)
@@ -480,11 +518,17 @@ static enum EpdDrawError hl_update_padded(
     // Select scan timing once after comparison, without a FULL-to-FAST round trip before fast updates.
     use_scan_for(waveform, mode);
     enum EpdDrawError result;
-    if (area != NULL) {
+    if (skip_body) result = EPD_DRAW_SUCCESS;
+    else if (area != NULL) {
         result = full ? epd_hl_update_area_full(hl, mode, 25, *area)
                     : epd_hl_update_area_padded(hl, mode, 25, *area, pad_l, pad_c);
     } else result = full ? epd_hl_update_screen_full(hl, mode, 25)
                          : epd_hl_update_screen_padded(hl, mode, 25, pad_l, pad_c);
+    if (result == EPD_DRAW_SUCCESS && update_edge) {
+        result = main_update_edge(hl);
+        epd_hl_waveform(hl, waveform);
+        use_scan_for(waveform, mode);
+    }
 
     return protected_area && result != EPD_DRAW_SUCCESS ? main_recover(hl, result) : result;
 }

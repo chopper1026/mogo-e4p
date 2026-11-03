@@ -22,7 +22,7 @@ The product targets Metalio E-INK4 Plus (ESP32-S31). Root/main CMakeLists.txt de
 | `main/settings/` | NVS 设置、迁移与备份恢复，不含设置页面。/ NVS settings, migrations and backup/restore, separate from the settings page. |
 | `main/time/` | 后台校时、对时准入策略及时间服务接口。/ Background calibration, sync admission policy and time-service contracts. |
 | `main/diagnostics/` | 默认关闭的阅读计时与资源快照，不决定产品行为。/ Default-off reader timing and resource snapshots, without product behavior decisions. |
-| `main/services/` | 跨页 USB 存储、字体上下文、文件任务交还与触摸震动服务。/ Cross-page USB storage, font contexts, file-worker handoff and touch haptics. |
+| `main/services/` | 跨页 USB 存储、字体上下文、文件任务交还、触摸震动及天气代理/缓存；见 [WEATHER.md](WEATHER.md)。/ Cross-page USB storage, font contexts, file-worker handoff, touch haptics and weather proxy/cache; see the weather contract. |
 | `main/platform/` | S31 平台输入适配，向应用提供统一输入快照。/ S31 input adaptation with uniform application snapshots. |
 | `main/assets/` | 内置字体、图标、图片等资源及生成数据。/ Bundled fonts, icons, images and generated assets. |
 | `main/factory/` | 启动标定、硬件自检与 EPD 测试图案。/ Startup calibration, hardware self-tests and EPD test patterns. |

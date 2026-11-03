@@ -13,16 +13,36 @@ unit=r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "home_components.h"
+#include "weather_service.h"
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int now_ms,leaf;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {HOME_ROOT,HOME_COMPONENT,HOME_GOAL,HOME_TIME,READING,SHELF};
-enum {UI_GESTURE_PRESS,UI_GESTURE_MOVE,UI_GESTURE_TAP,UI_GESTURE_LONG_PRESS,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U};
+enum {UI_GESTURE_PRESS,UI_GESTURE_MOVE,UI_GESTURE_TAP,UI_GESTURE_LONG_PRESS,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U,UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
 #define ESP_OK 0
 static int s_view=HOME_ROOT;
 static bool s_press_pending;
 static EpdRect s_pressed,s_area;
+#define UI_NAV_TOP 1112
+#define HOME_REGION_TOP 168
+#define HOME_REGION_HEIGHT 472
+#define WEATHER_REGION_WIDTH 684
+#define WEATHER_REGION_HEIGHT 472
+static app_home_widget_t slots[2]={APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY};
+app_home_widget_t app_home_component_at(unsigned slot){assert(slot<2);return slots[slot];}
+static bool s_weather_tomorrow[2];
+static unsigned s_widget_dirty;
+static app_weather_view_t weather_view;
+static const app_weather_view_t *app_weather_view_stub(void){return &weather_view;}
+#define app_weather_view app_weather_view_stub
+static void app_components_open(app_ctx_t *ctx,bool city){(void)ctx;(void)city;}
+static bool app_weather_request_stub(app_weather_request_t type,const char *query){(void)query;assert(type==APP_WEATHER_FETCH);return true;}
+#define app_weather_request app_weather_request_stub
+typedef enum {UI_WEATHER_NONE,UI_WEATHER_CITY,UI_WEATHER_TODAY,UI_WEATHER_TOMORROW,UI_WEATHER_REFRESH,UI_WEATHER_SETTINGS} ui_weather_action_t;
+static int epd_rotated_display_width(void){return 684;}
+static int epd_rotated_display_height(void){return 1216;}
 typedef struct {char path[32];} home_book_t;
 static home_book_t book={"/sdcard/books/Novel/a.epub"};
 static home_book_t *featured(void){return &book;}
@@ -31,7 +51,8 @@ static int ui_nav_hit(int x,int y){(void)x;return y>=1096?2:-1;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;nav=tab;}
 static bool app_book_request_open_from_home(const char *path){assert(!strcmp(path,book.path));++open_calls;return !fail_open;}
 '''
-unit+='\n'.join(function(n,home) for n in ['continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','hit','control','on_gesture'])
+unit+='\n'.join(function(n,root/'main/ui/ui_weather.c') for n in ['valid_region','ui_weather_hit'])
+unit+='\n'.join(function(n,home) for n in ['home_region','continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','redraw_widgets','hit','control','on_gesture'])
 settings=(root/'main/settings/settings.h').read_text();a=settings.index('typedef enum {\n    APP_READER_KEY_PREV');b=settings.index('} app_reader_key_action_t;',a)+len('} app_reader_key_action_t;');unit+=settings[a:b]
 unit+=r'''
 enum {READER_PANEL_NONE,READER_PANEL_TOOLS};
@@ -71,22 +92,35 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
  assert(s_reader_panel==READER_PANEL_TOOLS&&!s_reader_tools_toggle);
  s_reader_panel=READER_PANEL_TOOLS;s_reader_tools_toggle=false;toggle_reader_tools_panel();
  assert(s_reader_panel==READER_PANEL_NONE&&s_reader_tools_toggle);
- int points=0;
- for(int y=172;y<574;y+=17)for(int x=24;x<660;x+=17){
-  s_view=HOME_ROOT;nav=-1;int old=open_calls;
-  ui_gesture_event_t ev={UI_GESTURE_PRESS,x,y,x,y};
-  assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&continue_card_pressed());
-  assert(s_area.x==56&&s_area.y==270&&s_area.width==184&&s_area.height==252); // no added card frame
-  ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE);
-  assert(open_calls==old+1&&nav==1&&!s_press_pending);++points;
+ int points=0,layouts=0,reading_slots=0;
+ for(unsigned a=0;a<3;++a)for(unsigned b=0;b<3;++b){
+  if(a==b&&a!=APP_HOME_WIDGET_EMPTY)continue;
+  slots[0]=a;slots[1]=b;++layouts;
+  for(unsigned slot=0;slot<2;++slot){
+   if(slots[slot]!=APP_HOME_WIDGET_READING)continue;
+   ++reading_slots;int top=home_region(slot).y;
+   for(int y=top+72;y<top+436;y+=17)for(int x=24;x<660;x+=17){
+    s_view=HOME_ROOT;nav=-1;int old=open_calls;
+    ui_gesture_event_t ev={UI_GESTURE_PRESS,x,y,x,y};
+    assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&continue_card_pressed(slot)&&!continue_card_pressed(1-slot));
+    assert(s_area.x==32&&s_area.y==top+80&&s_area.width==186&&s_area.height==250);
+    ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE);
+    assert(open_calls==old+1&&nav==1&&!s_press_pending);++points;
+   }
+   ui_gesture_event_t ev={UI_GESTURE_PRESS,400,top+180,400,top+180};on_gesture(&ctx,&ev);
+   ev.type=UI_GESTURE_MOVE;ev.x=670;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&!s_press_pending);
+   int old=open_calls;ev.type=UI_GESTURE_SWIPE_U;on_gesture(&ctx,&ev);assert(open_calls==old);
+   ev=(ui_gesture_event_t){UI_GESTURE_PRESS,400,top+180,400,top+180};on_gesture(&ctx,&ev);
+   ev.type=UI_GESTURE_CANCEL;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&!s_press_pending&&open_calls==old);
+   ev.type=UI_GESTURE_PRESS;on_gesture(&ctx,&ev);ev.type=UI_GESTURE_SWIPE_U;
+   assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&!s_press_pending&&open_calls==old);
+   book.path[0]=0;ev.type=UI_GESTURE_PRESS;assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE);
+   ev.type=UI_GESTURE_TAP;nav=-1;on_gesture(&ctx,&ev);assert(nav==-1&&open_calls==old);
+   strcpy(book.path,"/sdcard/books/Novel/a.epub");fail_open=true;ev.type=UI_GESTURE_PRESS;on_gesture(&ctx,&ev);
+   ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&nav==-1);fail_open=false;
+  }
  }
- ui_gesture_event_t ev={UI_GESTURE_PRESS,400,350,400,350};on_gesture(&ctx,&ev);
- ev.type=UI_GESTURE_MOVE;ev.x=670;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&!s_press_pending);
- int old=open_calls;ev.type=UI_GESTURE_SWIPE_U;on_gesture(&ctx,&ev);assert(open_calls==old);
- book.path[0]=0;ev=(ui_gesture_event_t){UI_GESTURE_PRESS,400,350,400,350};assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE);
- ev.type=UI_GESTURE_TAP;nav=-1;on_gesture(&ctx,&ev);assert(nav==-1&&open_calls==old);
- strcpy(book.path,"/sdcard/books/Novel/a.epub");fail_open=true;ev.type=UI_GESTURE_PRESS;on_gesture(&ctx,&ev);
- ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&nav==-1);fail_open=false;
+ assert(layouts==7&&reading_slots==4);
  assert(!strcmp(reader_key_label(APP_READER_KEY_HOME),"返回主页"));
  assert(!strcmp(reader_key_label(APP_READER_KEY_FRONTLIGHT),"前光开关"));
  // 前光开关只驱动灯，不重画正文；再按一次关灯。
@@ -102,10 +136,10 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
   else assert(result==APP_REDRAW_PAGE&&nav==-1&&s_view==SHELF&&ctx.leaf==4&&freed==before+1&&s_reader_panel==READER_PANEL_NONE);
  }
  assert(saved==4&&restored==2);
- printf("PASS: %d full-card hit points, local cover-lift bounds, cancel/empty/open-failure guards; screen/key/hold shared return routes retain home or shelf category/page; renamed label\n",points);
+ printf("PASS: seven unique layouts, four reading placements, %d hit points, local cover-lift bounds, move/cancel/swipe/empty/open-failure guards; screen/key/hold shared return routes retain home or shelf category/page; renamed label\n",points);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-reading-origin-',dir='/private/tmp') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-g',str(c),'-o',str(binary)],check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-Imain/settings','-Imain/services','-g',str(c),'-o',str(binary)],cwd=root,check=True)
  subprocess.run([str(binary)],check=True)
