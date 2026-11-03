@@ -20,15 +20,25 @@ static unsigned starts,stops,requests,auto_calls,forecast_calls,search_calls,ns_
 static int network_state,scenario;
 static int64_t monotonic;
 static unsigned pending_opens,header_calls;
+static unsigned header_eagain,body_eagain,body_reads,heap_allocs;
+static unsigned search_total=17;
+static int fail_alloc_after=-1,fail_search_page=-1;
+static bool stall_headers,stall_body,fail_headers,fail_body,incomplete_body,cancel_headers;
+static bool clear_during_read;
+static int64_t body_progress_us;
+static int io_timeout_ms;
 static char *alphanumeric_forecast;
 static bool stall_http_connect,cancel_http_connect;
 static unsigned char prefs_bytes[1024],cache_bytes[2048];
 static size_t prefs_size,cache_size;
 static pmu_snapshot_t battery={80};
-struct FakeHttp {const char *body;size_t size,at;int status;};
+struct FakeHttp {const char *body;size_t size,at;int status;char payload[WEATHER_BODY_LIMIT+1];};
 static void run_worker(void) {assert(pending);void(*f)(void*)=pending;pending=NULL;worker=true;f(NULL);worker=false;}
-void *heap_caps_malloc(size_t n,int c){(void)c;return fail_alloc?NULL:malloc(n);}
-void heap_caps_free(void *p){free(p);}
+void *heap_caps_malloc(size_t n,int c){
+    (void)c;if(fail_alloc||fail_alloc_after==0)return NULL;if(fail_alloc_after>0)--fail_alloc_after;
+    void *p=malloc(n);if(p)++heap_allocs;return p;
+}
+void heap_caps_free(void *p){if(p){assert(heap_allocs);--heap_allocs;}free(p);}
 SemaphoreHandle_t xSemaphoreCreateBinary(void){return (void*)1;}
 int xSemaphoreTake(SemaphoreHandle_t s,uint32_t wait){
     assert(s==(void*)1);if(wait&&pending)run_worker();
@@ -90,9 +100,17 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
         if(scenario==4){h->body="{}";}
         if(scenario==5){h->body="{\"code\":\"BUDGET_EXHAUSTED\"}";h->status=429;}
     } else if(strstr(c->url,"/locations?")) {
-        ++search_calls;assert(strstr(c->url,"q=%E6%9D%AD%E5%B7%9E")&&strstr(c->url,"pageSize=5"));
-        h->body="{\"total\":1,\"page\":0,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
-        if(strstr(c->url,"page=1&"))h->body="{\"total\":6,\"page\":1,\"pageSize\":5,\"locations\":[" WEATHER_TEST_CITY "]}";
+        ++search_calls;assert(strstr(c->url,"q=%E6%9D%AD%E5%B7%9E")||strstr(c->url,"q=%E4%B8%8A%E6%B5%B7"));
+        unsigned page,size;assert(sscanf(strstr(c->url,"&page="),"&page=%u&pageSize=%u",&page,&size)==2&&size==20);
+        cJSON *root=cJSON_CreateObject(),*list=cJSON_AddArrayToObject(root,"locations");
+        cJSON_AddNumberToObject(root,"total",search_total);cJSON_AddNumberToObject(root,"page",page);cJSON_AddNumberToObject(root,"pageSize",size);
+        for(unsigned i=page*size;i<search_total&&i<(page+1)*size;++i){
+            cJSON *city=cJSON_Parse(WEATHER_TEST_CITY);char id[17];snprintf(id,sizeof(id),"%u",101210101+i);
+            cJSON_ReplaceItemInObject(city,"locationId",cJSON_CreateString(id));cJSON_AddItemToArray(list,city);
+        }
+        char *json=cJSON_PrintUnformatted(root);assert(json&&strlen(json)<sizeof(h->payload));
+        strcpy(h->payload,json);free(json);cJSON_Delete(root);h->body=h->payload;
+        if((int)page==fail_search_page){h->body="{}";h->status=503;}
     } else {
         h->body=WEATHER_TEST_CATALOG;
         if(scenario==2)h->body="{\"schemaVersion\":1,\"components\":[{\"code\":\"weather\",\"schemaVersion\":1,\"enabled\":false,\"available\":false}]}";
@@ -109,12 +127,24 @@ esp_err_t esp_http_client_open(esp_http_client_handle_t h,int n){
     if(pending_opens){--pending_opens;return ESP_ERR_HTTP_EAGAIN;}
     return ESP_OK;
 }
-esp_err_t esp_http_client_set_timeout_ms(esp_http_client_handle_t h,int ms){(void)h;assert(ms==1200);return ESP_OK;}
-int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h){++header_calls;return (int64_t)h->size;}
+esp_err_t esp_http_client_set_timeout_ms(esp_http_client_handle_t h,int ms){(void)h;assert(ms>0&&ms<=200);io_timeout_ms=ms;return ESP_OK;}
+int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h){
+    ++header_calls;
+    if(cancel_headers){atomic_store(&s_cancel,true);return -ESP_ERR_HTTP_EAGAIN;}
+    if(fail_headers)return ESP_FAIL;
+    if(header_eagain||stall_headers){if(header_eagain)--header_eagain;monotonic+=(int64_t)io_timeout_ms*1000;return -ESP_ERR_HTTP_EAGAIN;}
+    return (int64_t)h->size;
+}
 int esp_http_client_get_status_code(esp_http_client_handle_t h){return h->status;}
 int esp_http_client_read(esp_http_client_handle_t h,char *out,int size){
+    ++body_reads;assert(size>0&&size<=512);
     if(cancel_read){atomic_store(&s_cancel,true);cancel_read=false;return -1;}
+    if(clear_during_read){app_weather_clear_search();clear_during_read=false;}
+    if(body_eagain||stall_body){if(body_eagain)--body_eagain;monotonic+=(int64_t)io_timeout_ms*1000;return -ESP_ERR_HTTP_EAGAIN;}
+    if(h->at&&fail_body)return ESP_FAIL;
+    if(h->at&&incomplete_body)return 0;
     size_t n=h->size-h->at;if(n>(size_t)size)n=(size_t)size;if(n>97)n=97;
+    if(n)monotonic+=body_progress_us;
     memcpy(out,h->body+h->at,n);h->at+=n;return (int)n;
 }
 bool esp_http_client_is_complete_data_received(esp_http_client_handle_t h){return h->at==h->size;}
@@ -192,13 +222,55 @@ int main(void) {
     assert(!s_view.has_forecast&&!cache_size&&forecast_calls==before&&s_view.state==APP_WEATHER_DISABLED);
     scenario=1;request(APP_WEATHER_LOCATE,NULL);assert(s_view.state==APP_WEATHER_CITY_REQUIRED);
     monotonic+=WEATHER_RETRY_US+1;before=auto_calls;app_weather_poll(true);assert(!pending&&auto_calls==before);
-    scenario=0;request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==1&&search_calls==1);
-    assert(app_weather_search("杭州",1));run_worker();assert(app_weather_poll(false));
-    assert(s_view.result_page==1&&s_view.result_total==6&&s_view.result_count==1);
+    scenario=0;request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==8&&s_view.result_total==17&&search_calls==1);
+    unsigned paging_requests=requests,paging_starts=starts,paging_cancels=time_cancels,paging_writes=ns_writes;
+    ota_busy=ble_connected=true;battery.battery=5;wall_time=0;
+    assert(app_weather_search("杭州",1)&&!pending&&!app_weather_busy());
+    assert(s_view.result_page==1&&s_view.result_total==17&&s_view.result_count==8&&!strcmp(s_view.results[0].id,"101210109"));
+    assert(app_weather_search("杭州",2)&&!pending&&s_view.result_count==1&&!strcmp(s_view.results[0].id,"101210117"));
+    assert(app_weather_search("杭州",0)&&!pending&&s_view.result_count==8);
+    assert(!app_weather_search("杭州",3)&&!pending);
+    assert(requests==paging_requests&&starts==paging_starts&&time_cancels==paging_cancels&&ns_writes==paging_writes);
+    ota_busy=ble_connected=false;battery.battery=80;wall_time=base_time;
+    search_total=41;request(APP_WEATHER_SEARCH,"杭州");paging_requests=requests;
+    assert(app_weather_search("杭州",2)&&pending);run_worker();assert(app_weather_poll(false));
+    assert(requests==paging_requests+2&&s_view.result_page==2&&s_view.result_count==8&&!strcmp(s_view.results[7].id,"101210124"));
+    paging_requests=requests;
+    assert(app_weather_search("杭州",3)&&!pending&&s_view.result_count==8);
+    assert(app_weather_search("杭州",4)&&!pending&&s_view.result_count==8&&requests==paging_requests);
+    fail_search_page=2;assert(app_weather_search("杭州",5)&&pending);run_worker();assert(app_weather_poll(false));
+    assert(s_view.state==APP_WEATHER_UNAVAILABLE&&s_view.result_page==4&&s_view.result_count==8);
+    fail_search_page=-1;assert(app_weather_search("杭州",5)&&pending);run_worker();assert(app_weather_poll(false));
+    assert(s_view.result_page==5&&s_view.result_count==1&&!strcmp(s_view.results[0].id,"101210141"));
+    paging_requests=requests;assert(app_weather_search("杭州",0)&&!pending&&requests==paging_requests);
+    request(APP_WEATHER_SEARCH,"上海");paging_requests=requests;
+    assert(app_weather_search("杭州",1)&&pending);run_worker();assert(app_weather_poll(false));
+    assert(requests==paging_requests+2&&s_view.result_page==1);
+    app_weather_clear_search();assert(!heap_allocs&&!s_cached_query[0]);
+    fail_search_page=1;assert(app_weather_search("杭州",2));run_worker();assert(app_weather_poll(false));
+    assert(s_view.state==APP_WEATHER_UNAVAILABLE&&!s_view.result_count&&!heap_allocs);
+    fail_search_page=-1;
+    search_total=4000;assert(app_weather_search("杭州",499));run_worker();assert(app_weather_poll(false));
+    assert(s_view.result_page==499&&s_view.result_count==8&&!strcmp(s_view.results[7].id,"101214100"));
+    assert(!app_weather_search("杭州",500)&&!app_weather_search("杭州",~0u));
+    app_weather_clear_search();search_total=17;
     assert(app_weather_request(APP_WEATHER_SEARCH,"杭州"));app_weather_clear_search();run_worker();
-    assert(app_weather_poll(false)&&s_view.result_count==0);
-    request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==1);
-    weather_location_t city=s_view.results[0];assert(app_weather_select(&city)&&s_view.result_count==0);
+    assert(app_weather_poll(false)&&s_view.result_count==0&&!heap_allocs);
+    assert(app_weather_request(APP_WEATHER_SEARCH,"杭州"));run_worker();app_weather_clear_search();
+    assert(app_weather_poll(false)&&!s_view.result_count&&!heap_allocs);
+    clear_during_read=true;request(APP_WEATHER_SEARCH,"杭州");assert(!s_view.result_count&&!heap_allocs);
+    fail_alloc_after=1;request(APP_WEATHER_SEARCH,"杭州");fail_alloc_after=-1;
+    assert(s_view.state==APP_WEATHER_FAILED&&!s_view.result_count&&!heap_allocs);
+    search_total=41;fail_alloc_after=2;assert(app_weather_search("杭州",2));run_worker();assert(app_weather_poll(false));fail_alloc_after=-1;
+    assert(s_view.state==APP_WEATHER_FAILED&&!s_view.result_count&&!heap_allocs);
+    search_total=17;
+    assert(app_weather_request(APP_WEATHER_SEARCH,"杭州"));run_worker();app_weather_cancel_join();assert(!heap_allocs);
+    search_total=0;request(APP_WEATHER_SEARCH,"杭州");paging_requests=requests;
+    assert(!s_view.result_count&&!s_view.result_total&&s_view.state==APP_WEATHER_READY);
+    assert(app_weather_search("杭州",0)&&!pending&&requests==paging_requests);
+    app_weather_clear_search();search_total=17;
+    request(APP_WEATHER_SEARCH,"杭州");assert(s_view.result_count==8);
+    weather_location_t city=s_view.results[0];assert(app_weather_select(&city)&&s_view.result_count==0&&!heap_allocs);
     request(APP_WEATHER_FETCH,NULL);assert(s_view.has_forecast);
     before=starts;assert(app_weather_request(APP_WEATHER_FETCH,NULL));
     app_weather_cancel_join();assert(!pending&&!app_weather_busy()&&starts==before);
@@ -213,6 +285,28 @@ int main(void) {
     cancel_http_connect=true;connect_started=monotonic;headers_before=header_calls;
     request(APP_WEATHER_FETCH,NULL);cancel_http_connect=false;
     assert(monotonic-connect_started<=20000&&headers_before==header_calls&&starts==stops);
+    header_eagain=20;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(!header_eagain&&s_view.state==APP_WEATHER_READY&&monotonic-connect_started>=4000000);
+    stall_headers=true;connect_started=monotonic;unsigned reads_before=body_reads;
+    request(APP_WEATHER_FETCH,NULL);stall_headers=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&monotonic-connect_started>=WEATHER_RESPONSE_US&&
+        monotonic-connect_started<=WEATHER_RESPONSE_US+20000&&body_reads==reads_before);
+    fail_headers=true;headers_before=header_calls;request(APP_WEATHER_FETCH,NULL);fail_headers=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&header_calls==headers_before+1);
+    cancel_headers=true;connect_started=monotonic;request(APP_WEATHER_FETCH,NULL);cancel_headers=false;
+    assert(monotonic-connect_started<=20000&&s_view.has_forecast);
+    body_eagain=20;connect_started=monotonic;request(APP_WEATHER_FETCH,NULL);
+    assert(!body_eagain&&s_view.state==APP_WEATHER_READY&&monotonic-connect_started>=4000000);
+    stall_body=true;connect_started=monotonic;request(APP_WEATHER_FETCH,NULL);stall_body=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&monotonic-connect_started>=WEATHER_RESPONSE_US&&
+        monotonic-connect_started<=WEATHER_RESPONSE_US+20000);
+    fail_body=true;reads_before=body_reads;request(APP_WEATHER_FETCH,NULL);fail_body=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&body_reads==reads_before+2);
+    incomplete_body=true;request(APP_WEATHER_FETCH,NULL);incomplete_body=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&s_view.has_forecast);
+    body_progress_us=600000;connect_started=monotonic;request(APP_WEATHER_FETCH,NULL);body_progress_us=0;
+    assert(s_view.state==APP_WEATHER_READY&&monotonic-connect_started>WEATHER_RESPONSE_US&&starts==stops&&!heap_allocs);
     saved=false;before=starts;request(APP_WEATHER_FETCH,NULL);assert(starts==before);saved=true;
     fail_alloc=true;request(APP_WEATHER_FETCH,NULL);fail_alloc=false;assert(starts==before);
     fail_task=true;assert(!app_weather_request(APP_WEATHER_FETCH,NULL)&&!app_weather_busy());fail_task=false;
@@ -238,6 +332,6 @@ int main(void) {
     free(alphanumeric_forecast);alphanumeric_forecast=NULL;
     wall_time=0;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));
     assert(!weather_day_for(&s_view.forecast,wall_time,false));
-    assert(starts==stops&&time_cancels>0);
+    assert(starts==stops&&time_cancels>0&&!heap_allocs);
     puts("PASS: weather proxy session, six-hour boundary, shorter expiry, midnight, toggle persistence, city-ID fetch, paginated search, no device relabeling, owned cleanup, cancellation, NVS main-only and resource guards");
 }

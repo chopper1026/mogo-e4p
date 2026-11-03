@@ -151,15 +151,17 @@ bool weather_location_parse(const char *json, size_t length, weather_location_t 
     if (ok) *out = v;
     cJSON_Delete(root); return ok;
 }
-bool weather_locations_parse(const char *json, size_t length, weather_location_t *out,
+bool weather_locations_parse(const char *json, size_t length, weather_location_t *out, unsigned page_size,
                              unsigned *count, unsigned *total, unsigned *page) {
     *count = *total = *page = 0; cJSON *root = document(json, length);
     cJSON *list = cJSON_GetObjectItemCaseSensitive(root, "locations");
     int n = cJSON_GetArraySize(list);
     int size = 0, all = 0, current = 0;
-    bool ok = root && cJSON_IsArray(list) && n <= WEATHER_CITY_LIMIT &&
-        integer(root, "pageSize", WEATHER_CITY_LIMIT, WEATHER_CITY_LIMIT, &size) &&
-        integer(root, "total", 0, 4000, &all) && integer(root, "page", 0, 799, &current) &&
+    bool ok = root && out && page_size && page_size <= WEATHER_SEARCH_BATCH_SIZE &&
+        cJSON_IsArray(list) && n <= (int)page_size &&
+        integer(root, "pageSize", (int)page_size, (int)page_size, &size) &&
+        integer(root, "total", 0, WEATHER_SEARCH_TOTAL_LIMIT, &all) &&
+        integer(root, "page", 0, WEATHER_SEARCH_TOTAL_LIMIT - 1, &current) &&
         (all ? current * size < all && n == (all - current * size < size ? all - current * size : size) : !current && !n);
     for (int i = 0; ok && i < n; ++i) ok = location(cJSON_GetArrayItem(list, i), &out[i]);
     if (ok) { *count = (unsigned)n; *total = (unsigned)all; *page = (unsigned)current; }

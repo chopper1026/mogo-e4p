@@ -7,7 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define WEATHER_CITY_LIMIT 5
+#define WEATHER_CITY_LIMIT 8
+#define WEATHER_SEARCH_BATCH_SIZE 20
+#define WEATHER_SEARCH_TOTAL_LIMIT 4000
 #define WEATHER_BODY_LIMIT 8192
 typedef struct {
     char id[17], admin2[97]; ///< 官方地点标识与地级行政区 / Official location ID and prefecture
@@ -34,7 +36,8 @@ typedef enum {
 
 bool weather_location_valid(const weather_location_t *location);
 bool weather_location_parse(const char *json, size_t length, weather_location_t *location);
-bool weather_locations_parse(const char *json, size_t length, weather_location_t *locations,
+/// locations至少容纳page_size项；按请求大小校验完整批次。/ locations holds at least page_size items; validate the requested batch size.
+bool weather_locations_parse(const char *json, size_t length, weather_location_t *locations, unsigned page_size,
                              unsigned *count, unsigned *total, unsigned *page);
 bool weather_catalog_parse(const char *json, size_t length, bool *enabled, bool *available);
 void weather_error_code(const char *json, size_t length, char *code, size_t capacity);

@@ -28,7 +28,7 @@ bool app_weather_set_enabled(bool enabled);
 bool app_weather_set_auto_refresh(bool enabled);
 bool app_weather_select(const weather_location_t *city);
 bool app_weather_request(app_weather_request_t request, const char *query);
-/// 使用相同关键词读取指定页；页码从零开始。/ Read a zero-based result page for the same query.
+/// 页码从零开始；优先本地缓存，仅补取缺失批次。/ Zero-based pages use local results first, fetching only missing batches.
 bool app_weather_search(const char *query, unsigned page);
 /// automatic由前台页面按首页槽位决定，旧enabled字段不再决定新布局。/ The foreground page gates automatic work by Home slots, not the legacy enabled field.
 bool app_weather_poll(bool automatic);

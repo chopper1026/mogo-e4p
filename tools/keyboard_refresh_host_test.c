@@ -18,8 +18,8 @@ static bool inside(EpdRect r,int radius,int x,int y) {
     return (x-cx)*(x-cx)+(y-cy)*(y-cy)<=radius*radius;
 }
 void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t *fb){for(int y=r.y;y<r.y+r.height;y++)for(int x=r.x;x<r.x+r.width;x++)pixel(fb,x,y,gray);}
-void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){for(int y=r.y;y<r.y+r.height;y++)for(int x=r.x;x<r.x+r.width;x++)if(inside(r,radius,x,y))pixel(fb,x,y,gray);}
-void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){EpdRect inner={r.x+1,r.y+1,r.width-2,r.height-2};for(int y=r.y;y<r.y+r.height;y++)for(int x=r.x;x<r.x+r.width;x++)if(inside(r,radius,x,y)&&!inside(inner,radius>0?radius-1:0,x,y))pixel(fb,x,y,gray);}
+void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){gray=ui_control_gray(gray);for(int y=r.y;y<r.y+r.height;y++)for(int x=r.x;x<r.x+r.width;x++)if(inside(r,radius,x,y))pixel(fb,x,y,gray);}
+void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){gray=ui_control_gray(gray);EpdRect inner={r.x+1,r.y+1,r.width-2,r.height-2};for(int y=r.y;y<r.y+r.height;y++)for(int x=r.x;x<r.x+r.width;x++)if(inside(r,radius,x,y)&&!inside(inner,radius>0?radius-1:0,x,y))pixel(fb,x,y,gray);}
 void epd_draw_line(int x,int y,int xx,int yy,uint8_t gray,uint8_t *fb){int dx=abs(xx-x),sx=x<xx?1:-1,dy=-abs(yy-y),sy=y<yy?1:-1,e=dx+dy;for(;;){pixel(fb,x,y,gray);if(x==xx&&y==yy)break;int ee=2*e;if(ee>=dy){e+=dy;x+=sx;}if(ee<=dx){e+=dx;y+=sy;}}}
 bool ui_rect_hit(EpdRect r,uint16_t x,uint16_t y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 EpdRect ui_rect_union(EpdRect a,EpdRect b){int x=a.x<b.x?a.x:b.x,y=a.y<b.y?a.y:b.y,r=a.x+a.width>b.x+b.width?a.x+a.width:b.x+b.width,d=a.y+a.height>b.y+b.height?a.y+a.height:b.y+b.height;return(EpdRect){x,y,r-x,d-y};}
@@ -29,6 +29,7 @@ int ui_text_fixed_width_px(int px,const char *text){++width_calls;int width=0;fo
 int ui_text_fixed_context_width_px(int px,const char *text,const char *sample){(void)sample;return ui_text_fixed_width_px(px,text);}
 void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags align,bool inverse){
  ++text_calls;int width=ui_text_fixed_width_px(px,text);if(align==EPD_DRAW_ALIGN_CENTER)x-=width/2;else if(align==EPD_DRAW_ALIGN_RIGHT)x-=width;
+ if(y==692&&strcmp(text,"‹")&&strcmp(text,"›"))assert(px==32);
  for(const unsigned char *p=(const unsigned char*)text;*p;p++)if((*p&192)!=128){int advance=*p>=128?px:px/2;for(int j=0;j<px/2;j++)for(int i=1;i<advance-1;i++)if((i+j+*p)%4)pixel(fb,x+i,y-px/4+j,inverse?255:0);x+=advance;}
 }
 void ui_text_fixed_context_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,enum EpdFontFlags align,bool inverse){(void)sample;ui_text_fixed_vc(fb,x,y,px,text,align,inverse);}
@@ -55,6 +56,10 @@ static void begin(bool ascii){value[0]=0;ui_text_edit_init(&edit,value,sizeof(va
 int main(void){
  fb=malloc(BYTES);reference=malloc(BYTES);previous=malloc(BYTES);assert(fb&&reference&&previous);
  begin(true);
+ // 使用真实控件调色板，键盘底色及未按下的辅助键不得变成深灰。
+ // Use the real control palette: the keyboard ground and idle utility keys must not become dark gray.
+ for(size_t i=0;i<BYTES;i++)assert(fb[i]==UI_GRAY_BLACK||fb[i]==UI_GRAY_WHITE);
+ assert(fb[550*WIDTH+342]==UI_GRAY_WHITE);
  // 按下不输入，反馈范围只含该键；松开复原，滑出取消不误输入。
  // Press commits nothing, paints only its key, and restores on release/cancel.
  assert(ui_keyboard_press(26,742,560,0));unsigned old_layouts=layouts;repaint(false);assert(layouts==old_layouts&&!value[0]);
@@ -69,6 +74,9 @@ int main(void){
  assert(ui_text_input_tap(&edit,field,28,false,NULL,550,285));repaint(true);
  begin(false);
  const char *digits="64426";for(const char *p=digits;*p;p++){int i=*p-'1';key(120+(i%3)*150,742+(i/3)*78);}
+ EpdRect boxes[5];size_t count=visible(s_page,boxes,560);assert(count);
+ for(size_t i=0;i<count;++i)assert(fb[(boxes[i].y+4)*WIDTH+boxes[i].x+boxes[i].width/2]==UI_GRAY_WHITE);
+ for(size_t i=0;i<BYTES;i++)assert(fb[i]==UI_GRAY_BLACK||fb[i]==UI_GRAY_WHITE);
  if(ui_keyboard_page(1))repaint(false);if(ui_keyboard_page(-1))repaint(false);
  key(88,685);key(220,580);key(26,742);key(600,900);key(30,580);
  key(580,820);key(590,900);key(480,1000);key(480,1000);
@@ -105,28 +113,29 @@ int main(void){
  // 候选变化累计后暂停才整理；不触发光标、普通英文或未松手的连打刷新。
  // Accumulated candidate changes settle only after a pause, never on caret moves, English input or held touches.
  begin(false);const char *burst="644264";
- for(int i=0;i<5;i++){int n=burst[i]-'1';key(120+n%3*150,742+n/3*78);assert(!last_update.settle);}
+ assert(WORDS_SETTLE_CHANGES==3&&WORDS_SETTLE_IDLE_MS==400);
+ for(int i=0;i<2;i++){int n=burst[i]-'1';key(120+n%3*150,742+n/3*78);assert(!last_update.settle);}
  assert(ui_keyboard_idle_tick(false,0)==UI_KEYBOARD_NONE);
  assert(ui_keyboard_idle_tick(false,10000)==UI_KEYBOARD_NONE);
- int n=burst[5]-'1';key(120+n%3*150,742+n/3*78);assert(!last_update.settle);
+ int n=burst[2]-'1';key(120+n%3*150,742+n/3*78);assert(!last_update.settle);
  assert(ui_keyboard_idle_tick(true,10000)==UI_KEYBOARD_NONE);
  assert(ui_keyboard_idle_tick(false,10001)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,10700)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,10701)==UI_KEYBOARD_CHANGED);repaint(false);
+ assert(ui_keyboard_idle_tick(false,10400)==UI_KEYBOARD_NONE);
+ assert(ui_keyboard_idle_tick(false,10401)==UI_KEYBOARD_CHANGED);repaint(false);
  assert(last_update.settle&&settles==1);
  for(int i=0;i<100;i++)assert(ui_keyboard_idle_tick(false,11000+i*1000)==UI_KEYBOARD_NONE);
  // 候选翻页也计数；触摸、时间回退和新布局取消旧停顿，不补刷多次。
  // Paging counts too; touches, clock rollback and layout switches cancel stale pauses without catch-up.
  begin(false);s_nine=false;strcpy(s_raw,"shi");refresh();fresh(fb);
- for(int i=0;i<6;i++){assert(ui_keyboard_page(1));repaint(false);assert(!last_update.settle);}
+ for(int i=0;i<3;i++){assert(ui_keyboard_page(1));repaint(false);assert(!last_update.settle);}
  assert(ui_keyboard_idle_tick(false,100)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(true,799)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,800)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,1499)==UI_KEYBOARD_NONE);
+ assert(ui_keyboard_idle_tick(true,499)==UI_KEYBOARD_NONE);
  assert(ui_keyboard_idle_tick(false,500)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,1199)==UI_KEYBOARD_NONE);
- assert(ui_keyboard_idle_tick(false,1200)==UI_KEYBOARD_CHANGED);repaint(false);assert(last_update.settle&&settles==2);
- for(int i=0;i<6;i++){assert(ui_keyboard_page(-1));repaint(false);}
+ assert(ui_keyboard_idle_tick(false,899)==UI_KEYBOARD_NONE);
+ assert(ui_keyboard_idle_tick(false,200)==UI_KEYBOARD_NONE);
+ assert(ui_keyboard_idle_tick(false,599)==UI_KEYBOARD_NONE);
+ assert(ui_keyboard_idle_tick(false,600)==UI_KEYBOARD_CHANGED);repaint(false);assert(last_update.settle&&settles==2);
+ for(int i=0;i<3;i++){assert(ui_keyboard_page(-1));repaint(false);}
  assert(ui_keyboard_press(26,742,560,0));repaint(false);
  assert(ui_keyboard_idle_tick(false,4000)==UI_KEYBOARD_NONE);
  assert(ui_keyboard_release());repaint(false);
@@ -136,12 +145,12 @@ int main(void){
  begin(true);for(int i=0;i<20;i++)key(26,742);
  assert(ui_keyboard_idle_tick(false,0)==UI_KEYBOARD_NONE&&ui_keyboard_idle_tick(false,10000)==UI_KEYBOARD_NONE);
  begin(false);s_nine=false;strcpy(s_raw,"shi");refresh();fresh(fb);
- for(int i=0;i<6;i++){assert(ui_keyboard_page(1));repaint(false);}
- assert(ui_keyboard_idle_tick(false,0)==UI_KEYBOARD_NONE&&ui_keyboard_idle_tick(false,700)==UI_KEYBOARD_CHANGED);
+ for(int i=0;i<3;i++){assert(ui_keyboard_page(1));repaint(false);}
+ assert(ui_keyboard_idle_tick(false,0)==UI_KEYBOARD_NONE&&ui_keyboard_idle_tick(false,400)==UI_KEYBOARD_CHANGED);
  // 输入框与整理合并时不得把整个联合区域当作全像素词栏。
  // A coalesced field repaint must never upgrade the entire union to a full-pixel word-strip settle.
  repaint(true);assert(!last_update.settle&&last_update.field);
- assert(ui_keyboard_idle_tick(false,800)==UI_KEYBOARD_NONE&&ui_keyboard_idle_tick(false,1500)==UI_KEYBOARD_CHANGED);
+ assert(ui_keyboard_idle_tick(false,800)==UI_KEYBOARD_NONE&&ui_keyboard_idle_tick(false,1200)==UI_KEYBOARD_CHANGED);
  repaint(false);assert(last_update.settle&&settles==3);
  ui_keyboard_end();ui_ime_release();free(fb);free(reference);free(previous);
  assert(ui_keyboard_idle_tick(false,100000)==UI_KEYBOARD_NONE);

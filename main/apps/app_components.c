@@ -19,7 +19,7 @@
 #include <time.h>
 
 extern const app_desc_t app_components;
-static bool s_requested_city, s_city, s_weather_settings, s_tomorrow, s_detail, s_keyboard_visible, s_keyboard_bound;
+static bool s_requested_city, s_city, s_weather_settings, s_tomorrow, s_detail, s_settle, s_keyboard_visible, s_keyboard_bound;
 static char s_query[129], s_notice[97];
 static ui_text_edit_t s_edit;
 static EpdRect s_area;
@@ -66,6 +66,12 @@ static void component_option(uint8_t *fb,int y,app_home_widget_t widget,unsigned
     epd_draw_circle(624,y,15,0,fb);epd_draw_circle(624,y,14,0,fb);
     if(app_home_component_at(slot)==widget)epd_fill_circle(624,y,8,0,fb);
 }
+static EpdRect city_result_row(unsigned index) {
+    return (EpdRect){36,350+(int)index*84,612,84};
+}
+static EpdRect city_page_button(bool next) {
+    return (EpdRect){next?576:36,1036,72,64};
+}
 static void render(app_ctx_t *ctx,uint8_t *fb) {
     (void)ctx;ui_clear_page(fb);ui_nav_status(fb);
     ui_text(fb,36,91,52,s_city?"所在城市":s_weather_settings?"天气设置":"首页组件",EPD_DRAW_ALIGN_LEFT,false);
@@ -109,19 +115,24 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
         ui_text_input_draw(fb,&s_edit,(EpdRect){36,270,480,68},28,false,NULL);
         ui_draw_control_frame(fb,(EpdRect){540,270,108,68},16,0);
         text(fb,594,304,26,"搜索",EPD_DRAW_ALIGN_CENTER);
-        for(unsigned i=0;i<v->result_count;i++) {
-            const weather_location_t *city=&v->results[i];int y=359+(int)i*34;char value[256];
-            snprintf(value,sizeof(value),"%s · %s · %s",city->name,city->admin2,city->admin1);
-            fitted(fb,48,y,23,value,570);
-            ui_draw_icon(fb,635,y,22,UI_ICON_CHEVRON_RIGHT,0);
-        }
-        if(v->result_total) {
-            char page[64];snprintf(page,sizeof(page),"%u / %u   共%u个地点",v->result_page+1,
-                (v->result_total+WEATHER_CITY_LIMIT-1)/WEATHER_CITY_LIMIT,v->result_total);
-            text(fb,342,540,20,page,EPD_DRAW_ALIGN_CENTER);
-            if(v->result_page)ui_draw_icon(fb,70,540,24,UI_ICON_CHEVRON_LEFT,0);
-            if((v->result_page+1)*WEATHER_CITY_LIMIT<v->result_total)
-                ui_draw_icon(fb,614,540,24,UI_ICON_CHEVRON_RIGHT,0);
+        if(!s_keyboard_visible) {
+            for(unsigned i=0;i<v->result_count;i++) {
+                const weather_location_t *city=&v->results[i];EpdRect row=city_result_row(i);char value[256];
+                fitted(fb,48,row.y+26,36,city->name,550);
+                snprintf(value,sizeof(value),"%s · %s",city->admin2,city->admin1);
+                fitted(fb,48,row.y+62,24,value,550);
+                ui_draw_icon(fb,634,row.y+42,28,UI_ICON_CHEVRON_RIGHT,0);
+                ui_draw_separator(fb,row.y+row.height-1,row.x,row.width,0x90);
+            }
+            if(v->result_total) {
+                EpdRect prev=city_page_button(false),next=city_page_button(true);
+                char page[64];snprintf(page,sizeof(page),"%u / %u   共%u个地点",v->result_page+1,
+                    (v->result_total+WEATHER_CITY_LIMIT-1)/WEATHER_CITY_LIMIT,v->result_total);
+                text(fb,342,1068,24,page,EPD_DRAW_ALIGN_CENTER);
+                if(v->result_page)ui_draw_icon(fb,prev.x+prev.width/2,1068,32,UI_ICON_CHEVRON_LEFT,0);
+                if((v->result_page+1)*WEATHER_CITY_LIMIT<v->result_total)
+                    ui_draw_icon(fb,next.x+next.width/2,1068,32,UI_ICON_CHEVRON_RIGHT,0);
+            }
         }
         if(s_keyboard_visible)ui_keyboard_draw(fb,560);
     }
@@ -129,7 +140,7 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
 }
 static app_redraw_t keyboard_paint(app_ctx_t *ctx,bool force) {
     ui_keyboard_update_t dirty=ui_keyboard_update(ctx->fb,560,(EpdRect){36,270,480,68},28,false,NULL,force);
-    s_area=dirty.area;s_detail=dirty.layout||dirty.settle;
+    s_area=dirty.area;s_detail=dirty.layout;s_settle=dirty.settle;
     return s_area.width?APP_REDRAW_AREA:APP_REDRAW_NONE;
 }
 static bool keyboard_hide(void) {
@@ -188,7 +199,8 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
         }
         if(x>=540&&x<648&&y>=270&&y<338)return submit();
         const app_weather_view_t *page=app_weather_view();
-        if(y>=522&&y<560&&page->result_total&&((x>=36&&x<108)||(x>=576&&x<648))) {
+        if(!s_keyboard_visible&&page->result_total&&
+            (ui_rect_hit(city_page_button(false),x,y)||ui_rect_hit(city_page_button(true),x,y))) {
             unsigned next=page->result_page;
             if(x<108&&next)--next;
             else if(x>=576&&(next+1)*WEATHER_CITY_LIMIT<page->result_total)++next;
@@ -196,17 +208,17 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
                 snprintf(s_notice,sizeof(s_notice),"暂不能搜索，请稍后重试并检查网络与时间");
             return APP_REDRAW_PAGE;
         }
+        bool results_visible=!s_keyboard_visible;
         bool hidden=keyboard_hide();
         if(y>=165&&y<221&&x>=440&&x<648) {
             s_notice[0]=0;
             if(!app_weather_request(APP_WEATHER_LOCATE,NULL))snprintf(s_notice,sizeof(s_notice),"暂不能定位，请稍后重试并检查网络与时间");
             return APP_REDRAW_PAGE;
         }
-        if(x>=36&&x<648&&y>=342&&y<512) {
-            unsigned index=(unsigned)(y-342)/34;
+        if(results_visible) {
             const app_weather_view_t *v=app_weather_view();
-            if(index<v->result_count) {
-                weather_location_t city=v->results[index];
+            for(unsigned i=0;i<v->result_count;i++)if(ui_rect_hit(city_result_row(i),x,y)) {
+                weather_location_t city=v->results[i];
                 if(app_weather_select(&city)){ui_keyboard_end();s_city=false;s_notice[0]=0;(void)app_weather_request(APP_WEATHER_FETCH,NULL);}
                 else snprintf(s_notice,sizeof(s_notice),"保存失败，请检查设置存储");
                 return APP_REDRAW_PAGE;
@@ -254,7 +266,7 @@ static app_redraw_t tick(app_ctx_t *ctx) {
         if(ui_keyboard_hold_tick(held,held?ctx->touch->x:0,held?ctx->touch->y:0,ctx->now_ms)==UI_KEYBOARD_CHANGED) {
             return edited(ctx);
         }
-        if(ui_keyboard_idle_tick(held,ctx->now_ms)==UI_KEYBOARD_CHANGED)return keyboard_paint(ctx,false);
+        if(ui_keyboard_idle_tick(ctx->touch&&ctx->touch->touched,ctx->now_ms)==UI_KEYBOARD_CHANGED)return keyboard_paint(ctx,false);
     }
     return APP_REDRAW_NONE;
 }
@@ -265,7 +277,9 @@ static app_redraw_t key(app_ctx_t *ctx,int key_value) {
 }
 static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
     if(redraw!=APP_REDRAW_AREA)return false;
-    guard_draw_result(ctx->hl,display_refresh_area(ctx->hl,s_detail?DISPLAY_REFRESH_DETAIL:DISPLAY_REFRESH_FEEDBACK,s_area,DISPLAY_REFRESH_DEFAULT));
+    display_refresh_intent_t intent=s_settle?DISPLAY_REFRESH_SETTLE:s_detail?DISPLAY_REFRESH_DETAIL:DISPLAY_REFRESH_FEEDBACK;
+    guard_draw_result(ctx->hl,display_refresh_area(ctx->hl,intent,s_area,DISPLAY_REFRESH_DEFAULT));
+    s_settle=false;
     return true;
 }
 static display_rect_t area(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}

@@ -11,6 +11,9 @@ import tempfile
 from run_reader_baseline import toolchain
 
 ROOT = Path(__file__).resolve().parents[1]
+service_source = (ROOT / "main/services/weather_service.c").read_text()
+assert '"request start origin=' not in service_source
+assert '"request finish phase=' not in service_source
 with tempfile.TemporaryDirectory(prefix="weather-host-") as directory:
     work = Path(directory)
     env, compiler = toolchain(work)
@@ -25,7 +28,6 @@ with tempfile.TemporaryDirectory(prefix="weather-host-") as directory:
     subprocess.run([str(binary)], env=env, check=True)
     shutil.copytree(ROOT / "tools/ota_stubs", work / "stubs")
     stubs = work / "stubs"
-    (stubs / "esp_log.h").write_text('#pragma once\n#include <stdio.h>\n#define ESP_LOGI(tag, ...) do { (void)(tag); printf(__VA_ARGS__); puts(""); } while (0)\n')
     (stubs / "nvs.h").write_text((ROOT / "tools/book_storage_stubs/nvs.h").read_text() +
         "\n#define ESP_ERR_NVS_NOT_FOUND 0x1102\n")
     (stubs / "device_power.h").write_text("""#pragma once

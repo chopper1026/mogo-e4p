@@ -3,6 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.2 · 本地测试 / Local testing · 2026-11-03
+
+- 天气响应等待放宽至5秒并保留分段取消；城市搜索按20条批次暂存，界面每页8条本地切换，仅在缺少结果批次时补取，避免每次翻页重连查询。/ Allow a cancellable five-second weather response window and cache 20-result city batches for local eight-row paging, fetching only missing batches.
+- 天气城市结果改为每页8条、36px城市名与24px行政区分行显示，整行点击及底部翻页利用键盘收起后的空间；展开键盘时隐藏结果与翻页，避免误选。/ Show eight weather-city results per page with 36px names, 24px administrative sublines, full-row targets and bottom paging; hide result actions while typing.
+- 共用键盘与首个候选改为白底黑字，候选放大至32px；修复城市页把候选清理降为差分刷新的问题，候选变化3次、停手400ms后仅做词栏全像素灰阶整理，不打断连续输入或增加整屏清理。实屏残影改善待验证。/ Use white keys/candidates with 32px candidate text, preserve the city page's full-pixel settle and clean only the word strip after three changes plus a 400ms pause; panel ghosting improvement remains unverified.
+- 移除天气请求的临时阶段与耗时日志，不改变请求超时、取消或资源交还。/ Remove temporary weather request phase/timing logs without changing timeouts, cancellation or resource cleanup.
+
 ## v1.0.2 · 本地测试 / Local testing · 2026-11-02
 
 - 修正天气正式接口为 `https://mogo.mantake.shop`，同步 OTA 平台地址说明；OTA 主源与下载校验保持使用该平台。/ Correct the production weather origin to `https://mogo.mantake.shop` and align OTA documentation with the existing platform feed and download validation.

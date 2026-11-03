@@ -9,8 +9,8 @@
  * 用户修订：按键按下加深、下沉两像素，松开复原，只刷该键；同音字可继续翻页。
  * User revision: darken/inset a pressed key, restore on release with local updates, and page through all homophones.
  * User revision: held backspace repeats; release, movement, multitouch or session exit cancels immediately, with local fast updates only.
- * 用户修订：候选高频变化后在无触摸停顿时仅整理词栏，不打断连打、不全屏黑闪。
- * User revision: settle only the word strip after frequent changes and a touch-free pause, without interrupting typing or flashing the whole screen.
+ * 用户修订：键盘与候选使用白底黑字；候选变化三次、停手400ms后仅整理词栏，不打断连打、不全屏黑闪。
+ * User revision: white keys/candidates with black text; settle the word strip after three changes and a 400ms pause, without interrupting typing or flashing the whole screen.
  */
 #include "ui_keyboard.h"
 #include "ui_ime.h"
@@ -33,7 +33,7 @@ static int s_probe_x, s_probe_y;
 static EpdRect s_pressed_area, s_feedback_area, s_key_clip;
 enum { DIRTY_FIELD = 1, DIRTY_WORDS = 2, DIRTY_SYLLABLES = 4, DIRTY_SPACE = 8, DIRTY_LAYOUT = 16, DIRTY_FEEDBACK = 32, DIRTY_WORDS_SETTLE = 64 };
 static unsigned s_dirty, s_candidates_revision;
-enum { WORDS_SETTLE_CHANGES = 6, WORDS_SETTLE_IDLE_MS = 700 };
+enum { WORDS_SETTLE_CHANGES = 3, WORDS_SETTLE_IDLE_MS = 400, CANDIDATE_PX = 32 };
 static unsigned s_word_updates;
 static int64_t s_words_idle_since = -1;
 static bool s_delete_hold;
@@ -102,27 +102,30 @@ static void key_paint(uint8_t *fb, EpdRect r, const char *text, int px, bool dar
     if (s_probe) { if (ui_rect_hit(r, s_probe_x, s_probe_y)) s_key_clip = r; return; }
     if (s_keys_only && !intersects(r, s_key_clip)) return;
     bool pressed = s_pressed && same_rect(r, s_pressed_area);
-    ui_fill_round_rect(fb, r, 12, dark ? (pressed ? 0x50 : UI_GRAY_BLACK) : pressed ? 0xb0 : utility ? 0xd8 : UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, r, 12, pressed ? 0x20 : 0x60);
+    bool inverse = dark != pressed;
+    ui_fill_round_rect(fb, r, 12, inverse ? UI_GRAY_BLACK : UI_GRAY_WHITE);
+    ui_draw_round_rect(fb, r, 12, UI_GRAY_BLACK);
+    if (utility) ui_draw_round_rect(fb, (EpdRect){r.x+1,r.y+1,r.width-2,r.height-2}, 11, UI_GRAY_BLACK);
     if (!strcmp(text, "⌫")) {
         int cx = r.x + r.width / 2, cy = r.y + r.height / 2 + (pressed ? 2 : 0);
         for (int d = 0; d < 2; ++d) {
-            epd_draw_line(cx - 17, cy, cx - 7, cy - 11 + d, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx - 17, cy, cx - 7, cy + 11 - d, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx - 7, cy - 11 + d, cx + 17, cy - 11 + d, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx - 7, cy + 11 - d, cx + 17, cy + 11 - d, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx + 17 - d, cy - 11, cx + 17 - d, cy + 11, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx - 2, cy - 5 + d, cx + 8, cy + 5 + d, UI_GRAY_BLACK, fb);
-            epd_draw_line(cx - 2, cy + 5 + d, cx + 8, cy - 5 + d, UI_GRAY_BLACK, fb);
+            uint8_t ink = inverse ? UI_GRAY_WHITE : UI_GRAY_BLACK;
+            epd_draw_line(cx - 17, cy, cx - 7, cy - 11 + d, ink, fb);
+            epd_draw_line(cx - 17, cy, cx - 7, cy + 11 - d, ink, fb);
+            epd_draw_line(cx - 7, cy - 11 + d, cx + 17, cy - 11 + d, ink, fb);
+            epd_draw_line(cx - 7, cy + 11 - d, cx + 17, cy + 11 - d, ink, fb);
+            epd_draw_line(cx + 17 - d, cy - 11, cx + 17 - d, cy + 11, ink, fb);
+            epd_draw_line(cx - 2, cy - 5 + d, cx + 8, cy + 5 + d, ink, fb);
+            epd_draw_line(cx - 2, cy + 5 + d, cx + 8, cy - 5 + d, ink, fb);
         }
-    } else ui_text_fixed_vc(fb, r.x + r.width / 2, r.y + r.height / 2 + (pressed ? 2 : 0), px, text, EPD_DRAW_ALIGN_CENTER, dark);
+    } else ui_text_fixed_vc(fb, r.x + r.width / 2, r.y + r.height / 2 + (pressed ? 2 : 0), px, text, EPD_DRAW_ALIGN_CENTER, inverse);
 }
 static size_t visible(size_t start, EpdRect boxes[5], int top) {
     if (!s_candidates || !s_chinese) return 0;
     int left = 78, limit = 606; size_t count = 0;
     while (start + count < s_candidates->count && count < 5) {
         const char *text = s_candidates->items[start + count].text;
-        int width = ui_text_fixed_width_px(25, text) + 24;
+        int width = ui_text_fixed_width_px(CANDIDATE_PX, text) + 24;
         if (width < 78) width = 78;
         if (width > limit - 78) width = limit - 78;
         if (left + width > limit) break;
@@ -197,10 +200,10 @@ static void paint_words(uint8_t *fb, int top) {
     EpdRect boxes[5]; size_t count = visible(s_page, boxes, top);
     for (size_t i = 0; i < count; ++i) {
         char text[UI_IME_TEXT_MAX]; snprintf(text, sizeof(text), "%s", s_candidates->items[s_page + i].text);
-        while (strlen(text) && ui_text_fixed_width_px(25, text) > boxes[i].width - 12) {
+        while (strlen(text) && ui_text_fixed_width_px(CANDIDATE_PX, text) > boxes[i].width - 12) {
             size_t n = strlen(text) - 1; while (n && ((unsigned char)text[n] & 192) == 128) --n; text[n] = 0;
         }
-        key_paint(fb, boxes[i], text, 25, false, i == 0);
+        key_paint(fb, boxes[i], text, CANDIDATE_PX, false, i == 0);
     }
     key_paint(fb, rect(24, 104, 44, 56, top), "‹", 30, false, true);
     key_paint(fb, rect(616, 104, 44, 56, top), "›", 30, false, true);
@@ -212,8 +215,7 @@ static void paint_syllables(uint8_t *fb, int top) {
 }
 void ui_keyboard_draw(uint8_t *fb, int top) {
     if (!s_probe && !s_keys_only) {
-    ui_fill_round_rect(fb, rect(16, -12, 652, 534, top), 26, UI_GRAY_WHITE);
-    ui_draw_round_rect(fb, rect(16, -12, 652, 534, top), 26, 0x60);
+    epd_fill_rect(rect(16, -12, 652, 534, top), UI_GRAY_WHITE, fb);
     }
     key_paint(fb, rect(24, 0, 144, 44, top), "九宫格", 24, s_nine, s_ascii || !s_candidates);
     key_paint(fb, rect(176, 0, 144, 44, top), "全键盘", 24, !s_nine, false);

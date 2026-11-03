@@ -26,8 +26,8 @@ void ui_keyboard_hold_cancel(void);
 /// 单指按住 500ms 后每 120ms 删除一位，优先删拼音；每轮最多删一次，不补发积压。
 /// After a 500ms single-finger hold, delete Pinyin first, then text every 120ms; no catch-up bursts.
 ui_keyboard_result_t ui_keyboard_hold_tick(bool held, int x, int y, int64_t now_ms);
-/// 词栏累计六次变化且无触摸停顿 700ms 后，安排一次局部灰阶整理；离页自动取消。
-/// After six word-strip changes and a 700ms touch-free pause, request one local gray settle; exit cancels it.
+/// 词栏累计三次变化且无触摸停顿 400ms 后，安排一次局部灰阶整理；离页自动取消。
+/// After three word-strip changes and a 400ms touch-free pause, request one local gray settle; exit cancels it.
 ui_keyboard_result_t ui_keyboard_idle_tick(bool touching, int64_t now_ms);
 /// 尚未确认的拼音不可保存。/ Unconfirmed Pinyin prevents saving.
 bool ui_keyboard_pending(void);

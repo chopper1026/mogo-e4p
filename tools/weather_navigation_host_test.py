@@ -20,12 +20,15 @@ unit = r'''
 #include "home_components.h"
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {bool touched;int count,x,y;} touch_t;
-typedef struct {uint8_t *fb;int64_t now_ms;bool request_return,consumed,released;touch_t *touch;const int *request_app;} app_ctx_t;
+typedef struct {uint8_t *fb;int64_t now_ms;bool request_return,consumed,released;touch_t *touch;const int *request_app;void *hl;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE} app_redraw_t;
 enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGHT};
 enum {UI_GESTURE_PRESS,UI_GESTURE_TAP,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0;} ui_gesture_event_t;
 typedef enum {UI_KEYBOARD_NONE,UI_KEYBOARD_CHANGED,UI_KEYBOARD_DONE} ui_keyboard_result_t;
+typedef struct {EpdRect area;bool layout,field,settle;} ui_keyboard_update_t;
+enum {DISPLAY_REFRESH_FEEDBACK,DISPLAY_REFRESH_DETAIL,DISPLAY_REFRESH_SETTLE,DISPLAY_REFRESH_DEFAULT};
+typedef int display_refresh_intent_t;
 typedef enum {UI_WEATHER_NONE,UI_WEATHER_CITY,UI_WEATHER_TODAY,UI_WEATHER_TOMORROW,UI_WEATHER_REFRESH,UI_WEATHER_SETTINGS} ui_weather_action_t;
 typedef int ui_icon_t;
 enum {UI_ICON_HOUSE,UI_ICON_CHEVRON_LEFT,UI_ICON_CHEVRON_RIGHT,UI_ICON_RADIO_TOWER,UI_ICON_BOOK_OPEN,UI_ICON_SUN,UI_ICON_EYE_CLOSED};
@@ -34,11 +37,17 @@ enum {UI_KEY_1,UI_KEY_2,UI_KEY_3};
 #define WEATHER_REGION_WIDTH 684
 #define WEATHER_REGION_HEIGHT 472
 static bool s_requested_city,s_city,s_weather_settings,s_tomorrow,s_keyboard_visible,s_keyboard_bound;
+static bool s_detail,s_settle;
+static EpdRect s_area;
+static ui_keyboard_update_t next_update={{24,612,636,114},false,false,false};
+static int refresh_intent,refreshes;
 static const int app_components=7;
 static char s_query[129],s_notice[97];
 static int s_edit,nav=-1,icons,cancels,ends,keys,begins,paints,pages,holds,idles,draws,requests,locates,searches,fields,location_controls;
+static unsigned row_names,row_admins,selections;
 static unsigned search_page;
 static bool pending,request_ok=true,save_ok=true,poll_changed;
+static bool idle_touch;
 static ui_keyboard_result_t key_result;
 static app_weather_view_t view;
 static app_home_widget_t slots[2]={APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER};
@@ -64,7 +73,7 @@ bool app_weather_request(app_weather_request_t type,const char *query){
 bool app_weather_search(const char *query,unsigned page){assert(query==s_query);++searches;search_page=page;return request_ok;}
 bool app_weather_set_enabled(bool enabled){view.enabled=enabled;return true;}
 bool app_weather_set_auto_refresh(bool enabled){if(save_ok)view.auto_refresh=enabled;return save_ok;}
-bool app_weather_select(const weather_location_t *city){if(save_ok)view.city=*city;return save_ok;}
+bool app_weather_select(const weather_location_t *city){++selections;if(save_ok)view.city=*city;return save_ok;}
 void app_weather_cancel_join(void){++cancels;}
 void app_weather_clear_search(void){view.result_count=view.result_total=view.result_page=0;view.notice[0]=0;}
 bool app_weather_poll(bool automatic){assert(automatic==(!s_city&&app_home_has_widget(APP_HOME_WIDGET_WEATHER)));return poll_changed;}
@@ -86,16 +95,29 @@ static void ui_keyboard_hold_cancel(void){}
 static bool ui_keyboard_page(int dir){assert(dir==1||dir==-1);++pages;return true;}
 static ui_keyboard_result_t ui_keyboard_tap(int x,int y,int top,int64_t now){(void)x;(void)y;(void)top;(void)now;++keys;return key_result;}
 static ui_keyboard_result_t ui_keyboard_hold_tick(bool held,int x,int y,int64_t now){(void)held;(void)x;(void)y;(void)now;++holds;return UI_KEYBOARD_NONE;}
-static ui_keyboard_result_t ui_keyboard_idle_tick(bool held,int64_t now){(void)held;(void)now;++idles;return UI_KEYBOARD_NONE;}
+static ui_keyboard_result_t ui_keyboard_idle_tick(bool held,int64_t now){(void)now;idle_touch=held;++idles;return UI_KEYBOARD_NONE;}
 static bool ui_text_input_tap(int *edit,EpdRect rect,int px,bool white,void *data,int x,int y){(void)edit;(void)rect;(void)px;(void)white;(void)data;(void)x;(void)y;return true;}
-static app_redraw_t keyboard_paint(app_ctx_t *ctx,bool force){(void)ctx;(void)force;++paints;return APP_REDRAW_AREA;}
+static ui_keyboard_update_t ui_keyboard_update(uint8_t *fb,int top,EpdRect field,int px,bool masked,void *suffix,bool force){
+    (void)fb;(void)force;assert(top==560&&field.x==36&&field.y==270&&field.width==480&&field.height==68&&px==28&&!masked&&!suffix);
+    ++paints;return next_update;
+}
+static int display_refresh_area(void *hl,int intent,EpdRect area,unsigned flags){
+    (void)hl;assert(area.x==s_area.x&&area.y==s_area.y&&area.width==s_area.width&&area.height==s_area.height&&flags==DISPLAY_REFRESH_DEFAULT);
+    refresh_intent=intent;++refreshes;return 0;
+}
+static void guard_draw_result(void *hl,int result){(void)hl;assert(!result);}
 static app_redraw_t edited(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
-static void ui_clear_page(uint8_t *fb){(void)fb;}
+static void ui_clear_page(uint8_t *fb){(void)fb;row_names=row_admins=0;}
 static void ui_nav_status(uint8_t *fb){(void)fb;}
 static void ui_text(uint8_t *fb,int x,int y,int px,const char *value,enum EpdFontFlags align,bool white){(void)fb;(void)x;(void)y;(void)px;(void)value;(void)align;(void)white;}
 static void text(uint8_t *fb,int x,int y,int px,const char *value,enum EpdFontFlags align){
     (void)fb;(void)x;(void)y;(void)px;(void)align;assert(!strstr(value,"重新识别"));
     if(!strcmp(value,"自动定位"))++location_controls;
+    if(s_city&&x==48&&y>=350&&y<1022){
+        assert(!s_keyboard_visible);
+        if(px==36){assert(y==376+(int)row_names*84);++row_names;}
+        else {assert(px==24&&y==412+(int)row_admins*84);++row_admins;}
+    }
 }
 static void fitted(uint8_t *fb,int x,int y,int px,const char *value,int width){(void)width;text(fb,x,y,px,value,EPD_DRAW_ALIGN_LEFT);}
 static void ui_draw_control_frame(uint8_t *fb,EpdRect rect,int radius,int gray){(void)fb;(void)rect;(void)radius;(void)gray;}
@@ -103,6 +125,7 @@ static void ui_fill_round_rect(uint8_t *fb,EpdRect rect,int radius,int gray){(vo
 static void epd_fill_circle(int x,int y,int radius,int gray,uint8_t *fb){(void)x;(void)y;(void)radius;(void)gray;(void)fb;}
 static void epd_draw_circle(int x,int y,int radius,int gray,uint8_t *fb){(void)x;(void)y;(void)radius;(void)gray;(void)fb;}
 static int ui_text_fixed_width_px(int px,const char *value){return px*(int)strlen(value);}
+static bool ui_rect_hit(EpdRect r,uint16_t x,uint16_t y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static void ui_text_input_draw(uint8_t *fb,int *edit,EpdRect rect,int px,bool masked,void *suffix){(void)fb;(void)edit;(void)rect;(void)px;(void)masked;(void)suffix;++fields;}
 static void ui_keyboard_draw(uint8_t *fb,int top){(void)fb;assert(top==560);++draws;}
 void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_view_t *v,int64_t now){(void)fb;assert(region.x==0&&region.y==236&&region.width==684&&region.height==472);(void)tomorrow;(void)v;(void)now;}
@@ -110,13 +133,23 @@ void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_
 for name, path in (("valid_region", ROOT / "main/ui/ui_weather.c"), ("refresh_button", ROOT / "main/ui/ui_weather.c"),
                    ("ui_weather_hit", ROOT / "main/ui/ui_weather.c"),
                    ("city_begin", PAGE), ("app_components_open", PAGE), ("app_components_open_home", PAGE), ("enter", PAGE),
-                   ("system_nav", PAGE), ("component_option", PAGE), ("render", PAGE),
+                   ("system_nav", PAGE), ("component_option", PAGE), ("city_result_row", PAGE), ("city_page_button", PAGE),
+                   ("render", PAGE), ("keyboard_paint", PAGE), ("present", PAGE),
                    ("keyboard_hide", PAGE), ("submit", PAGE), ("back", PAGE),
                    ("gesture", PAGE), ("tick", PAGE), ("key", PAGE)):
     unit += "\n" + function(name, path)
 unit += r'''
 int main(void){
     app_ctx_t ctx={0};
+    next_update.settle=true;
+    assert(keyboard_paint(&ctx,false)==APP_REDRAW_AREA&&present(&ctx,APP_REDRAW_AREA));
+    assert(refresh_intent==DISPLAY_REFRESH_SETTLE&&refreshes==1&&!s_settle);
+    next_update.settle=false;next_update.layout=true;
+    assert(keyboard_paint(&ctx,false)==APP_REDRAW_AREA&&present(&ctx,APP_REDRAW_AREA));
+    assert(refresh_intent==DISPLAY_REFRESH_DETAIL&&refreshes==2);
+    next_update.layout=false;
+    assert(keyboard_paint(&ctx,false)==APP_REDRAW_AREA&&present(&ctx,APP_REDRAW_AREA));
+    assert(refresh_intent==DISPLAY_REFRESH_FEEDBACK&&refreshes==3&&!present(&ctx,APP_REDRAW_PAGE));
     app_components_open_home(&ctx,APP_HOME_SLOT_COUNT);assert(!ctx.request_app);
     view.enabled=true;app_components_open_home(&ctx,APP_HOME_SLOT_BOTTOM);assert(ctx.request_app==&app_components);
     enter(&ctx);assert(!s_city&&!s_weather_settings&&!s_tomorrow&&layout_inits==1&&weather_inits==1&&prepares==1);
@@ -208,14 +241,40 @@ int main(void){
     event=(ui_gesture_event_t){UI_GESTURE_TAP,100,304};gesture(&ctx,&event);
     view.result_count=1;strcpy(view.results[0].name,"上海");
     save_ok=false;event=(ui_gesture_event_t){UI_GESTURE_TAP,100,365};
+    unsigned old_selections=selections;
+    assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_city&&!s_keyboard_visible&&selections==old_selections);
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_city&&!s_keyboard_visible&&s_notice[0]);
     save_ok=true;assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_city&&!strcmp(view.city.name,"上海"));
-    city_begin();strcpy(s_query,"杭州");view.result_count=5;view.result_total=14;view.result_page=0;
-    event=(ui_gesture_event_t){UI_GESTURE_TAP,614,540};
+    city_begin();strcpy(s_query,"杭州");view.result_count=8;view.result_total=14;view.result_page=0;
+    assert(WEATHER_CITY_LIMIT==8);
+    for(unsigned i=0;i<view.result_count;++i){
+        snprintf(view.results[i].id,sizeof(view.results[i].id),"10121010%u",i);
+        snprintf(view.results[i].name,sizeof(view.results[i].name),"杭州%u",i);
+        strcpy(view.results[i].admin2,"杭州市");strcpy(view.results[i].admin1,"浙江省");
+        EpdRect row=city_result_row(i);
+        assert(row.x==36&&row.y==350+(int)i*84&&row.width==612&&row.height==84);
+    }
+    assert(city_result_row(7).y+city_result_row(7).height<=city_page_button(false).y);
+    assert(city_page_button(false).y+city_page_button(false).height<UI_NAV_TOP);
+    render(&ctx,NULL);assert(row_names==8&&row_admins==8);
+    s_keyboard_visible=true;render(&ctx,NULL);assert(!row_names&&!row_admins);s_keyboard_visible=false;
+    for(unsigned i=0;i<8;++i)for(int edge=0;edge<3;++edge){
+        s_city=true;EpdRect row=city_result_row(i);
+        event=(ui_gesture_event_t){UI_GESTURE_TAP,edge==0?36:edge==1?342:647,row.y+(edge==0?0:edge==1?42:83)};
+        assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_city&&!strcmp(view.city.id,view.results[i].id));
+    }
+    s_city=true;old_selections=selections;
+    const int misses[][2]={{35,400},{648,400},{36,349},{36,1022},{36,1035},{648,1068},{36,1100}};
+    for(unsigned i=0;i<sizeof(misses)/sizeof(*misses);++i){
+        event=(ui_gesture_event_t){UI_GESTURE_TAP,misses[i][0],misses[i][1]};
+        assert(gesture(&ctx,&event)==APP_REDRAW_NONE&&s_city&&selections==old_selections);
+    }
+    event=(ui_gesture_event_t){UI_GESTURE_TAP,614,1068};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&search_page==1&&s_city);
-    view.result_page=2;int old_searches=searches;
+    view.result_page=1;view.result_count=6;int old_searches=searches;
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&searches==old_searches);
-    event.x0=70;assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&search_page==1);
+    render(&ctx,NULL);assert(row_names==6&&row_admins==6);
+    event.x0=70;assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&search_page==0);
     view.result_page=0;old_searches=searches;
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&searches==old_searches);
     render(&ctx,NULL);
@@ -229,7 +288,10 @@ int main(void){
     assert(key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&!s_weather_settings);
     ctx.request_return=false;assert(key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&ctx.request_return);
     city_begin();nav=-1;assert(key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&nav==0);
-    puts("PASS: three Home-only footers, unique slot swaps/double Empty/failure, weather settings and preserved city keyboard/location/back behavior");
+    s_keyboard_visible=true;touch_t touch={.touched=true,.count=2};ctx.touch=&touch;
+    assert(tick(&ctx)==APP_REDRAW_NONE&&idle_touch);
+    touch.touched=false;assert(tick(&ctx)==APP_REDRAW_NONE&&!idle_touch);
+    puts("PASS: eight large city rows/edge hits, paging/keyboard separation, full-pixel candidate settle, Home-only footers and weather settings");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="weather-nav-") as directory:
