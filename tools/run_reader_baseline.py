@@ -17,6 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "flash_fast": [sys.executable, "tools/flash_fast_host_test.py"],
     "weather": [sys.executable, "tools/weather_host_test.py"],
     "journal": [sys.executable, "tools/reading_journal_host_test.py"],
     "journal_reader": [sys.executable, "tools/reading_journal_reader_host_test.py"],
