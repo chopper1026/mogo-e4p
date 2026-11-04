@@ -58,7 +58,7 @@ if(NOT builtin_image_result EQUAL 0)
     message(FATAL_ERROR "Built-in image compression failed")
 endif()
 file(SIZE "${CMAKE_CURRENT_LIST_DIR}/assets/weather_backgrounds.bin" weather_background_size)
-if(NOT weather_background_size EQUAL 206976)
+if(NOT weather_background_size EQUAL 310464)
     message(FATAL_ERROR "Weather masks must be regenerated with tools/generate_weather_backgrounds.py")
 endif()
 idf_component_register(

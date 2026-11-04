@@ -26,9 +26,17 @@ Shared keys, utility buttons and the first candidate use white paper/black text;
 
 The platform persists the official public CSV as a city dictionary. Search and English-to-Chinese mapping query only that database, without QWeather Geo calls or quota use. IP results are canonicalized there and already include Chinese labels, IDs and dictionary coordinates. Firmware never issues a separate relabel request. The dictionary is a weather-location list, not an exhaustive administrative register.
 
-温度为当日最低/最高摄氏温度，以 `/` 分隔；湿度为白天预报湿度，不是实时传感器读数。日出为地平线上的半轮太阳；日落为半空完整太阳及向地面的箭头。缺失事件显示 `--:--`。全区背景区分太阳、云、雨、雪、雾和雷雨，未知代码保持中性。
+温度为当日最低/最高摄氏温度，以 `/` 分隔；湿度为白天预报湿度，不是实时传感器读数。日出为地平线上的半轮太阳；日落为半空完整太阳及向地面的箭头。缺失事件显示 `--:--`。全区背景区分晴、多云、阴、雨、雪、雨雪混合、雾霾、沙尘和雷雨；雾和霾共用背景，天气文字保留各自原描述。热、冷和未知代码保持中性，不推断天空状况。
 
-Temperatures are daily minimum/maximum °C separated by `/`, and humidity is daytime forecast humidity, not a live sensor. Sunrise uses a half sun at the horizon; sunset uses an airborne sun and downward arrow. Missing events show `--:--`. Region-wide scenes distinguish sun, cloud, rain, snow, fog and thunderstorms; unknown codes stay neutral.
+Temperatures are daily minimum/maximum °C separated by `/`, and humidity is daytime forecast humidity, not a live sensor. Sunrise uses a half sun at the horizon; sunset uses an airborne sun and downward arrow. Missing events show `--:--`. Region-wide scenes distinguish sun, cloud, overcast, rain, snow, mixed rain/snow, fog/haze, dust and thunderstorms. Fog and Haze share one background while retaining their original condition labels. Hot, cold and unknown codes stay neutral without inferring sky conditions.
+
+按和风[天气现象](https://dev.qweather.com/docs/api/weather/weather-conditions/)映射：`104` 为阴，`404–406` 为雨雪混合，`503/504/507/508` 为沙尘；雾 `500/501/509/510/514/515` 和霾 `502/511–513` 共用雾景。多云、小雨、雪仍沿用原背景，不按雨雪强度另外新增图片。
+
+Following QWeather's [condition list](https://dev.qweather.com/en/docs/api/weather/weather-conditions/), `104` selects Overcast, `404–406` mixed rain/snow and `503/504/507/508` Dust. Fog `500/501/509/510/514/515` and Haze `502/511–513` share the fog image. Cloud, Rain and Snow retain their images, without extra images for precipitation intensity.
+
+雾霾以林梢被低雾带遮挡表现低能见度，不使用全区平行斜线或独立霾图。雷阵雨使用独立云雨构图，闪电主干从云底贯穿到组件最下沿，允许自然分叉，以不规则转折、宽窄变化和内侧亮芯表现放电通道。背景仍沿用固定灰度的1bpp资源，不改变刷新策略；host图不等同于实屏效果。
+
+Fog and Haze use treetops obscured by low mist banks, without region-wide parallel slashes or a separate Haze asset. Thunderstorms have a separate cloud/rain composition and a discharge trunk running from the cloud base to the widget's bottom edge, with natural side channels, irregular turns, varied width and inner bright cores. Backgrounds retain fixed-gray 1bpp masks and existing refresh policy; host previews are not panel acceptance.
 
 ## 平台接口 / Platform Contract
 
@@ -84,18 +92,22 @@ Home layout uses `read_pico/home_regions`, committing both choices together and 
 
 Preference schema 3 stores official IDs, administrative metadata and the automatic toggle; cache schema 2 stores its forecast. This unreleased feature does not migrate earlier development formats, so select the city again. Writes happen on preference/city changes, never each poll.
 
-`ui_weather_draw()` 纯绘制，无联网、持久化或分配，显式接收684×472区域。首页两区从y=168开始，于y=1112直接接导航；公共导航仅绘制y=1112以下区域，不额外清白或保护上方24px内容。进入页面时准备684×472的4bpp暂存（161424字节PSRAM），离页释放，不另分配整屏缓冲。内存不足则保留清晰白底内容、略去装饰。复用系统字体，不增加内建字库。六种固定背景以1bpp只读资源保存，合计206976字节Flash，不额外占用PSRAM；设备直接绘制原纹理，文字留白按连续笔画合并。首页切日只重画并呈现天气所在区域，不重画页眉或最近阅读。分钟时钟仍独立局部更新，不改变波形或电源策略。
+`ui_weather_draw()` 纯绘制，无联网、持久化或分配，显式接收684×472区域。首页两区从y=168开始，于y=1112直接接导航；公共导航仅绘制y=1112以下区域，不额外清白或保护上方24px内容。进入页面时准备684×472的4bpp暂存（161424字节PSRAM），离页释放，不另分配整屏缓冲。内存不足则保留清晰白底内容、略去装饰。复用系统字体，不增加内建字库。九种固定背景以1bpp只读资源保存，合计310464字节Flash，雾霾共图，不额外占用PSRAM；设备直接绘制原纹理，文字留白按连续笔画合并。首页切日只重画并呈现天气所在区域，不重画页眉或最近阅读。分钟时钟仍独立局部更新，不改变波形或电源策略。
 
 内容刷新截止与固定导航起点统一为y=1112，所有页面普通整页/局部差分直接覆盖y=1088–1111，不再把这24px作为固定区或另留白带。32列物理对齐仍由底层处理，固定导航取真实已显示像素。仅全像素清理向内对齐到y=1088并对余下内容补差分，避免驱动固定导航；导航图标及横条位置不变。
 
 Content differences and fixed navigation share y=1112 across all pages, so ordinary page and area updates directly include y=1088–1111. Only full-pixel cleanup aligns inward to y=1088 and completes the remaining content with differences, preserving fixed navigation pixels and icon positions.
 
-`ui_weather_draw()` only paints into an explicit 684x472 region, without networking, persistence or allocation. Home regions start at y=168 and meet navigation at y=1112. Shared navigation paints only y=1112 and below, without clearing or protecting 24 extra content rows. Entry prepares a 161424-byte region-sized scratch; exit releases it. There is no extra full-screen buffer. Allocation failure retains white-background content. The active font is reused. Six fixed 1bpp backgrounds use 206976 bytes of read-only Flash without extra PSRAM. Firmware stamps original textures and combines contiguous ink halos into spans. Day switching presents only the weather region, leaving the header and reading untouched. The minute clock stays independent; waveforms/power policy are unchanged.
+`ui_weather_draw()` only paints into an explicit 684x472 region, without networking, persistence or allocation. Home regions start at y=168 and meet navigation at y=1112. Shared navigation paints only y=1112 and below, without clearing or protecting 24 extra content rows. Entry prepares a 161424-byte region-sized scratch; exit releases it. There is no extra full-screen buffer. Allocation failure retains white-background content. The active font is reused. Nine fixed 1bpp backgrounds use 310464 bytes of read-only Flash with a shared Fog/Haze image and no extra PSRAM. Firmware stamps original textures and combines contiguous ink halos into spans. Day switching presents only the weather region, leaving the header and reading untouched. The minute clock stays independent; waveforms/power policy are unchanged.
 
 背景原图在 `main/assets/weather/`，资源由 `python3 tools/generate_weather_backgrounds.py` 无损打包；`--check` 校验可复现性，不手改二进制。/ Source masks live in `main/assets/weather/`; losslessly pack them with `python3 tools/generate_weather_backgrounds.py`, or verify with `--check`. Do not hand-edit the binary.
 
 ## 验证入口 / Verification
 
-`python3 tools/weather_host_test.py` 或 `python3 tools/run_reader_baseline.py weather` 覆盖真实解析/缓存、取消服务与NVS交接、七类原生背景/双旋转/区域边界/内存降级。固定样本不是定位、供应商接入或实屏证据。产品构建仍须 IDF6.1/S31 `--preview`；部署、供应商实测和刷机分别需要授权。
+`python3 tools/weather_host_test.py` 或 `python3 tools/run_reader_baseline.py weather` 覆盖真实解析/缓存、取消服务与NVS交接、九种背景及中性画面/双旋转/区域边界/内存降级，并逐像素验证四个霾代码与雾景共图。固定样本不是定位、供应商接入或实屏证据。产品构建仍须 IDF6.1/S31 `--preview`；部署、供应商实测和刷机分别需要授权。
 
-The weather host suite covers real parsing/cache, cancellable service/NVS handoff and seven native scenes, two rotations, bounds and allocation fallback. Fixtures are not location/provider/optical evidence. Product builds require IDF6.1/S31 `--preview`; deployment, provider tests and flashing require separate authorization.
+The weather host suite covers real parsing/cache, cancellable service/NVS handoff, nine backgrounds plus neutral, two rotations, bounds and allocation fallback, and pixel-identical rendering for all four Haze codes versus Fog. Fixtures are not location/provider/optical evidence. Product builds require IDF6.1/S31 `--preview`; deployment, provider tests and flashing require separate authorization.
+
+`python3 tools/weather_raster_host_test.py --output-dir build/weather-preview` 在回归通过后导出十类天气（雾霾共图）及中性画面的今日/明日共22张原生组件图、五张对照图和PNG压缩包，使用当前固件绘制与内置字体，不访问网络。
+
+After regressions pass, `python3 tools/weather_raster_host_test.py --output-dir build/weather-preview` exports 22 native widget images (ten conditions with shared Fog/Haze, plus neutral, Today/Tomorrow), five comparison sheets and a PNG archive using current firmware drawing and the built-in font, without networking.

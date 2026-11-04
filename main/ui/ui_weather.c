@@ -14,7 +14,7 @@
 #define WEATHER_REGION_HEIGHT 472
 #define WEATHER_BACKGROUND_INK 0x50
 #define WEATHER_BACKGROUND_ROW_BYTES ((WEATHER_WIDTH+7)/8)
-extern const uint8_t weather_backgrounds_asset[6*WEATHER_BACKGROUND_ROW_BYTES*WEATHER_HEIGHT]
+extern const uint8_t weather_backgrounds_asset[(WEATHER_SCENE_COUNT-1)*WEATHER_BACKGROUND_ROW_BYTES*WEATHER_HEIGHT]
     asm("_binary_weather_backgrounds_bin_start");
 static uint8_t *s_scratch;
 bool ui_weather_prepare(void) {
@@ -35,7 +35,7 @@ static void stroke(uint8_t *f,double ax,double ay,double bx,double by,int width,
     }
 }
 static void draw_background(uint8_t *f,EpdRect region,weather_scene_t scene){
-    if(scene<WEATHER_SCENE_SUN||scene>WEATHER_SCENE_STORM)return;
+    if(scene<WEATHER_SCENE_SUN||scene>=WEATHER_SCENE_COUNT)return;
     const uint8_t *mask=weather_backgrounds_asset+(scene-WEATHER_SCENE_SUN)*WEATHER_BACKGROUND_ROW_BYTES*WEATHER_HEIGHT;
     for(int y=0;y<region.height;++y)for(int x=0;x<region.width;++x){
         int sx=x*WEATHER_WIDTH/region.width,sy=y*WEATHER_HEIGHT/region.height;

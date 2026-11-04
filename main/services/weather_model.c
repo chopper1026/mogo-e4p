@@ -249,11 +249,16 @@ const weather_day_t *weather_day_for(const weather_forecast_t *f, int64_t now, b
 }
 weather_scene_t weather_scene(int code) {
     if (code == 100 || code == 150) return WEATHER_SCENE_SUN;
-    if ((code >= 101 && code <= 104) || (code >= 151 && code <= 153)) return WEATHER_SCENE_CLOUD;
+    if (code == 104) return WEATHER_SCENE_OVERCAST;
+    if ((code >= 101 && code <= 103) || (code >= 151 && code <= 153)) return WEATHER_SCENE_CLOUD;
     if (code >= 302 && code <= 304) return WEATHER_SCENE_STORM;
     if (code >= 300 && code <= 399) return WEATHER_SCENE_RAIN;
+    if (code >= 404 && code <= 406) return WEATHER_SCENE_SLEET;
     if (code >= 400 && code <= 499) return WEATHER_SCENE_SNOW;
-    if (code >= 500 && code <= 515) return WEATHER_SCENE_FOG;
+    if (code == 503 || code == 504 || code == 507 || code == 508) return WEATHER_SCENE_DUST;
+    if (code == 500 || code == 501 || code == 502 || code == 509 || code == 510 ||
+        (code >= 511 && code <= 515))
+        return WEATHER_SCENE_FOG;
     return WEATHER_SCENE_NEUTRAL;
 }
 bool weather_url_encode(const char *text, char *out, size_t cap) {

@@ -6,7 +6,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET = ROOT / "main/assets/weather_backgrounds.bin"
-SIZE = 6 * ((612 + 7) // 8) * 448
+SCENES = ("sun", "rain", "cloud", "snow", "fog", "storm", "dust", "sleet", "overcast")
+SIZE = len(SCENES) * ((612 + 7) // 8) * 448
 
 
 def host_definition():
@@ -24,7 +25,7 @@ def main():
     parser.add_argument("--output", type=Path, default=ASSET)
     args = parser.parse_args()
     packed = bytearray()
-    for name in ("sun", "rain", "cloud", "snow", "fog", "storm"):
+    for name in SCENES:
         with Image.open(ROOT / "main/assets/weather" / (name + ".png")) as image:
             if image.mode != "1" or image.size != (612, 448):
                 raise ValueError(f"{name}: expected a native-size 1bpp source mask")
@@ -41,7 +42,7 @@ def main():
     if args.check:
         if not args.output.exists() or args.output.read_bytes() != data:
             raise SystemExit("Weather background asset is outdated; run tools/generate_weather_backgrounds.py")
-        print("PASS: six approved 1bpp weather masks are reproducible")
+        print(f"PASS: {len(SCENES)} 1bpp weather masks are reproducible")
     elif not args.output.exists() or args.output.read_bytes() != data:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(data)

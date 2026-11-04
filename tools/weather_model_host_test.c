@@ -71,6 +71,29 @@ int main(void) {
     free(json);cJSON_Delete(root);
     assert(weather_scene(999)==WEATHER_SCENE_NEUTRAL&&weather_scene(100)==WEATHER_SCENE_SUN);
     assert(weather_scene(302)==WEATHER_SCENE_STORM&&weather_scene(400)==WEATHER_SCENE_SNOW);
+    const int scene_codes[][24]={
+        {100,150},
+        {300,301,305,306,307,308,309,310,311,312,313,314,315,316,317,318,350,351,399},
+        {101,102,103,151,152,153},
+        {400,401,402,403,407,408,409,410,456,457,499},
+        {500,501,502,509,510,511,512,513,514,515},
+        {302,303,304},
+        {503,504,507,508},
+        {404,405,406},
+        {104}
+    };
+    unsigned seen_scenes=0;
+    for(unsigned i=0;i<sizeof(scene_codes)/sizeof(*scene_codes);++i){
+        weather_scene_t scene=weather_scene(scene_codes[i][0]);
+        assert(scene>WEATHER_SCENE_NEUTRAL&&scene<WEATHER_SCENE_COUNT);
+        assert(!(seen_scenes&(1u<<scene)));
+        seen_scenes|=1u<<scene;
+        for(unsigned j=0;j<24&&scene_codes[i][j];++j)assert(weather_scene(scene_codes[i][j])==scene);
+    }
+    assert((seen_scenes>>1)==((1u<<(WEATHER_SCENE_COUNT-1))-1));
+    const int neutral_codes[]={0,99,105,149,154,200,299,505,506,516,899,900,901,999,1000};
+    for(unsigned i=0;i<sizeof(neutral_codes)/sizeof(*neutral_codes);++i)
+        assert(weather_scene(neutral_codes[i])==WEATHER_SCENE_NEUTRAL);
     assert(weather_url_encode("杭州 &?",text,sizeof(text))&&!strcmp(text,"%E6%9D%AD%E5%B7%9E%20%26%3F"));
     assert(!weather_url_encode("杭州",text,5)&&!text[0]);
     assert(weather_query_valid("杭州")&&weather_query_valid("hangzhou")&&!weather_query_valid("杭")&&!weather_query_valid("\xff\xff"));
