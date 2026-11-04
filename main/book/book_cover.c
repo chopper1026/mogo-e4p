@@ -21,7 +21,7 @@ bool book_cover_thumbnail(const uint8_t *data, size_t size, bool png,
 /* ---- 共享封面缓存 / Shared cover cache ---- */
 
 #define COVER_CACHE_MAGIC UINT32_C(0x52435041)
-#define COVER_CACHE_SCHEMA 1u
+#define COVER_CACHE_SCHEMA 2u
 
 typedef struct {
     uint32_t magic, schema, template_version, width, height;

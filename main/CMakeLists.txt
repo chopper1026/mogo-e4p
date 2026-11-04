@@ -14,6 +14,7 @@ set(main_requires
     # 渐进式 JPEG；基线仍走 esp_jpeg。/ Progressive JPEG; baseline stays on esp_jpeg.
     jpegdec
     espressif__libpng
+    webp_decoder
     espressif__zlib
     espressif__esp_tinyusb
     # BLE HID 主机（蓝牙翻页器）。本仓库开了 MINIMAL_BUILD，组件不进依赖图的话连它的
@@ -167,6 +168,7 @@ idf_component_register(
         "book/book_epub.c"
         "book/book_cover.c"
         "image/image_decode.c"
+        "image/image_webp.c"
         "image/book_jpeg_hw.c"
         "book/book_cover_jobs.c"
         "book/book_shelf_covers.c"

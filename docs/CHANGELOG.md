@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.3 · 本地测试 / Local testing · 2026-11-04
 
+- 修复含冒号等特殊文件名的部分 EPUB 无法打开；新增静态 WebP 封面/插图解码，并将正文 body 的单图背景保留为插图，重建旧自动封面缓存。原书无需转换，宿主回归通过，两个问题样本已刷入设备并由用户确认恢复。/ Fix opening EPUBs with literal-colon archive names; add static WebP covers/illustrations and body single-background illustrations, rebuilding old fallback-cover caches. No book conversion; host checks passed and the user confirmed recovery of both reported samples after flashing.
 - 新增可选半屏「阅读手账」：首页显示当天书目、时长、章节和翻页次数，点击进入当月日历查看逐日明细；六幅像素插画每天轮换，也可点图手动切换，同日选择保存。明细保存在本机，不纳入现有设置备份，实机效果待验收。/ Add an optional half-screen Reading journal with today's books/time/chapters/turns, a current-month daily calendar and six persistent daily/manual pixel scenes. Records stay local and outside existing settings backups; device acceptance remains pending.
 - 首页续读按下反馈改为封面外缘黑色描边，不再移动灰阶封面，避免长按进入组件页时遗留旧封面底边；不增加整页强刷，实屏改善待验证。/ Keep Home cover pixels fixed and show a black margin outline on press to avoid an old bottom edge after holding into Components; no extra full-page refresh, with panel improvement awaiting verification.
 - 天气组件补充沙尘、雨雪混合与阴天三种背景，按官方天气代码区分；雾和霾共用雾景，移除独立霾图。热、冷和未知状态仍保持中性。/ Add Dust, mixed rain/snow and Overcast backgrounds mapped by official condition codes; Fog and Haze share the fog image, with no separate Haze asset. Hot, Cold and Unknown remain neutral.

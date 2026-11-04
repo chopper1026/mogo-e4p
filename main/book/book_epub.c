@@ -531,7 +531,7 @@ static bool resolve_path(const char *base, const char *href, char out[EPUB_PATH_
             int a = hex(href[i + 1]), b = hex(href[i + 2]); if (a < 0 || b < 0) return false;
             c = (unsigned char)((a << 4) | b); i += 2;
         }
-        if (c < 32 || c == 127 || c == '\\' || c == ':' || c == '?' || used + 1 >= sizeof(decoded)) return false;
+        if (c < 32 || c == 127 || c == '\\' || c == '?' || used + 1 >= sizeof(decoded)) return false;
         decoded[used++] = (char)c;
     }
     decoded[used] = 0;
@@ -540,6 +540,14 @@ static bool resolve_path(const char *base, const char *href, char out[EPUB_PATH_
         strcpy(out, base); return true;
     }
     if (decoded[0] == '/') return false;
+    // 按 URI 协议名语法拦截外部地址；其余冒号保留为 ZIP 文件名的一部分。
+    // Reject URI scheme syntax, preserving other colons as literal ZIP name bytes.
+    bool scheme = isalpha((unsigned char)decoded[0]) != 0;
+    for (size_t i = 0; decoded[i] && decoded[i] != '/'; ++i) {
+        unsigned char c = (unsigned char)decoded[i];
+        if (c == ':' && scheme) return false;
+        if (!isalnum(c) && c != '+' && c != '-' && c != '.') scheme = false;
+    }
     size_t length = 0;
     const char *slash = strrchr(base, '/'); if (slash) length = (size_t)(slash - base);
     if (length >= EPUB_PATH_CAP) return false;
@@ -1899,6 +1907,70 @@ typedef struct {
     char path[EPUB_PATH_CAP];
 } css_link_scratch_t;
 
+// 合并样式前将 url 相对样式表解析，再编码为相对正文的路径，不能误用正文目录。
+// Resolve stylesheet URLs before merging, then encode paths relative to the chapter.
+static char *css_rebase_urls(const char *css, size_t len, const char *base,
+                             const char *chapter, size_t cap, size_t *out_len) {
+    char *out = psram(cap), *paths = psram(2 * EPUB_PATH_CAP);
+    if (!out || !paths) { free(out); free(paths); return NULL; }
+    size_t used = 0, i = 0;
+    char quote = 0;
+    bool comment = false;
+    while (i < len) {
+        if (!quote && !comment && i + 4 <= len && !strncasecmp(css + i, "url(", 4) &&
+            (!i || !(isalnum((unsigned char)css[i - 1]) || css[i - 1] == '_' || css[i - 1] == '-'))) {
+            size_t at = i + 4;
+            while (at < len && space(css[at])) ++at;
+            char q = at < len && (css[at] == '\'' || css[at] == '"') ? css[at++] : 0;
+            size_t start = at;
+            while (at < len && (q ? css[at] != q : css[at] != ')')) ++at;
+            size_t stop = at;
+            if (q && at < len) ++at;
+            while (at < len && space(css[at])) ++at;
+            while (stop > start && space(css[stop - 1])) --stop;
+            size_t n = stop - start;
+            if (at < len && css[at] == ')' && n && n < EPUB_PATH_CAP) {
+                memcpy(paths, css + start, n); paths[n] = 0;
+                if (resolve_path(base, paths, paths + EPUB_PATH_CAP)) {
+                    const char *resolved = paths + EPUB_PATH_CAP;
+                    size_t need = 7;
+                    for (const char *p = chapter; *p; ++p) if (*p == '/') need += 3;
+                    for (const unsigned char *p = (const unsigned char *)resolved; *p; ++p)
+                        need += *p <= 32 || *p == '%' || *p == '\'' || *p == '"' || *p == '#' ? 3 : 1;
+                    if (need > cap - used) goto fail;
+                    memcpy(out + used, "url('", 5); used += 5;
+                    for (const char *p = chapter; *p; ++p) if (*p == '/') {
+                        memcpy(out + used, "../", 3); used += 3;
+                    }
+                    static const char digits[] = "0123456789ABCDEF";
+                    for (const unsigned char *p = (const unsigned char *)resolved; *p; ++p) {
+                        if (*p <= 32 || *p == '%' || *p == '\'' || *p == '"' || *p == '#') {
+                            out[used++] = '%'; out[used++] = digits[*p >> 4]; out[used++] = digits[*p & 15];
+                        } else out[used++] = (char)*p;
+                    }
+                    memcpy(out + used, "')", 2); used += 2;
+                    i = at + 1;
+                    continue;
+                }
+            }
+        }
+        if (used == cap) goto fail;
+        char c = css[i++]; out[used++] = c;
+        if (comment) {
+            if (c == '/' && i >= 2 && css[i - 2] == '*') comment = false;
+        } else if (quote) {
+            if (c == '\\' && i < len) {
+                if (used == cap) goto fail;
+                out[used++] = css[i++];
+            } else if (c == quote) quote = 0;
+        } else if (c == '/' && i < len && css[i] == '*') comment = true;
+        else if (c == '\'' || c == '"') quote = c;
+    }
+    free(paths); *out_len = used; return out;
+fail:
+    free(paths); free(out); return NULL;
+}
+
 // 仅提取章节引用的本地样式，超过预算的 CSS 忽略但不阻断正文。顺便把 @font-face
 // 记进字体表：样式表已经解压到手上，再单独读一遍是浪费。
 // Load bounded in-book stylesheets; oversized CSS never blocks chapter text. The same pass
@@ -1935,7 +2007,20 @@ static char *chapter_css(book_epub_t *book, const char *chapter_path,
                         css = next;
                         if (zip_extract(book->zip, index, css + *css_len, n) == ESP_OK) {
                             css_add_faces(book, sc->path, css + *css_len, n);
-                            *css_len += n; css[(*css_len)++] = '\n';
+                            size_t rebased_len = 0;
+                            char *rebased = css_rebase_urls(css + *css_len, n, sc->path,
+                                chapter_path, EPUB_CSS_MAX - *css_len - 1, &rebased_len);
+                            if (rebased) {
+                                next = heap_caps_realloc(css, *css_len + rebased_len + 1,
+                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                if (next) {
+                                    css = next;
+                                    memcpy(css + *css_len, rebased, rebased_len);
+                                    *css_len += rebased_len;
+                                    css[(*css_len)++] = '\n';
+                                }
+                                free(rebased);
+                            }
                         }
                     }
                 }
@@ -1995,9 +2080,10 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
     if (err != ESP_OK) { free(image); return err; }
     bool is_png = n >= 8 && !memcmp(image, "\x89PNG\r\n\x1a\n", 8);
     bool is_jpeg = n >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;
-    if (!is_png && !is_jpeg) {
-        // 许多中文 EPUB 用 SVG 只包一张 JPEG/PNG。解析这一层引用即可复用现有低内存解码器。
-        // Many Chinese EPUBs wrap one JPEG/PNG in SVG. Resolve that one reference and reuse the bounded decoder.
+    bool is_webp = n >= 12 && !memcmp(image, "RIFF", 4) && !memcmp(image + 8, "WEBP", 4);
+    if (!is_png && !is_jpeg && !is_webp) {
+        // SVG 单图包装可引用 JPEG/PNG/静态 WebP，解析一层后复用有界解码器。
+        // Resolve one SVG wrapper reference to JPEG/PNG/static WebP through the bounded decoder.
         char nested[EPUB_PATH_CAP] = {0};
         for (size_t i = 0; i + 4 < n && !nested[0]; ++i) {
             if (strncasecmp((const char *)image + i, "href", 4)) continue;
@@ -2026,7 +2112,8 @@ esp_err_t book_epub_image(book_epub_t *book, size_t chapter, const char *src,
         if (err != ESP_OK) { free(image); return err; }
         is_png = n >= 8 && !memcmp(image, "\x89PNG\r\n\x1a\n", 8);
         is_jpeg = n >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff;
-        if (!is_png && !is_jpeg) { free(image); return ESP_ERR_NOT_SUPPORTED; }
+        is_webp = n >= 12 && !memcmp(image, "RIFF", 4) && !memcmp(image + 8, "WEBP", 4);
+        if (!is_png && !is_jpeg && !is_webp) { free(image); return ESP_ERR_NOT_SUPPORTED; }
     }
     *data = image; *size = n; *png = is_png;
     return ESP_OK;
@@ -2156,7 +2243,8 @@ esp_err_t book_epub_cover_bounded(const char *path, uint8_t **data, size_t *size
                 if (!attribute(t, "id", scratch->id, sizeof(scratch->id)) || !attribute(t, "href", scratch->href, sizeof(scratch->href)) ||
                     !attribute(t, "media-type", scratch->media, sizeof(scratch->media)) || !attribute(t, "properties", scratch->props, sizeof(scratch->props))) continue;
                 bool png = !strcmp(scratch->media, "image/png"), jpeg = !strcmp(scratch->media, "image/jpeg") || !strcmp(scratch->media, "image/jpg");
-                if (!(png || jpeg) || !(word(scratch->props, "cover-image") || (scratch->cover_id[0] && !strcmp(scratch->id, scratch->cover_id)))) continue;
+                bool webp = !strcmp(scratch->media, "image/webp");
+                if (!(png || jpeg || webp) || !(word(scratch->props, "cover-image") || (scratch->cover_id[0] && !strcmp(scratch->id, scratch->cover_id)))) continue;
                 if (resolve_path(scratch->opf, scratch->href, scratch->cover_path)) { cover_png = png; break; }
             }
         }

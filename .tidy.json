@@ -10,6 +10,7 @@
     "components/board_support/README.md",
     "components/board_i2c/README.md",
     "components/book_search/README.md",
+    "components/webp_decoder/README.md",
     "components/device_power/README.md",
     "components/device_power/docs",
     "components/cst836u/README.md",

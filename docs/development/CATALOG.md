@@ -17,6 +17,7 @@
 - [components/e0470_epaper_waveform/README.md](../../components/e0470_epaper_waveform/README.md)
 - [components/fca9555/README.md](../../components/fca9555/README.md)
 - [components/sc7a20h/README.md](../../components/sc7a20h/README.md)
+- [components/webp_decoder/README.md](../../components/webp_decoder/README.md)
 - [docs/ARCHITECTURE.md](../ARCHITECTURE.md)
 - [docs/CHANGELOG.md](../CHANGELOG.md)
 - [docs/COMMIT_CONVENTION.md](../COMMIT_CONVENTION.md)

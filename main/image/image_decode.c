@@ -3,6 +3,7 @@
  * English: Generic memory/stream image decoding and scaling, without book or page state.
  */
 #include "image_decode.h"
+#include "image_webp.h"
 #include "book_jpeg_hw.h"
 #include <errno.h>
 #include <setjmp.h>
@@ -426,6 +427,8 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
     if (!data || !size || !out || !out_width || !out_height ||
         out_width > 1216 || out_height > 1216 || (size_t)out_width * out_height > 684u * 1216u)
         return false;
+    if (size >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4))
+        return book_webp_grayscale(data, size, out_width, out_height, out);
     return png ? png_gray_input(data, size, NULL, out_width, out_height, out, NULL)
                : jpeg_gray(data, size, out_width, out_height, out);
 }

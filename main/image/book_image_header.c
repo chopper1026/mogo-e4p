@@ -2,6 +2,36 @@
 #include "image_decode.h"
 #include <string.h>
 
+static uint32_t webp_u24(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16;
+}
+
+// ZIP 探测只提供有界前缀；这里只读取标准帧头，完整载荷由 libwebp 验证。
+// ZIP probing supplies a bounded prefix; libwebp validates the full payload during decoding.
+static bool webp_dimensions(const uint8_t *data, size_t size, unsigned *width, unsigned *height) {
+    if (size < 20) return false;
+    uint32_t riff = webp_u24(data + 4) | (uint32_t)data[7] << 24;
+    uint32_t chunk = webp_u24(data + 16) | (uint32_t)data[19] << 24;
+    if (riff < 12 || chunk > riff - 12) return false;
+    if (!memcmp(data + 12, "VP8X", 4)) {
+        if (size < 30 || chunk != 10 || (data[20] & 0xc3) ||
+            data[21] || data[22] || data[23]) return false;
+        *width = webp_u24(data + 24) + 1;
+        *height = webp_u24(data + 27) + 1;
+    } else if (!memcmp(data + 12, "VP8L", 4)) {
+        if (size < 25 || chunk < 5 || data[20] != 0x2f || (data[24] & 0xe0)) return false;
+        uint32_t bits = webp_u24(data + 21) | (uint32_t)data[24] << 24;
+        *width = (bits & 0x3fff) + 1;
+        *height = ((bits >> 14) & 0x3fff) + 1;
+    } else if (!memcmp(data + 12, "VP8 ", 4)) {
+        if (size < 30 || chunk < 10 || (data[20] & 1) || memcmp(data + 23, "\x9d\x01\x2a", 3)) return false;
+        *width = ((unsigned)data[26] | (unsigned)data[27] << 8) & 0x3fff;
+        *height = ((unsigned)data[28] | (unsigned)data[29] << 8) & 0x3fff;
+    } else return false;
+    return *width && *height && *width <= 8192 && *height <= 8192 &&
+        (uint64_t)*width * *height <= 4194304u;
+}
+
 bool book_jpeg_frame(const uint8_t *data, size_t size, uint8_t *sof,
                        unsigned *width, unsigned *height) {
     if (!data || size < 4 || data[0] != 0xFF || data[1] != 0xD8) return false;
@@ -33,6 +63,11 @@ bool book_image_dimensions(const uint8_t *data, size_t size, bool png,
                            unsigned *width, unsigned *height) {
     if (!data || !width || !height) return false;
     *width = *height = 0;
+    if (size >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4)) {
+        if (webp_dimensions(data, size, width, height)) return true;
+        *width = *height = 0;
+        return false;
+    }
     if (png) {
         static const uint8_t signature[8] = {137,80,78,71,13,10,26,10};
         if (size < 24 || memcmp(data, signature, 8) || memcmp(data + 12, "IHDR", 4)) return false;

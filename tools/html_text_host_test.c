@@ -110,6 +110,17 @@ int main(void) {
     html_text_free(&t);
     // 后代、子元素、优先级和不支持的选择器不能扩散到普通正文。
     // Descendants, children, specificity and unsupported selectors never broaden to ordinary prose.
+    t = parse("<style>body{background-image:url('base.png')}"
+              "body.plate{background-position:top;/* placement */background-image:url('art.webp')}"
+              "div{background-image:url('decoration.png')}</style>"
+              "<body class='plate'><p>Caption</p><div>Text</div></body>", "￼\nCaption\nText");
+    assert(t.image_count == 1 && !strcmp(t.images[0], "art.webp") && t.blocks[0].image == 0);
+    html_text_free(&t);
+    t = parse("<style>body{background-image:url('base.png')}</style>"
+              "<body style='background-image:none'><p>Text</p></body>", "Text");
+    assert(!t.image_count); html_text_free(&t);
+    t = parse("<body style=\"background-image:url('inline.webp')\"><p>Text</p></body>", "￼\nText");
+    assert(t.image_count == 1 && !strcmp(t.images[0], "inline.webp")); html_text_free(&t);
     t = parse("<style>.js p{text-align:right}.js > p{text-align:center} p{text-align:left}"
               " .x:before p{text-align:right}.s + p{text-align:right}</style>"
               "<p>normal</p><div class='js'><p>direct</p><section><p>deep</p></section></div><p>tail</p>",

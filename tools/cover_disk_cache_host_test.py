@@ -81,10 +81,15 @@ int main(int argc,char **argv){
  changed=key;changed.width=120;changed.height=156;assert(!book_cover_fast_cache_read(path,"name","author",changed,out,&edge));
  assert(!book_cover_fast_cache_read(path,"name","other author",key,out,&edge));
  char cache[120];fast_cover_header_t h;assert(fast_cover_key(path,"name","author",key,cache,&h));
+ assert(COVER_CACHE_SCHEMA>1);
+ FILE *f=fopen(cache,"r+b");fast_cover_header_t old;assert(f&&fread(&old,1,sizeof(old),f)==sizeof(old));
+ old.source.schema=COVER_CACHE_SCHEMA-1;rewind(f);assert(fwrite(&old,1,sizeof(old),f)==sizeof(old));fclose(f);
+ assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
+ book_cover_fast_cache_write(path,"name","author",key,bits,true);
  uint8_t stale[4494];memset(stale,0,sizeof(stale));
  book_cover_fast_cache_write_checked(path,"name","author",key,stale,false,(int64_t)h.source.file_size+1,h.source.modified);
  assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!memcmp(out,bits,4494));
- FILE *f=fopen(cache,"r+b");assert(f&&fseek(f,sizeof(h)+8,SEEK_SET)==0);int byte=fgetc(f);fseek(f,-1,SEEK_CUR);assert(fputc(byte^1,f)!=EOF);fclose(f);
+ f=fopen(cache,"r+b");assert(f&&fseek(f,sizeof(h)+8,SEEK_SET)==0);int byte=fgetc(f);fseek(f,-1,SEEK_CUR);assert(fputc(byte^1,f)!=EOF);fclose(f);
  assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
  book_cover_fast_cache_write(path,"name","author",key,bits,true);assert(load_shelf_cover_fast(0,0));
  save_shelf_cover_fast(0,0);free(s_covers[0].fast_bits);s_covers[0].fast_bits=NULL;

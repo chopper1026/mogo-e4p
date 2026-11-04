@@ -80,6 +80,18 @@ def main():
             return lambda files: files.__setitem__('OPS/pkg/book.opf', files['OPS/pkg/book.opf'].replace(old, new))
 
         case('good_paths')
+        def colon_paths(files):
+            renamed = {}
+            for name, content in files.items():
+                for i in range(1, 5):
+                    target = f'_**::*{i}:chapter'
+                    name = name.replace(f'part {i}&x', target)
+                    for old in (f'part%20{i}%26x', f'part%20{i}&amp;x'):
+                        content = content.replace(old, target)
+                renamed[name] = content
+            files.clear()
+            files.update(renamed)
+        case('good_colons', colon_paths)
         def bounded_cover(files):
             files['OPS/pkg/book.opf'] = files['OPS/pkg/book.opf'].replace(
                 '</manifest>', '<item id="image-cover" href="../covers/test.png" '
@@ -247,6 +259,15 @@ def main():
         case('good_resources', resources)
         case('bad_escape', replace_opf('../text/part%201%26x.xhtml#start', '../../../escape.xhtml'))
         case('bad_url', replace_opf('../text/part%201%26x.xhtml#start', 'https://example.org/a.xhtml'))
+        for name, href in (
+                ('encoded_scheme', 'https%3a//example.org/a.xhtml'),
+                ('file_scheme', 'file:///tmp/a.xhtml'),
+                ('data_scheme', 'data:text/plain,hello'),
+                ('drive', 'C:/a.xhtml'),
+                ('absolute', '/a.xhtml'),
+                ('network', '//example.org/a.xhtml'),
+                ('encoded_escape', '%2e%2e/%2e%2e/%2e%2e/a.xhtml')):
+            case('bad_' + name, replace_opf('../text/part%201%26x.xhtml#start', href))
         case('bad_percent', replace_opf('../text/part%201%26x.xhtml#start', '../text/%XX.xhtml'))
         case('bad_duplicate', replace_opf('id="c2"', 'id="c1"'))
         case('bad_missingref', replace_opf('idref="c2"', 'idref="missing"'))

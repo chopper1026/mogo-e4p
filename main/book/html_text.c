@@ -35,10 +35,13 @@ enum {
     CSS_BEFORE = 1u << 2,
     CSS_AFTER = 1u << 3,
     CSS_FAMILY = 1u << 4,
+    CSS_BACKGROUND = 1u << 5,
 };
 
 typedef struct {
     uint8_t mask, align, indent, before, after, family;
+    const char *background;
+    size_t background_len;
 } css_style_t;
 
 typedef struct {
@@ -120,6 +123,10 @@ static void css_apply(css_style_t* dst, const css_style_t* src) {
     if (src->mask & CSS_BEFORE) dst->before = src->before;
     if (src->mask & CSS_AFTER) dst->after = src->after;
     if (src->mask & CSS_FAMILY) dst->family = src->family;
+    if (src->mask & CSS_BACKGROUND) {
+        dst->background = src->background;
+        dst->background_len = src->background_len;
+    }
     dst->mask |= src->mask;
 }
 
@@ -172,6 +179,11 @@ static uint8_t css_length_percent(const char* value, size_t len) {
 static void css_declarations(writer_t* w, const char* at, const char* end, css_style_t* style) {
     while (at < end) {
         while (at < end && (ascii_space((unsigned char)*at) || *at == ';')) ++at;
+        if (end - at >= 2 && at[0] == '/' && at[1] == '*') {
+            const char *close = bounded_case_find(at + 2, end, "*/");
+            at = close ? close + 2 : end;
+            continue;
+        }
         const char* key = at;
         while (at < end && *at != ':' && *at != ';') ++at;
         if (at == end || *at != ':') { while (at < end && *at++ != ';') {} continue; }
@@ -200,6 +212,10 @@ static void css_declarations(writer_t* w, const char* at, const char* end, css_s
             // Runs start only once a name really resolves; an unmatched family is not worth
             // recording span by span.
             if (style->family != 0) w->family_rules = true;
+        } else if (kn == 16 && !strncasecmp(key, "background-image", 16)) {
+            style->background = value;
+            style->background_len = vn;
+            style->mask |= CSS_BACKGROUND;
         }
     }
 }
@@ -381,7 +397,7 @@ static bool css_scope_match(const writer_t *w, const char *s, size_t len,
 }
 static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, const char* attrs_end) {
     css_style_t out = {0};
-    unsigned priorities[5] = {0};
+    unsigned priorities[6] = {0};
     for (size_t i = 0; i < w->rule_count; ++i) {
         const css_rule_t *rule = &w->rules[i];
         bool body = rule->length == 4 && !strncasecmp(rule->selector, "body", 4);
@@ -391,7 +407,7 @@ static css_style_t style_for(writer_t* w, const char* tag, const char* attrs, co
         if (!matches) continue;
         css_style_t chosen = rule->style;
         unsigned specificity = body ? 0 : rule->specificity;
-        for (unsigned bit = 0; bit < 5; ++bit) {
+        for (unsigned bit = 0; bit < 6; ++bit) {
             if (!(chosen.mask & (1u << bit))) continue;
             if (specificity < priorities[bit]) chosen.mask &= ~(1u << bit);
             else priorities[bit] = specificity;
@@ -743,6 +759,34 @@ static esp_err_t add_image(writer_t* w, const char* path) {
     return err;
 }
 
+// 仅把 body 的单图背景当成页首插图；不继承为段落背景，也不改变用户阅读背景。
+// Preserve a body's single-image background as an illustration, not an inherited paragraph backdrop.
+static esp_err_t body_background(writer_t *w, const char *attrs, const char *end) {
+    css_style_t style = style_for(w, "body", attrs, end);
+    const char *at = style.background, *stop = at ? at + style.background_len : NULL;
+    if (!at || stop - at < 5 || strncasecmp(at, "url(", 4)) return ESP_OK;
+    at += 4;
+    while (at < stop && ascii_space((unsigned char)*at)) ++at;
+    char quote = at < stop && (*at == '\'' || *at == '"') ? *at++ : 0;
+    const char *value = at;
+    while (at < stop && (quote ? *at != quote : *at != ')')) ++at;
+    const char *value_end = at;
+    if (quote) {
+        if (at == stop) return ESP_OK;
+        ++at;
+    }
+    while (at < stop && ascii_space((unsigned char)*at)) ++at;
+    if (at == stop || *at++ != ')') return ESP_OK;
+    while (at < stop && ascii_space((unsigned char)*at)) ++at;
+    if (at != stop) return ESP_OK;
+    while (value_end > value && ascii_space((unsigned char)value_end[-1])) --value_end;
+    size_t length = (size_t)(value_end - value);
+    if (!length || length > HTML_IMAGE_PATH_MAX || memchr(value, '\\', length)) return ESP_OK;
+    char path[HTML_IMAGE_PATH_MAX + 1];
+    memcpy(path, value, length); path[length] = 0;
+    return add_image(w, path);
+}
+
 esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                                           const char* css, size_t css_len,
                                           const html_font_map_t* fonts,
@@ -880,6 +924,10 @@ esp_err_t html_to_blocks_with_css_target(const char* html, size_t len,
                         if (err != ESP_OK) goto fail;
                     }
                     continue;
+                }
+                if (!closing && name_equal(name, "body")) {
+                    err = body_background(&w, html + at, html + end);
+                    if (err != ESP_OK) goto fail;
                 }
                 if (!closing && !self_closing && (name_equal(name, "head") || name_equal(name, "style") || name_equal(name, "script"))) {
                     memcpy(skip, name, sizeof(skip));

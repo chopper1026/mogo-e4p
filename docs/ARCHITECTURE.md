@@ -34,7 +34,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | `main/app/` | 页面契约、跨页请求接口、输入、导航、介质与生命周期调度。/ Page contracts, cross-page request APIs, input, navigation, media and lifecycle coordination. |
 | `main/apps/` | 产品页面控制器及页面专用的目录、文件树视图。/ Product page controllers and their TOC/file-tree views. |
 | `main/book/` | 书源、TXT/EPUB、排版、阅读会话、书架规则、进度与封面缓存。/ Sources, TXT/EPUB, layout, reader sessions, shelf rules, progress and cover caches. |
-| `main/image/` | 通用图像探测、JPEG/PNG 解码、裁剪与缩放，包含硬件 JPEG 适配。不得依赖书籍、UI、字体或页面。/ Generic image probing, JPEG/PNG decoding, crop/scale and hardware JPEG adaptation; no book, UI, font or page dependencies. |
+| `main/image/` | 通用图像探测、JPEG/PNG/静态 WebP 解码、裁剪与缩放，包含硬件 JPEG 适配。不得依赖书籍、UI、字体或页面。/ Generic image probing, JPEG/PNG/static WebP decoding, crop/scale and hardware JPEG adaptation; no book, UI, font or page dependencies. |
 | `main/ui/` | 公共绘制、控件、交互反馈及题头样式；绘制接口不承担页面状态转换。/ Shared drawing, controls, feedback and heading styles; paint APIs do not own page transitions. |
 | `main/font/` | 字体来源、加载、字形缓存与渲染。系统/阅读字体的选择策略在 services。/ Font sources, loading, glyph caches and rendering; services owns system/reader face policy. |
 | `main/display/` | 统一刷新意图、波形目录、显示出口与几何、导航/阅读波形及灰阶归一；契约见 [DISPLAY_REFRESH.md](development/designs/DISPLAY_REFRESH.md)。/ Central refresh intents, waveform catalog, physical exits/geometry and navigation/reader/normalization waveforms; see the refresh contract. |
@@ -72,6 +72,8 @@ After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier s
   `ui_reader_settings` paints reading-setting controls, turn-zone diagrams and Done from a read-only value snapshot, with scaled geometry shared by drawing and hit testing. The page retains sheet shells, Back feedback, settings reads/writes, actions, reflow and presentation scheduling. The module does not directly depend on pages, book modules or system settings and retains no snapshot, font or framebuffer; font and key sheets reuse its switch painter.
 - 书籍封面依赖 image；壁纸、阅读背景和图片页直接依赖 image。book_cover.h 暂时转出原有图像声明以兼容既有调用方，新增通用图像调用应直接使用 image_decode.h。
   Book covers depend on image; wallpaper, reader backgrounds and image pages use image directly. book_cover.h forwards legacy image declarations for compatibility; new generic consumers should include image_decode.h.
+- `components/webp_decoder` 保留 libwebp 1.6.0 的可移植解码子集和原许可，PSRAM 分配适配不改上游源码。`image_webp` 限制源像素和一屏输出、合成白底灰阶；上游互斥保护初始化，不开解码工作线程。EPUB 层解析书内路径与样式表相对 URL，HTML 层只将 `body` 的单图背景转为页首插图；不扩展为浏览器背景渲染，也不改变用户阅读背景。独立图片文件入口仍只列出 JPG/PNG。
+  `webp_decoder` retains the portable libwebp 1.6.0 subset and licenses, with external PSRAM allocation adapters. `image_webp` bounds source pixels/panel output and composites onto white; mutexes protect initialization without decoding workers. EPUB owns archive paths and stylesheet-relative URLs; HTML maps only a body's single-image background to a leading illustration, without browser background rendering or reading-background changes. Standalone image pickers still list only JPG/PNG.
 - main 的头文件搜索路径为组件私有。目录边界由结构检查补充约束，不表示每个目录都是独立 IDF 组件。
   Main header search paths are component-private. Structural checks enforce directory boundaries; directories are not automatically separate IDF components.
 - main 根目录只保留 app_main.c、CMakeLists.txt、Kconfig.projbuild 和 idf_component.yml；新增功能文件必须放入最接近的职责目录，结构检查会拒绝散落在根目录的功能文件。

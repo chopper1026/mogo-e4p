@@ -67,6 +67,7 @@ SUITES = {
     "font_cache": [sys.executable, "tools/ttf_block_cache_host_test.py"],
     "glyph_cache": [sys.executable, "tools/ttf_glyph_cache_host_test.py"],
     "images": [sys.executable, "tools/reader_images_host_test.py"],
+    "webp": [sys.executable, "tools/webp_host_test.py"],
     "settings_view": ["bash", "tools/run_reader_settings_host_tests.sh"],
     "settings_backup": [sys.executable, "tools/settings_backup_host_test.py"],
     "controls": ["bash", "tools/run_reader_controls_host_tests.sh"],

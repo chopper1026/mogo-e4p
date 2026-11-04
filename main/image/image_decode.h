@@ -15,7 +15,8 @@ typedef struct {
 /// 兼容既有调用名；仅计算窗口，不读取文件。/ Retain the existing API name; calculate the crop without file I/O.
 book_crop_t book_cover_crop(unsigned src_width, unsigned src_height,
                             unsigned dst_width, unsigned dst_height);
-/// 解码内存图像为每像素一字节灰度；输出最多一屏。/ Decode memory images to byte grayscale, bounded to one panel.
+/// JPEG/PNG/静态 WebP 解码为每像素一字节灰度；WebP 按签名识别，png 仅标记 PNG。
+/// Decode JPEG/PNG/static WebP to byte grayscale, bounded to one panel; WebP is signature-detected.
 bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
                           unsigned out_width, unsigned out_height, uint8_t *out);
 /// 读取图像头尺寸；不分配像素。/ Read header dimensions without pixel allocations.

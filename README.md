@@ -62,6 +62,16 @@ python3 tools/run_reader_baseline.py
 宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/development/guides/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
 Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrounds, the event loop, books, display, navigation and ripple effects. See the performance guide for measurement setup; CI builds do not replace device acceptance.
 
+## EPUB 图片兼容 / EPUB Image Compatibility
+
+本地开发版支持书内 JPEG、PNG 和静态 WebP 封面/插图，透明 WebP 合成到白底。样式表中 `body` 的单张背景图按页首插图处理，相对路径按样式表目录解析；不模拟浏览器的背景平铺或叠字，也不替换用户的阅读背景。兼容 ZIP 文件名中的字面冒号，但继续拦截外部地址和越界路径。旧自动封面缓存会重建，原 EPUB 不需要转换。
+
+The local development build supports EPUB JPEG, PNG and static WebP covers/illustrations, compositing WebP alpha onto white. A body's single CSS background becomes a leading illustration with stylesheet-relative resolution, not a tiled/text-overlay backdrop or a user reading background. Literal-colon ZIP names are accepted while external schemes and traversal remain blocked. Old automatic-cover caches rebuild without converting the original EPUB.
+
+WebP 每轴最多 8192、总像素最多 4,194,304，输出最多一屏；动画、超限、损坏或内存不足时按现有图片失败路径回退。独立图片页、头像和壁纸选图仍仅提供 JPG/PNG。原书逐章与解码宿主检查已通过，两个问题样本已刷入设备并由用户确认恢复；实际内存峰值、耗时及其他书籍兼容性仍需分别验证。后端与许可见 [WebP 组件](components/webp_decoder/README.md)。
+
+WebP sources are capped at 8192 per axis and 4,194,304 pixels, with at most one panel of output. Animated, oversized, corrupt or out-of-memory images use the existing failure path. Standalone image/avatar/wallpaper pickers still offer JPG/PNG. Private-book chapter/decoder host checks passed, and the user confirmed recovery of both reported samples after flashing. Actual memory peaks, latency and other books require separate validation. See the component for backend and license details.
+
 ## 定时待机关机 / Timed Standby Power-Off
 
 在设置 → 显示 → 待机方式中，可选「彻底关机」「仅浅睡」或「浅睡后关机」。选中「浅睡后关机」后，在同一张卡片内选择 10/30/60 分钟，不再将时长列成三个重复待机选项；从非定时方式切入时默认选 10 分钟，已保存的定时档打开页面时原样显示。默认待机方式仍为仅浅睡。定时档从锁屏画面显示完成、开始浅睡时计时；自动锁屏与手动锁屏均生效，与无操作自动锁屏的等待时间分别计算。提前按电源键或拿起唤醒（需开启拿起唤醒）会取消本轮计时，再次进入锁屏浅睡重新计时；密码输入期间不计时，重新等待唤醒时开始新一轮。
