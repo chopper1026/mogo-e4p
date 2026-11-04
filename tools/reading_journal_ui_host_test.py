@@ -8,6 +8,7 @@ from pathlib import Path
 import platform
 import re
 import subprocess
+import sys
 import tempfile
 
 from PIL import Image, ImageChops, ImageDraw
@@ -178,12 +179,19 @@ int main(int argc,char **argv){
     day_tap(&ctx,2);detail(&ctx);snapshot(fb,argv[1],"detail-history");
     for(unsigned scene=0;scene<6;++scene){
         journal.scene=scene;char name[64];widget(fb,1);snprintf(name,sizeof(name),"widget-scene-%u",scene);snapshot(fb,argv[1],name);
+        widget(fb,0);snprintf(name,sizeof(name),"widget-upper-scene-%u",scene);snapshot(fb,argv[1],name);
         detail(&ctx);snprintf(name,sizeof(name),"detail-scene-%u",scene);snapshot(fb,argv[1],name);
     }
     day_tap(&ctx,4);for(unsigned i=4;i<=6;++i)add(4,i,"书",2,2,3);s_page=2;detail(&ctx);snapshot(fb,argv[1],"detail-page-3");
     set_date(2026,11,30);app_reading_journal.on_enter(&ctx);detail(&ctx);snapshot(fb,argv[1],"detail-six-rows");
     reading_journal_clear(&journal);journal.scene=0;set_date(2026,11,4);app_reading_journal.on_enter(&ctx);
     widget(fb,1);snapshot(fb,argv[1],"widget-empty");detail(&ctx);snapshot(fb,argv[1],"detail-empty");
+    for(unsigned scene=0;scene<6;++scene){
+        journal.scene=scene;char name[64];widget(fb,1);snprintf(name,sizeof(name),"widget-empty-scene-%u",scene);snapshot(fb,argv[1],name);
+        widget(fb,0);snprintf(name,sizeof(name),"widget-upper-empty-scene-%u",scene);snapshot(fb,argv[1],name);
+        detail(&ctx);snprintf(name,sizeof(name),"detail-empty-scene-%u",scene);snapshot(fb,argv[1],name);
+    }
+    journal.scene=0;
     add(4,1,"这是一个很长很长的书名这是一个很长很长的书名这是一个很长很长的书名",8192,71582,UINT32_MAX);
     widget(fb,1);snapshot(fb,argv[1],"widget-long");detail(&ctx);snapshot(fb,argv[1],"detail-long");
     for(unsigned i=2;i<=512;++i)add((i%4)+1,i,"书",1,71582,UINT32_MAX);
@@ -198,6 +206,7 @@ int main(int argc,char **argv){
 
 def run(output):
     output.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/generate_reading_scenes.py"), "--check"], check=True)
     with tempfile.TemporaryDirectory(prefix="journal-ui-") as directory:
         work = Path(directory)
         host.write_shims(work)
@@ -232,13 +241,21 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
     for raw in output.glob("*.raw"):
         image = Image.frombytes("L", (684, 1216), raw.read_bytes()).point(lambda v: v * 17 // 16)
         if raw.stem.startswith("widget"):
-            top = 168 if raw.stem == "widget-upper" else 640
+            top = 168 if raw.stem.startswith("widget-upper") else 640
             image = image.crop((0, top, 684, top + 472))
         image.save(raw.with_suffix(".png"))
         raw.unlink()
-    for view in ("widget", "detail"):
+    scenes = json.loads((ROOT / "main/assets/reading-scenes/scenes.json").read_text())["scenes"]
+    for view in ("widget", "widget-upper", "detail"):
+        box = (438, 171, 648, 333) if view == "detail" else (438, 78, 648, 240)
+        for scene, entry in enumerate(scenes):
+            expected = Image.open(ROOT / "main/assets/reading-scenes" / (entry["slug"] + ".png")).convert("L").resize((210, 162), Image.Resampling.NEAREST)
+            for state in ("", "empty-"):
+                actual = Image.open(output / f"{view}-{state}scene-{scene}.png").convert("L").crop(box)
+                assert ImageChops.difference(actual, expected).getbbox() is None, (view, state, scene, "source pixels differ")
+    for view in ("widget", "widget-upper", "detail"):
         baseline = Image.open(output / f"{view}-scene-0.png").convert("L")
-        box = (438, 78 if view == "widget" else 171, 648, 240 if view == "widget" else 333)
+        box = (438, 171, 648, 333) if view == "detail" else (438, 78, 648, 240)
         for scene in range(1, 6):
             difference = ImageChops.difference(baseline, Image.open(output / f"{view}-scene-{scene}.png").convert("L"))
             assert difference.getbbox(), (view, scene, "blank scene")
@@ -254,8 +271,8 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
     sheet.paste(Image.open(output / "widget-scene-4.png").convert("RGB"), (32, 576))
     sheet.paste(Image.open(output / "detail-today.png").convert("RGB"), (748, 48))
     sheet.save(output / "review.png")
-    (output / "verification.json").write_text(json.dumps({"realProductUI": True, "builtinFont": True, "sampleDataOnly": True, "sanitizers": ["ASan", "UBSan"], "deviceAccess": False}, indent=2) + "\n")
-    print(f"PASS: native PNGs and scene isolation/removed-control pixel checks: {output}")
+    (output / "verification.json").write_text(json.dumps({"realProductUI": True, "builtinFont": True, "sampleDataOnly": True, "scenePixelComparisons": 36, "sanitizers": ["ASan", "UBSan"], "deviceAccess": False}, indent=2) + "\n")
+    print(f"PASS: 36 exact source-pixel comparisons, native PNGs and scene isolation/removed-control checks: {output}")
 
 
 if __name__ == "__main__":

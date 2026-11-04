@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.4 · 本地测试 / Local testing · 2026-11-04
+
+- 阅读手账替换全部旧像素插画，改为沿途有书、街角书店、纸上花园、月面观测站、唱片聆听角和灯塔书屋；保持六图轮换、同日选择保存及原有布局，空记录也使用当前插画。/ Replace all old journal illustrations with Books Along The Way, Corner Bookshop, Paper Garden, Moon Observatory, Vinyl Listening Corner and Lighthouse Library, preserving six-scene rotation, saved choices and layout; empty journals use the current scene too.
+
 ## v1.0.4 · 2026-11-04
 
 - 天气组件补充雷阵雨、雾霾背景。

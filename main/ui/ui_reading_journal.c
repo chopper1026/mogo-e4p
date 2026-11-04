@@ -11,6 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
+_Static_assert(READING_SCENE_COUNT == READING_JOURNAL_SCENES, "Scene rotation must match assets");
+_Static_assert(READING_SCENE_WIDTH * READING_SCENE_SCALE == 210, "Keep art width unchanged");
+_Static_assert(READING_SCENE_HEIGHT * READING_SCENE_SCALE == 162, "Keep art height unchanged");
+
 static const char *s_week[]={"周一","周二","周三","周四","周五","周六","周日"};
 static void text(uint8_t *fb,int x,int y,int px,const char *value,enum EpdFontFlags align) {
     ui_text_fixed_vc(fb,x,y,px,value,align,false);
@@ -35,14 +39,14 @@ static void rect(uint8_t *fb,int x,int y,int w,int h,uint8_t gray) {
 EpdRect ui_reading_journal_art(EpdRect region) {
     return (EpdRect){region.x+438,region.y+78,210,162};
 }
-static void art(uint8_t *fb,int x,int y,const reading_journal_model_t *model,bool occupied) {
+static void art(uint8_t *fb,int x,int y,const reading_journal_model_t *model) {
     unsigned index=model->scene%READING_JOURNAL_SCENES;
-    if (!index && !occupied) index=6;
     const uint8_t *pixels=reading_scene_pixels[index];
-    for (unsigned row=0;row<54;++row) for(unsigned col=0;col<70;++col) {
-        unsigned at=row*70+col;
-        uint8_t nibble=(pixels[at/2]>>((at%2)*4))&15;
-        if (nibble!=15) rect(fb,x+(int)col*3,y+(int)row*3,3,3,(uint8_t)(nibble*17));
+    for (unsigned row=0;row<READING_SCENE_HEIGHT;++row) for(unsigned col=0;col<READING_SCENE_WIDTH;++col) {
+        unsigned at=row*READING_SCENE_ROW_BYTES+col/2;
+        uint8_t nibble=(pixels[at]>>((col%2)*4))&15;
+        if (nibble!=15) rect(fb,x+(int)col*READING_SCENE_SCALE,y+(int)row*READING_SCENE_SCALE,
+                             READING_SCENE_SCALE,READING_SCENE_SCALE,(uint8_t)(nibble*17));
     }
 }
 static void duration(uint8_t *fb,int x,int y,uint64_t ms,int large,int small) {
@@ -85,7 +89,7 @@ void ui_reading_journal_widget(uint8_t *fb,EpdRect region,const reading_journal_
     ui_draw_icon(fb,636,top+38,24,UI_ICON_CHEVRON_RIGHT,0);
     text(fb,36,top+100,26,"今日阅读",EPD_DRAW_ALIGN_LEFT);
     duration(fb,36,top+157,total.milliseconds,78,29);
-    art(fb,438,top+78,model,total.books>0);
+    art(fb,438,top+78,model);
     snprintf(value,sizeof(value),"%u 本书     %lu 章     翻页 %lu 次",total.books,(unsigned long)total.chapters,(unsigned long)total.turns);
     fitted(fb,36,top+220,27,value,612,EPD_DRAW_ALIGN_LEFT);
     rect(fb,36,top+251,612,1,0x90);
@@ -146,7 +150,7 @@ void ui_reading_journal_detail(uint8_t *fb,const reading_journal_model_t *model,
     if(today->serial)snprintf(value,sizeof(value),"%d年%d月",today->year,today->month);
     else snprintf(value,sizeof(value),"日期未校准");
     text(fb,36,190,34,value,EPD_DRAW_ALIGN_LEFT);
-    duration(fb,36,252,month.milliseconds,58,27);art(fb,438,171,model,month.books>0);
+    duration(fb,36,252,month.milliseconds,58,27);art(fb,438,171,model);
     snprintf(value,sizeof(value),"%u 天阅读    %u 本    %lu 章    翻页 %lu 次",month.days,month.books,(unsigned long)month.chapters,(unsigned long)month.turns);
     fitted(fb,36,331,25,value,612,EPD_DRAW_ALIGN_LEFT);
     if(!today->serial) {text(fb,342,600,29,"请先校准日期和时间",EPD_DRAW_ALIGN_CENTER);return;}

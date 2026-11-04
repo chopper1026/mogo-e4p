@@ -15,9 +15,9 @@ Choose Reading journal by holding a Home region or opening the component library
 
 Home shows only today's duration, book/chapter/turn counts and at most two books. Tap outside the illustration to open details with Today selected, then choose a date in the current-month calendar. Future dates are muted and disabled; reading dates have dots, Today an outline and selection an inverted fill. Details page through two books at a time using arrows above the footer or swipes over the book list; date changes reset paging. Only the center Home footer is active. Side hardware keys return, the middle key goes Home and a middle hold refreshes the page.
 
-首页和详情共用六幅像素场景：窗边阅读、溪谷远足、林间打怪、遗迹探险、海底潜游、湖畔露营。点击插画只换图，不进入详情或改变选中日期；同日手动选择会保存。下一天从当前图继续前进一幅，间隔多天按天数推进，跨月不断序列；日期回拨保留当前图并重建日期基线。每日轮换在下一次前台轮询时发生，不为换图唤醒待机设备。阅读角在空记录时使用无人物版本，不增加第七个轮换主题。
+首页和详情共用六幅像素场景：沿途有书、街角书店、纸上花园、月面观测站、唱片聆听角、灯塔书屋。点击插画只换图，不进入详情或改变选中日期；同日手动选择会保存。下一天从当前图继续前进一幅，间隔多天按天数推进，跨月不断序列；日期回拨保留当前图并重建日期基线。每日轮换在下一次前台轮询时发生，不为换图唤醒待机设备。空记录仍显示当前选中的场景；旧图及阅读角空景不再内置，已保存的六图序号继续有效。
 
-Home and details share six pixel scenes: reading, hiking, forest combat, ruins, diving and camping. Tapping art changes only the scene, preserving navigation and date selection. Manual choices persist for the day; subsequent days advance from the current image, including elapsed days and month changes. Clock rollback preserves the image and rebases its date. Rotation happens on the next foreground poll without waking standby. The empty reading corner omits its person, not an extra seventh rotation theme.
+Home and details share six pixel scenes: Books Along The Way, Corner Bookshop, Paper Garden, Moon Observatory, Vinyl Listening Corner and Lighthouse Library. Tapping art changes only the scene, preserving navigation and date selection. Manual choices persist for the day; subsequent days advance from the current image, including elapsed days and month changes. Clock rollback preserves the image and rebases its date. Rotation happens on the next foreground poll without waking standby. Empty journals use the selected scene too; old scenes and the empty corner are no longer bundled, and saved six-scene indices remain valid.
 
 ## 统计口径 / Measurement
 
@@ -47,9 +47,9 @@ Home placement remains in v33 settings backups, but **journal records and scene 
 
 ## 素材与验证 / Assets And Verification
 
-批准的PNG与图块来源清单见[像素场景](../../../main/assets/reading-scenes/README.md)。Kenney 1-Bit Pack 1.2图块部分为CC0，补绘及完整构图不冒称全部来自Kenney；第三方权利不因本项目许可改变。
+批准的105×81灰阶PNG与来源清单见[像素场景](../../../main/assets/reading-scenes/README.md)，以2倍整数显示，保持210×162区域。雨、落叶、瀑布和涟漪细节来自固定版本PixelFX的静态帧，保留MIT许可；新增主体与完整构图单独标识。固件无PixelFX运行依赖或动画，第三方权利不因本项目许可改变。
 
-See the scene README for approved PNGs and the tile manifest. Kenney's reused tiles are CC0; custom additions and compositions are not claimed as wholly Kenney works, and project licensing does not change third-party rights.
+See the scene README for approved 105x81 grayscale PNGs and provenance. Integer 2x display preserves the 210x162 footprint. Static rain/leaves/waterfall/ripple details come from pinned PixelFX effects under MIT; new subjects and compositions are identified separately. Firmware has no PixelFX runtime or animation, and project licensing does not change third-party rights.
 
 ```sh
 python3 tools/run_reader_baseline.py journal journal_reader journal_ui weather open controls settings_backup
@@ -60,6 +60,6 @@ python3 tools/generate_reading_scenes.py --check
 idf.py --preview build
 ```
 
-模型/服务回归覆盖日历、去重、容量和分配失败、快照损坏与截断、重启、迟到挂载、午夜/月界及无效时钟；阅读接入执行真实计时函数；原生UI执行真实内置字体和4bpp绘制、详情手势/按键、书目分页、六图隔离及移除控件区域像素检查。导出图使用样例数据，不是设备已采集记录；宿主测试和S31构建不能替代实屏、实际写盘时延、突然断电和设备长期运行验收。
+模型/服务回归覆盖日历、去重、容量和分配失败、快照损坏与截断、重启、迟到挂载、午夜/月界及无效时钟；阅读接入执行真实计时函数；原生UI执行真实内置字体和4bpp绘制、详情手势/按键、书目分页、六图隔离及移除控件区域像素检查，并逐像素核对六图在上下组件槽、详情与空记录中的36种显示。导出图使用样例数据，不是设备已采集记录；宿主测试和S31构建不能替代实屏、实际写盘时延、突然断电和设备长期运行验收。
 
-Tests cover the real model/service, timing integration, built-in font/4bpp drawing, detail actions/paging and isolated scene/control pixels. Exported pictures contain fixtures, not collected device history. Host tests and S31 compilation do not establish panel quality, real write latency, power-loss resilience or long-running device acceptance.
+Tests cover the real model/service, timing integration, built-in font/4bpp drawing, detail actions/paging and isolated scene/control pixels, plus 36 exact source-pixel comparisons across all six scenes in both widget slots, details and empty journals. Exported pictures contain fixtures, not collected device history. Host tests and S31 compilation do not establish panel quality, real write latency, power-loss resilience or long-running device acceptance.
