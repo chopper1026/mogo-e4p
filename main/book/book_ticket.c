@@ -18,6 +18,7 @@
 #include <time.h>
 #include "book_cover.h"
 #include "book_epub.h"
+#include "book_mobi.h"
 #include "book_progress.h"
 #include "book_title.h"
 #include "epdiy.h"
@@ -278,6 +279,14 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     if (ext && !strcasecmp(ext, ".epub")) {
         char meta_title[256] = {0};
         (void)book_epub_metadata_cached(path, meta_title, sizeof(meta_title), author, sizeof(author));
+    } else if (ext && (!strcasecmp(ext, ".mobi") || !strcasecmp(ext, ".prc") || !strcasecmp(ext, ".azw"))) {
+        // 票根同样显示 MOBI 的 EXTH 书名与作者。/ The ticket shows the MOBI EXTH title and creator too.
+        char meta_title[256] = {0};
+        char meta_author[128] = {0};
+        if (book_mobi_metadata(path, meta_title, sizeof(meta_title), meta_author, sizeof(meta_author)) == ESP_OK) {
+            if (meta_title[0]) snprintf(title, sizeof(title), "%s", meta_title);
+            if (meta_author[0]) snprintf(author, sizeof(author), "%s", meta_author);
+        }
     }
     ticket_stats_t stats; stats_load(&stats);
     uint32_t day = local_day();

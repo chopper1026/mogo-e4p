@@ -158,13 +158,15 @@ int main(int argc, char **argv) {
         assert(book_open("/sdcard/.cache/catolog.weread") == ESP_ERR_NOT_SUPPORTED);
         assert(book_open(argv[a]) == ESP_OK); assert(book_chapter_count() > 0);
         bool epub = strstr(argv[a], ".epub") != NULL;
-        assert(book_kind() == (epub ? BOOK_KIND_EPUB : BOOK_KIND_TXT));
+        bool mobi = strstr(argv[a], ".mobi") != NULL || strstr(argv[a], ".prc") != NULL;
+        assert(book_kind() == (epub ? BOOK_KIND_EPUB : mobi ? BOOK_KIND_MOBI : BOOK_KIND_TXT));
         size_t sum = 0;
         for (size_t i = 0; i < book_chapter_count(); ++i) {
             assert(book_chapter_load(i, &out, &len) == ESP_OK); assert(out[len] == 0);
             html_text_t blocks = {0}; assert(book_chapter_load_blocks(i, &blocks) == ESP_OK);
             assert(blocks.len == len && !memcmp(blocks.utf8, out, len));
-            assert(epub ? blocks.blocks != NULL && blocks.count > 0 : blocks.blocks == NULL && blocks.count == 0);
+            assert(epub || mobi ? blocks.blocks != NULL && blocks.count > 0
+                                : blocks.blocks == NULL && blocks.count == 0);
             if (strstr(argv[a], "河边记事_图文.epub")) {
                 assert(blocks.image_count == 60);
                 size_t images = 0;
