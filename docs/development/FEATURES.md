@@ -1,0 +1,57 @@
+# 功能全景 / Feature Inventory
+
+最近核对：2026-11-04（Asia/Shanghai），按 `codex/weather-backgrounds` 当前工作区的构建清单、页面注册表、模块接口和测试入口静态盘点。包括既有未提交的天气背景与首页封面反馈修改，不表示这些修改已经发布。
+Last checked on 2026-11-04 (Asia/Shanghai) against this working tree's build list, registry, interfaces and test entries, including uncommitted weather and cover-feedback work; this is not publication evidence.
+
+本轮未重新运行产品回归、构建或真机验收。下表“已实现待验证”表示有代码与可复跑入口，证据列列出复核方法，不宣称这些命令本轮通过。历史执行结果只保留在原版本说明和 Git 中，不自动追认到当前工作区。
+This inventory does not rerun product regressions, builds or device acceptance. Implemented/pending means code and verification entries exist; test entries are not passing results. Historical results do not automatically apply to this working tree.
+
+## 当前能力 / Current Capabilities
+
+| ID | 用户能力 / Capability | 状态 / Status | 入口代码 / Entry | 模块与边界 / Modules And Limits | 测试或待复核证据 / Verification Entry | 长期说明与版本 / Reference |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-NAV | 四个主页、系统子页、返回与快捷层 / Navigation and quick controls | 已实现待验证 | [registry](../../main/app/app_registry.c)、[loop](../../main/app/app_loop.c) | 六项注册含图片和组件；传输另由文件入口进入。/ Six registry entries include image/components; transfer enters from Files. | `input`、`routing`、`quick`、`loop` | [页面契约](../../AGENTS.md) |
+| F-HOME | 最近阅读、上下区域布局与留白 / Home resume and regions | 已实现待验证 | [dashboard](../../main/apps/app_dashboard.c) | `home_components` 保证同类唯一；封面反馈候选只改白色外缘。/ Unique nonempty widgets; candidate feedback preserves cover pixels. | [首页回归](../../tools/dashboard_home_host_test.py)、`settings_backup`；实屏待复核 / panel pending | [天气与组件](guides/WEATHER.md)、[1.0.3](../CHANGELOG.md) |
+| F-WEATHER | 选城、近似定位、两日预报与自动刷新 / City selection and forecasts | 已实现待验证 | [components](../../main/apps/app_components.c)、[service](../../main/services/weather_service.c) | 官方 HTTPS 代理、地点 ID、分批搜索缓存、过期隐藏；不直连供应商。/ Trusted proxy, location IDs, batch cache and expiry; no direct provider access. | `weather`；真实网络、许可和实屏另验 / network, licensing and panel separate | [天气契约](guides/WEATHER.md) |
+| F-SHELF | 分类、搜索、排序、收藏和多选管理 / Shelf and management | 已实现待验证 | [book page](../../main/apps/app_book.c) | 扫描、分类、封面、删除预留及失败重试各自持有资源。/ Separate scan/category/cover and deletion-retry owners. | `shelf`、`shelf_covers`、`management` | [架构](../ARCHITECTURE.md) |
+| F-TXT | TXT 章节、编码和进度定位 / TXT reading | 已实现待验证 | [TXT](../../main/book/book_txt.c)、[source](../../main/book/book_source.c) | 书源与章节缓存，旧进度格式不因本次治理迁移。/ Source/index caches; governance does not migrate progress. | `book`、`session`、`chapter` | [版本变化](../CHANGELOG.md) |
+| F-EPUB | EPUB、目录、脚注、插图与嵌入字体 / EPUB content | 已实现待验证 | [EPUB](../../main/book/book_epub.c)、[TOC](../../main/apps/book_toc.c) | ZIP/HTML、章节及图片借用受会话生命周期约束。/ Session-bound ZIP/HTML, chapter and image borrows. | `book`、`chapter`、`images`、`font_faces` | [资源边界](guides/READER_PERFORMANCE.md) |
+| F-LAYOUT | 横竖排、字体、字号、间距与重排 / Typography and reflow | 已实现待验证 | [reflow](../../main/book/reader_reflow.c)、[font](../../main/font/ttf_font.c) | 保持锚点、失败回滚、字节源与字形缓存预算。/ Anchors, rollback and per-face source/cache ownership. | `reflow`、`controls`、`font_source`、`font_cache`、`glyph_cache` | [性能与资源](guides/READER_PERFORMANCE.md) |
+| F-CHROME | 题头样式、六槽页眉页脚及高度 / Reader headings and chrome | 已实现待验证 | [chrome](../../main/book/reader_chrome.c)、[heading](../../main/ui/ui_reader_heading.c) | 内容、字号和高度影响正文几何与刷新边界。/ Content/size/height affect body geometry and refresh bounds. | `heading`、`settings_view`、`controls`、`settings_backup` | [版本变化](../CHANGELOG.md) |
+| F-PROGRESS | 续读、书签、阅读计时和备份 / Reading state | 已实现待验证 | [progress](../../main/book/book_progress.c)、[history backup](../../main/book/book_history_backup.c) | 进度以书路径、大小、章节与字节锚点关联。/ Progress retains path/size/chapter/byte anchors. | `open`、`session`、`settings_backup` | [资源说明](guides/READER_PERFORMANCE.md) |
+| F-KEYS | 可配置翻页、全屏、底部工具栏和电源键 / Reader controls | 已实现待验证 | [book page](../../main/apps/app_book.c)、[input](../../main/app/app_input.c) | 阅读正文与系统页面按契约分别处理。/ Reader and system-page actions follow distinct contracts. | `controls`、`power_key`、`input`、`loop` | [按键契约](../../AGENTS.md) |
+| F-SHAKE | 默认关闭的横向晃动翻页 / Shake turns | 已实现待验证 | [book page](../../main/apps/app_book.c)、[accelerometer](../../components/sc7a20h/sc7a20h.c) | 触摸静默、变化速率、回弹过滤与传感器交还。/ Touch silence, slew/rebound guards and sensor handoff. | `controls`；真实持机方向与误触另验 / physical handling separate | [1.0.2](../CHANGELOG.md) |
+| F-BLE | BLE 翻页器配对、学习与重连 / BLE page turners | 已实现待验证 | [BLE](../../components/ble_page_turner/src/ble_page_turner.c) | 设置页管理，阅读时消费，睡眠交还无线。/ Settings owns pairing, reading consumes actions, sleep returns radios. | `ble`、`ble_recent`、`lifecycle` | [工具入口](../../tools/README.md) |
+| F-DISPLAY | 分区刷新、水波纹、周期清理与供电保护 / Display presentation | 已实现待验证 | [refresh](../../main/display/display_refresh.c)、[display](../../main/display/display.c) | 意图解析与物理出口分离；VCOM、波形数据不在治理范围。/ Separate intent and physical exits; governance excludes VCOM/waveforms. | `refresh`、`display`、`present`、`navigation`、`ripple`、`hv_guard`、`hv_bus` | [刷新契约](designs/DISPLAY_REFRESH.md) |
+| F-FILES | TF 文件浏览、重命名、复制、移动和删除 / File management | 已实现待验证 | [files](../../main/apps/app_files.c)、[tree](../../main/apps/file_tree.c) | 文件任务交还、介质失效通知及显式重挂。/ File-worker handoff, media loss and explicit remount. | `storage`、`media`、`management` | [架构](../ARCHITECTURE.md) |
+| F-TRANSFER | 热点与已有 WiFi 传书工作台 / Browser transfer | 已实现待验证 | [transfer](../../main/apps/app_transfer.c)、[embedded UI](../../components/wifi_transfer/upload.html) | 分页、串行上传、覆盖确认、会话重试；离页停止。/ Paging, serial uploads, overwrite confirmation and session retries; stops on exit. | `transfer_web`、`storage`、`time_policy`；设备传输另验 / device transfer separate | [README](../../README.md) |
+| F-USB | USB 存储共享与收回 / USB storage | 已实现待验证 | [USB](../../main/services/usb_storage.c) | USB 导出前先交还文件消费者与 SD 所有权。/ Return file consumers and SD ownership before export. | `storage`、`media`、`board` | [存储边界](../ARCHITECTURE.md) |
+| F-IMAGES | JPG/PNG、灰阶图、头像与壁纸 / Images and artwork | 已实现待验证 | [image page](../../main/apps/app_image.c)、[decode](../../main/image/image_decode.c) | 共用探测、解码和缩放；显示不代表资源来源许可。/ Shared probing/decoding/scaling; rendering is not asset licensing. | `images`、[图像文件测试](../../tools/test_image_files.py) | [图像架构](../ARCHITECTURE.md) |
+| F-SETTINGS | 设备资料、签名、系统显示与阅读背景 / Preferences | 已实现待验证 | [settings page](../../main/apps/app_device_settings.c)、[settings](../../main/settings/settings.c) | 保存失败保留原值；系统与阅读字体上下文分离。/ Failed writes retain values; separate system/reader faces. | `settings_font`、`settings_view`、`controls`、`font_policy` | [设置入口](../../tools/README.md) |
+| F-LIGHT | 冷暖前光与触摸震动 / Frontlight and haptics | 已实现待验证 | [quick layer](../../main/app/app_quick_layer.c)、[haptics](../../main/services/haptics.c) | 设置存储，睡眠前停止并在原顺序恢复硬件。/ Persist settings and retain sleep/wake ordering. | `quick`、`quick_pixels`、`board`、`sleep_power` | [架构](../ARCHITECTURE.md) |
+| F-TIME | 手动设置、联网校时及 RTC / Clock and sync | 已实现待验证 | [time](../../main/time/time_service.c) | 六小时自动节奏；网络会话与 UI 写回分工。/ Six-hour automatic cadence and separate network/UI ownership. | `clock`、`time_policy` | [上手指南](../ONBOARDING.md) |
+| F-LOCK | 自动锁屏、PIN 与多种锁屏图 / Locking and PIN | 已实现待验证 | [lock](../../main/lock/lock_screen.c)、[PIN](../../main/lock/lock_pin_flow.c) | 锁前保存进度；密码、图缓存和睡眠职责分离。/ Flush progress before lock; separate PIN/art/sleep owners. | `lock`、`pinpad`、`font_policy`、`lifecycle` | [安全与页面约束](../../AGENTS.md) |
+| F-SLEEP | 浅睡、拿起唤醒及 10/30/60 分钟关机 / Sleep and shutdown | 已实现待验证 | [sleep](../../main/power/sleep.c)、[compatibility](../../main/power/s31_sleep_compat.c) | 资源交还后进入硬件睡眠；真实电流、定时断电另验。/ Hardware sleep follows handoff; current/timing/power-off require devices. | `sleep_compat`、`sleep_power`、`metalio_drivers`、`battery_filter` | [待机说明](../../README.md) |
+| F-BACKUP | 设置与书籍记录的 TF 备份恢复 / Backup and restore | 已实现待验证 | [settings](../../main/settings/settings.c)、[history](../../main/book/book_history_backup.c) | 保留备份文件名；首页布局纳入，独立天气偏好不纳入。/ Preserve filenames; include Home layout, exclude standalone weather preferences. | `settings_backup`、`management` | [天气存储边界](guides/WEATHER.md) |
+| F-OTA | 联网升级、12 小时检查及 TF 升级底层 / OTA and card updates | 已实现待验证 | [online](../../main/ota/ota_online.c)、[automatic](../../main/ota/ota_auto.c)、[card](../../main/ota/ota_update.c) | 检查仅提示，下载安装需确认；TF 设置入口隐藏但底层保留。/ Checks prompt only; installation needs confirmation; card backend remains behind hidden settings entry. | `ota`、`ota_auto`、`ota_auto_ui`、`loop` | [平台 OTA](guides/PLATFORM_OTA.md)、[日志](../ota-release-notes/README.md) |
+| F-BOOT | 启动恢复、槽确认与出厂自检 / Recovery and factory flows | 已实现待验证 | [boot](../../main/app_main.c)、[recovery](../../main/apps/app_boot_recovery.c)、[factory](../../main/factory/vcom_setup.c) | 不属于根导航；不提供产品页 VCOM 修改入口。/ Outside root navigation; no product-page VCOM editor. | `power_gate`、`board`、`metalio_drivers`、`ota`；硬件流程另验 / physical flow separate | [硬约束](../../AGENTS.md) |
+| F-DIAG | 阅读性能、资源快照与电量日志 / Diagnostics | 已实现待验证 | [reader diagnostics](../../main/diagnostics/reader_perf.c)、[power](../../components/device_power/device_power_metalio.c) | 诊断开关与正常行为分离；快照不能证明泄漏或省电。/ Diagnostics do not establish leaks or power savings. | `perf`、`memory`、`source_memory`、`battery_log`、`battery_log_task`、`capture` | [测量边界](guides/READER_PERFORMANCE.md) |
+
+## 已移除与历史能力 / Removed And Historical
+
+| ID | 能力 / Capability | 状态 / Status | 当前边界 / Current Limit | 依据与复核 / Reference |
+| --- | --- | --- | --- | --- |
+| H-HOME | 旧时钟、月阅读闭环和书夹组件 / Old Home widgets | 已移除 | 旧设置仅作存储兼容；不恢复旧页面。/ Old settings remain only for compatibility. | [1.0.2 记录](../CHANGELOG.md)、[registry](../../main/app/app_registry.c)、首页回归 / Home tests |
+| H-NIGHT | 夜间阅读实验模式 / Night-reader experiments | 已移除 | 用户已撤回；本地 N00-N21 历史留存，不授权恢复或继续刷机。/ Withdrawn; local trial history does not authorize revival or flashing. | [约束](../../AGENTS.md)、[版本记录](../CHANGELOG.md) |
+| H-S3 | 旧板演示页、CW32 协议及旧官网 / Legacy board demos and site | 历史参考 | 不作为 S31 构建、硬件参数或上线证据。/ Not S31 build/hardware or deployment evidence. | [架构](../ARCHITECTURE.md)、[旧官网说明](history/WEBSITE-MANUAL.md) |
+
+## 覆盖范围与待核验项 / Scope And Gaps
+
+按页面注册、非根页面、设置分组、跨页服务、构建和回归入口列产品能力，不把每个辅助函数列为功能。已核对入口不等于枚举了全部错误分支、外设组合或第三方能力。
+Coverage follows registered/nonroot pages, settings groups, shared services, build and test entries, not every helper or every error/peripheral combination.
+
+表中 suite 名均对应 `python3 tools/run_reader_baseline.py <suite>`；独立脚本另列。只有实际执行并记录日期、环境和结果后，才能改标“已测试”或“已验收”。静态核对、主机、S31 编译、刷写读回、设备启动、实屏及线上验证须分别记述。
+Suite names map to the baseline runner. Mark tested/accepted only after dated execution evidence, keeping static, host, build, flash, boot, panel and production checks distinct.
+
+待复核重点包括真实媒体拔插、USB/无线交还、PIN/备份损坏恢复、天气供应商许可与峰值资源、BLE 与晃动误触、浅睡实际电流和定时断电。官网与 OTA 后台位于外部系统；本表不据旧站点文档认定已上线，也不进行远端部署。
+Pending device/integration areas include media/USB/radio handoff, PIN/backup faults, weather permissions/resources, BLE/shake handling and physical sleep/shutdown. External website/OTA services require separate deployment evidence.

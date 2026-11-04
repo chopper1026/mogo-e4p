@@ -131,7 +131,7 @@ Use `main/CMakeLists.txt` and `app_registry.c` as page entry points; legacy boar
 | 文件 / File | 职责 / Role |
 | --- | --- |
 | `app_dashboard.c` | 首页题头、头像及上下等高组件区；最近阅读/天气唯一，天气直角铺满。/ Home header, avatar and equal widget regions; reading/weather are unique, with edge-to-edge rectangular weather. |
-| `app_components.c` | 组件库与天气城市选择，契约见 `docs/WEATHER.md`。/ Component library and weather city picker; see the weather contract. |
+| `app_components.c` | 组件库与天气城市选择，契约见 `docs/development/guides/WEATHER.md`。/ Component library and weather city picker; see the weather contract. |
 | `app_book.c` | 书架与 TXT / EPUB 阅读。/ Shelf and TXT / EPUB reading. |
 | `app_files.c` | 文件浏览与传输入口。/ Files and transfer entry points. |
 | `app_device_settings.c` | 设备设置、蓝牙翻页与维护。/ Settings, Bluetooth page-turners and maintenance. |
@@ -297,3 +297,19 @@ This project is indexed by GitNexus as **mogo-e4p** (16298 symbols, 32232 relati
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+<!-- tidy:start -->
+## 项目开发治理
+
+先读取 `.tidy.json` 与 `docs/development/INDEX.md`。提交信息遵守 `docs/COMMIT_CONVENTION.md`。
+使用 `$tidy` 执行提交前文档/架构/功能检查和提交后 GitNexus 刷新。
+tidy 更新后使用 `$tidy-rebuild` 评估并对齐现有治理；制定或维护自动化发版流程使用 `$tidy-release`。
+本次记录放 `docs/local/tidy/changes/`；过程材料遵守已确认的可见性，不取消既有忽略边界。
+普通计划、设计草稿、图片、过程决策和验收摘要放 `docs/local/tidy/` 对应分类；工具固定路径优先，稳定共享文档另按项目政策维护。
+GitNexus 计划保留 `docs/plans/*gitnexus-plan*.md` 原路径与正文，tidy 只建索引，不搬迁、改名、复制或用符号链接替代。
+本地过程策略与 `gitnexus-work` 的计划入库要求冲突时，先确认可见性与当前提交授权；不强制入库或擅自改变忽略规则。
+提交前按规范归类全部实际变化并维护统一入口；仅暂存本任务内容。
+每次提交前检查并清理本任务的临时日志、断点、测试入口及调试桩；保留正式日志/回归测试，清理后验证并运行 check --staged。
+提交成功后刷新 `gitnexus analyze --index-only`，核对新鲜度并更新本地回执；失败如实报告。
+不因治理流程获得 push、历史改写、发布或硬件操作授权。现有规则冲突先询问用户。
+<!-- tidy:end -->

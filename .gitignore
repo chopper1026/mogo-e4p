@@ -120,3 +120,6 @@ Desktop.ini
 /flash/ota_data_initial.bin
 /flash/Pico-update.bin
 /flash/Pico-update-*.bin
+# tidy local state
+/docs/local/tidy/
+/.gitnexus/

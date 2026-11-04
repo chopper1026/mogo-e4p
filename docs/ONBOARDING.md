@@ -80,8 +80,8 @@ python3 tools/check_architecture.py
 python3 tools/run_reader_baseline.py
 ```
 
-[工具入口](../tools/README.md)列出宿主回归、资源生成和发布工具。[阅读性能文档](READER_PERFORMANCE.md)说明诊断开关和测量方法。宿主回归保留 sanitizer；不得通过禁用检查掩盖失败。
-The [tool guide](../tools/README.md) groups host tests, generators and release tools. The [reader performance guide](READER_PERFORMANCE.md) documents diagnostic switches and measurements. Preserve host sanitizers instead of disabling checks to hide failures.
+[工具入口](../tools/README.md)列出宿主回归、资源生成和发布工具。[阅读性能文档](development/guides/READER_PERFORMANCE.md)说明诊断开关和测量方法。宿主回归保留 sanitizer；不得通过禁用检查掩盖失败。
+The [tool guide](../tools/README.md) groups host tests, generators and release tools. The [reader performance guide](development/guides/READER_PERFORMANCE.md) documents diagnostic switches and measurements. Preserve host sanitizers instead of disabling checks to hide failures.
 
 烧写前确认目标芯片、版本和生成包；使用该次构建生成的 flash_args，不手写或沿用旧板地址。设备操作应获得对应授权。构建通过、写入校验通过和用户实际验收是不同证据等级，报告时分别说明。
 Before flashing, confirm the chip, version and bundle. Use that build's generated flash_args instead of handwritten or old-board addresses. Obtain the relevant device-operation authorization. Build success, flash verification and actual user acceptance are distinct evidence levels.

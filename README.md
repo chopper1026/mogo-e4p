@@ -8,7 +8,7 @@
 
 ## 先看这个
 
-完整方案在 [移植适配方案.md](./移植适配方案.md)，包含：
+完整方案在 [移植适配方案.md](docs/development/history/porting/%E7%A7%BB%E6%A4%8D%E9%80%82%E9%85%8D%E6%96%B9%E6%A1%88.md)，包含：
 
 - 两块板的硬件/总线/电源/触摸/存储差异对照
 - 推荐架构：Mogo 应用层 + Metalio 板级驱动 + 合并 epdiy S31 后端
@@ -59,7 +59,7 @@ idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" build
 python3 tools/run_reader_baseline.py
 ```
 
-宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
+宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/development/guides/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
 Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrounds, the event loop, books, display, navigation and ripple effects. See the performance guide for measurement setup; CI builds do not replace device acceptance.
 
 ## 定时待机关机 / Timed Standby Power-Off
@@ -107,3 +107,9 @@ Product builds accept only `esp32s31` and directly select the Metalio board, pow
 设备默认从 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json` 获取 stable 升级清单，只接受该平台 `/files/firmware/ota/` 下的 HTTPS 镜像（以及已有的 GitHub 来源和显式配置的额外来源）。平台需发布 E4P 对应的 app 镜像，清单的 project、board、layout、版本、大小和 SHA-256 必须匹配设备；旧板 GitHub 清单不兼容 E4P。已有 `sdkconfig` 会保留旧设置，需通过 menuconfig 更新 Primary manifest URL 或重新生成配置。更改源不会更新已安装的固件，需要先刷入包含新配置的构建。
 
 The device reads the stable E4P OTA feed from the URL above and accepts HTTPS images under the platform OTA path, the existing GitHub origins, or an explicitly configured extra origin. Publish an E4P app image with matching metadata and SHA-256. The legacy GitHub feed is not compatible with E4P. Existing `sdkconfig` values persist: update the primary URL in menuconfig or regenerate the configuration. Devices already installed need a build containing the new configuration before they can use the new source.
+
+<!-- tidy:start -->
+## 开发文档
+
+[项目开发总入口](docs/development/INDEX.md)
+<!-- tidy:end -->
