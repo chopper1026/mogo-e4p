@@ -3,6 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.4 · 2026-11-04
+
+- 天气组件补充雷阵雨、雾霾背景。
+- 新增阅读手帐组件。
+- 修复部分 EPUB 书籍无法打开的问题。
+- 优化 EPUB 书籍，支持 WebP 图片。
+
 ## v1.0.3 · 本地测试 / Local testing · 2026-11-04
 
 - 修复含冒号等特殊文件名的部分 EPUB 无法打开；新增静态 WebP 封面/插图解码，并将正文 body 的单图背景保留为插图，重建旧自动封面缓存。原书无需转换，宿主回归通过，两个问题样本已刷入设备并由用户确认恢复。/ Fix opening EPUBs with literal-colon archive names; add static WebP covers/illustrations and body single-background illustrations, rebuilding old fallback-cover caches. No book conversion; host checks passed and the user confirmed recovery of both reported samples after flashing.

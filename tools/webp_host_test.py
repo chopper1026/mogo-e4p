@@ -43,6 +43,8 @@ def main():
                     "components/webp_decoder/libwebp/src"]
         flags = ["-g", "-O1", "-pthread", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-ffunction-sections", "-fdata-sections", "-I" + str(work)]
+        if sys.platform.startswith("linux"):
+            flags.append("-D__LINUX__")
         flags += ["-I" + str(ROOT / path) for path in includes]
         flags += ["-I" + str(png), "-DPNG_ARM_NEON_OPT=0", "-DPNG_INTEL_SSE_OPT=0"]
         sources = ["tools/webp_host_test.c", "main/book/book_epub.c", "main/book/zip_reader.c",
