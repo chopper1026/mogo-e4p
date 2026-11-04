@@ -341,7 +341,7 @@ static void home_frame(uint8_t *fb,EpdRect box,int radius) {
     for(int i=0;i<3;++i)ui_draw_round_rect(fb,ui_inset_rect(box,i),radius>i?radius-i:0,0x30);
 }
 static home_book_t *featured(void) {return s_current.path[0]?&s_current:&s_recent[0];}
-static void draw_cover(uint8_t *fb,const home_book_t *item,EpdRect bounds) {
+static void draw_cover(uint8_t *fb,const home_book_t *item,EpdRect bounds,bool pressed) {
     EpdRect box=bounds;
     if(item->cover&&item->cover_width&&item->cover_height) {
         unsigned w=item->cover_width,h=item->cover_height;
@@ -355,6 +355,13 @@ static void draw_cover(uint8_t *fb,const home_book_t *item,EpdRect bounds) {
         }
     } else ui_fill_rect_fast(box,0xe0,fb);
     home_frame(fb,box,0);
+    // 按下只改白色外缘，避免用 DU 移动灰阶封面后留下旧底边。
+    // Change only the white margin on press so DU never moves gray cover pixels or leaves their old bottom edge.
+    if(pressed) {
+        EpdRect frame=ui_inset_rect(box,-3);
+        ui_draw_round_rect(fb,frame,0,UI_GRAY_BLACK);
+        ui_draw_round_rect(fb,ui_inset_rect(frame,1),0,UI_GRAY_BLACK);
+    }
 }
 
 static void avatar_prepare_state(void) {
@@ -400,7 +407,7 @@ static void render_reading(uint8_t *fb,unsigned slot) {
     label(fb,36,top+38,26,"最近阅读",EPD_DRAW_ALIGN_LEFT,0);
     home_book_t *b=featured();
     if(b->path[0]) {
-        draw_cover(fb,b,(EpdRect){36,top+(continue_card_pressed(slot)?80:84),178,242});
+        draw_cover(fb,b,(EpdRect){36,top+84,178,242},continue_card_pressed(slot));
         int rows=title_lines(fb,top,b->title,UI_GRAY_WHITE);
         if(b->author[0]) {
             char author[128];snprintf(author,sizeof(author),"%s",b->author);fit(author,25,400);

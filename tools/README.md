@@ -8,6 +8,7 @@ Run commands from the repository root and keep outputs in ignored build director
 | 天气 / Weather | `python3 tools/weather_host_test.py` | 真实解析、缓存、代理任务/取消、NVS交接及原生绘图边界；不联网。/ Real parsing, cache, proxy jobs/cancellation, NVS handoff and native raster bounds, without networking. |
 | 天气背景 / Weather masks | `python3 tools/generate_weather_backgrounds.py` | 无损打包九张1bpp背景，雾霾共图；`--check` 核对源图与资源一致。/ Losslessly pack nine 1bpp backgrounds with shared Fog/Haze; `--check` verifies source/asset consistency. |
 | 天气预览 / Weather preview | `python3 tools/weather_raster_host_test.py --output-dir build/weather-preview` | 先跑原生绘图回归，再导出全部今日/明日组件图、对照图与PNG压缩包。/ Run native raster regressions, then export all Today/Tomorrow widgets, comparison sheets and a PNG archive. |
+| 首页组件 / Home widgets | `python3 tools/dashboard_home_host_test.py` | 真实封面灰阶/1bpp/占位绘制、上下布局、按下仅改变外缘黑白像素、长按/取消/滑出/点按与局部刷新；保留 ASan/UBSan，不能替代实屏验收。/ Real gray/1bpp/placeholder covers, both layouts, binary-only margin feedback, hold/cancel/drag/tap and isolated updates with ASan/UBSan, not panel acceptance. |
 | 目录与依赖 / Structure | `python3 tools/check_architecture.py` | 检查模块依赖、构建清单和测试入口。/ Check module boundaries, build registration and test entry points. |
 | 完整阅读回归 / Reader regression | `python3 tools/run_reader_baseline.py` | 统一执行阅读、字体、显示、存储、OTA 与应用循环回归，保留 ASan/UBSan。/ Run reader/font/display/storage/OTA/app-loop suites with ASan/UBSan. |
 | 指定领域 / Selected suites | `python3 tools/run_reader_baseline.py session chapter open turn reflow` | 只执行指定领域；完整列表见 `--help`。/ Run selected domains; see --help for all suites. |

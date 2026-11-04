@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""中文：首页双区唯一布局、局部刷新与分钟刷新回归。
-English: Regress unique two-region Home layouts, isolated widget and minute updates.
+"""中文：首页双区布局、封面按下像素、局部刷新与分钟刷新回归。
+English: Regress Home layouts, cover press pixels, isolated widget and minute updates.
 """
 from pathlib import Path
 import os
@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from home_cover_cache_host_test import function
+from run_reader_baseline import toolchain
 
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path(os.environ.get("HOME_TEST_SOURCE", ROOT / "main/apps/app_dashboard.c"))
@@ -23,6 +24,7 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include "ui_image_dither.h"
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define BOOK_EXCERPT_CAP 128
@@ -47,6 +49,7 @@ enum {UI_GESTURE_PRESS, UI_GESTURE_MOVE, UI_GESTURE_TAP, UI_GESTURE_LONG_PRESS,
       UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
 typedef struct {char path[128],title[128],author[128];uint8_t *cover;
+    bool cover_fast;uint16_t cover_width,cover_height;
     bool has_progress;struct {unsigned pct;} progress;} home_book_t;
 typedef struct {bool mounted;} board_sd_info_t;
 typedef enum {UI_AVATAR_PENDING, UI_AVATAR_READY, UI_AVATAR_FAILED} ui_avatar_state_t;
@@ -69,6 +72,9 @@ static unsigned s_widget_dirty;
 static int widget_paints[2];
 static int draws,pages,fulls,last_intent,clock_paints;
 static bool wait_cover,fail_open;
+static int contrast=100;
+static int app_settings_system_contrast(void){return contrast;}
+static inline uint8_t ui_control_gray(uint8_t gray);
 static enum EpdDrawError draw_result;
 static uint8_t framebuffer[UI_LOCK_WIDTH*UI_LOCK_HEIGHT],cover_pixel;
 static void pixel(uint8_t *fb,int x,int y,uint8_t gray){
@@ -79,6 +85,12 @@ static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){
     for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)pixel(fb,x,y,gray);
 }
 static void ui_clear_page(uint8_t *fb){memset(fb,255,sizeof(framebuffer));}
+static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){pixel(fb,x,y,gray);}
+static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){
+    assert(radius==0);gray=ui_control_gray(gray);
+    for(int x=r.x;x<r.x+r.width;++x){pixel(fb,x,r.y,gray);pixel(fb,x,r.y+r.height-1,gray);}
+    for(int y=r.y;y<r.y+r.height;++y){pixel(fb,r.x,y,gray);pixel(fb,r.x+r.width-1,y,gray);}
+}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){
     (void)radius;ui_fill_rect_fast(r,gray,fb);
 }
@@ -99,7 +111,6 @@ static void label_on(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFon
 }
 static int ui_text_fixed_width_px(int px,const char *text){(void)px;(void)text;return 100;}
 static void fit(char *text,int px,int width){(void)text;(void)px;(void)width;}
-static void home_frame(uint8_t *fb,EpdRect r,int radius){(void)radius;pixel(fb,r.x,r.y,0);}
 static void circle_frame(uint8_t *fb,int x,int y,int radius){(void)radius;pixel(fb,x,y,0);}
 static void epd_fill_circle(int x,int y,int radius,uint8_t gray,uint8_t *fb){(void)radius;pixel(fb,x,y,gray);}
 static void ui_wallpaper_draw_avatar(uint8_t *fb,const uint8_t *data,EpdRect r,int radius){
@@ -114,9 +125,6 @@ static int title_lines(uint8_t *fb,int top,const char *text,uint8_t bg){
 enum {UI_ICON_SLIDERS_HORIZONTAL,UI_ICON_CHEVRON_RIGHT};
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){
     (void)px;(void)icon;pixel(fb,x,y,gray);
-}
-static void draw_cover(uint8_t *fb,const home_book_t *book,EpdRect r){
-    (void)book;ui_fill_rect_fast(r,0,fb);
 }
 static home_book_t *featured(void){return s_current.path[0]?&s_current:&s_recent[0];}
 static int64_t ui_nav_clock_minute(void){return minute;}
@@ -168,8 +176,11 @@ static bool app_weather_request_stub(app_weather_request_t request,const char *q
 unit += "\n" + function("valid_region", ROOT / "main/ui/ui_weather.c")
 unit += "\n" + function("refresh_button", ROOT / "main/ui/ui_weather.c")
 unit += "\n" + function("ui_weather_hit", ROOT / "main/ui/ui_weather.c")
+unit += "\n" + function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
+unit += "\n" + function("ui_contrast_gray", ROOT / "main/ui/ui_kit.c")
+unit += "\n" + function("ui_inset_rect", ROOT / "main/ui/ui_kit.c")
 for name in ("home_region", "continue_card_rect", "continue_card_hit_rect", "continue_card_pressed",
-             "control_feedback_area", "render_reading", "render_widget", "redraw_widgets", "render_root", "render", "present", "on_tick",
+             "control_feedback_area", "home_frame", "draw_cover", "render_reading", "render_widget", "redraw_widgets", "render_root", "render", "present", "on_tick",
              "hit", "control", "on_gesture", "main_page_visible"):
     unit += "\n" + function(name, HOME)
 unit += r'''
@@ -184,8 +195,81 @@ static void empty_slot(unsigned slot){
     for(int y=r.y;y<r.y+r.height;++y)for(int x=0;x<684;++x)
         assert(framebuffer[y*684+x]==((x==632&&y==r.y+38)?0:255));
 }
+static void binary_margin_feedback(EpdRect area,EpdRect cover){
+    unsigned changed=0;
+    for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
+        unsigned at=y*684+x;
+        if(framebuffer[at]==before[at])continue;
+        ++changed;
+        assert(hit(area,x,y));
+        assert(!hit(cover,x,y));
+        assert(before[at]==255&&framebuffer[at]==0);
+    }
+    assert(changed>0);
+}
+static void cover_feedback(app_ctx_t *ctx){
+    static uint8_t gray[320*360],bits[40*360];
+    const unsigned shapes[][2]={{178,242},{97,317},{263,113},{171,241}};
+    const int contrasts[]={70,160};
+    const int actions[]={UI_GESTURE_LONG_PRESS,UI_GESTURE_CANCEL,UI_GESTURE_MOVE,
+                         UI_GESTURE_TAP,UI_GESTURE_TAP};
+    unsigned cases=0;
+    for(unsigned slot=0;slot<2;++slot)for(unsigned format=0;format<3;++format)
+    for(unsigned shape=0;shape<sizeof(shapes)/sizeof(*shapes);++shape)
+    for(unsigned c=0;c<sizeof(contrasts)/sizeof(*contrasts);++c){
+        if(format==2&&shape)continue;
+        unsigned w=shapes[shape][0],h=shapes[shape][1],stride=(w+7)/8;
+        memset(bits,0,sizeof(bits));
+        for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+            gray[y*w+x]=(uint8_t)(11*x+7*y);
+            if((x+3*y)%7<4)bits[y*stride+x/8]|=1u<<(x&7);
+        }
+        contrast=contrasts[c];s_current.cover_fast=format==1;
+        s_current.cover=format==2?NULL:format==1?bits:gray;
+        s_current.cover_width=format==2?0:w;s_current.cover_height=format==2?0:h;
+        strcpy(s_current.path,"/book.epub");slots[slot]=APP_HOME_WIDGET_READING;
+        slots[1-slot]=APP_HOME_WIDGET_WEATHER;
+        EpdRect region=home_region(slot),box={36,region.y+84,178,242};
+        if(format!=2){
+            if(w*242>h*178)box.height=178*h/w;else box.width=242*w/h;
+            box.x=36+(178-box.width)/2;box.y=region.y+84+242-box.height;
+        }
+        for(unsigned action=0;action<sizeof(actions)/sizeof(*actions);++action){
+            ++cases;s_press_pending=s_clock_pending=false;s_widget_dirty=0;
+            s_home_force_full_once=false;fail_open=action==4;nav=-1;
+            render(ctx,ctx->fb);memcpy(before,framebuffer,sizeof(before));
+            const int old_pages=pages,old_fulls=fulls,old_opens=open_calls,old_library=library_calls;
+            ui_gesture_event_t ev={UI_GESTURE_PRESS,72,region.y+200,72,region.y+200};
+            assert(on_gesture(ctx,&ev)==APP_REDRAW_AREA&&s_press_pending);
+            assert(present(ctx,APP_REDRAW_AREA)&&last_intent==DISPLAY_REFRESH_FEEDBACK);
+            binary_margin_feedback(last_area,box);
+            ev.type=UI_GESTURE_MOVE;assert(on_gesture(ctx,&ev)==APP_REDRAW_NONE&&s_press_pending);
+            ev.type=actions[action];
+            if(ev.type==UI_GESTURE_MOVE){ev.x=680;ev.y=region.y+20;}
+            app_redraw_t redraw=on_gesture(ctx,&ev);assert(!s_press_pending);
+            if(ev.type==UI_GESTURE_LONG_PRESS){
+                assert(redraw==APP_REDRAW_NONE&&library_calls==old_library+1&&!library_city);
+                assert(open_calls==old_opens&&nav==-1);
+            }else if(ev.type==UI_GESTURE_TAP){
+                assert(open_calls==old_opens+1&&library_calls==old_library);
+                assert(redraw==(fail_open?APP_REDRAW_AREA:APP_REDRAW_NONE)&&nav==(fail_open?-1:1));
+            }else{
+                assert(redraw==APP_REDRAW_AREA&&library_calls==old_library&&open_calls==old_opens&&nav==-1);
+            }
+            if(redraw==APP_REDRAW_AREA){
+                assert(present(ctx,redraw)&&last_intent==DISPLAY_REFRESH_DETAIL);
+            }else render(ctx,ctx->fb);
+            assert(memcmp(framebuffer,before,sizeof(before))==0);
+            assert(pages==old_pages&&fulls==old_fulls);
+        }
+    }
+    s_current.cover=NULL;s_current.cover_width=s_current.cover_height=0;fail_open=false;contrast=100;
+    printf("PASS: %u real-cover press/hold/cancel/drag/tap cases, fixed grayscale/1bpp/placeholder pixels and binary margin feedback in both slots\n",cases);
+}
 int main(void){
     app_ctx_t ctx={.fb=framebuffer};touch_t touch={0};ctx.touch=&touch;
+    cover_feedback(&ctx);
+    draws=pages=fulls=open_calls=library_calls=0;
     unsigned layouts=0;
     for(unsigned a=0;a<3;++a)for(unsigned b=0;b<3;++b){
         if(a==b&&a!=APP_HOME_WIDGET_EMPTY)continue;
@@ -201,7 +285,7 @@ int main(void){
                 if(slots[slot]==APP_HOME_WIDGET_EMPTY)empty_slot(slot);
                 if(slots[slot]==APP_HOME_WIDGET_READING&&has_book){
                     assert(framebuffer[(r.y+84)*684+36]==0);
-                    assert(framebuffer[(r.y+80)*684+36]==((pressed&&s_pressed.y==r.y)?0:255));
+                    assert(framebuffer[(r.y+80)*684+36]==255);
                 }
                 if(slots[slot]==APP_HOME_WIDGET_WEATHER)
                     for(int y=r.y;y<r.y+r.height;++y)for(int x=0;x<684;++x)assert(framebuffer[y*684+x]==0x55);
@@ -289,9 +373,11 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory(prefix="dashboard-home-") as directory:
     work = Path(directory)
+    env, compiler = toolchain(work)
     c_file, binary = work / "test.c", work / "test"
     c_file.write_text(unit)
-    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-g",
-                    "-fsanitize=address,undefined", "-Imain/services", "-Imain/settings", str(c_file), "-o", str(binary)],
-                   cwd=ROOT, check=True)
-    subprocess.run([str(binary)], cwd=ROOT, check=True)
+    subprocess.run(compiler + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-g",
+                    "-fsanitize=address,undefined", "-Imain/services", "-Imain/settings", "-Imain/ui",
+                    str(c_file), "main/ui/ui_image_dither.c", "-o", str(binary)],
+                   cwd=ROOT, env=env, check=True)
+    subprocess.run([str(binary)], cwd=ROOT, env=env, check=True)

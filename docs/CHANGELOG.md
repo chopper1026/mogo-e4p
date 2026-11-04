@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.3 · 本地测试 / Local testing · 2026-11-04
 
+- 首页续读按下反馈改为封面外缘黑色描边，不再移动灰阶封面，避免长按进入组件页时遗留旧封面底边；不增加整页强刷，实屏改善待验证。/ Keep Home cover pixels fixed and show a black margin outline on press to avoid an old bottom edge after holding into Components; no extra full-page refresh, with panel improvement awaiting verification.
 - 天气组件补充沙尘、雨雪混合与阴天三种背景，按官方天气代码区分；雾和霾共用雾景，移除独立霾图。热、冷和未知状态仍保持中性。/ Add Dust, mixed rain/snow and Overcast backgrounds mapped by official condition codes; Fog and Haze share the fog image, with no separate Haze asset. Hot, Cold and Unknown remain neutral.
 - 雾景改用林梢与雾带遮挡；雷阵雨使用独立云雨构图，闪电主干从云底贯穿组件下沿，增加自然分叉、不规则转折、宽窄变化和亮芯，区别普通下雨。实屏效果待验收。/ Use mist-obscured trees for Fog and a separate thunderstorm composition with a cloud-to-bottom lightning trunk, natural side channels, irregular turns, varied width and bright cores; panel appearance awaits acceptance.
 
