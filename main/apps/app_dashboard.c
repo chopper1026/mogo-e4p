@@ -45,6 +45,7 @@
 #include "book_cover_jobs.h"
 #include "ui_image_dither.h"
 #include "book_epub.h"
+#include "book_mobi.h"
 #include "book_progress.h"
 #include "book_store.h"
 #include "book_file_path.h"
@@ -213,10 +214,16 @@ static void scan_books(void) {
     }
     home_book_t *featured = s_current.path[0] ? &s_current : &s_recent[0];
     const char *ext = strrchr(featured->path, '.');
-    if (ext && !strcasecmp(ext, ".epub") && pico_boot_asset_allowed(featured->path)) {
+    const bool featured_mobi = ext && (!strcasecmp(ext, ".mobi") || !strcasecmp(ext, ".prc") ||
+                                       !strcasecmp(ext, ".azw"));
+    if (ext && (!strcasecmp(ext, ".epub") || featured_mobi) && pico_boot_asset_allowed(featured->path)) {
         char metadata_title[256];
-        if (book_epub_metadata(featured->path, metadata_title, sizeof(metadata_title),
-                               featured->author, sizeof(featured->author)) != ESP_OK)
+        esp_err_t meta = featured_mobi
+            ? book_mobi_metadata(featured->path, metadata_title, sizeof(metadata_title),
+                                 featured->author, sizeof(featured->author))
+            : book_epub_metadata(featured->path, metadata_title, sizeof(metadata_title),
+                                 featured->author, sizeof(featured->author));
+        if (meta != ESP_OK)
             featured->author[0] = 0;
         else if (metadata_title[0]) copy_title(featured->title,sizeof(featured->title),metadata_title);
     }

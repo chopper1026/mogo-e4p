@@ -166,6 +166,7 @@ idf_component_register(
         "book/book_index_cache.c"
         "book/book_txt.c"
         "book/book_epub.c"
+        "book/book_mobi.c"
         "book/book_cover.c"
         "image/image_decode.c"
         "image/image_webp.c"
