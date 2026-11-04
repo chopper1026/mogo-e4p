@@ -69,7 +69,7 @@ int main(void){
     assert(app_home_component_at(2)==APP_HOME_WIDGET_EMPTY&&app_home_component_at(UINT32_MAX)==APP_HOME_WIDGET_EMPTY);
     assert(!app_home_component_set(2,APP_HOME_WIDGET_READING));
     assert(!app_home_component_set(0,(app_home_widget_t)-1));
-    assert(!app_home_component_set(0,(app_home_widget_t)3));assert(!writes&&!begins);
+    assert(!app_home_component_set(0,(app_home_widget_t)4));assert(!writes&&!begins);
     assert(app_home_component_set(0,APP_HOME_WIDGET_READING)&&!writes);
     reboot(true);choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);assert(!writes&&!begins);
     select_once(0,APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_READING);
@@ -98,7 +98,7 @@ int main(void){
     int before=writes,valid_count=0;
     for(unsigned value=0;value<256;++value){
         disk=(uint8_t)value;
-        bool valid=value>=0x10&&value<=0x1f&&(value&3)<=2&&((value>>2)&3)<=2&&
+        bool valid=value>=0x10&&value<=0x1f&&
             ((value&3)!=((value>>2)&3)||(value&3)==2);
         assert(app_home_components_value_valid((uint8_t)value)==valid);
         reboot(true);
@@ -106,7 +106,10 @@ int main(void){
         else choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);
         assert(writes==before);
     }
-    assert(valid_count==7);
+    assert(valid_count==13);
+    app_home_components_apply(0x18);
+    select_once(0,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_EMPTY);
+    select_once(1,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_EMPTY,APP_HOME_WIDGET_JOURNAL);
     open_allowed=false;reboot(false);open_allowed=true;choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY);
     get_allowed=false;reboot(true);get_allowed=true;choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);
     int before_apply=writes;

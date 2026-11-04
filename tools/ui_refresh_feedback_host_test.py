@@ -134,6 +134,9 @@ static bool app_settings_reader_hide_images(void){return test_hide_images;}
 static uint8_t app_settings_reader_full_pages(void){return test_full_pages;}
 static int app_settings_reader_turn_effect(void){return test_effect;}
 static void save_progress(void){}
+static void app_reading_journal_record(const char *path,const char *title,uint32_t size,unsigned chapter,uint32_t ms,uint32_t turns){
+    (void)path;(void)title;(void)size;(void)chapter;(void)ms;(void)turns;
+}
 static void skip_hidden_image_pages(app_ctx_t *ctx,int dir){(void)ctx;(void)dir;}
 static bool load_chapter(app_ctx_t *ctx,unsigned chapter,int off,bool last){(void)ctx;(void)off;if(test_load_failed)return false;s_chapter=chapter;s_page=last?1:0;return true;}
 static void set_reader_view(int view){s_view=view;}

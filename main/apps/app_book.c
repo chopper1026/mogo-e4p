@@ -174,6 +174,7 @@
 #include "book_font_size.h"
 #include "book_title.h"
 #include "book_ticket.h"
+#include "reading_journal.h"
 #include "book_excerpt.h"
 #include "book_toc.h"
 #include "app_font_context.h"
@@ -3877,7 +3878,9 @@ static void track_ticket_stats(app_ctx_t* ctx) {
         uint32_t elapsed = (uint32_t)(ctx->now_ms - s_stats_last_ms);
         s_stats_pending_ms += elapsed;
         s_session_read_ms += elapsed;
-    }
+        app_reading_journal_record(s_reader_session.book.path,s_reader_session.book.title,
+            s_reader_session.book.file_size,(unsigned)s_reader_session.position.chapter,elapsed,0);
+    } else (void)app_reading_journal_poll();
     s_stats_last_ms = ctx->now_ms;
     if (s_stats_pending_ms >= 30000) flush_ticket_stats();
 }
@@ -3897,6 +3900,7 @@ static void reader_bind_chapter(void) {
 }
 static void free_book(void) {
     flush_ticket_stats();
+    (void)app_reading_journal_flush();
     e0470_page_turn_release();
     s_water_turn_pending = false;
     s_reader_turn_pending = s_reader_text_frame = s_reader_stable_frame = false;
@@ -4269,6 +4273,8 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
         book_layout_page_image_count(s_reader_session.position.page) > 0 && s_page_images;
     s_stats_last_ms = s_stats_activity_ms = ctx->now_ms;
+    app_reading_journal_record(s_reader_session.book.path,s_reader_session.book.title,
+        s_reader_session.book.file_size,(unsigned)s_reader_session.position.chapter,0,0);
     s_reader_panel = READER_PANEL_NONE;
     s_clear_confirm = s_batch_confirm = false;
     s_session_read_ms = s_session_turns = 0;
@@ -4660,6 +4666,8 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_last_turn_ms = s_stats_activity_ms = ctx->now_ms;
     ++s_stats_pending_turns;
     ++s_session_turns;
+    app_reading_journal_record(s_reader_session.book.path,s_reader_session.book.title,
+        s_reader_session.book.file_size,(unsigned)s_reader_session.position.chapter,0,1);
     uint8_t full_pages = app_settings_reader_full_pages();
     if (full_pages) ++s_turns;
     else s_turns = 0;
@@ -6000,6 +6008,7 @@ static void on_enter(app_ctx_t* ctx) {
 
 }
 static void book_on_exit(app_ctx_t* ctx) {
+    track_ticket_stats(ctx);
     middle_pending_clear();
     reader_indent_hold_cancel();
     // 离页恢复加速度计静默；门槛与静默窗口一并复位，下次进书重新起步。
@@ -6967,6 +6976,7 @@ static void before_lock(app_ctx_t* ctx) {
     // 锁屏票根始终以当前正在阅读的书为准；不要依赖书架最近项是否已经同步。
     if (s_text && s_reader_session.book.path[0]) book_progress_set_last_path(s_reader_session.book.path);
     flush_ticket_stats();
+    (void)app_reading_journal_flush();
     s_stats_last_ms = 0;
 }
 static display_rect_t area_hint(app_ctx_t* ctx) { (void)ctx; return display_rect_from_epd(s_area); }

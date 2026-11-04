@@ -43,7 +43,10 @@ static bool s_reader_fullscreen,s_clear_confirm,s_reader_text_frame,s_reader_tur
 static bool s_reader_stable_frame,s_reader_footer_strong;
 static bool s_water_turn_pending,s_reader_cleanup,draw_locked,load_failed;
 static int s_water_turn_dir;
-static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved;
+static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved,journal_turns;
+static void app_reading_journal_record(const char *path,const char *title,uint32_t size,unsigned chapter,uint32_t ms,uint32_t turns){
+ assert(!strcmp(path,"/book.epub")&&!strcmp(title,"Book")&&size==500&&chapter==s_chapter&&!ms&&turns==1);journal_turns+=turns;
+}
 static int64_t s_last_turn_ms,s_stats_activity_ms;
 static bool s_save_failed;
 static char s_message[128];
@@ -102,10 +105,15 @@ unit += reflow_code("indent", "fullscreen")
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
              'toggle_reader_fullscreen', 'reader_turn_chrome', 'turn_page'):
-    unit += function(name, BOOK) + '\n'
+    if name == 'turn_page':
+        unit += '#define turn_page actual_turn_page\n' + function(name, BOOK) + '\n#undef turn_page\n'
+        unit += 'static app_redraw_t turn_page(app_ctx_t *ctx,int dir){app_redraw_t result=actual_turn_page(ctx,dir);assert(journal_turns==s_stats_pending_turns);return result;}\n'
+    else:
+        unit += function(name, BOOK) + '\n'
 unit += r'''
 static void reset(bool full,bool tools,size_t page,size_t chapter){
  s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
+ strcpy(s_reader_session.book.path,"/book.epub");strcpy(s_reader_session.book.title,"Book");s_reader_session.book.file_size=500;journal_turns=0;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=0;
  failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=s_reader_stable_frame=true;

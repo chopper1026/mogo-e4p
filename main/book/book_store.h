@@ -40,6 +40,8 @@ size_t book_store_file_limit(const book_store_root_t* root);
 uint64_t book_store_free_bytes(const book_store_root_t* root);
 /// 仅查询内置分区是否已挂载，不触发挂载。/ Inspect flash mount state without mounting.
 bool book_store_flash_ready(void);
+/// 为本机数据挂载已有内置卷，绝不格式化或访问TF卡。/ Mount an existing internal volume for local data; never format or access SD.
+esp_err_t book_store_prepare_data(void);
 /// 仅删除已挂载书根内的直接 TXT/EPUB 普通文件，然后清对应进度及 last。
 /// Delete only a direct regular TXT/EPUB file in a mounted book root, then forget its progress and last path.
 /// 先清同名普通覆盖备份；仅有备份时先恢复再删除，失败不声称文件已删。

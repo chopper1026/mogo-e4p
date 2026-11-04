@@ -18,6 +18,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 
 - [显示刷新契约](designs/DISPLAY_REFRESH.md)：显示意图、波形出口与失败恢复。/ Refresh intents, waveform exits and failure recovery.
 - [组件与天气](guides/WEATHER.md)：首页布局、选城、网络生命周期与缓存。/ Home layout, city selection, networking and cache.
+- [阅读手账](guides/READING_JOURNAL.md)：当月逐日统计、日历、六图轮换与本机存储边界。/ Monthly daily records, calendar, six-scene rotation and local persistence limits.
 - [阅读性能测量](guides/READER_PERFORMANCE.md)：诊断开关、资源归属和样本解释边界。/ Diagnostic flags, resource ownership and measurement limits.
 - [平台 OTA 操作](guides/PLATFORM_OTA.md)、[OTA 日志要求](../ota-release-notes/README.md)：构建提交草稿与管理员发布不同。/ Draft submission is distinct from administrator publication.
 - [板级入口](../../components/board_support/README.md)、[电源组件](../../components/device_power/README.md)、[离线检索](../../components/book_search/README.md)：模块旁文档保留原位。电源组件的 `docs/` 是旧 CW32 协议参考，不是当前板级事实。/ Keep component documentation in place; the power component's docs are legacy CW32 references, not current board specifications.

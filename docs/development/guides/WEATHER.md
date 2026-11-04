@@ -2,11 +2,11 @@
 
 ## 使用 / Use
 
-首页分为上下两个等高区域，可分别选择「最近阅读」「天气」或「留白」。最近阅读和天气各只能出现一次；选择已在另一区域的组件时，两区自动交换，留白可以重复。通过留白区域的设置图标、长按任一区域，或设置页「阅读背景」下方的「组件库」进入配置。天气去除外框和圆角，铺满所在区域并直接衔接底部导航。组件库、天气设置及城市页底栏均仅保留中间的首页按钮，两侧无隐藏返回热区。点「今日 / 明日」本地切换，不额外请求天气。旧组件、月阅读记录与闭环目标不恢复。
+首页分为上下两个等高区域，可分别选择「最近阅读」「天气」「阅读手账」或「留白」。非留白组件各只能出现一次；选择已在另一区域的组件时，两区自动交换，留白可以重复。通过留白区域的设置图标、长按任一区域，或设置页「阅读背景」下方的「组件库」进入配置。天气去除外框和圆角，铺满所在区域并直接衔接底部导航。组件库、天气设置及城市页底栏均仅保留中间的首页按钮，两侧无隐藏返回热区。点「今日 / 明日」本地切换，不额外请求天气。旧组件、旧月阅读记录与闭环目标不恢复；新增手账的独立采集、日历和存储边界见[阅读手账](READING_JOURNAL.md)。
 
 天气底部只保留36像素的刷新图标，不再显示「刷新」文字；图标中心位于区域左侧632像素处，点击范围为64×64像素，避开导航栏的扩展热区；最近阅读右上角的设置图标及点击入口也已移除，天气设置通过长按区域或设置页组件库进入，原底部设置图标及其独立热区移除。
 
-Home has two equal regions, each choosing Recent reading, Weather or Empty. Real widgets are unique: selecting one already in the other region swaps both choices; Empty may repeat. Open configuration using the settings icon in Empty, a hold on either region, or the library below Reading background in Settings. Weather is rectangular, borderless and edge-to-edge, meeting the footer directly. Configuration, weather settings and city footers retain only Home, without hidden side hit areas. Day switching is local and never submits a weather request. Retired widgets, monthly records and goals remain removed.
+Home has two equal regions, each choosing Reading, Weather, Reading journal or Empty. Real widgets are unique: selecting one already in the other region swaps both choices; Empty may repeat. Open configuration using the settings icon in Empty, a hold on either region, or the library below Reading background in Settings. Weather is rectangular, borderless and edge-to-edge, meeting the footer directly. Configuration, weather settings and city footers retain only Home, without hidden side hit areas. Day switching is local and never submits a weather request. Retired widgets, old monthly records and goals remain removed; the journal guide defines the new independent recording/calendar/storage contract.
 
 The weather footer shows only a 36-pixel refresh icon centered at x=632 within the region, with a 64×64-pixel hit area outside the navigation touch margin. The Refresh label and the Reading settings icon/tap target are removed. Open weather settings with a hold or through the component library in Settings; the old footer settings icon and its independent hit area are removed.
 

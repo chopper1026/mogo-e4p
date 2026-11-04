@@ -23,6 +23,7 @@ static bool s_requested_city, s_city, s_weather_settings, s_tomorrow, s_detail, 
 static char s_query[129], s_notice[97];
 static ui_text_edit_t s_edit;
 static EpdRect s_area;
+static const app_home_widget_t s_choices[]={APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_EMPTY};
 static void text(uint8_t *fb, int x, int y, int px, const char *value, enum EpdFontFlags align) {
     ui_text_fixed_vc(fb,x,y,px,value,align,false);
 }
@@ -59,8 +60,8 @@ static void system_nav(uint8_t *fb) {
     ui_draw_icon(fb,342,1164,44,UI_ICON_HOUSE,0);
 }
 static void component_option(uint8_t *fb,int y,app_home_widget_t widget,unsigned slot) {
-    static const char *names[]={"最近阅读","天气","留白"};
-    const ui_icon_t icons[]={UI_ICON_BOOK_OPEN,UI_ICON_SUN,UI_ICON_EYE_CLOSED};
+    static const char *names[]={"最近阅读","天气","留白","阅读手账"};
+    const ui_icon_t icons[]={UI_ICON_BOOK_OPEN,UI_ICON_SUN,UI_ICON_EYE_CLOSED,UI_ICON_BOOKMARK};
     ui_draw_icon(fb,58,y,30,icons[widget],0);
     text(fb,94,y,30,names[widget],EPD_DRAW_ALIGN_LEFT);
     epd_draw_circle(624,y,15,0,fb);epd_draw_circle(624,y,14,0,fb);
@@ -78,11 +79,11 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
     const app_weather_view_t *v=app_weather_view();
     if(!s_city&&!s_weather_settings) {
         text(fb,36,205,26,"上方区域",EPD_DRAW_ALIGN_LEFT);
-        for(unsigned i=0;i<3;++i)component_option(fb,281+(int)i*84,(app_home_widget_t)i,APP_HOME_SLOT_TOP);
-        ui_draw_separator(fb,523,36,612,0x90);
+        for(unsigned i=0;i<4;++i)component_option(fb,263+(int)i*76,s_choices[i],APP_HOME_SLOT_TOP);
+        ui_draw_separator(fb,548,36,612,0x90);
         text(fb,36,583,26,"下方区域",EPD_DRAW_ALIGN_LEFT);
-        for(unsigned i=0;i<3;++i)component_option(fb,659+(int)i*84,(app_home_widget_t)i,APP_HOME_SLOT_BOTTOM);
-        ui_draw_separator(fb,901,36,612,0x90);
+        for(unsigned i=0;i<4;++i)component_option(fb,645+(int)i*76,s_choices[i],APP_HOME_SLOT_BOTTOM);
+        ui_draw_separator(fb,920,36,612,0x90);
         text(fb,36,964,27,"天气设置",EPD_DRAW_ALIGN_LEFT);
         char city[193];snprintf(city,sizeof(city),"%s",v->has_city?v->city.name:"");
         while(*city&&ui_text_fixed_width_px(25,city)>300) {
@@ -229,10 +230,10 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
     } else if(ev->type==UI_GESTURE_TAP&&!s_weather_settings) {
         int x=ev->x0,y=ev->y0;
         if(x>=36&&x<648) {
-            for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)for(unsigned choice=0;choice<3;++choice) {
-                int row=(slot?659:281)+(int)choice*84;
-                if(y>=row-38&&y<row+38) {
-                    if(!app_home_component_set(slot,(app_home_widget_t)choice))snprintf(s_notice,sizeof(s_notice),"设置保存失败，请稍后重试");
+            for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)for(unsigned choice=0;choice<4;++choice) {
+                int row=(slot?645:263)+(int)choice*76;
+                if(y>=row-34&&y<row+34) {
+                    if(!app_home_component_set(slot,s_choices[choice]))snprintf(s_notice,sizeof(s_notice),"设置保存失败，请稍后重试");
                     else {s_notice[0]=0;if(!app_home_has_widget(APP_HOME_WIDGET_WEATHER))app_weather_cancel_join();}
                     return APP_REDRAW_PAGE;
                 }

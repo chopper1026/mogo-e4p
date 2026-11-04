@@ -3,6 +3,7 @@
 English: Regress real callbacks for Home-only footers, on-demand keyboard and automatic location.
 """
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -31,7 +32,7 @@ enum {DISPLAY_REFRESH_FEEDBACK,DISPLAY_REFRESH_DETAIL,DISPLAY_REFRESH_SETTLE,DIS
 typedef int display_refresh_intent_t;
 typedef enum {UI_WEATHER_NONE,UI_WEATHER_CITY,UI_WEATHER_TODAY,UI_WEATHER_TOMORROW,UI_WEATHER_REFRESH,UI_WEATHER_SETTINGS} ui_weather_action_t;
 typedef int ui_icon_t;
-enum {UI_ICON_HOUSE,UI_ICON_CHEVRON_LEFT,UI_ICON_CHEVRON_RIGHT,UI_ICON_RADIO_TOWER,UI_ICON_BOOK_OPEN,UI_ICON_SUN,UI_ICON_EYE_CLOSED};
+enum {UI_ICON_HOUSE,UI_ICON_CHEVRON_LEFT,UI_ICON_CHEVRON_RIGHT,UI_ICON_RADIO_TOWER,UI_ICON_BOOK_OPEN,UI_ICON_SUN,UI_ICON_EYE_CLOSED,UI_ICON_BOOKMARK};
 enum {UI_KEY_1,UI_KEY_2,UI_KEY_3};
 #define UI_NAV_TOP 1112
 #define WEATHER_REGION_WIDTH 684
@@ -58,7 +59,7 @@ void app_weather_init(void){++weather_inits;}
 bool ui_weather_prepare(void){++prepares;return true;}
 app_home_widget_t app_home_component_at(unsigned slot){assert(slot<2);return slots[slot];}
 bool app_home_component_set(unsigned slot,app_home_widget_t widget){
-    assert(slot<2&&(unsigned)widget<3);++layout_writes;
+    assert(slot<2&&(unsigned)widget<4);++layout_writes;
     if(layout_save_ok){unsigned other=slot?0:1;if(widget!=APP_HOME_WIDGET_EMPTY&&slots[other]==widget)slots[other]=slots[slot];slots[slot]=widget;}
     return layout_save_ok;
 }
@@ -130,6 +131,7 @@ static void ui_text_input_draw(uint8_t *fb,int *edit,EpdRect rect,int px,bool ma
 static void ui_keyboard_draw(uint8_t *fb,int top){(void)fb;assert(top==560);++draws;}
 void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_view_t *v,int64_t now){(void)fb;assert(region.x==0&&region.y==236&&region.width==684&&region.height==472);(void)tomorrow;(void)v;(void)now;}
 '''
+unit += re.search(r'static const app_home_widget_t s_choices\[\]=\{[^;]+;', PAGE.read_text()).group(0)
 for name, path in (("valid_region", ROOT / "main/ui/ui_weather.c"), ("refresh_button", ROOT / "main/ui/ui_weather.c"),
                    ("ui_weather_hit", ROOT / "main/ui/ui_weather.c"),
                    ("city_begin", PAGE), ("app_components_open", PAGE), ("app_components_open_home", PAGE), ("enter", PAGE),
@@ -169,9 +171,9 @@ int main(void){
     }
     s_city=s_weather_settings=false;ui_gesture_event_t event={UI_GESTURE_TAP,600,281};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[0]==APP_HOME_WIDGET_READING);
-    for(unsigned slot=0;slot<2;++slot)for(unsigned choice=0;choice<3;++choice){
-        event=(ui_gesture_event_t){UI_GESTURE_TAP,100,(slot?659:281)+(int)choice*84};
-        assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[slot]==(app_home_widget_t)choice);
+    for(unsigned slot=0;slot<2;++slot)for(unsigned choice=0;choice<4;++choice){
+        event=(ui_gesture_event_t){UI_GESTURE_TAP,100,(slot?645:263)+(int)choice*76};
+        assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[slot]==s_choices[choice]);
     }
     assert(slots[0]==APP_HOME_WIDGET_EMPTY&&slots[1]==APP_HOME_WIDGET_EMPTY);
     assert(tick(&ctx)==APP_REDRAW_NONE);
@@ -186,7 +188,7 @@ int main(void){
         assert(result==((x>=36&&x<648)?APP_REDRAW_PAGE:APP_REDRAW_NONE));
         assert(layout_writes==before+((x>=36&&x<648)?1:0));
     }
-    int before_layout=layout_writes;event=(ui_gesture_event_t){UI_GESTURE_TAP,100,523};
+    int before_layout=layout_writes;event=(ui_gesture_event_t){UI_GESTURE_TAP,100,548};
     assert(gesture(&ctx,&event)==APP_REDRAW_NONE&&layout_writes==before_layout);
     render(&ctx,NULL);
     event=(ui_gesture_event_t){UI_GESTURE_TAP,100,964};

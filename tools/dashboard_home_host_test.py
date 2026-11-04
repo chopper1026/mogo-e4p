@@ -64,11 +64,21 @@ static unsigned s_cover_generation;
 static int s_cover_next,cover_calls,scan_calls,nav=-1,open_calls,library_calls,weather_requests;
 static bool library_city;
 #include "home_components.h"
+#include "reading_journal_model.h"
 static app_home_widget_t slots[2]={APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY};
 app_home_widget_t app_home_component_at(unsigned slot){assert(slot<2);return slots[slot];}
 bool app_home_has_widget(app_home_widget_t widget){return slots[0]==widget||slots[1]==widget;}
 static bool s_weather_tomorrow[2];
 static unsigned s_widget_dirty;
+static const reading_journal_model_t *app_reading_journal_model(void){return NULL;}
+static const reading_journal_date_t *app_reading_journal_today(void){return NULL;}
+static const char *app_reading_journal_notice(void){return "";}
+static bool journal_changed;
+static int journal_opens,journal_scenes;
+static bool app_reading_journal_poll(void){bool changed=journal_changed;journal_changed=false;return changed;}
+static bool app_reading_journal_next_scene(void){++journal_scenes;return true;}
+static void app_reading_journal_open(app_ctx_t *ctx){(void)ctx;++journal_opens;}
+static EpdRect ui_reading_journal_art(EpdRect region){return(EpdRect){438,region.y+78,210,162};}
 static int widget_paints[2];
 static int draws,pages,fulls,last_intent,clock_paints;
 static bool wait_cover,fail_open;
@@ -85,6 +95,9 @@ static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){
     for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)pixel(fb,x,y,gray);
 }
 static void ui_clear_page(uint8_t *fb){memset(fb,255,sizeof(framebuffer));}
+static void ui_reading_journal_widget(uint8_t *fb,EpdRect region,const reading_journal_model_t *model,const reading_journal_date_t *today,const char *notice){
+    (void)model;(void)today;(void)notice;ui_fill_rect_fast(region,0x77,fb);
+}
 static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){pixel(fb,x,y,gray);}
 static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){
     assert(radius==0);gray=ui_control_gray(gray);
@@ -271,7 +284,7 @@ int main(void){
     cover_feedback(&ctx);
     draws=pages=fulls=open_calls=library_calls=0;
     unsigned layouts=0;
-    for(unsigned a=0;a<3;++a)for(unsigned b=0;b<3;++b){
+    for(unsigned a=0;a<4;++a)for(unsigned b=0;b<4;++b){
         if(a==b&&a!=APP_HOME_WIDGET_EMPTY)continue;
         slots[0]=a;slots[1]=b;++layouts;
         for(int has_book=0;has_book<2;++has_book)for(int avatar=0;avatar<2;++avatar)for(int pressed=0;pressed<2;++pressed){
@@ -295,7 +308,7 @@ int main(void){
             assert(framebuffer[18*684+24]==0&&framebuffer[1164*684+24]==0);
         }
     }
-    assert(layouts==7);s_press_pending=false;strcpy(s_current.path,"/book.epub");
+    assert(layouts==13);s_press_pending=false;strcpy(s_current.path,"/book.epub");
     slots[0]=APP_HOME_WIDGET_READING;slots[1]=APP_HOME_WIDGET_EMPTY;
     ui_gesture_event_t ev={UI_GESTURE_TAP,540,118,540,118};nav=-1;
     assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&nav==-1);
@@ -351,14 +364,28 @@ int main(void){
         assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&library_calls==library_before&&weather_requests==refresh_before&&nav==-1);
         ev.y0=1112;on_gesture(&ctx,&ev);assert(nav==3);
     }
-    for(unsigned a=0;a<3;++a)for(unsigned b=0;b<3;++b){
+    for(unsigned slot=0;slot<2;++slot){
+        slots[slot]=APP_HOME_WIDGET_JOURNAL;slots[1-slot]=APP_HOME_WIDGET_WEATHER;
+        EpdRect region=home_region(slot);render(&ctx,ctx.fb);
+        int opened=journal_opens,scenes=journal_scenes;
+        ev=(ui_gesture_event_t){UI_GESTURE_TAP,500,region.y+150,0,0};
+        memcpy(before,framebuffer,sizeof(before));
+        assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&journal_scenes==scenes+1&&journal_opens==opened);
+        assert(present(&ctx,APP_REDRAW_AREA));isolated(region);
+        ev.x0=120;assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&journal_opens==opened+1&&journal_scenes==scenes+1);
+        ev.x0=648;ev.y0=region.y+78;assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&journal_opens==opened+2);
+        journal_changed=true;assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_widget_dirty==(1u<<slot));
+        memcpy(before,framebuffer,sizeof(before));present(&ctx,APP_REDRAW_AREA);isolated(region);
+        assert(!journal_changed&&last_area.y==region.y&&last_area.height==472);
+    }
+    for(unsigned a=0;a<4;++a)for(unsigned b=0;b<4;++b){
         if(a==b&&a!=APP_HOME_WIDGET_EMPTY)continue;
         slots[0]=a;slots[1]=b;
         for(unsigned slot=0;slot<2;++slot){
             EpdRect r=home_region(slot);int library_before=library_calls;
             ev=(ui_gesture_event_t){UI_GESTURE_LONG_PRESS,10,r.y+10,10,r.y+10};
             assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&library_calls==library_before+1&&!library_city);
-            if(slots[slot]!=APP_HOME_WIDGET_WEATHER){
+            if(slots[slot]!=APP_HOME_WIDGET_WEATHER&&slots[slot]!=APP_HOME_WIDGET_JOURNAL){
                 library_before=library_calls;ev=(ui_gesture_event_t){UI_GESTURE_TAP,632,r.y+38,0,0};
                 assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&library_calls==library_before+(slots[slot]==APP_HOME_WIDGET_EMPTY)&&!library_city);
             }
@@ -368,7 +395,7 @@ int main(void){
             assert(weather_requests==count&&redraw_widgets(APP_HOME_WIDGET_WEATHER)==APP_REDRAW_NONE&&!s_widget_dirty);
         }
     }
-    puts("PASS: seven unique Home layouts, both weather/reading slots, nav starts at1112, settings entries, local day changes/manual refresh, isolated regions/header/nav, minute retry and resume-cover/full-refresh policy");
+    puts("PASS: 13 unique Home layouts, both weather/reading/journal slots, journal art-only taps/detail entry/date polling, nav starts at1112, settings entries, isolated regions/header/nav, minute retry and resume-cover/full-refresh policy");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="dashboard-home-") as directory:

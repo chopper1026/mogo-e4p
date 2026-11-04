@@ -135,6 +135,12 @@ void book_layout_set_chapter_lead_width(unsigned width){(void)width;}
 bool book_layout_build_blocks(const char *t,size_t len,const blk_t *b,size_t n,EpdRect r,int px){(void)t;(void)len;(void)b;(void)n;(void)r;(void)px;return true;}
 void html_text_free(html_text_t *t){free(t->utf8);*t=(html_text_t){0};}
 static void flush_ticket_stats(void){event('F');}
+static bool app_reading_journal_flush(void){return true;}
+static unsigned journal_records;
+static void app_reading_journal_record(const char *path,const char *title,uint32_t size,unsigned chapter,uint32_t ms,uint32_t turns){
+    assert(path[0]&&title[0]&&size==(uint32_t)file_size&&chapter==s_reader_session.position.chapter&&!ms&&!turns);
+    assert(!strcmp(path,s_reader_session.book.path)&&!strcmp(title,s_reader_session.book.title));++journal_records;
+}
 static void e0470_page_turn_release(void){}
 static void invalidate_prep(void){assert(!prefetch_borrowed);}
 static void reader_bind_chapter(void){s_text=s_reader_session.content.utf8;}
@@ -153,6 +159,10 @@ static void save_progress(void){event('S');if(!*s_reader_session.book.path)retur
 '''
 
 CASES = r'''
+static bool open_book_impl(app_ctx_t *ctx,const char *path){
+    unsigned before=journal_records;bool opened=open_book_impl_actual(ctx,path);
+    assert(journal_records-before==(unsigned)opened);return opened;
+}
 static bool pending_reserve(const char *path){++reserve_calls;event('R');fail_alloc=fail_reserve==(int)reserve_calls;bool ok=pending_reserve_actual(path);fail_alloc=false;return ok;}
 static void reset(void){
     prefetch_borrowed=false;free_book();while(s_pending)pending_discard(s_pending->path);
@@ -244,6 +254,8 @@ def main():
         if name == 'pending_reserve':
             body = body.replace('pending_reserve(', 'pending_reserve_actual(', 1)
             body = '#define malloc test_malloc\n' + body + '#undef malloc\n'
+        if name == 'open_book_impl':
+            body = '#define open_book_impl open_book_impl_actual\n' + body + '#undef open_book_impl\n'
         code += body
     code += CASES
     with tempfile.TemporaryDirectory() as directory:

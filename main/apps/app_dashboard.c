@@ -8,8 +8,8 @@
  * User revision: persist proportional Home monochrome separately and reuse gray thumbnail files; ordinary/water reuse gray caches with a memory reserve.
  * 中文：首页使用真实续读与完整缓存书摘；绘图不读卡。
  * English: Home uses real resume data and cached complete sentences; painting never reads media.
- * 冻结（用户2026-11-03修订）：旧组件、月阅读与闭环目标保持撤下；上下等高区域独立选择最近阅读、天气或留白，天气直角铺满并直接接导航。
- * Frozen (user revision 2026-11-03): retired widgets, records and goals stay removed; equal regions independently show reading, weather or nothing, with rectangular edge-to-edge weather meeting navigation.
+ * 冻结（用户2026-11-04修订）：按批准设计新增当月阅读手账，不恢复旧月记录与目标；上下等高区可选最近阅读、天气、手账或留白，天气直角铺满并直接接导航。
+ * Frozen (user revision 2026-11-04): add the approved current-month journal, not retired records/goals; equal regions choose reading, weather, journal or empty, retaining edge-to-edge weather.
  * 用户2026-11-03修订：最近阅读移除设置图标及其点击入口，组件配置保留长按区域或设置页入口。
  * User revision 2026-11-03: remove the Reading settings icon and tap target; retain configuration through a region hold or Settings.
  * 用户修订：缓存原位换位，只用一个条目的栈空间；保留复用速度，避免启动时复制七条占用半个主任务栈。
@@ -38,6 +38,9 @@
 #include "app_components_mode.h"
 #include "weather_service.h"
 #include "ui_weather.h"
+#include "reading_journal.h"
+#include "ui_reading_journal.h"
+#include "app_reading_journal_mode.h"
 #include "book_cover.h"
 #include "book_cover_jobs.h"
 #include "ui_image_dither.h"
@@ -433,6 +436,7 @@ static void render_widget(uint8_t *fb,unsigned slot) {
     switch(app_home_component_at(slot)) {
     case APP_HOME_WIDGET_READING: render_reading(fb,slot);break;
     case APP_HOME_WIDGET_WEATHER: ui_weather_draw(fb,region,s_weather_tomorrow[slot],app_weather_view(),time(NULL));break;
+    case APP_HOME_WIDGET_JOURNAL: ui_reading_journal_widget(fb,region,app_reading_journal_model(),app_reading_journal_today(),app_reading_journal_notice());break;
     default: ui_draw_icon(fb,632,region.y+38,27,UI_ICON_SLIDERS_HORIZONTAL,0);break;
     }
 }
@@ -487,6 +491,7 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
 static void refresh_excerpt(void) {book_excerpt_load(featured()->path,s_excerpt);}
 static void on_enter(app_ctx_t *ctx) {
     app_weather_init();app_home_components_init(app_weather_view()->enabled);
+    if(app_home_has_widget(APP_HOME_WIDGET_JOURNAL))(void)app_reading_journal_poll();
     memset(s_weather_tomorrow,0,sizeof(s_weather_tomorrow));s_widget_dirty=0;
     if(app_home_has_widget(APP_HOME_WIDGET_WEATHER))(void)ui_weather_prepare();
     s_cover_generation=book_cover_jobs_begin();
@@ -519,6 +524,7 @@ static void on_media_lost(app_ctx_t *ctx) {
 static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;s_scan_pending=true;avatar_prepare_state();}
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
+    if(app_home_has_widget(APP_HOME_WIDGET_JOURNAL)&&app_reading_journal_poll())return redraw_widgets(APP_HOME_WIDGET_JOURNAL);
     if(app_weather_poll(app_home_has_widget(APP_HOME_WIDGET_WEATHER))) {
         app_redraw_t weather=redraw_widgets(APP_HOME_WIDGET_WEATHER);
         if(weather!=APP_REDRAW_NONE)return weather;
@@ -576,6 +582,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
     for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot) {
         EpdRect region=home_region(slot);
         if(!hit(region,x,y))continue;
+        if(app_home_component_at(slot)==APP_HOME_WIDGET_JOURNAL) {
+            if(hit(ui_reading_journal_art(region),x,y)) {
+                (void)app_reading_journal_next_scene();return redraw_widgets(APP_HOME_WIDGET_JOURNAL);
+            }
+            app_reading_journal_open(ctx);return APP_REDRAW_NONE;
+        }
         if(app_home_component_at(slot)!=APP_HOME_WIDGET_WEATHER) {
             if(app_home_component_at(slot)==APP_HOME_WIDGET_EMPTY&&hit((EpdRect){608,region.y+14,52,48},x,y)){app_components_open(ctx,false);return APP_REDRAW_NONE;}
             continue;
@@ -598,7 +610,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
 static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
 static bool main_page_visible(app_ctx_t *ctx) {(void)ctx;return true;}
 static display_rect_t area_hint(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}
-static void home_before_lock(app_ctx_t *ctx){(void)ctx;app_weather_cancel_join();}
+static void home_before_lock(app_ctx_t *ctx){(void)ctx;app_weather_cancel_join();(void)app_reading_journal_flush();}
 static void home_exit(app_ctx_t *ctx){home_before_lock(ctx);ui_weather_release();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
 const app_desc_t app_dashboard={
     .title="首页 Home",.detail="继续阅读",.enter_full=false,.owns_keys=true,.menu_handle_enabled=no_menu_handle,

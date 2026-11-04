@@ -134,6 +134,16 @@ bool book_store_flash_ready(void) {
     return s_wl != WL_INVALID_HANDLE;
 }
 
+esp_err_t book_store_prepare_data(void) {
+    if (book_store_flash_ready()) return ESP_OK;
+    const esp_vfs_fat_mount_config_t config = {
+        .format_if_mount_failed = false, .max_files = 4, .allocation_unit_size = 4096,
+    };
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
+    if (err != ESP_OK) s_wl = WL_INVALID_HANDLE;
+    return err;
+}
+
 esp_err_t book_store_delete(const char* path, bool* removed) {
     if (!removed) return ESP_ERR_INVALID_ARG;
     *removed = false;

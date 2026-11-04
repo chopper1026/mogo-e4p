@@ -9,7 +9,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 ## 系统与主路径 / System And Main Flows
 
 - 用户通过触摸、盖板三键、电源键及可选 BLE 翻页器操作 684x1216 逻辑界面。硬件由 `components/board_support`、`device_power` 和芯片驱动持有，页面通过应用契约借用快照与显示状态。/ Users operate the logical interface through touch, three keys, power and optional BLE; board/drivers own hardware while pages borrow snapshots/display state.
-- `app_main` 完成设置、板级、前光、时间、VCOM 读取、开机图与字体装配，再经锁屏/恢复门控进入 `app_loop`。注册表前四项为主页，图片与组件为扩展页；传输与启动恢复虽然编译，不是额外根导航项。/ Boot assembles settings/hardware/light/time/VCOM/art/fonts before lock/resume gates and the loop; only the first four registry entries are root pages, with image/components extensions and separate transfer/recovery entries.
+- `app_main` 完成设置、板级、前光、时间、VCOM 读取、开机图与字体装配，再经锁屏/恢复门控进入 `app_loop`。注册表共七项，前四项为主页，图片、组件与阅读手账为扩展页；传输与启动恢复虽然编译，不是额外根导航项。/ Boot assembles settings/hardware/light/time/VCOM/art/fonts before lock/resume gates and the loop; seven registry entries retain four root pages, with image/components/journal extensions and separate transfer/recovery entries.
 - 开书经 `reader_open` 交还旧会话与预绘，`reader_chapter` 提交章节和布局，页面绘制后经 `reader_present`、刷新意图和物理显示出口呈现；失败保留相应回滚与错误语义。/ Open returns old session/prefetch resources; chapter commits precede painting and presentation through the existing refresh/physical exits, retaining rollback/error semantics.
 - 页面退出、锁屏、USB 导出和关机先取消或等待持有资源的服务。`app_lifecycle` 协调天气、自动升级、校时、存储任务与无线交还；`storage_jobs` 统一文件消费者的交还，调用方仍负责画面和硬件恢复。/ Exit/lock/USB/off cancel or join owners; lifecycle coordinates weather/OTA/time/storage/radios, while callers retain painting and hardware recovery.
 - 天气只经 `https://mogo.mantake.shop` 的组件 GET 接口获取数据；OTA 使用允许的官方 HTTPS 清单与镜像，并保留既有 GitHub 回退源。浏览器传书由设备的 AP/STA 会话服务，不与天气共享后台所有权。/ Weather uses the official component GET API; OTA retains trusted official feeds/images and GitHub fallback. Browser transfer owns its separate AP/STA service session.
@@ -20,6 +20,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | --- | --- |
 | 系统与阅读偏好 / System and reader settings | `main/settings` 持有 NVS 与备份协议；原键、备份文件名及旧格式兼容独立于源码目录。/ Settings owns NVS/backup contracts; keys, filenames and compatibility do not follow source moves. |
 | 首页布局与天气 / Home and weather | `read_pico/home_regions` 一次保存上下布局并纳入 v33 备份；`kiiko_weather` 独立保存城市、偏好和有期限的缓存，不纳入设置/书籍备份。/ Atomic Home layout participates in v33 backup; standalone weather state/cache does not. |
+| 阅读手账 / Reading journal | UI任务服务将当月逐日逐书明细与共享插画写入内置卷双快照，非格式化挂载、不依赖TF卡；不纳入设置/书籍备份，旧票根不补造明细。/ The UI-thread service owns internal-volume dual snapshots of current-month book/day rows and shared scenes, without formatting or SD dependency; excluded from backups and not synthesized from old tickets. |
 | 书籍、字体、图片与缓存 / Content and caches | TF/内部书籍库由 `book_store` 与媒体/USB 服务交接；`.readpico` 缓存、进度、书签及资源借用保留既有标识。/ Content stores coordinate with media/USB; retain cache/progress/bookmark identities and borrowing contracts. |
 | 恢复与升级 / Resume and updates | `main/boot` 保存恢复检查点；OTA 模块校验清单、镜像和槽位，Flash 写入与显示供电保护互斥。/ Boot owns resume checkpoints; OTA validates feeds/images/slots and coordinates flash writes with display guards. |
 | 网站与平台 / Website and platform | 后端凭据、供应商许可、管理员发布、官网部署不由固件构建证明；不把草稿提交当成上线。/ Firmware builds do not establish credentials, provider permissions, administrator publication or deployment. |
@@ -43,7 +44,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | `main/settings/` | NVS 设置、迁移与备份恢复，不含设置页面。/ NVS settings, migrations and backup/restore, separate from the settings page. |
 | `main/time/` | 后台校时、对时准入策略及时间服务接口。/ Background calibration, sync admission policy and time-service contracts. |
 | `main/diagnostics/` | 默认关闭的阅读计时与资源快照，不决定产品行为。/ Default-off reader timing and resource snapshots, without product behavior decisions. |
-| `main/services/` | 跨页 USB 存储、字体上下文、文件任务交还、触摸震动及天气代理/缓存；见 [WEATHER.md](development/guides/WEATHER.md)。/ Cross-page USB storage, font contexts, file-worker handoff, touch haptics and weather proxy/cache; see the weather contract. |
+| `main/services/` | 跨页 USB 存储、字体上下文、文件任务交还、触摸震动、天气代理/缓存与阅读手账；见 [WEATHER.md](development/guides/WEATHER.md) 和 [READING_JOURNAL.md](development/guides/READING_JOURNAL.md)。/ Cross-page USB storage, font contexts, file-worker handoff, touch haptics, weather proxy/cache and reading journal; see their contracts. |
 | `main/platform/` | S31 平台输入适配，向应用提供统一输入快照。/ S31 input adaptation with uniform application snapshots. |
 | `main/assets/` | 内置字体、图标、图片等资源及生成数据。/ Bundled fonts, icons, images and generated assets. |
 | `main/factory/` | 启动标定、硬件自检与 EPD 测试图案。/ Startup calibration, hardware self-tests and EPD test patterns. |
@@ -61,6 +62,8 @@ After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier s
 
 - 页面通过 app 中的公开契约协作，不包含另一个页面的实现。app 的调度代码不得包含 apps 目录的头文件。跨页请求仍由对应页面消费，不能借移动头文件改变生命周期。
   Pages collaborate through app contracts without including another page implementation. App coordinators must not include apps headers. The target page still consumes each cross-page request; moving a header does not transfer lifecycle ownership.
+- 阅读页面只在成功开书、成功翻页和有效正文计时后通知手账服务；锁屏与离页尝试保存。`reading_journal_model`不读时钟或文件，`reading_journal`持有内存与存储，`ui_reading_journal`只绘制借用快照。日期、章节口径、轮换和容量上限见手账契约。
+  Reading notifies the journal only after successful opens/turns and eligible body intervals, flushing on lock/exit. The model performs no clock/file IO, the service owns memory/storage and the UI paints borrowed views. The journal guide defines dates, chapters, scenes and limits.
 - `book_shelf_category_state` 独占分类表、可用性、计数、选中项、两种布局的页码记忆和分类菜单状态；页面通过接口访问，不读写内部字段。扫描仅同步借用书目，模块不访问 UI、系统设置或存储。目录更换释放旧分类，普通离页保留本次开机的分类与页码；选择分类仍先保存旧页码，再清选择、排序和恢复新页码。
   `book_shelf_category_state` owns the category table, availability, counts, selection, page memory for both layouts and category-menu state. Pages use its API without accessing internal fields. Recounts borrow the catalog synchronously; the module has no UI, settings or storage access. Root changes release old categories, while ordinary exits retain this boot's categories and pages. Category selection still remembers the old page before clearing selections, sorting and restoring the new page.
 - `book_shelf_covers` 独占书架封面像素、任务代次、整组显示标记和预热进度；页面只通过 API 修改，同步只读借用槽位。普通离页取消任务并保留缓存；开书、换模式或介质失效先取消再释放。只有成功的整页或封面批次输出才能确认已显示，失败输出保留标记。它复用全局 `book_cover_jobs` 单队列，不提供多页面并行解码；导航、几何、设置、转换绘制和装饰缓存仍由页面负责。

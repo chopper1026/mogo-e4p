@@ -10,7 +10,7 @@ static app_home_widget_t s_slots[APP_HOME_SLOT_COUNT] = {APP_HOME_WIDGET_READING
 
 bool app_home_components_value_valid(uint8_t value) {
     unsigned top = value & 3u, bottom = (value >> 2) & 3u;
-    return (value & 0xf0u) == 0x10u && top <= APP_HOME_WIDGET_EMPTY && bottom <= APP_HOME_WIDGET_EMPTY &&
+    return (value & 0xf0u) == 0x10u && top <= APP_HOME_WIDGET_JOURNAL && bottom <= APP_HOME_WIDGET_JOURNAL &&
         (top != bottom || top == APP_HOME_WIDGET_EMPTY);
 }
 
@@ -42,7 +42,7 @@ app_home_widget_t app_home_component_at(unsigned slot) {
 }
 
 bool app_home_component_set(unsigned slot, app_home_widget_t widget) {
-    if (slot >= APP_HOME_SLOT_COUNT || (unsigned)widget > APP_HOME_WIDGET_EMPTY) return false;
+    if (slot >= APP_HOME_SLOT_COUNT || (unsigned)widget > APP_HOME_WIDGET_JOURNAL) return false;
     app_home_components_init(false);
     if (s_slots[slot] == widget) return true;
     app_home_widget_t next[APP_HOME_SLOT_COUNT] = {s_slots[0], s_slots[1]};

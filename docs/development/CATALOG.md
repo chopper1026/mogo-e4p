@@ -27,6 +27,7 @@
 - [docs/development/INDEX.md](INDEX.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_PERFORMANCE.md](guides/READER_PERFORMANCE.md)
+- [docs/development/guides/READING_JOURNAL.md](guides/READING_JOURNAL.md)
 - [docs/development/guides/WEATHER.md](guides/WEATHER.md)
 - [docs/development/history/WEBSITE-MANUAL.md](history/WEBSITE-MANUAL.md)
 - [docs/development/history/porting/移植适配方案.md](history/porting/%E7%A7%BB%E6%A4%8D%E9%80%82%E9%85%8D%E6%96%B9%E6%A1%88.md)

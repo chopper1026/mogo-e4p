@@ -225,6 +225,7 @@ static unsigned percent(size_t page){return (unsigned)page*20;}
 static int book_progress_save(const char* p,const book_progress_t* value){(void)p;(void)value;test_save_calls++;book_progress_bump();return test_save_error;}
 static int book_progress_set_last_path(const char* p){test_last_calls++;if(!test_last_error)snprintf(test_last_path,sizeof(test_last_path),"%s",p);book_progress_bump();return test_last_error;}
 static void save_progress(void);
+static void track_ticket_stats(app_ctx_t *ctx){(void)ctx;}
 static void invalidate_prep(void){}
 static void invalidate_covers(void){}
 static shelf_entry_t s_managed;

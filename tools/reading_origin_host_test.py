@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function
+from run_reader_baseline import toolchain
 root=Path(__file__).resolve().parents[1]
 home=root/'main/apps/app_dashboard.c';book=root/'main/apps/app_book.c'
 unit=r'''
@@ -50,8 +51,11 @@ static int open_calls,nav=-1;static bool fail_open;
 static int ui_nav_hit(int x,int y){(void)x;return y>=1096?2:-1;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;nav=tab;}
 static bool app_book_request_open_from_home(const char *path){assert(!strcmp(path,book.path));++open_calls;return !fail_open;}
+static EpdRect ui_reading_journal_art(EpdRect r){return(EpdRect){438,r.y+78,210,162};}
+static bool app_reading_journal_next_scene(void){return true;}
+static void app_reading_journal_open(app_ctx_t *ctx){(void)ctx;}
 '''
-unit+='\n'.join(function(n,root/'main/ui/ui_weather.c') for n in ['valid_region','ui_weather_hit'])
+unit+='\n'.join(function(n,root/'main/ui/ui_weather.c') for n in ['valid_region','refresh_button','ui_weather_hit'])
 unit+='\n'.join(function(n,home) for n in ['home_region','continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','redraw_widgets','hit','control','on_gesture'])
 settings=(root/'main/settings/settings.h').read_text();a=settings.index('typedef enum {\n    APP_READER_KEY_PREV');b=settings.index('} app_reader_key_action_t;',a)+len('} app_reader_key_action_t;');unit+=settings[a:b]
 unit+=r'''
@@ -93,7 +97,7 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
  s_reader_panel=READER_PANEL_TOOLS;s_reader_tools_toggle=false;toggle_reader_tools_panel();
  assert(s_reader_panel==READER_PANEL_NONE&&s_reader_tools_toggle);
  int points=0,layouts=0,reading_slots=0;
- for(unsigned a=0;a<3;++a)for(unsigned b=0;b<3;++b){
+ for(unsigned a=0;a<4;++a)for(unsigned b=0;b<4;++b){
   if(a==b&&a!=APP_HOME_WIDGET_EMPTY)continue;
   slots[0]=a;slots[1]=b;++layouts;
   for(unsigned slot=0;slot<2;++slot){
@@ -120,7 +124,7 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
    ev.type=UI_GESTURE_TAP;assert(on_gesture(&ctx,&ev)==APP_REDRAW_AREA&&nav==-1);fail_open=false;
   }
  }
- assert(layouts==7&&reading_slots==4);
+ assert(layouts==13&&reading_slots==6);
  assert(!strcmp(reader_key_label(APP_READER_KEY_HOME),"返回主页"));
  assert(!strcmp(reader_key_label(APP_READER_KEY_FRONTLIGHT),"前光开关"));
  // 前光开关只驱动灯，不重画正文；再按一次关灯。
@@ -136,10 +140,11 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
   else assert(result==APP_REDRAW_PAGE&&nav==-1&&s_view==SHELF&&ctx.leaf==4&&freed==before+1&&s_reader_panel==READER_PANEL_NONE);
  }
  assert(saved==4&&restored==2);
- printf("PASS: seven unique layouts, four reading placements, %d hit points, local cover-lift bounds, move/cancel/swipe/empty/open-failure guards; screen/key/hold shared return routes retain home or shelf category/page; renamed label\n",points);
+ printf("PASS: 13 unique layouts, six reading placements, %d hit points, fixed cover-feedback bounds, move/cancel/swipe/empty/open-failure guards; screen/key/hold shared return routes retain home or shelf category/page; renamed label\n",points);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiiko-reading-origin-',dir='/private/tmp') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-Imain/settings','-Imain/services','-g',str(c),'-o',str(binary)],cwd=root,check=True)
- subprocess.run([str(binary)],check=True)
+ env,compiler=toolchain(Path(folder))
+ subprocess.run(compiler+['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-Imain/settings','-Imain/services','-g',str(c),'-o',str(binary)],cwd=root,env=env,check=True)
+ subprocess.run([str(binary)],env=env,check=True)
