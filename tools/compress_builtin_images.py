@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""构建时无损压缩两张内置全屏图。/ Losslessly pack the two built-in full-screen images at build time."""
+"""构建时无损压缩开机与锁屏共用图。/ Losslessly pack the shared splash/lock image at build time."""
 
 import argparse
 from pathlib import Path
@@ -13,7 +13,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    for name in ("lock_4bpp", "loading_4bpp"):
+    for name in ("lock_4bpp",):
         raw = (args.source / (name + ".bin")).read_bytes()
         if len(raw) != 684 * 1216 // 2:
             parser.error(f"{name}: expected a 684 x 1216 4bpp frame")

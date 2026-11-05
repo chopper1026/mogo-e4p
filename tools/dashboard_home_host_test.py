@@ -125,7 +125,9 @@ static void label_on(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFon
 static int ui_text_fixed_width_px(int px,const char *text){(void)px;(void)text;return 100;}
 static void fit(char *text,int px,int width){(void)text;(void)px;(void)width;}
 static void circle_frame(uint8_t *fb,int x,int y,int radius){(void)radius;pixel(fb,x,y,0);}
-static void epd_fill_circle(int x,int y,int radius,uint8_t gray,uint8_t *fb){(void)radius;pixel(fb,x,y,gray);}
+static void ui_builtin_avatar_draw(uint8_t *fb,int x,int y,int side){
+    assert(x==588&&y==88&&side==60);pixel(fb,x,y,0);
+}
 static void ui_wallpaper_draw_avatar(uint8_t *fb,const uint8_t *data,EpdRect r,int radius){
     (void)data;(void)radius;pixel(fb,r.x,r.y,0);
 }

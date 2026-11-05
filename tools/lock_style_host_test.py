@@ -88,6 +88,7 @@ static void device_power_drain_events(void){}
 static void device_power_consume_key_press(void){assert(!key_sampling);++key_consumes;}
 // 后台对时取消只验证被调用，本测试不桥接对时状态机。/ Cancelling background sync is only counted as called; this test does not bridge its state machine.
 static unsigned time_cancels;
+static void pico_ota_auto_cancel(void){}
 static void app_weather_cancel_join(void){}
 static void app_time_service_cancel(void){++time_cancels;}
 static int64_t esp_timer_get_time(void){return 2000000;}

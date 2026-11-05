@@ -23,6 +23,7 @@ SUITES = {
     "journal_reader": [sys.executable, "tools/reading_journal_reader_host_test.py"],
     "journal_ui": [sys.executable, "tools/reading_journal_ui_host_test.py"],
     "architecture": [sys.executable, "tools/architecture_host_test.py"],
+    "builtin_images": [sys.executable, "tools/builtin_image_host_test.py"],
     "heading": [sys.executable, "tools/reader_title_style_host_test.py"],
     "font_policy": [sys.executable, "tools/lock_font_host_test.py"],
     "memory": [sys.executable, "tools/reader_memory_host_test.py"],

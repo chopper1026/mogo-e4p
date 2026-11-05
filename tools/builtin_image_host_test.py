@@ -8,15 +8,24 @@ import sys
 import tempfile
 import zlib
 from home_cover_cache_host_test import function
+from generate_brand_images import SOURCE, outputs
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
+with Image.open(SOURCE) as source:
+    for path, data in outputs(source.convert('L')).items():
+        assert path.read_bytes() == data, f'Regenerate {path}'
+assert not (ROOT / 'assets/image/init-loading.png').exists()
+assert not (ROOT / 'main/assets/loading_4bpp.bin').exists()
+cmake = (ROOT / 'main/CMakeLists.txt').read_text()
+assert 'loading_4bpp' not in cmake and 'assets/avatar_4bpp.bin' in cmake
 with tempfile.TemporaryDirectory() as folder:
     work = Path(folder)
     command = [sys.executable, str(ROOT / 'tools/compress_builtin_images.py'),
                '--source', str(ROOT / 'main/assets'), '--output', str(work)]
     subprocess.run(command, check=True)
     assembly = ['.data']
-    for name in ['lock', 'loading']:
+    for name in ['lock']:
         packed_path = work / (name + '_4bpp.kbz')
         packed = packed_path.read_bytes()
         raw_path = ROOT / 'main/assets' / (name + '_4bpp.bin')
@@ -29,6 +38,10 @@ with tempfile.TemporaryDirectory() as folder:
         for symbol, path in [(f'_binary_{name}_4bpp_kbz', packed_path), (f'reference_{name}', raw_path)]:
             assembly += [f'.globl {symbol}_start', f'{symbol}_start:', f'.incbin "{path}"',
                          f'.globl {symbol}_end', f'{symbol}_end:']
+    avatar_path = ROOT / 'main/assets/avatar_4bpp.bin'
+    assembly += ['.globl _binary_avatar_4bpp_bin_start', '_binary_avatar_4bpp_bin_start:',
+                 f'.incbin "{avatar_path}"', '.globl _binary_avatar_4bpp_bin_end', '_binary_avatar_4bpp_bin_end:']
+    assert not (work / 'loading_4bpp.kbz').exists()
     (work / 'assets.S').write_text('\n'.join(assembly) + '\n')
     (work / 'epdiy.h').write_text('''#pragma once
 #include <stdint.h>
@@ -86,7 +99,6 @@ static enum EpdRotation epd_get_rotation(void){return display_rotation;}
     unit += '#pragma GCC diagnostic pop\n#include "' + str(ROOT / 'main/ui/ui_builtin_image.c') + '"\n'
     unit += r'''
 extern const uint8_t reference_lock[] asm("reference_lock_start");
-extern const uint8_t reference_loading[] asm("reference_loading_start");
 static uint8_t guarded[FRAME_BYTES+32],expected[FRAME_BYTES];
 static uint8_t *frame=guarded+16;
 static void prepare(void){memset(guarded,0xa5,sizeof(guarded));allocations=0;assert(live==0);}
@@ -95,16 +107,37 @@ static void white(void){for(size_t i=0;i<FRAME_BYTES;++i)assert(frame[i]==255);b
 static void set_word(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;++i)p[i]=(uint8_t)(v>>(i*8));}
 int main(void){
  unsigned success_allocations=0;
+ size_t lock_bytes,loading_bytes;
+ assert(image_data(UI_BUILTIN_IMAGE_LOCK,&lock_bytes)==image_data(UI_BUILTIN_IMAGE_LOADING,&loading_bytes));
+ assert(lock_bytes==loading_bytes);
  for(int rotation=0;rotation<4;++rotation){
   display_rotation=rotation;
   for(unsigned image=0;image<2;++image){
    prepare();assert(ui_builtin_image_size(image)==FRAME_BYTES);
    memset(expected,255,sizeof(expected));
-   epd_draw_rotated_image((EpdRect){0,0,epd_rotated_display_width(),epd_rotated_display_height()},image?reference_loading:reference_lock,expected);
+   epd_draw_rotated_image((EpdRect){0,0,epd_rotated_display_width(),epd_rotated_display_height()},reference_lock,expected);
    assert(ui_builtin_image_draw(frame,image));assert(!memcmp(frame,expected,FRAME_BYTES));
    success_allocations=allocations;boundaries();
   }
+  for(int side=60;side<=82;side+=22){
+   const uint8_t *pixels=avatar_start+(side==82?60*60/2:0);
+   const int positions[][2]={{0,0},{588,88},{57,199},{-5,-7},{epd_rotated_display_width()-20,epd_rotated_display_height()-20}};
+   for(unsigned pos=0;pos<sizeof(positions)/sizeof(positions[0]);++pos){
+    int x=positions[pos][0],y=positions[pos][1];
+    prepare();memset(frame,0x99,FRAME_BYTES);memset(expected,0x99,FRAME_BYTES);
+    for(int row=0;row<side;++row)for(int col=0;col<side;++col){
+     uint8_t byte=pixels[(row*side+col)/2];
+     uint8_t gray=((col&1)?byte>>4:byte&15)*17;
+     epd_draw_pixel(x+col,y+row,gray,expected);
+    }
+    ui_builtin_avatar_draw(frame,x,y,side);
+    assert(!memcmp(frame,expected,FRAME_BYTES));assert(!allocations);boundaries();
+   }
+  }
  }
+ prepare();memset(frame,0x99,FRAME_BYTES);memcpy(expected,frame,FRAME_BYTES);
+ ui_builtin_avatar_draw(frame,0,0,0);ui_builtin_avatar_draw(frame,0,0,61);ui_builtin_avatar_draw(NULL,0,0,60);
+ assert(!memcmp(frame,expected,FRAME_BYTES));assert(!allocations);boundaries();
  assert(peak<64*1024);
  for(unsigned nth=1;nth<=success_allocations;++nth){prepare();fail_at=nth;assert(!ui_builtin_image_draw(frame,UI_BUILTIN_IMAGE_LOCK));white();}
  fail_at=0;
@@ -124,7 +157,7 @@ int main(void){
  }
  prepare();assert(!ui_builtin_image_draw(frame,99));white();assert(ui_builtin_image_size(99)==0);
  assert(!ui_builtin_image_draw(NULL,UI_BUILTIN_IMAGE_LOCK));assert(!live);free(bad);
- printf("PASS: original EPD full-frame/row pixels identical for both images in all four rotations; bounded temporary heap peak %zu B; OOM, bad headers, truncation, checksum, trailing data and output-size faults clear white without leaks or overwrites\n",peak);
+ printf("PASS: splash/lock share one resource; generated art and both avatars match pixels in four rotations, including clipping; bounded temporary heap peak %zu B; OOM, bad headers, truncation, checksum, trailing data and output-size faults clear white without leaks or overwrites\n",peak);
 }
 '''
     (work / 'test.c').write_text(unit)

@@ -50,7 +50,6 @@ idf_build_get_property(image_python PYTHON)
 set(builtin_image_dir "${CMAKE_CURRENT_BINARY_DIR}/builtin_images")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/assets/lock_4bpp.bin"
-    "${CMAKE_CURRENT_LIST_DIR}/assets/loading_4bpp.bin"
     "${CMAKE_CURRENT_LIST_DIR}/../tools/compress_builtin_images.py")
 execute_process(COMMAND "${image_python}" "${CMAKE_CURRENT_LIST_DIR}/../tools/compress_builtin_images.py"
     --source "${CMAKE_CURRENT_LIST_DIR}/assets" --output "${builtin_image_dir}"
@@ -193,7 +192,7 @@ idf_component_register(
         "boot" "display" "lock" "power" "ota" "settings" "time" "diagnostics"
     EMBED_FILES
         "${builtin_image_dir}/lock_4bpp.kbz"
-        "${builtin_image_dir}/loading_4bpp.kbz"
+        "assets/avatar_4bpp.bin"
         "assets/builtin.ttf"
         "assets/weather_backgrounds.bin"
         "assets/ui-hanzi.bin"

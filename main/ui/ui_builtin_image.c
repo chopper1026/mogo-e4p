@@ -10,8 +10,8 @@
 
 extern const uint8_t lock_start[] asm("_binary_lock_4bpp_kbz_start");
 extern const uint8_t lock_end[] asm("_binary_lock_4bpp_kbz_end");
-extern const uint8_t loading_start[] asm("_binary_loading_4bpp_kbz_start");
-extern const uint8_t loading_end[] asm("_binary_loading_4bpp_kbz_end");
+extern const uint8_t avatar_start[] asm("_binary_avatar_4bpp_bin_start");
+extern const uint8_t avatar_end[] asm("_binary_avatar_4bpp_bin_end");
 
 static uint32_t word(const uint8_t *bytes) {
     return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 |
@@ -24,13 +24,9 @@ static size_t image_size(const uint8_t *data, size_t bytes) {
 }
 
 static const uint8_t *image_data(ui_builtin_image_t image, size_t *bytes) {
-    if (image == UI_BUILTIN_IMAGE_LOCK) {
+    if (image == UI_BUILTIN_IMAGE_LOCK || image == UI_BUILTIN_IMAGE_LOADING) {
         *bytes = (size_t)(lock_end - lock_start);
         return lock_start;
-    }
-    if (image == UI_BUILTIN_IMAGE_LOADING) {
-        *bytes = (size_t)(loading_end - loading_start);
-        return loading_start;
     }
     *bytes = 0;
     return NULL;
@@ -97,4 +93,11 @@ bool ui_builtin_image_draw(uint8_t *framebuffer, ui_builtin_image_t image) {
     size_t bytes;
     const uint8_t *data = image_data(image, &bytes);
     return draw_image(framebuffer, data, bytes);
+}
+
+void ui_builtin_avatar_draw(uint8_t *framebuffer, int x, int y, int side) {
+    if (!framebuffer || (side != 60 && side != 82) ||
+        (size_t)(avatar_end - avatar_start) != (60 * 60 + 82 * 82) / 2) return;
+    const uint8_t *pixels = avatar_start + (side == 82 ? 60 * 60 / 2 : 0);
+    epd_draw_rotated_image((EpdRect){.x = x, .y = y, .width = side, .height = side}, pixels, framebuffer);
 }

@@ -52,6 +52,7 @@
 #include "book_excerpt.h"
 #include "ui_wallpaper.h"
 #include "ui_avatar.h"
+#include "ui_builtin_image.h"
 #include "board_crashlog.h"
 #include "display.h"
 #include "display_refresh.h"
@@ -453,7 +454,7 @@ static app_redraw_t redraw_widgets(app_home_widget_t widget) {
 static void render_root(uint8_t *fb) {
     ui_nav_status(fb);ui_text(fb,36,91,52,"首页",EPD_DRAW_ALIGN_LEFT,false);
     if(s_avatar_ready)ui_wallpaper_draw_avatar(fb,s_avatar,(EpdRect){588,88,60,60},30);
-    else {epd_fill_circle(618,118,30,UI_GRAY_BLACK,fb);label(fb,618,118,30,"K",EPD_DRAW_ALIGN_CENTER,0xff);}
+    else ui_builtin_avatar_draw(fb,588,88,60);
     // 公共导航仅绘制实际底栏，组件直接铺到它的上沿。
     // Shared navigation paints only its actual footer; widgets meet its top edge.
     ui_nav_draw(fb,0);

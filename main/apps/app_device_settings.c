@@ -76,6 +76,7 @@
 #include "ui_wallpaper.h"
 #include "ui_reader_background.h"
 #include "ui_avatar.h"
+#include "ui_builtin_image.h"
 #include "book_search.h"
 #include "book_store.h"
 #include "book_cover.h"
@@ -1631,8 +1632,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (avatar_ok) ui_wallpaper_draw_avatar(fb,s_avatar_pixels,(EpdRect){57,avatar_y,82,82},20);
         if (app_settings_main_fast_refresh() && avatar_ok) ui_image_bw_rect(fb,(EpdRect){57,avatar_y,82,82});
         if (!avatar_ok) {
-            ui_fill_round_rect(fb,(EpdRect){57,avatar_y,82,82},20,0x30);
-            ui_text_fixed_vc(fb,98,avatar_y+41,49,"K",EPD_DRAW_ALIGN_CENTER,true);
+            ui_builtin_avatar_draw(fb,57,avatar_y,82);
         }
         char name[64];snprintf(name,sizeof(name),"%s",app_settings_device_name());
         int width=588-ui_text_fixed_width_px(ui_text_effective_px(20),"编辑")-188;

@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.4 · 本地测试 / Local testing · 2026-11-05
 
+- 默认头像改为压缩后的 mogo logo，默认锁屏与开机准备画面共用同一张 684×1216 logo 图片，移除旧文字锁屏及独立 init-loading 资源；保留自定义头像和壁纸。/ Use the compressed mogo logo for default avatars and one shared 684x1216 logo image for fallback lock and startup screens, removing the old text art and separate init-loading asset while preserving custom avatars and wallpapers.
 - 本地快速刷机脚本默认及最大时限由 110 秒放宽到 180 秒，保留 10 秒失败清理、活动应用分区限定、完整校验与启动确认。/ Extend the local fast-flash helper's default/maximum deadline from 110 to 180 seconds, preserving ten-second cleanup, active-app-only writes, complete verification and boot confirmation.
 - 修复设备时间偏差导致正常天气被拒收：预报校验、跨日显示和自动刷新使用可信 HTTPS 响应的服务器时间及单调计时，保留原始有效期和异常检查，不修改系统时钟或 RTC；宿主回归通过，未刷机验收。/ Fix normal weather rejection caused by device-clock skew using trusted HTTPS server time plus monotonic elapsed time for validation, day selection and refresh, preserving original expiry and anomaly checks without setting the system clock or RTC; host regressions passed, with device acceptance pending.
 
