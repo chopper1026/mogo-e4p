@@ -7,7 +7,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 
 | 资料 / Document | 适用范围 / Scope |
 | --- | --- |
-| [README](../../README.md)、[上手指南](../ONBOARDING.md) | 当前 S31 硬件、构建和开发入口；README 中的移植阶段表是历史。/ Current hardware, build and onboarding; the README's porting milestones are historical. |
+| [README](../../README.md)、[上手指南](../ONBOARDING.md) | 产品介绍、安装、当前 S31 硬件与构建入口；移植评估另存于历史资料。/ Product, installation, current S31 hardware and builds; port assessments live in the historical references. |
 | [AGENTS](../../AGENTS.md)、[贡献指南](../../CONTRIBUTING.md) | 产品硬约束、页面契约、许可和操作授权边界。/ Product constraints, page contracts, licenses and authorization boundaries. |
 | [中文提交规范](../COMMIT_CONVENTION.md) | 未来提交唯一格式依据；保留原路径与旧 Git 历史。/ Sole format authority for future commits, retaining its path and existing history. |
 | [架构](../ARCHITECTURE.md)、[功能全景](FEATURES.md) | 稳定依赖与所有权，以及有入口依据的产品能力。/ Stable dependencies/ownership and entry-backed capabilities. |
