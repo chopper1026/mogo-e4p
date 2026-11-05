@@ -96,6 +96,8 @@ esp_err_t book_history_backup_restore(FILE *file) {
 static bool card_mounted = true;
 static bool commit_fails;
 static int commit_count;
+static const char *loaded_device_name;
+static char written_device_name[64];
 static uint8_t test_loaded_system_size;
 static uint8_t test_loaded_fast;
 static uint8_t loaded_main_mode;
@@ -132,13 +134,22 @@ esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { for(unsi
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_H:NVS_KEY_CHROME_HEADER_H))loaded_chrome_heights[i]=value; (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){loaded_shutdown=value;has_shutdown=true;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
+ if(!strcmp(key,NVS_KEY_DEVICE_NAME)&&loaded_device_name) {
+  size_t bytes=strlen(loaded_device_name)+1;
+  if(*size<bytes)return ESP_FAIL;
+  memcpy(value,loaded_device_name,bytes);*size=bytes;return ESP_OK;
+ }
  if(!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR)) {
   const char *legacy="/sdcard/legacy/custom";size_t bytes=strlen(legacy)+1;
   if(*size<bytes)return ESP_FAIL;
   memcpy(value,legacy,bytes);*size=bytes;return ESP_OK;
  }
  return ESP_FAIL;
-}esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
+}esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) {
+ (void)h;
+ if(!strcmp(key,NVS_KEY_DEVICE_NAME))strlcpy(written_device_name,value,sizeof(written_device_name));
+ return ESP_OK;
+}
 /* rc92 引入的时间同步键走 u32；桩按缺省处理即可（恢复时回退 0）。/ rc92's time-sync keys use u32;
    defaulting stubs are enough (restore falls back to zero). */
 esp_err_t nvs_get_u32(nvs_handle_t h, const char *key, uint32_t *value) { (void)h; (void)key; (void)value; return ESP_FAIL; }
@@ -323,7 +334,35 @@ static void test_home_regions_backup(void) {
     assert(!flash_depth);
 }
 
+static void test_device_name_branding(void) {
+    const struct { const char *stored; const char *expected; } cases[] = {
+        {NULL, "mogo"}, {"", "mogo"}, {"Pico", "mogo"}, {"kiikoread", "mogo"},
+        {"mogo", "mogo"}, {"My Reader", "My Reader"}, {"kiikoread-custom", "kiikoread-custom"}
+    };
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        loaded_device_name = cases[i].stored;
+        app_settings_init();
+        assert(!strcmp(app_settings_device_name(), cases[i].expected));
+        if (!cases[i].stored || !cases[i].stored[0]) continue;
+        loaded_device_name = NULL;
+        strlcpy(s_device_name, cases[i].stored, sizeof(s_device_name));
+        assert(app_settings_backup_save() == ESP_OK);
+        strlcpy(s_device_name, "Keep current", sizeof(s_device_name));
+        commit_fails = true;
+        assert(app_settings_backup_restore() == ESP_FAIL);
+        assert(!strcmp(app_settings_device_name(), "Keep current"));
+        commit_fails = false;
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(!strcmp(app_settings_device_name(), cases[i].expected));
+        assert(!strcmp(written_device_name, cases[i].expected));
+    }
+    loaded_device_name = NULL;
+    app_settings_init();
+    assert(!strcmp(app_settings_device_name(), "mogo"));
+}
+
 int main(void) {
+    assert(!strcmp(app_settings_device_name(), "mogo"));
     flash_failure = true;
     nvs_handle_t rejected = 0;
     assert(settings_write_open(&rejected) == ESP_ERR_INVALID_STATE && !flash_depth && !rejected);
@@ -1005,10 +1044,11 @@ int main(void) {
     assert(fclose(file) == 0);
     /* 彻底断电档已移除：旧备份里的 FULL 一律迁移为彻底关机。/ Full-off is retired: legacy FULL in backups migrates to full off. */
     assert(app_settings_backup_restore() == ESP_OK && s_shutdown_style == APP_SHUTDOWN_STAGED);
+    assert(!strcmp(app_settings_device_name(), "mogo"));
     assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
     app_settings_init();
     assert(!strcmp(app_settings_books_dir(),"/sdcard/books")&&!strcmp(app_settings_fonts_dir(),"/sdcard/fonts"));
-    assert(!s_home_full_refresh && !strcmp(s_device_name, "kiikoread") && !s_status_signature[0]);
+    assert(!s_home_full_refresh && !strcmp(s_device_name, "mogo") && !s_status_signature[0]);
     assert(!strcmp(saved_wifi.ssid, "Home_2.4G")); /* Old backups leave network alone. */
 
     /* Existing PICOSET2 backups remain readable, with centered guide lines. */
@@ -1374,6 +1414,7 @@ int main(void) {
     assert(commit_count==commits_before_bad_shutdown&&wifi_imports==imports_before_bad_shutdown&&
            app_settings_shutdown_style()==APP_SHUTDOWN_STAGED);
     test_home_regions_backup();
+    test_device_name_branding();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;
 }

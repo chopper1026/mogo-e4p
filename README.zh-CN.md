@@ -1,4 +1,4 @@
-# kiikoread
+# mogo
 
 > 当前仓库目标为 Metalio E-INK4 Plus（ESP32-S31）。开发请读[上手指南](docs/ONBOARDING.md)、[代码结构](docs/ARCHITECTURE.md)和[测试工具](tools/README.md)；以下上游旧板介绍不作为当前硬件或构建参数。
 
@@ -8,7 +8,7 @@
 
 > **使用与授权：** 今后明确标注适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)的新增原创内容，允许个人学习，未经单独书面授权不得商用。**此政策不重新许可 rc93 及以前的代码或固件，不撤销既有 Apache-2.0 授权，也不覆盖第三方许可。** 完整范围见 [LICENSE](LICENSE)。
 
-项目对外名称统一为 **kiikoread**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 kiikoread。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。
+项目对外名称统一为 **mogo**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 mogo。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。
 正式固件 Bin 发布到当前远端仓库的 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases)。版本标签推送后，构建将同一批固件提交到 OTA 平台草稿，须经管理员审核后上线。设备优先读取 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json`，仅接受平台 `/files/firmware/ota/` 下的 HTTPS 镜像及已有 GitHub 来源，主源失败后回退原 GitHub 更新源。已发布的固定下载与升级地址保留；天气接口也使用 `https://mogo.mantake.shop`。
 
 
@@ -64,7 +64,7 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 
 ## 文件传输
 
-文件管理直接显示 **WiFi传输、热点传输、USB传输** 三个入口。WiFi 传输连接已保存的网络，未配网时进入网络设置；热点传输直接创建 kiikoread 热点；USB 传输连接电脑读写 TF 卡。WiFi 与热点网页继续支持 TF 卡目录浏览、任意文件上传、书籍/字体/图片导入和状态栏签名设置。
+文件管理直接显示 **WiFi传输、热点传输、USB传输** 三个入口。WiFi 传输连接已保存的网络，未配网时进入网络设置；热点传输直接创建 `mogo-XXXX` 热点，口令为 `mogo1234`；USB 传输连接电脑读写 TF 卡。WiFi 与热点网页继续支持 TF 卡目录浏览、任意文件上传、书籍/字体/图片导入和状态栏签名设置。
 
 本地开发版传书网页使用文件工作台：书籍、字体、图片快捷目录分别对应 `books`、`fonts`、`pictures`，默认上传会校验对应格式；「添加其他文件」保留向当前目录上传任意格式和空文件的入口，根目录与其他子目录默认接受任意文件。目录每页最多 20 项，搜索与名称排序只作用于本页；切换分页可继续查看。单项操作在文件右侧菜单，批量删除需勾选并确认，删除文件夹包含其内容。
 
@@ -94,7 +94,7 @@ WiFi 和热点传书网页都有「状态栏签名」，保存或清空后写入
 
 如果运行本固件的设备无法自动进入下载模式，请按住机身的 **BOOT 键**再上电，等电脑重新识别串口后再用网页刷机。
 
-刷机页现有图文新手指南：**连接 kiikoread → 选择串口 → 确认安装并等待完成**。页面下方也介绍了首页、书架、文件管理和设置，以及常见问题。
+刷机页现有图文新手指南：**连接 mogo → 选择串口 → 确认安装并等待完成**。页面下方也介绍了首页、书架、文件管理和设置，以及常见问题。
 
 刷机清单为 [`flash/manifest.json`](flash/manifest.json)，写入引导程序、分区表、应用程序和 OTA 数据分区；不会覆盖现有 NVS 设置与内置书籍分区。网页由 [Pages 工作流](.github/workflows/pages.yml) 按明确的文件清单部署，不上传本机书籍、备份或额外字体包。[查看更新日志](docs/CHANGELOG.md)。
 

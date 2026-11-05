@@ -92,7 +92,7 @@ int main(void) {
     puts("transfer WiFi forget: failed-start recovery, persistence faults, busy/upload and resource guards PASS");
 }
 '''
-with tempfile.TemporaryDirectory(prefix="kiikoread-wifi-forget-") as directory:
+with tempfile.TemporaryDirectory(prefix="mogo-wifi-forget-") as directory:
     work = Path(directory)
     source = work / "test.c"
     source.write_text(harness)

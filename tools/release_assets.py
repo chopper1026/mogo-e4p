@@ -54,7 +54,7 @@ def _hydrate_files(source: Path, output: Path, release: dict) -> None:
             try:
                 # Size cap also applies to a malicious/unexpected upstream response.
                 # 大小上限也约束非预期响应，避免无限读入内存。
-                with urlopen(Request(url, headers={'User-Agent':'kiikoread-publisher'}), timeout=30) as response:
+                with urlopen(Request(url, headers={'User-Agent':'mogo-publisher'}), timeout=30) as response:
                     data = response.read(info['size'] + 1)
                 assert len(data) == info['size'] and hashlib.sha256(data).hexdigest() == info['sha256'], 'Release asset checksum mismatch'
                 target.write_bytes(data)

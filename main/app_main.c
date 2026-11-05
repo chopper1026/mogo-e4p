@@ -110,7 +110,7 @@ static bool images_match_panel(void) {
 // 中文：每行带时间、开机秒数、codepoint、gid、字号、原因、PSRAM 余量和字体路径。
 // English: each line carries the time, uptime, codepoint, gid, pixel size, reason, free PSRAM
 // and the active face.
-#define GLYPH_DIAG_PATH "/sdcard/kiikoread-font.log"
+#define GLYPH_DIAG_PATH "/sdcard/mogo-font.log"
 static void glyph_failure_note(uint32_t codepoint, int gid, int pixel_height,
                                ttf_font_failure_t reason) {
     static unsigned logged;

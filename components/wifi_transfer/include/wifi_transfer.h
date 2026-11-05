@@ -16,7 +16,7 @@
 #include "esp_err.h"
 #include "wifi_transfer_network.h"
 
-#define WIFI_TRANSFER_PASSWORD "kiikoread"
+#define WIFI_TRANSFER_PASSWORD "mogo1234"
 #define WIFI_TRANSFER_URL "http://192.168.4.1"
 
 typedef enum {

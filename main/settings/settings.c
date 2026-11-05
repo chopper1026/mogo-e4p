@@ -71,6 +71,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_TSYNC_AT "tsync_at"
 #define NVS_KEY_TSYNC_TRY "tsync_try"
 #define NVS_KEY_DEVICE_NAME "dev_name"
+#define DEFAULT_DEVICE_NAME "mogo"
 #define NVS_KEY_AVATAR "dev_avatar"
 #define NVS_KEY_STATUS_SIGNATURE "status_sig"
 #define NVS_KEY_TOUCH_HAPTIC "touch_haptic"
@@ -158,7 +159,7 @@ static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh = APP_MAIN_REFRESH_WATER;
-static char s_device_name[64] = "kiikoread";
+static char s_device_name[64] = DEFAULT_DEVICE_NAME;
 static char s_avatar[288];
 static char s_status_signature[96];
 // 触摸震动默认开启、弱档；与原厂默认一致。/ Touch vibration defaults to on and weak, matching the vendor.
@@ -302,6 +303,13 @@ static uint8_t valid_book_px(uint8_t px) {
     return px >= BOOK_READER_PX_MIN && px <= BOOK_READER_PX_MAX ? px : 48;
 }
 
+// 仅迁移历史默认名；启动和备份恢复共用规则，不覆盖自定义名称。
+// Migrate historical defaults on boot and restore without overwriting custom names.
+static void migrate_device_name(char *name, size_t capacity) {
+    if (!strcmp(name, "Pico") || !strcmp(name, "kiikoread"))
+        strlcpy(name, DEFAULT_DEVICE_NAME, capacity);
+}
+
 void app_settings_init(void) {
     esp_err_t err = nvs_flash_init();
     // 设置分区异常时保留原数据供恢复，绝不因空间不足自动擦除用户资料。
@@ -351,9 +359,8 @@ void app_settings_init(void) {
     if (nvs_get_u32(h, NVS_KEY_TSYNC_TRY, &s_time_sync_try) != ESP_OK) s_time_sync_try = 0;
     size_t value_len = sizeof(s_device_name);
     if (nvs_get_str(h, NVS_KEY_DEVICE_NAME, s_device_name, &value_len) != ESP_OK || !s_device_name[0])
-        strlcpy(s_device_name, "kiikoread", sizeof(s_device_name));
-    // 仅迁移旧默认名字，保留用户填写的姓名。/ Migrate only the old default, preserving custom names.
-    if (!strcmp(s_device_name, "Pico")) strlcpy(s_device_name, "kiikoread", sizeof(s_device_name));
+        strlcpy(s_device_name, DEFAULT_DEVICE_NAME, sizeof(s_device_name));
+    migrate_device_name(s_device_name, sizeof(s_device_name));
     value_len = sizeof(s_avatar);
     if (nvs_get_str(h, NVS_KEY_AVATAR, s_avatar, &value_len) != ESP_OK ||
         (s_avatar[0] && strncmp(s_avatar, "/sdcard/", 8))) s_avatar[0] = 0;
@@ -1905,7 +1912,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_chrome_t chrome = {.items = {
         APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
         APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS}};
-    settings_backup_profile_t profile = {.device_name = "kiikoread"};
+    settings_backup_profile_t profile = {.device_name = DEFAULT_DEVICE_NAME};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
     bool has_wifi = false;
@@ -2052,6 +2059,7 @@ esp_err_t app_settings_backup_restore(void) {
     // Accept retired IDs from old backups and restore the default acrylic style.
     if (backup.flags[BK_SHELF] == 3 || backup.flags[BK_SHELF] == 4) backup.flags[BK_SHELF] = 2;
     if (profile.avatar[0] && !backup_file_exists(profile.avatar, false)) profile.avatar[0] = 0;
+    migrate_device_name(profile.device_name, sizeof(profile.device_name));
     strlcpy(backup.books_dir, "/sdcard/books", sizeof(backup.books_dir));
     strlcpy(backup.fonts_dir, "/sdcard/fonts", sizeof(backup.fonts_dir));
     // v27 用独立块保存关机方式；旧备份仍按扩展 bit0 回落（仅浅睡降级为彻底关机）。

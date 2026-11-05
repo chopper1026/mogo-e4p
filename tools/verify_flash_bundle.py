@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the public kiikoread web-flashing bundle."""
+"""Validate the public mogo web-flashing bundle."""
 
 from __future__ import annotations
 

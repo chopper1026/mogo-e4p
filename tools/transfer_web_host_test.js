@@ -95,6 +95,24 @@ async function edit(t,action,name){
   t.context.openEditor(action,t.run('directoryItems[0]'));if(name!==undefined)t.get('editorName').value=name;await t.context.submitEditor();
 }
 (async()=>{
+  for(const root of ['main','components'])for(const relative of fs.readdirSync(root,{recursive:true})){
+    const path=root+'/'+relative;
+    if(!/\.(?:c|h|cpp|html|json|md|txt)$/.test(path)||!fs.statSync(path).isFile())continue;
+    let text=fs.readFileSync(path,'utf8').replaceAll('LicenseRef-Kiikoread-Personal-Study-1.0','');
+    if(path==='main/settings/settings.c')text=text.replace('strcmp(name, "kiikoread")','');
+    assert.doesNotMatch(text,/kiikoread/i,'Unexpected old firmware brand in '+path);
+  }
+  const board=fs.readFileSync('components/board_support/include/board_hardware.h','utf8');
+  for(const name of ['BOARD_PRODUCT_NAME','BOARD_DEVICE_NAME'])assert.match(board,new RegExp('#define '+name+' "mogo"'));
+  const transferHeader=fs.readFileSync('components/wifi_transfer/include/wifi_transfer.h','utf8');
+  const password=transferHeader.match(/#define WIFI_TRANSFER_PASSWORD "([^"]+)"/)[1];
+  assert.equal(password,'mogo1234');assert.ok(password.length>=8&&password.length<=63);
+  const transfer=fs.readFileSync('components/wifi_transfer/wifi_transfer.c','utf8');
+  assert.match(transfer,/"mogo-%02X%02X", mac\[4\], mac\[5\]/);
+  assert.match(transfer,/strcpy\(\(char \*\)wifi\.ap\.password, WIFI_TRANSFER_PASSWORD\)/);
+  assert.match(html,/<title>mogo · WiFi 传书<\/title>/);
+  assert.match(html,/<span>mogo<span class="brand-note">WiFi 传书/);
+  assert.doesNotMatch(html,/kiikoread/i);
   assert.match(html,/浏览 TF 卡/);assert.doesNotMatch(html,/图片对比|编辑书架名称/);
   assert.doesNotMatch(html,/(?:src|href)="https?:/);
   let t=await setup();
@@ -115,7 +133,10 @@ async function edit(t,action,name){
   }
   for(const mode of ['ap','sta']){
     t=await setup({mode});assert.equal(t.get('signatureText').value,'慢慢阅读');
-    for(const value of ['我的 Pico','']){t.get('signatureText').value=value;await t.get('signatureSave').onclick();assert.equal(t.state.signature,value);}
+    for(const value of ['我的 Pico','']){
+      t.get('signatureText').value=value;await t.get('signatureSave').onclick();assert.equal(t.state.signature,value);
+      assert.equal(t.get('signatureResult').textContent,value?'签名已保存，mogo 状态栏已更新':'签名已清除');
+    }
     for(const value of ['字'.repeat(32),'换行\n签名','\u007f']){t.get('signatureText').value=value;await t.get('signatureSave').onclick();}
     assert.equal(t.state.signatures.length,2);
     await t.context.sendFiles([file('README',0),file('升级 包%+#.bin',32),file('.env',17)],'file','');
