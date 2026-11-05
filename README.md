@@ -1,127 +1,258 @@
-# mogo-e4p
+<div align="center">
 
-> 当前开发入口：[上手指南](docs/ONBOARDING.md) · [代码结构与依赖边界](docs/ARCHITECTURE.md) · [测试与工具](tools/README.md)。下方阶段表保留移植历史；当前配置以构建清单与 sdkconfig.defaults 为准。
+<a href="https://mogo.mantake.shop"><img src="assets/image/mogo-logo.png" width="112" height="112" alt="mogo"></a>
 
-把 **Mogo**（ESP32-S3 阅读固件）移植到 **Metalio E-INK4 Plus**（ESP32-S31，4.7" 1216×684 并口墨水屏）的工作区。
+# mogo
 
-当前产品构建仅支持 **ESP32-S31 / ESP-IDF v6.1 preview**；历史移植与设备验证记录见下文，当前目录职责见架构说明。
+### 为 Metalio E-INK4 Plus 打造的阅读固件
 
-当前固件品牌统一为小写 **mogo**。默认设备名称为 `mogo`；热点传书创建 `mogo-XXXX`（后四位用于区分设备），口令为 `mogo1234`。升级及配置恢复会迁移历史默认名称，不覆盖用户自定义名称。历史许可标识、已发布下载地址、配置备份与 OTA 内部标识保持兼容。
+**把书装进口袋，把时间留给阅读。**<br>
+阅读 EPUB 与 TXT，用自己的字体和排版，记住每一次停下的位置。<br>
+从书架到天气，从无线传书到阅读手账，都在这一块墨水屏上。
 
-## 先看这个
+[![Release](https://img.shields.io/github/v/release/chopper1026/mogo-e4p?label=release&color=24292f)](https://github.com/chopper1026/mogo-e4p/releases/latest)
+[![Build](https://github.com/chopper1026/mogo-e4p/actions/workflows/build.yml/badge.svg)](https://github.com/chopper1026/mogo-e4p/actions/workflows/build.yml)
+[![ESP32-S31](https://img.shields.io/badge/ESP32--S31-4.7%22_E--Ink-397568)](#硬件)
+[![License](https://img.shields.io/badge/license-按内容适用-24292f)](LICENSE)
 
-完整方案在 [移植适配方案.md](docs/development/history/porting/%E7%A7%BB%E6%A4%8D%E9%80%82%E9%85%8D%E6%96%B9%E6%A1%88.md)，包含：
+**[官网](https://mogo.mantake.shop)** &nbsp;·&nbsp; **[下载固件](https://github.com/chopper1026/mogo-e4p/releases/latest)** &nbsp;·&nbsp; **[网页刷机](https://mogo.mantake.shop/flash)**<br>
+**[使用说明](https://mogo.mantake.shop/docs/firmware/manual/)** &nbsp;·&nbsp; **[更新日志](docs/CHANGELOG.md)** &nbsp;·&nbsp; **[开发文档](#开发文档)**
 
-- 两块板的硬件/总线/电源/触摸/存储差异对照
-- 推荐架构：Mogo 应用层 + Metalio 板级驱动 + 合并 epdiy S31 后端
-- EPD、触摸、PMU、SD、USB、OTA 的逐项适配设计
-- 文件级改造清单、M0–M8 分阶段计划、验收与风险清单
+<br>
 
-## 已完成（代码级）
+<a href="assets/readme/overview.png"><img src="assets/readme/overview.png" width="900" alt="mogo 当前源码界面预览：天气组件、今日阅读记录和当月阅读日历"></a>
 
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| M0 | `esp32s31` target、16 MB / 5 MB OTA 分区、S3 专属代码隔离、RISC-V 编译 | ✅ 干净构建通过，镜像 ≈ 4.77 MB |
-| M1 | epdiy 合并 Metalio S31 LCD IOMUX / AXI-GDMA / RMT 后端，保留 Mogo 的 `epd_lcd_set_line_timing` 等时序 API | ✅ 编译通过 |
-| M1 | Metalio 板级 BSP：TPS65185 + TCA9555 + 8-bit 总线（GPIO8–15，20 MHz）+ `EpdBoardDefinition` | ✅ 编译通过 |
-| M1 | 开机 EPD 测试图案（`CONFIG_MOGO_EPD_TEST_PATTERN`）：灰阶条、棋盘、细线、四角、中心圆、边框、20 次 GL16 局刷 | ✅ 已接入，默认开启 |
-| M3 | FT6336U 触摸驱动，沿用 `cst836u_*` API；普通触点逆旋转 + 盖板三键归一化 | ✅ 编译通过 |
-| M4 | SDMMC 4-bit（CLK24 / CMD25 / D0–D3 20–23）；USB MSC 同步改 4-bit + ANA_SW | ✅ 编译通过 |
-| M5 | `device_power_*` 兼容层：BQ27220 电量、CX25601N 充电、PCF8563 RTC、TCA P17 电源键、NVS VCOM | ✅ 编译通过 |
-| M6 | OTA 分区地址与芯片 ID 更新；在线升级 board/layout 改为新板（旧升级源自然失效） | ✅ 编译通过 |
-| 实机 | 2026-10-19 烧录并启动：TCA9555 0x20、TPS65185 REVID 0x65、FT6336U ID 0x64、SD 4-bit 挂载 15200 MB、BQ/CX/RTC 全部在线；测试图案 GC16 成功，UI 进入首页 | ✅ 启动通过 |
-| 实机 | 触摸：FT6336U 已按竖屏逻辑坐标上报，改为恒等映射；普通触点和盖板三键均可命中 | ✅ |
-| 实机 | 修复设置页/水波纹路径死锁：prefill 127 行超过 8-bit 行队列 62 个可用槽，现按队列容量截断 | ✅ |
+<sub>当前开发源码的宿主绘图预览，使用示例数据；不是实屏照片，也不代表已发布版本。<a href="assets/readme/README.md">图片来源</a></sub>
 
-## 尚未验证 / 下一步
+</div>
 
-1. **实机 M1**：烧写后先看测试图案，确认灰阶、方向、1 px 线、边框、GC16 耗时；标定 VCOM（默认 1200 mV）。
-2. **实机 M3**：标定 FT6336U 四角/中心与盖板三键；当前映射按 Metalio 实测 raw 值写入，可能需要微调。
-3. **实机 M4**：确认 4-bit SD 在 40 MHz 下稳定；USB MSC 导出/收回。
-4. **实机 M5**：确认 BQ27220/CX25601N/PCF8563 地址与读数；软睡/关机仍走 `main/power/sleep.c` 的降级路径，PMU shim 的 `report_sleep` 返回不支持。
-5. **M7**：RISC-V C stub 比 S3 PIE 慢，实测翻页/水波纹耗时后再优化热路径。
-6. 测试完成后关闭 `CONFIG_MOGO_EPD_TEST_PATTERN`。
+<br>
 
-## 构建
+## 读书，也照顾阅读之外的小事
 
-```bash
-. ~/esp/esp-idf/export.sh
-idf.py --preview set-target esp32s31   # 首次
+mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，基于 MindReset 阅读固件与 Metalio 板级实现适配，并非硬件厂商的官方固件。
+
+- **书放在自己手里。** 从 TF 卡读取 EPUB、TXT，按目录分类，搜索、收藏，接着上次的位置读。
+- **页面按自己的习惯来。** 字体、字号、间距、横竖排、章节题头、页眉页脚和阅读背景均可调整。
+- **传书不必拔卡。** 通过已有 WiFi、设备热点或 USB 传文件；浏览器里就能整理目录、裁剪壁纸、修改签名。
+- **首页不只是一张封面。** 最近阅读、天气、阅读手账与留白自由组合；阅读记录汇入当月日历。
+- **翻页有不止一种方式。** 触摸、可配置按键与 BLE 翻页器；也可按需开启晃动翻页。
+
+这里介绍当前源码的能力，安装包以 [Release](https://github.com/chopper1026/mogo-e4p/releases) 和对应[更新日志](docs/CHANGELOG.md)为准。功能的设备验证范围见[功能全景](docs/development/FEATURES.md)，不以预览图或编译成功代替实机验收。
+
+## 快速开始
+
+### 1. 安装固件
+
+确认设备是 **Metalio E-INK4 Plus / ESP32-S31**。在电脑端 Chrome 或 Edge 中打开[网页刷机页](https://mogo.mantake.shop/flash)，连接 USB 数据线，核对所选固件的设备型号后按页面提示操作。刷写前先备份重要设置与阅读记录。
+
+也可以在 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases/latest) 下载完整 USB 刷机包，按包内 `README.txt` 操作，并用 `SHA256SUMS` 核对文件。
+
+<details>
+<summary>下载文件怎么选？</summary>
+
+| 文件 | 用途 |
+| :-- | :-- |
+| `mogo-e4p-<版本号>-usb.zip` | 完整 USB 刷机包，包含操作说明、镜像与校验值 |
+| `mogo-e4p-<版本号>-full.bin` | USB 单文件整机镜像，使用对应版本说明中的刷写方式 |
+| `mogo-e4p-update-<版本号>.bin` | TF / OTA 应用镜像，不是整机镜像，不能当作完整 USB 包使用 |
+
+当前设置页提供联网 OTA；TF 升级底层仍保留，但设置入口隐藏。首次安装、恢复或基础布局不兼容时使用完整 USB 包，不手写分区地址。版本号不含 `v`，Git 标签使用 `v<版本号>`。
+
+</details>
+
+### 2. 放入书籍
+
+把 EPUB、TXT 放进 TF 卡的 `books/`。也可以进入设备的「文件管理」，选择 WiFi、热点或 USB 传输。
+
+热点传书时，连接 **`mogo-XXXX`**，默认口令 **`mogo1234`**，再打开设备屏幕显示的地址。手机和电脑均可使用；传输期间让墨水屏停留在传输页面。日常传书和离线阅读不需要访问外网。
+
+### 3. 开始阅读
+
+从书架打开一本书。阅读时从屏幕底部上滑呼出工具栏，调整字体、排版和翻页方式。默认三键短按分别是上一页、工具栏、下一页，也可自行配置；新开书沿用记住的全屏偏好。
+
+更多操作见[在线使用说明](https://mogo.mantake.shop/docs/firmware/manual/)。
+
+## 功能一览
+
+### 阅读，按自己的节奏
+
+| | |
+| :-- | :-- |
+| **书籍与书架** | EPUB / TXT、封面与列表、目录分类、离线搜索、排序、收藏与批量管理 |
+| **正文与排版** | 自定义字体、抗锯齿、字号与间距、横竖排、四款章节题头、六槽页眉页脚与独立高度 |
+| **进度与内容** | 续读、书签、章节目录、EPUB 脚注、插图与嵌入字体 |
+| **翻页与显示** | 触摸与可配置按键、BLE 翻页器、可选晃动翻页、普通 / 水波纹效果、周期与手动全刷 |
+| **个性化** | 阅读背景、自定义头像、锁屏壁纸、签名、冷暖前光与触摸震动 |
+
+<a id="epub-图片兼容--epub-image-compatibility"></a>
+<details>
+<summary>EPUB 图片兼容与资源限制</summary>
+
+支持书内 JPEG、PNG 和静态 WebP 封面 / 插图，透明 WebP 合成到白底。样式表中 `body` 的单张背景图按页首插图处理，相对路径按样式表目录解析；不模拟浏览器的背景平铺或叠字，也不替换用户的阅读背景。
+
+兼容 ZIP 文件名中的字面冒号，仍拦截外部地址和越界路径。旧自动封面缓存会重建，原 EPUB 不需要转换。WebP 每轴最多 8192、总像素最多 4,194,304，输出最多一屏；动画、超限、损坏或内存不足时按图片失败路径回退。独立图片页、头像和壁纸选图仍仅提供 JPG / PNG。
+
+两个已报告的问题样本经过宿主检查与用户实机确认；这不代表其他书籍、实际内存峰值和解码耗时已全面验证。后端与许可见 [WebP 组件](components/webp_decoder/README.md)。
+
+</details>
+
+### 首页，留给你关心的内容
+
+上下两个等高区域可分别选择最近阅读、天气、阅读手账或留白，同类非空组件不重复。长按区域，或从设置进入组件库即可更换。
+
+**天气**支持中文选城、今日 / 明日切换，灰阶背景随天气变化。数据来自官方 HTTPS 代理；平台未配置、停用或数据过期时不显示虚构预报。详情见[组件与天气](docs/development/guides/WEATHER.md)。
+
+**阅读手账**记录每天读过的书、时长、章节和翻页次数，点开查看当月日历，搭配六幅轮换的像素插画。记录保存在本机，不补造历史明细；目前只查看当月，手账明细不包含在设置备份中。详情见[阅读手账](docs/development/guides/READING_JOURNAL.md)。
+
+### 传书，一个浏览器就够
+
+<a href="assets/readme/transfer.png"><img src="assets/readme/transfer.png" width="900" alt="mogo 传书网页预览：侧栏切换文件、壁纸和签名，中间浏览目录，右侧上传文件和查看传输记录"></a>
+
+<sub>当前传书网页的浏览器截图，文件与存储容量为示例数据，未连接真实设备。</sub>
+
+热点模式不需要路由器，已有 WiFi 模式让手机、电脑与设备在同一网络下传书。网页资源全部内嵌，无需外网加载；也可以用 USB 直接读写 TF 卡。
+
+- **文件工作台：** 浏览目录、上传原文件、新建文件夹、重命名、复制和确认删除。
+- **壁纸：** 拖动、缩放并裁剪，输出适合竖屏的 JPG。
+- **签名：** 预览文字，确认保存后写入设备配置。
+
+<a id="传书网页--transfer-workspace"></a>
+<details>
+<summary>目录、上传限制与断连处理</summary>
+
+书籍、字体、图片快捷目录对应 `books`、`fonts`、`pictures`，默认上传校验对应格式；「添加其他文件」允许向当前目录上传任意格式和空文件，根目录及其他子目录默认接受任意文件。每页最多 20 项，搜索与排序只作用于当前页。删除文件夹包含其内容，批量删除需要确认。
+
+上传逐个发送原文件，同名替换需要确认。本次网页会话保留最近 40 条传输记录，失败可重试；断连后先核对文件是否已保存，再决定是否替换。字体上限 32 MiB，图片 20 MiB，书籍限制由设备返回。壁纸输出 684 × 1216 JPG，不超过 2 MiB。签名预览仅为示意，点击保存才写入设备。离开设备的传输页面后服务停止。
+
+</details>
+
+### 锁屏与待机
+
+自动锁屏、密码、自定义锁屏图、拿起唤醒和阅读恢复检查点各自配合；锁屏前保存阅读位置。待机方式可选「彻底关机」「仅浅睡」「浅睡后关机」，默认仅浅睡。
+
+<a id="定时待机关机--timed-standby-power-off"></a>
+<details>
+<summary>定时关机、唤醒与备份兼容</summary>
+
+在「设置 → 显示 → 待机方式」选择「浅睡后关机」，再选 10 / 30 / 60 分钟。从非定时方式切入时默认 10 分钟；再次打开页面保留已保存的档位。
+
+计时从锁屏画面显示完成、进入浅睡时开始，自动锁屏与手动锁屏均生效，与无操作锁屏的等待时间独立。按电源键或已启用的拿起唤醒会取消本轮计时，再次进入锁屏浅睡重新计时；密码输入期间不计时，重新等待唤醒时开始新一轮。
+
+到时保留锁屏画面与阅读恢复检查点，沿用关机流程；之后长按电源键约 1 秒开机，已设密码仍需验证。关机失败回退无期限锁屏浅睡与既有故障恢复，不把定时器唤醒视为解锁，不连续重试。电源菜单「关机」始终立即关机。
+
+设置保存在 NVS 与配置备份中；新版可读原备份，旧固件不能恢复含新增定时档的备份。真实待机电流、定时与断电行为仍需专项设备验证。
+
+</details>
+
+## 硬件
+
+| 项目 | 当前目标 |
+| :-- | :-- |
+| 开发板 | Metalio E-INK4 Plus |
+| 主控 / 工具链 | ESP32-S31 / ESP-IDF v6.1，preview 目标 |
+| 屏幕 | 4.7 英寸，1216 × 684，8-bit 并口；竖屏逻辑尺寸 684 × 1216 |
+| 存储 | 16 MB Flash，80 MHz；Octal PSRAM，200 MHz；TF 卡使用 SDMMC 4-bit |
+| 触摸 / 运动 | FT6336U / SC7A20H |
+| 板级与电源 | TPS65185、TCA9555、BQ27220、CX25601N、PCF8563 |
+
+<details>
+<summary>主要引脚与兼容接口</summary>
+
+| 总线 / 功能 | GPIO |
+| :-- | :-- |
+| I2C SDA / SCL | 0 / 1 |
+| TCA9555 / SC7A20H 共用中断 | 2 |
+| EPD D0–D7 | 8–15 |
+| EPD XCL / XLE / XOE / XSTL | 16 / 17 / 18 / 4 |
+| EPD SPV / CKV / MODE / BORDER | 35 / 40 / 19 / 37 |
+| TF CLK / CMD / D0–D3 | 24 / 25 / 20–23 |
+| 冷 / 暖前光 | 6 / 7 |
+| 顶部按键 | 61 |
+
+引脚以[板级实现](components/board_support/board_metalio_e4p.c)和 [TF 卡驱动](components/board_support/board_sd.c)为准。`cst836u_*`、`fca9555_*`、`device_power_*` 是仍在使用的兼容接口，不代表产品使用旧芯片。硬件时序、供电与唤醒边界见[板级说明](components/board_support/README.md)。
+
+</details>
+
+## 从源码构建
+
+先安装并激活 **ESP-IDF v6.1**。ESP32-S31 仍是 preview 目标，以下 `idf.py` 命令都必须带 `--preview`。
+
+```sh
+git clone https://github.com/chopper1026/mogo-e4p.git
+cd mogo-e4p
+
+. "$IDF_PATH/export.sh"
+idf.py --preview set-target esp32s31
 idf.py --preview build
 ```
 
-ESP32-S31 在 IDF 6.1 中仍是 preview，`idf.py` 必须带 `--preview`。
+`IDF_PATH` 应指向本机的 ESP-IDF v6.1 安装目录。产品与 OTA 使用 `sdkconfig.defaults`；已有 `sdkconfig` 会保留旧值，修改 defaults 后应核对生成配置。
 
-产品与 OTA 使用 `sdkconfig.defaults`（flash 80 MHz、Octal PSRAM 200 MHz）。普通 CI 使用相同产品配置，再加载 `sdkconfig.ci` 的编译警告叠加项：
-Product and OTA builds use `sdkconfig.defaults` (80 MHz flash, 200 MHz octal PSRAM). CI loads the same product defaults followed by the warning overlay:
+<details>
+<summary>CI 配置、宿主回归与本地刷写</summary>
 
-```bash
+CI 在产品 defaults 后叠加编译警告配置，不切换硬件目标：
+
+```sh
 idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" set-target esp32s31
 idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" build
+python3 tools/check_architecture.py
 python3 tools/run_reader_baseline.py
 ```
 
-宿主阅读回归保留 ASan/UBSan，覆盖诊断、预绘、背景、主循环、书籍、显示、导航与水波纹；配置和测量说明见 [阅读性能测量](docs/development/guides/READER_PERFORMANCE.md)。CI 构建不能替代真机验收。
-Host reader regressions retain ASan/UBSan across diagnostics, prefetch, backgrounds, the event loop, books, display, navigation and ripple effects. See the performance guide for measurement setup; CI builds do not replace device acceptance.
+宿主回归保留 ASan / UBSan。编译器、Python 图像依赖和各套件要求见[上手指南](docs/ONBOARDING.md)与[工具入口](tools/README.md)。编译、宿主回归、刷写校验、设备启动与实屏验收是不同验证层级。
 
-## EPUB 图片兼容 / EPUB Image Compatibility
+开发构建完成后，可先准备本次产品镜像：
 
-本地开发版支持书内 JPEG、PNG 和静态 WebP 封面/插图，透明 WebP 合成到白底。样式表中 `body` 的单张背景图按页首插图处理，相对路径按样式表目录解析；不模拟浏览器的背景平铺或叠字，也不替换用户的阅读背景。兼容 ZIP 文件名中的字面冒号，但继续拦截外部地址和越界路径。旧自动封面缓存会重建，原 EPUB 不需要转换。
+```sh
+python3 tools/flash_fast.py prepare --build-dir build
+```
 
-The local development build supports EPUB JPEG, PNG and static WebP covers/illustrations, compositing WebP alpha onto white. A body's single CSS background becomes a leading illustration with stylesheet-relative resolution, not a tiled/text-overlay backdrop or a user reading background. Literal-colon ZIP names are accepted while external schemes and traversal remain blocked. Old automatic-cover caches rebuild without converting the original EPUB.
+需要本地刷写且已确认目标设备与操作授权时，按[项目刷机说明](.agents/skills/mogo-e4p-flash/SKILL.md)执行 `python3 tools/flash_fast.py flash --yes`。脚本默认及上限为 180 秒，动态识别活动应用分区，不自动退回整机擦写。不要刷入旧包或把局部写入失败当作成功。
 
-WebP 每轴最多 8192、总像素最多 4,194,304，输出最多一屏；动画、超限、损坏或内存不足时按现有图片失败路径回退。独立图片页、头像和壁纸选图仍仅提供 JPG/PNG。原书逐章与解码宿主检查已通过，两个问题样本已刷入设备并由用户确认恢复；实际内存峰值、耗时及其他书籍兼容性仍需分别验证。后端与许可见 [WebP 组件](components/webp_decoder/README.md)。
+本地测试沿用当前正式版本号，用日期和说明区分；产物留在忽略的构建目录，不覆盖已经发布的同版本文件。
 
-WebP sources are capped at 8192 per axis and 4,194,304 pixels, with at most one panel of output. Animated, oversized, corrupt or out-of-memory images use the existing failure path. Standalone image/avatar/wallpaper pickers still offer JPG/PNG. Private-book chapter/decoder host checks passed, and the user confirmed recovery of both reported samples after flashing. Actual memory peaks, latency and other books require separate validation. See the component for backend and license details.
+</details>
 
-## 定时待机关机 / Timed Standby Power-Off
+<a id="联网升级--online-updates"></a>
+<details>
+<summary>联网 OTA 与发布边界</summary>
 
-在设置 → 显示 → 待机方式中，可选「彻底关机」「仅浅睡」或「浅睡后关机」。选中「浅睡后关机」后，在同一张卡片内选择 10/30/60 分钟，不再将时长列成三个重复待机选项；从非定时方式切入时默认选 10 分钟，已保存的定时档打开页面时原样显示。默认待机方式仍为仅浅睡。定时档从锁屏画面显示完成、开始浅睡时计时；自动锁屏与手动锁屏均生效，与无操作自动锁屏的等待时间分别计算。提前按电源键或拿起唤醒（需开启拿起唤醒）会取消本轮计时，再次进入锁屏浅睡重新计时；密码输入期间不计时，重新等待唤醒时开始新一轮。
+默认 stable 清单为 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json`。设备接受该平台 `/files/firmware/ota/` 下的 HTTPS 镜像，以及已有 GitHub 来源和显式配置的额外来源；保留 GitHub 回退路径。清单的 project、board、layout、版本、大小与 SHA-256 必须匹配设备，旧板清单不能用于 E4P。
 
-Settings → Display → Standby offers immediate off, light-only, or light-sleep-then-off. Selecting the timed mode reveals 10/30/60-minute buttons within that card instead of three duplicate standby choices. Switching from an untimed mode initially selects ten minutes; opening the page preserves a saved timed choice. Light-only remains the default standby mode. The countdown begins after presenting the lock art, on entry to light sleep, for both manual and idle locks; it is separate from the inactivity timeout. An early power-key or enabled pickup wake cancels that countdown. Returning to locked sleep starts a new interval; PIN-entry time is excluded.
+已有 `sdkconfig` 不会自动采用新的默认地址，需在 menuconfig 更新 Primary manifest URL 或重新生成配置；已安装设备需要先刷入包含新配置的构建。
 
-到时沿用现有关机流程，保留锁屏画面和阅读恢复检查点；之后需长按电源键约 1 秒开机，有密码仍需验证。关机失败则回退原有无期限锁屏浅睡及故障恢复路径，不把定时器唤醒当作解锁，也不连续重试关机；有密码时始终先验证。电源菜单中的「关机」始终立即关机。设置会保存到 NVS 和配置备份；新版可读取原备份，旧固件不支持恢复含新增定时档的备份。本功能尚待真机定时与断电验证。
+正式发布时，GitHub Release、官网刷机包与 OTA 提交必须来自同一次正式构建。标签构建提交的是平台草稿，管理员审核发布后才上线；草稿成功不等于设备已可升级。详见[平台 OTA 操作](docs/development/guides/PLATFORM_OTA.md)。
 
-Expiry reuses the existing shutdown flow, preserving lock art and the reader checkpoint. Booting afterwards requires holding the power key for about one second, followed by PIN verification when enabled. If shutdown fails, the device returns to the existing untimed locked wait and fault-recovery path, without timer-based unlocking or repeated shutdown attempts; enabled PINs still require verification. The power menu's shutdown remains immediate. NVS and settings backups preserve the choice; new firmware reads legacy backups, but old firmware cannot restore backups containing timed styles. On-device timing and power-off remain unverified.
-
-## 传书网页 / Transfer Workspace
-
-本地开发版的 WiFi/热点网页采用纯白文件工作台，目录与上传记录在桌面并排，壁纸和签名单独切换。书籍、字体、图片快捷目录对应 `books`、`fonts`、`pictures`，默认上传校验对应格式；「添加其他文件」保留向当前目录上传任意格式和空文件的入口，根目录及其他子目录默认接受任意文件。目录每页最多 20 项，搜索/排序仅作用于本页。文件菜单提供重命名、复制和删除，勾选后可确认批量删除；文件夹删除包含其内容。
-
-The local development WiFi/AP page uses a white file workspace: desktop browsing and transfer history sit side by side, with separate wallpaper and signature views. Quick folders target `books`, `fonts` and `pictures` with matching format checks by default; Add other files preserves arbitrary-format and empty-file uploads to the current folder. Root and other subfolders accept arbitrary files by default. Paging keeps at most 20 entries per page, and search/sort apply only to that page. Row menus rename, copy or delete; selection enables confirmed bulk deletion, including folder contents.
-
-上传保留原文件、逐个发送，同名替换需确认；记录只保留本次网页会话的最近 40 条，失败可重试。断连后先核对文件是否已保存，再决定是否替换。字体上限 32 MiB，图片 20 MiB；书籍限制由设备返回。壁纸裁剪输出 684 × 1216 JPG（不超过 2 MiB），签名效果为示意，点击保存才写入设备。资源全部内嵌，热点模式无需外网；传输期间保持设备停留在传输页面。
-
-Uploads send original files serially and require overwrite confirmation. The session retains the latest 40 transfer records with retry for failures. After disconnection, check whether the file was saved before replacing it. Fonts are limited to 32 MiB and images to 20 MiB; the device supplies any book limit. Wallpaper cropping produces a 684 × 1216 JPG of at most 2 MiB. The signature preview is illustrative; only Save writes the setting. All web assets are embedded, requiring no internet in AP mode. Keep the device on its transfer page.
-
-## 关键文件
-
-- `components/epdiy/src/output_lcd/lcd_driver.c`：S31 LCD/GPU/RMT 后端（来自 Metalio 已验证实现）+ Mogo 行时序。
-- `components/board_support/board_metalio_e4p.c`：Metalio 板级 BSP（TPS/TCA/8-bit 总线）。
-- `components/epdiy/src/epdiy_riscv_ve_stub.c`：RISC-V 替代 Xtensa PIE 的三个热路径函数。
-- `components/cst836u/cst836u.c`：S31 下走 FT6336U，保留 CST836U API。
-- `components/device_power/device_power_metalio.c`：BQ27220/CX25601N/PCF8563/TCA 电源键兼容层。
-- `main/factory/epd_test.c`：M1 面板测试图案。
-
-## 代码边界 / Code boundaries
-
-产品页面由 `main/CMakeLists.txt` 和 `main/app/app_registry.c` 定义。上游未参与产品构建的硬件演示页、内置演示正文及其 continuous_du 组件已移除；当前阅读翻页、水波纹、快捷栏、蓝牙、前光、震动、存储、升级与出厂流程保留。S31 使用静默蜂鸣器接口，不依赖 PWM 音频组件。
-Product pages are defined by `main/CMakeLists.txt` and `main/app/app_registry.c`. Uncompiled upstream hardware demos, their sample text and continuous_du component have been removed. Reader turns, ripple transitions, quick controls, Bluetooth, frontlight, haptics, storage, updates and factory flows remain. S31 keeps a silent buzzer interface without the PWM audio dependency.
-
-旧芯片名称不等于无用代码：`cst836u_*` 在 S31 驱动 FT6336U，`fca9555_*` 驱动 TCA9555，`device_power_*` 包装电量、充电、RTC 与电源键。普通 CI 与 OTA 均验证 S31；未使用的旧板硬件实现应按依赖边界逐步清理，不能整目录删除。
-Legacy chip names can denote active compatibility APIs: `cst836u_*` drives FT6336U on S31, `fca9555_*` drives TCA9555, and `device_power_*` wraps battery, charging, RTC and power keys. Both CI and OTA build S31; prune old-board implementations along verified dependency boundaries.
-
-产品构建仅接受 `esp32s31`，直接选择 Metalio 板级、电源兼容层和静默蜂鸣器实现；旧 S3 后端与 HPM 覆盖不再由产品构建选择。部分旧源码仍供宿主测试和离线工具使用，删除前需先迁移这些消费者。
-Product builds accept only `esp32s31` and directly select the Metalio board, power compatibility layer and silent buzzer. Legacy S3 backends and HPM overrides are no longer product build choices. Some old sources still support host tests and offline tools; migrate those consumers before removing the files.
-
-### 联网升级 / Online updates
-
-设备默认从 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json` 获取 stable 升级清单，只接受该平台 `/files/firmware/ota/` 下的 HTTPS 镜像（以及已有的 GitHub 来源和显式配置的额外来源）。平台需发布 E4P 对应的 app 镜像，清单的 project、board、layout、版本、大小和 SHA-256 必须匹配设备；旧板 GitHub 清单不兼容 E4P。已有 `sdkconfig` 会保留旧设置，需通过 menuconfig 更新 Primary manifest URL 或重新生成配置。更改源不会更新已安装的固件，需要先刷入包含新配置的构建。
-
-The device reads the stable E4P OTA feed from the URL above and accepts HTTPS images under the platform OTA path, the existing GitHub origins, or an explicitly configured extra origin. Publish an E4P app image with matching metadata and SHA-256. The legacy GitHub feed is not compatible with E4P. Existing `sdkconfig` values persist: update the primary URL in menuconfig or regenerate the configuration. Devices already installed need a build containing the new configuration before they can use the new source.
+</details>
 
 <!-- tidy:start -->
 ## 开发文档
 
 [项目开发总入口](docs/development/INDEX.md)
 <!-- tidy:end -->
+
+| | |
+| :-- | :-- |
+| [开发上手](docs/ONBOARDING.md) | 环境准备、构建、测试与设备验证 |
+| [架构说明](docs/ARCHITECTURE.md) | 页面、阅读、显示、存储与服务的职责边界 |
+| [功能全景](docs/development/FEATURES.md) | 当前能力、实现入口与验证范围 |
+| [测试与工具](tools/README.md) | 宿主回归、原生预览、资源生成和发布工具 |
+| [显示刷新契约](docs/development/designs/DISPLAY_REFRESH.md) | 刷新意图、波形出口与失败恢复 |
+| [阅读性能](docs/development/guides/READER_PERFORMANCE.md) | 资源归属、诊断开关与测量方法 |
+| [贡献指南](CONTRIBUTING.md) / [Agent 入口](AGENTS.md) | 贡献要求、产品约束与提交规范 |
+
+早期[移植评估](docs/development/history/porting/移植适配方案.md)、[中文旧版说明](README.zh-CN.md)和[日文旧版说明](README.ja-JP.md)保留为历史资料，不作为当前 S31 硬件、构建或发布状态的依据。当前产品页面以 `main/CMakeLists.txt` 和 `main/app/app_registry.c` 为准；旧板演示页与 `continuous_du` 已移除，旧名称的有效兼容接口仍保留。
+
+## 反馈与贡献
+
+使用中遇到问题，或有新的想法，可以提交 [Issue](https://github.com/chopper1026/mogo-e4p/issues) 或通过[官网反馈](https://mogo.mantake.shop/feedback)联系维护者。请附设备型号、固件版本、复现步骤；分享日志前删去 WiFi 密码和其他私人信息。
+
+代码贡献前请阅读[贡献指南](CONTRIBUTING.md)与[中文提交规范](docs/COMMIT_CONVENTION.md)。
+
+## 致谢与许可
+
+感谢 [MindReset](https://github.com/MindReset/read_pico_firmware) 的固件基础、Metalio 的 E-INK4 Plus 板级实现，以及 [epdiy](https://github.com/vroland/epdiy) 和其他上游项目。完整来源与许可见[第三方声明](THIRD_PARTY_NOTICES.md)。
+
+本仓库按内容范围适用不同许可，**并非整个仓库统一采用同一许可**。既有代码与历史版本保留 Apache-2.0 或各自组件许可；明确标注个人学习许可的新增原创内容允许个人学习、研究和测试，官方未修改版本也可用于个人非商业阅读，商用需权利人书面授权。第三方和既有授权不因本声明改变。详见 [LICENSE](LICENSE)。

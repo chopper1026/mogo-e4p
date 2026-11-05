@@ -10,8 +10,8 @@ This repository maintains the mogo reader firmware for Metalio E-INK4 Plus (ESP3
 3. [架构说明](ARCHITECTURE.md)：目录职责和依赖边界。/ Directory ownership and dependency boundaries.
 4. [交接协议](HANDOFF.md)：接手未完任务时读取本机 HANDOFF.local.md，再对照实际工作区。/ For unfinished work, read local HANDOFF.local.md and verify it against the checkout.
 
-行为以当前代码和文件头 Frozen 决策为准。README 中的移植阶段记录用于理解历史，不覆盖当前 CMake、sdkconfig.defaults 或页面契约。
-Current code and file-header Frozen decisions define behavior. Historical port milestones do not override current CMake, sdkconfig.defaults or page contracts.
+行为以当前代码和文件头 Frozen 决策为准。README 是产品、安装与构建入口；早期移植评估保留在 docs/development/history/porting，不覆盖当前 CMake、sdkconfig.defaults 或页面契约。
+Current code and file-header Frozen decisions define behavior. README covers the product, installation and builds; early port assessments remain in docs/development/history/porting and do not override current CMake, sdkconfig.defaults or page contracts.
 
 ## 构建环境 / Build environment
 
