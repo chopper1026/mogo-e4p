@@ -107,6 +107,23 @@ int64_t weather_timestamp(const char *s) {
     if (s[n - 1] != 'Z') return 0;
     return (int64_t)day * 86400 + h * 3600 + m * 60 + sec;
 }
+int64_t weather_http_date(const char *s) {
+    if (!s || strnlen(s, 30) != 29 || s[3] != ',' || s[4] != ' ' || s[7] != ' ' ||
+        s[11] != ' ' || s[16] != ' ' || s[19] != ':' || s[22] != ':' || strcmp(s + 25, " GMT")) return 0;
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    static const char weekdays[] = "SunMonTueWedThuFriSat";
+    int month = 1, weekday = 0;
+    while (month <= 12 && memcmp(s + 8, months + (month - 1) * 3, 3)) ++month;
+    while (weekday < 7 && memcmp(s, weekdays + weekday * 3, 3)) ++weekday;
+    int year = digits(s + 12, 4), day = digits(s + 5, 2);
+    int hour = digits(s + 17, 2), minute = digits(s + 20, 2), second = digits(s + 23, 2);
+    if (year < 2024 || year > 2099 || month > 12 || weekday == 7 || day < 1 ||
+        day > month_days(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
+        second < 0 || second > 59) return 0;
+    int32_t date = civil_day(year, month, day);
+    if ((date + 4) % 7 != weekday) return 0;
+    return (int64_t)date * 86400 + hour * 3600 + minute * 60 + second;
+}
 bool weather_clock_valid(int64_t now) { return now >= 1704067200 && now <= 4102444799LL; }
 int32_t weather_local_day(int64_t now) { return (int32_t)((now + 28800) / 86400); }
 void weather_date_text(int32_t day, char *out, size_t cap) {

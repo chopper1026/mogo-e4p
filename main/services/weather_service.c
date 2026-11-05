@@ -22,6 +22,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #ifndef CONFIG_PICO_COMPONENT_API_ORIGIN
@@ -48,11 +49,19 @@ typedef struct {
     weather_forecast_t forecast;
 } weather_cache_t;
 typedef struct {
+    int64_t utc, at_us;
+} weather_clock_t;
+typedef struct {
+    weather_clock_t clock;
+    bool seen;
+} weather_date_header_t;
+typedef struct {
     app_weather_state_t state;
     char notice[97];
     bool has_city, has_forecast, clear_cache;
     weather_location_t city;
     weather_forecast_t forecast;
+    weather_clock_t clock;
     unsigned total;
     weather_search_batch_t *batches;
 } weather_result_t;
@@ -73,6 +82,14 @@ static SemaphoreHandle_t s_done;
 static int64_t s_next_attempt, s_deadline;
 static int32_t s_display_day;
 static bool s_display_valid;
+static weather_clock_t s_clock, s_requested_clock;
+
+static int64_t clock_now(const weather_clock_t *clock) {
+    if (!clock->utc) return time(NULL);
+    int64_t elapsed = esp_timer_get_time() - clock->at_us;
+    return elapsed >= 0 ? clock->utc + elapsed / 1000000 : 0;
+}
+int64_t app_weather_now(void) { return clock_now(&s_clock); }
 
 static bool write_blob(const char *key, const void *value, size_t size) {
     if (!epd_flash_begin()) return false;
@@ -95,6 +112,7 @@ static bool save_preferences(bool enabled, bool auto_refresh, bool has_city, con
 void app_weather_init(void) {
     if (s_loaded) return;
     s_loaded = true;
+    s_clock = (weather_clock_t){0};
     s_view.state = APP_WEATHER_IDLE;
     s_view.auto_refresh = true;
     nvs_handle_t h;
@@ -141,7 +159,18 @@ static int http_wait_ms(int64_t until) {
     int64_t remaining = (until - esp_timer_get_time() + 999) / 1000;
     return remaining > WEATHER_IO_POLL_MS ? WEATHER_IO_POLL_MS : (int)remaining;
 }
-static bool http_get(const char *path, char *body) {
+static esp_err_t weather_date_header(esp_http_client_event_t *event) {
+    if (event->event_id != HTTP_EVENT_ON_HEADER || !event->user_data || !event->header_key ||
+        strcasecmp(event->header_key, "Date")) return ESP_OK;
+    weather_date_header_t *header = event->user_data;
+    header->clock.utc = header->seen ? 0 : weather_http_date(event->header_value);
+    header->clock.at_us = esp_timer_get_time();
+    header->seen = true;
+    return ESP_OK;
+}
+static bool http_get(const char *path, char *body, weather_clock_t *response_clock) {
+    weather_date_header_t header = {0};
+    if (response_clock) *response_clock = (weather_clock_t){0};
     char url[1024];
     const char *origin = CONFIG_PICO_COMPONENT_API_ORIGIN;
     size_t origin_length = strlen(origin);
@@ -153,6 +182,7 @@ static bool http_get(const char *path, char *body) {
     esp_http_client_config_t config = {
         .url = url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 6000, .is_async = true,
         .disable_auto_redirect = true, .buffer_size = 1024, .buffer_size_tx = 1024,
+        .event_handler = response_clock ? weather_date_header : NULL, .user_data = &header,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return false;
@@ -202,7 +232,9 @@ static bool http_get(const char *path, char *body) {
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    return ok && !cancelled();
+    ok = ok && !cancelled();
+    if (ok && response_clock) *response_clock = header.clock;
+    return ok;
 }
 static void search_free_batches(weather_search_batch_t **list) {
     while (*list) {
@@ -261,7 +293,7 @@ static void weather_worker(void *arg) {
         if (status.state == WIFI_TRANSFER_ERROR || status.state == WIFI_TRANSFER_STOPPED) goto done;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    if (cancelled() || !http_get("/components", body)) goto done;
+    if (cancelled() || !http_get("/components", body, NULL)) goto done;
     bool enabled, available;
     if (!weather_catalog_parse(body, strlen(body), &enabled, &available)) goto done;
     if (!enabled) {
@@ -279,7 +311,7 @@ static void weather_worker(void *arg) {
             memset(batch, 0, sizeof(*batch));
             unsigned total;
             snprintf(path, sizeof(path), "/components/weather/locations?q=%s&page=%u&pageSize=%u", escaped, page, WEATHER_SEARCH_BATCH_SIZE);
-            bool ok = http_get(path, body) && weather_locations_parse(body, strlen(body), batch->locations,
+            bool ok = http_get(path, body, NULL) && weather_locations_parse(body, strlen(body), batch->locations,
                 WEATHER_SEARCH_BATCH_SIZE, &batch->count, &total, &batch->page) && batch->page == page &&
                 (!s_requested_total_known || total == s_requested_total) && (!i || total == s_result.total);
             if (!ok) { heap_caps_free(batch); goto done; }
@@ -290,7 +322,7 @@ static void weather_worker(void *arg) {
     }
     weather_location_t city = s_requested_city;
     if (s_request == APP_WEATHER_LOCATE || !s_requested_has_city) {
-        if (!http_get("/components/weather/auto-location", body)) {
+        if (!http_get("/components/weather/auto-location", body, NULL)) {
             if (s_result.state == APP_WEATHER_FAILED)
                 result_notice(APP_WEATHER_CITY_REQUIRED, "未能确定城市，请手动选择");
             goto done;
@@ -302,7 +334,13 @@ static void weather_worker(void *arg) {
     }
     char path[256];
     snprintf(path, sizeof(path), "/components/weather/forecast?locationId=%s", city.id);
-    if (!http_get(path, body) || !weather_forecast_parse(body, strlen(body), time(NULL), &city, &s_result.forecast)) goto done;
+    weather_clock_t clock = s_requested_clock, response_clock;
+    if (!http_get(path, body, &response_clock)) goto done;
+    // 仅接受同一可信HTTPS预报的时间；旧响应不能倒退参照或延长原始有效期。
+    // Trust time only from the same HTTPS forecast; older responses cannot roll back time or extend expiry.
+    if (response_clock.utc && (!clock.utc || clock_now(&response_clock) > clock_now(&clock))) clock = response_clock;
+    if (!weather_forecast_parse(body, strlen(body), clock_now(&clock), &city, &s_result.forecast)) goto done;
+    s_result.clock = clock;
     s_result.has_forecast = true; result_notice(APP_WEATHER_READY, "");
 done:
     if (owned) wifi_transfer_stop();
@@ -334,6 +372,7 @@ static bool collect_result(void) {
     }
     if (s_result.clear_cache) { s_view.has_forecast = false; (void)write_blob("cache", NULL, 0); }
     else if (s_result.has_forecast) {
+        s_clock = s_result.clock;
         s_view.forecast = s_result.forecast; s_view.has_forecast = true;
         weather_cache_t cache = {.schema=2,.forecast=s_view.forecast};
         (void)write_blob("cache", &cache, sizeof(cache));
@@ -420,6 +459,7 @@ static bool request_page(app_weather_request_t request, const char *query, unsig
     if (!s_done) s_done = xSemaphoreCreateBinary();
     if (!s_done) return false;
     s_request = request; s_requested_city = s_view.city; s_requested_has_city = s_view.has_city;
+    s_requested_clock = s_clock;
     if(request==APP_WEATHER_LOCATE||(request==APP_WEATHER_FETCH&&!s_view.has_city))s_auto_attempted=true;
     memset(&s_result, 0, sizeof(s_result));
     s_requested_total_known = s_search_total_known; s_requested_total = s_search_total;
@@ -456,7 +496,7 @@ bool app_weather_search(const char *query, unsigned page) {
 }
 bool app_weather_poll(bool automatic) {
     app_weather_init(); unsigned revision = s_view.revision;
-    (void)collect_result(); int64_t now = time(NULL);
+    (void)collect_result(); int64_t now = app_weather_now();
     bool valid = s_view.has_forecast && weather_forecast_valid(&s_view.forecast, now);
     int32_t day = weather_local_day(now);
     if (day != s_display_day || valid != s_display_valid) {

@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.4 · 本地测试 / Local testing · 2026-11-05
+
+- 修复设备时间偏差导致正常天气被拒收：预报校验、跨日显示和自动刷新使用可信 HTTPS 响应的服务器时间及单调计时，保留原始有效期和异常检查，不修改系统时钟或 RTC；宿主回归通过，未刷机验收。/ Fix normal weather rejection caused by device-clock skew using trusted HTTPS server time plus monotonic elapsed time for validation, day selection and refresh, preserving original expiry and anomaly checks without setting the system clock or RTC; host regressions passed, with device acceptance pending.
+
 ## v1.0.4 · 本地测试 / Local testing · 2026-11-04
 
 - 固件与传书网页品牌统一为 `mogo`，默认设备名为 `mogo`、热点名为 `mogo-XXXX`、口令为 `mogo1234`；启动及恢复配置时迁移历史默认设备名，保留自定义名称与旧备份兼容。/ Rebrand the firmware and transfer page as `mogo`, with device default `mogo`, hotspot `mogo-XXXX` and password `mogo1234`; migrate historical default names on boot/restore while preserving custom names and backup compatibility.

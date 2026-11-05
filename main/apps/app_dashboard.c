@@ -435,7 +435,7 @@ static void render_widget(uint8_t *fb,unsigned slot) {
     ui_fill_rect_fast(region,UI_GRAY_WHITE,fb);
     switch(app_home_component_at(slot)) {
     case APP_HOME_WIDGET_READING: render_reading(fb,slot);break;
-    case APP_HOME_WIDGET_WEATHER: ui_weather_draw(fb,region,s_weather_tomorrow[slot],app_weather_view(),time(NULL));break;
+    case APP_HOME_WIDGET_WEATHER: ui_weather_draw(fb,region,s_weather_tomorrow[slot],app_weather_view(),app_weather_now());break;
     case APP_HOME_WIDGET_JOURNAL: ui_reading_journal_widget(fb,region,app_reading_journal_model(),app_reading_journal_today(),app_reading_journal_notice());break;
     default: ui_draw_icon(fb,632,region.y+38,27,UI_ICON_SLIDERS_HORIZONTAL,0);break;
     }

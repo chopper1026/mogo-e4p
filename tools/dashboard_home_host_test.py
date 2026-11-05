@@ -170,12 +170,14 @@ unit += r'''
 static app_weather_view_t weather_view;
 static const app_weather_view_t *app_weather_view_stub(void){return &weather_view;}
 #define app_weather_view app_weather_view_stub
+static int64_t app_weather_now_stub(void){return 1793579400;}
+#define app_weather_now app_weather_now_stub
 static bool poll_changed;
 static bool app_weather_poll_stub(bool automatic){assert(automatic==app_home_has_widget(APP_HOME_WIDGET_WEATHER));return poll_changed;}
 #define app_weather_poll app_weather_poll_stub
 static void app_components_open(app_ctx_t *ctx,bool city){(void)ctx;library_city=city;++library_calls;}
 static void ui_weather_draw(uint8_t *f,EpdRect region,bool tomorrow,const app_weather_view_t *v,int64_t now){
-    (void)v;(void)now;assert(region.x==0&&region.width==684&&region.height==472);
+    (void)v;assert(now==1793579400);assert(region.x==0&&region.width==684&&region.height==472);
     assert(region.y==168||region.y==640);++widget_paints[region.y==640];
     ui_fill_rect_fast(region,tomorrow?0x66:0x55,f);
 }

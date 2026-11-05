@@ -52,6 +52,10 @@ Product builds use the system trust bundle without local development CAs. Local 
 
 Schema 1 returns both days with UTC events/deadlines. Requests use only `locationId`; responses validate that ID, canonical coordinates, timezone, dates, ranges and deadlines. Explicit search requests validated 20-item batches while the UI keeps eight rows per page. Query-scoped RAM batches serve cached pages without a worker or WiFi reconnect; up to 20 matches arrive together. Larger searches fetch only missing batches when needed, retain them for return navigation and never download the entire dictionary before showing results. At most 4000 results are supported with allocation on demand. Query edits, explicit resubmission, city selection and exit release batches; stale workers cannot restore them. Queries require 2-64 characters within 128 bytes. All users share the platform's default six-hour cache per location ID, never per personal coordinate.
 
+天气校验、今日/明日选择及自动刷新共用 `app_weather_now()`：完整且校验通过的可信 HTTPS 预报响应提供标准 GMT `Date` 时间头，以收到该头时的单调计时推进天气专用 UTC，不写系统时钟或 RTC。正文下载及 UI 交接等待均计入经过时间，后续旧响应不能倒退已建立的参照。目录、搜索、定位、失败或取消的响应不能建立参照；缺失、格式错误或重复的 `Date` 不可信，改用已有天气参照，尚无参照时仍按设备时钟严格校验。保留超过参照时间120秒的未来预报拒收、原始期限及最长六小时限制，不用 `fetchedAt` 冒充当前时间。
+
+Validation, day selection and automatic refresh share `app_weather_now()`. A complete, validated forecast from the trusted HTTPS origin supplies a standard GMT `Date` header, advanced using monotonic time since header receipt without setting the system clock or RTC. Body download and UI handoff delays count, and later old responses cannot move an established reference backward. Catalog, search, location, failed and cancelled responses cannot establish it. Missing, malformed or duplicate `Date` falls back to the existing weather reference, or strict device-clock validation if none exists. Forecasts over 120 seconds into the reference's future remain rejected, with original deadlines and the six-hour limit intact; `fetchedAt` never substitutes for current time.
+
 地点 ID 为 1 至 16 位大写字母或数字的字符串，不限定九位数字；官方 `F4F1`、`CA3` 等地点可正常选择、请求和保存。平台仍须核对 ID 存在于官方字典中。
 
 Location IDs are strings of 1-16 uppercase ASCII letters or digits, not necessarily nine digits. Official IDs such as `F4F1` and `CA3` can be selected, requested and persisted. The platform still requires dictionary membership.
@@ -73,6 +77,10 @@ Automatic clock/OTA work yields while weather is busy. Weather first cancels aut
 自动失败冷却至少5分钟。蓝牙翻页器已连接、低电量未充电、日期无效或内存不足时不联网。用户刷新仍走公共缓存 GET，不调用管理端强刷接口。
 
 Automatic failures cool down at least five minutes. A connected Bluetooth turner, low unplugged battery, invalid clock and allocation failure prevent networking. User refresh uses the public cached GET, never an admin force-refresh endpoint.
+
+天气参照只在本次开机的 RAM 中保留，重启后先以设备时间校验持久缓存，取得下一次正常预报才重新建立。系统日期无效时仍需先校时；HTTPS 证书验证依赖系统时钟，本机制不替代 SNTP 或修复无效系统日期。
+
+The weather reference stays in RAM for the current boot. After reboot, persistent cache is checked against device time until a new valid forecast establishes a reference. An invalid system date still requires clock synchronization: HTTPS certificate validation depends on system time, so this mechanism does not replace SNTP or repair invalid system dates.
 
 ## 缓存与绘制 / Cache And Painting
 
@@ -107,6 +115,8 @@ Content differences and fixed navigation share y=1112 across all pages, so ordin
 `python3 tools/weather_host_test.py` 或 `python3 tools/run_reader_baseline.py weather` 覆盖真实解析/缓存、取消服务与NVS交接、九种背景及中性画面/双旋转/区域边界/内存降级，并逐像素验证四个霾代码与雾景共图。固定样本不是定位、供应商接入或实屏证据。产品构建仍须 IDF6.1/S31 `--preview`；部署、供应商实测和刷机分别需要授权。
 
 The weather host suite covers real parsing/cache, cancellable service/NVS handoff, nine backgrounds plus neutral, two rotations, bounds and allocation fallback, and pixel-identical rendering for all four Haze codes versus Fog. Fixtures are not location/provider/optical evidence. Product builds require IDF6.1/S31 `--preview`; deployment, provider tests and flashing require separate authorization.
+
+时间回归还覆盖 GMT 时间头与两分钟边界、设备时钟偏快/偏慢、系统时间跳变、正文及交接延迟、旧参照不倒退、原始期限到期、跨日缺明日及重启回退；首页与天气设置页均验证传入天气专用时间。/ Clock regressions cover GMT headers, the two-minute boundary, skew in both directions, system-clock jumps, body/handoff delays, nondecreasing references, original expiry, missing tomorrow at midnight and reboot fallback; Home and weather settings both verify the weather-specific draw time.
 
 `python3 tools/weather_raster_host_test.py --output-dir build/weather-preview` 在回归通过后导出十类天气（雾霾共图）及中性画面的今日/明日共22张原生组件图、五张对照图和PNG压缩包，使用当前固件绘制与内置字体，不访问网络。
 

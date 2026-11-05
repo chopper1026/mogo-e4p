@@ -29,10 +29,18 @@ static int64_t body_progress_us;
 static int io_timeout_ms;
 static char *alphanumeric_forecast;
 static bool stall_http_connect,cancel_http_connect;
+static const char *forecast_date,*catalog_date,*forecast_override;
+static bool duplicate_date,cancel_forecast_read,incomplete_forecast;
+static int64_t forecast_progress_us;
 static unsigned char prefs_bytes[1024],cache_bytes[2048];
 static size_t prefs_size,cache_size;
 static pmu_snapshot_t battery={80};
-struct FakeHttp {const char *body;size_t size,at;int status;char payload[WEATHER_BODY_LIMIT+1];};
+struct FakeHttp {
+    const char *body,*date;size_t size,at;int status;char payload[WEATHER_BODY_LIMIT+1];
+    bool forecast,headers_sent;
+    int (*event_handler)(esp_http_client_event_t *);
+    void *user_data;
+};
 static void run_worker(void) {assert(pending);void(*f)(void*)=pending;pending=NULL;worker=true;f(NULL);worker=false;}
 void *heap_caps_malloc(size_t n,int c){
     (void)c;if(fail_alloc||fail_alloc_after==0)return NULL;if(fail_alloc_after>0)--fail_alloc_after;
@@ -90,12 +98,15 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
     assert(worker&&c->disable_auto_redirect&&c->crt_bundle_attach&&c->timeout_ms==6000&&c->is_async);
     assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
     struct FakeHttp *h=calloc(1,sizeof(*h));h->status=200;++requests;
+    h->event_handler=c->event_handler;h->user_data=c->user_data;
     if(strstr(c->url,"/auto-location")) {
         ++auto_calls;h->body=WEATHER_TEST_CITY;
         if(scenario==1){h->body="{\"code\":\"CITY_SELECTION_REQUIRED\"}";h->status=503;}
     } else if(strstr(c->url,"/forecast?")) {
         assert(strstr(c->url,scenario==6?"locationId=F4F1":"locationId=101210101")&&!strstr(c->url,"lat="));
         ++forecast_calls;h->body=scenario==6?alphanumeric_forecast:WEATHER_TEST_FORECAST;
+        h->forecast=true;h->date=forecast_date;
+        if(forecast_override)h->body=forecast_override;
         if(scenario==3){h->body="{\"code\":\"WEATHER_UPSTREAM_UNAVAILABLE\"}";h->status=503;}
         if(scenario==4){h->body="{}";}
         if(scenario==5){h->body="{\"code\":\"BUDGET_EXHAUSTED\"}";h->status=429;}
@@ -112,7 +123,7 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
         strcpy(h->payload,json);free(json);cJSON_Delete(root);h->body=h->payload;
         if((int)page==fail_search_page){h->body="{}";h->status=503;}
     } else {
-        h->body=WEATHER_TEST_CATALOG;
+        h->body=WEATHER_TEST_CATALOG;h->date=catalog_date;
         if(scenario==2)h->body="{\"schemaVersion\":1,\"components\":[{\"code\":\"weather\",\"schemaVersion\":1,\"enabled\":false,\"available\":false}]}";
     }
     h->size=strlen(h->body);return h;
@@ -133,18 +144,27 @@ int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h){
     if(cancel_headers){atomic_store(&s_cancel,true);return -ESP_ERR_HTTP_EAGAIN;}
     if(fail_headers)return ESP_FAIL;
     if(header_eagain||stall_headers){if(header_eagain)--header_eagain;monotonic+=(int64_t)io_timeout_ms*1000;return -ESP_ERR_HTTP_EAGAIN;}
+    if(!h->headers_sent&&h->date&&h->event_handler) {
+        esp_http_client_event_t event={.event_id=HTTP_EVENT_ON_HEADER,.user_data=h->user_data,
+            .header_key="dAtE",.header_value=(char*)h->date};
+        assert(h->event_handler(&event)==ESP_OK);
+        if(duplicate_date)assert(h->event_handler(&event)==ESP_OK);
+    }
+    h->headers_sent=true;
     return (int64_t)h->size;
 }
 int esp_http_client_get_status_code(esp_http_client_handle_t h){return h->status;}
 int esp_http_client_read(esp_http_client_handle_t h,char *out,int size){
     ++body_reads;assert(size>0&&size<=512);
+    if(h->forecast&&cancel_forecast_read){atomic_store(&s_cancel,true);return -1;}
+    if(h->forecast&&h->at&&incomplete_forecast)return 0;
     if(cancel_read){atomic_store(&s_cancel,true);cancel_read=false;return -1;}
     if(clear_during_read){app_weather_clear_search();clear_during_read=false;}
     if(body_eagain||stall_body){if(body_eagain)--body_eagain;monotonic+=(int64_t)io_timeout_ms*1000;return -ESP_ERR_HTTP_EAGAIN;}
     if(h->at&&fail_body)return ESP_FAIL;
     if(h->at&&incomplete_body)return 0;
     size_t n=h->size-h->at;if(n>(size_t)size)n=(size_t)size;if(n>97)n=97;
-    if(n)monotonic+=body_progress_us;
+    if(n)monotonic+=body_progress_us+(h->forecast?forecast_progress_us:0);
     memcpy(out,h->body+h->at,n);h->at+=n;return (int)n;
 }
 bool esp_http_client_is_complete_data_received(esp_http_client_handle_t h){return h->at==h->size;}
@@ -153,6 +173,110 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t h){free(h);return ESP
 static void request(app_weather_request_t type,const char *query) {
     assert(app_weather_request(type,query)&&app_weather_busy());
     run_worker();assert(!app_weather_busy());assert(app_weather_poll(false));assert(!pending&&!done);
+}
+static void clock_setup(time_t device_time) {
+    assert(!pending&&!s_pending&&!done&&!app_weather_busy());
+    app_weather_clear_search();assert(!heap_allocs);
+    wall_time=device_time;monotonic=0;prefs_size=cache_size=0;
+    forecast_date="Mon, 02 Nov 2026 00:30:00 GMT";
+    catalog_date=forecast_override=NULL;duplicate_date=cancel_forecast_read=incomplete_forecast=false;
+    forecast_progress_us=0;scenario=0;
+    s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
+    weather_location_t city;
+    assert(weather_location_parse(WEATHER_TEST_CITY,strlen(WEATHER_TEST_CITY),&city)&&app_weather_select(&city));
+}
+static void weather_clocks(void) {
+    const int64_t server=weather_timestamp("2026-11-02T00:30:00Z");
+    const int64_t fetched=weather_timestamp("2026-11-02T00:20:00Z");
+    const int64_t skewed[]={fetched-120,fetched-121,fetched-3600,fetched+3600,fetched+86400};
+    for(unsigned i=0;i<sizeof(skewed)/sizeof(*skewed);++i) {
+        clock_setup(skewed[i]);request(APP_WEATHER_FETCH,NULL);
+        assert(s_view.state==APP_WEATHER_READY&&s_view.has_forecast&&s_display_valid);
+        assert(wall_time==skewed[i]&&app_weather_now()==server);
+        weather_cache_t cache;memcpy(&cache,cache_bytes,sizeof(cache));
+        assert(cache.schema==2&&cache.forecast.fetched==fetched&&cache.forecast.serve==fetched+21600);
+    }
+    for(unsigned i=0;i<4;++i) {
+        clock_setup(fetched-121);
+        if(i==0)forecast_date=NULL;
+        if(i==1)forecast_date="invalid";
+        if(i==2)duplicate_date=true;
+        if(i==3){forecast_date=NULL;catalog_date="Mon, 02 Nov 2026 00:30:00 GMT";}
+        request(APP_WEATHER_FETCH,NULL);
+        assert(s_view.state==APP_WEATHER_FAILED&&!s_view.has_forecast&&app_weather_now()==wall_time);
+    }
+    clock_setup(server);forecast_date=NULL;request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_READY&&s_view.has_forecast&&app_weather_now()==wall_time);
+    const char *invalid_dates[]={"Mon, 02 Nov 2026 00:17:59 GMT","Mon, 02 Nov 2026 06:20:00 GMT"};
+    for(unsigned i=0;i<2;++i) {
+        clock_setup(server);forecast_date=invalid_dates[i];request(APP_WEATHER_FETCH,NULL);
+        assert(s_view.state==APP_WEATHER_FAILED&&!s_view.has_forecast&&app_weather_now()==wall_time);
+    }
+    clock_setup(fetched-121);forecast_date="Mon, 02 Nov 2026 00:18:00 GMT";request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_READY&&s_view.has_forecast);
+    for(unsigned i=0;i<6;++i) {
+        clock_setup(fetched-3600);
+        if(i==0)scenario=3;
+        if(i==1)scenario=4;
+        if(i==2)incomplete_forecast=true;
+        if(i==3)cancel_forecast_read=true;
+        if(i==4)fail_flash=true;
+        if(i==5) {
+            assert(app_weather_request(APP_WEATHER_FETCH,NULL));run_worker();app_weather_cancel_join();
+        } else request(i==4?APP_WEATHER_LOCATE:APP_WEATHER_FETCH,NULL);
+        fail_flash=false;
+        assert(!s_view.has_forecast&&!cache_size&&app_weather_now()==wall_time);
+    }
+    clock_setup(fetched-3600);forecast_progress_us=250000;
+    assert(app_weather_request(APP_WEATHER_FETCH,NULL));run_worker();
+    assert(monotonic>0&&app_weather_now()==wall_time&&!s_view.has_forecast);
+    forecast_progress_us=0;monotonic+=7000000;wall_time+=86400;
+    assert(app_weather_poll(false)&&s_display_valid&&app_weather_now()==server+monotonic/1000000);
+    int64_t weather_now=app_weather_now(),serve=s_view.forecast.serve;
+    wall_time=fetched-86400;assert(app_weather_now()==weather_now);
+    forecast_date="Mon, 02 Nov 2026 00:25:00 GMT";request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_READY&&app_weather_now()==weather_now);
+    forecast_date=NULL;request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_READY&&app_weather_now()==weather_now);
+    scenario=3;request(APP_WEATHER_FETCH,NULL);scenario=0;
+    assert(s_view.has_forecast&&app_weather_now()==weather_now&&s_display_valid);
+    monotonic+=600000000;forecast_date="Mon, 02 Nov 2026 00:40:00 GMT";
+    request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_READY&&s_view.forecast.fetched==fetched&&s_view.forecast.serve==serve);
+    monotonic+=(serve-app_weather_now()-1)*1000000;
+    wall_time=server+86400;app_weather_poll(false);
+    assert(s_display_valid&&weather_day_for(&s_view.forecast,app_weather_now(),false));
+    wall_time=fetched-86400;monotonic+=1000000;
+    assert(app_weather_poll(true)&&!s_display_valid&&pending);
+    assert(!weather_day_for(&s_view.forecast,app_weather_now(),false));
+    scenario=3;run_worker();app_weather_poll(false);
+    assert(!s_display_valid&&app_weather_now()>=serve&&s_view.forecast.serve==serve);
+
+    clock_setup(server);
+    cJSON *root=cJSON_Parse(WEATHER_TEST_FORECAST);
+    cJSON_ReplaceItemInObject(root,"fetchedAt",cJSON_CreateString("2026-11-02T15:30:00Z"));
+    cJSON_ReplaceItemInObject(root,"freshUntil",cJSON_CreateString("2026-11-02T21:30:00Z"));
+    cJSON_ReplaceItemInObject(root,"serveUntil",cJSON_CreateString("2026-11-02T21:30:00Z"));
+    char *midnight=cJSON_PrintUnformatted(root);cJSON_Delete(root);assert(midnight);
+    forecast_override=midnight;forecast_date="Mon, 02 Nov 2026 15:59:59 GMT";
+    request(APP_WEATHER_FETCH,NULL);assert(s_view.has_forecast&&s_display_valid);
+    assert(weather_day_for(&s_view.forecast,app_weather_now(),false)->humidity==68);
+    monotonic+=1000000;assert(app_weather_poll(false));
+    assert(weather_day_for(&s_view.forecast,app_weather_now(),false)->humidity==82);
+    assert(!weather_day_for(&s_view.forecast,app_weather_now(),true));
+    monotonic+=WEATHER_RETRY_US;assert(app_weather_poll(true)&&pending);app_weather_cancel_join();
+    free(midnight);forecast_override=NULL;
+    unsigned writes=ns_writes;weather_cache_t cache;
+    memcpy(&cache,cache_bytes,sizeof(cache));wall_time=cache.forecast.fetched-121;monotonic=0;
+    s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
+    assert(s_view.has_city&&!s_view.has_forecast&&app_weather_now()==wall_time&&ns_writes==writes);
+    weather_cache_t unchanged;memcpy(&unchanged,cache_bytes,sizeof(unchanged));
+    assert(!memcmp(&cache,&unchanged,sizeof(cache)));
+    wall_time=cache.forecast.fetched+60;
+    s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
+    assert(s_view.has_forecast&&app_weather_now()==wall_time&&ns_writes==writes);
+    assert(starts==stops&&!heap_allocs&&!pending&&!done);
+    puts("PASS: weather HTTPS Date reference, clock skew, strict fallback, original expiry, monotonic delays, midnight and reboot isolation");
 }
 int main(void) {
     wall_time=weather_timestamp("2026-11-02T00:30:00Z");
@@ -333,5 +457,6 @@ int main(void) {
     wall_time=0;assert(!app_weather_request(APP_WEATHER_FETCH,NULL));
     assert(!weather_day_for(&s_view.forecast,wall_time,false));
     assert(starts==stops&&time_cancels>0&&!heap_allocs);
+    weather_clocks();
     puts("PASS: weather proxy session, six-hour boundary, shorter expiry, midnight, toggle persistence, city-ID fetch, paginated search, no device relabeling, owned cleanup, cancellation, NVS main-only and resource guards");
 }

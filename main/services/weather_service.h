@@ -23,6 +23,8 @@ typedef struct {
 /// 以下生命周期和选择接口仅由UI任务调用。/ Lifecycle and selection APIs below are UI-task only.
 void app_weather_init(void);
 const app_weather_view_t *app_weather_view(void);
+/// 天气专用UTC秒；使用服务器参照，不修改系统时钟。/ Weather-only UTC seconds using a server reference, without changing the system clock.
+int64_t app_weather_now(void);
 bool app_weather_set_enabled(bool enabled);
 /// 仅控制自动请求；手动更新和选城不受影响。/ Gate automatic requests only, preserving manual updates and city selection.
 bool app_weather_set_auto_refresh(bool enabled);

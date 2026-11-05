@@ -50,6 +50,8 @@ const weather_day_t *weather_day_for(const weather_forecast_t *forecast, int64_t
 bool weather_clock_valid(int64_t now);
 int32_t weather_local_day(int64_t now);
 int64_t weather_timestamp(const char *text);
+/// 严格解析HTTP的GMT日期，失败返回零。/ Parse an HTTP GMT date strictly; return zero on failure.
+int64_t weather_http_date(const char *text);
 void weather_date_text(int32_t day, char *text, size_t capacity);
 void weather_time_text(int64_t utc, char *text, size_t capacity);
 weather_scene_t weather_scene(int code);

@@ -21,7 +21,40 @@ static void invalid_field(const char *field,const char *value) {
     cJSON_ReplaceItemInObjectCaseSensitive(root,field,cJSON_CreateString(value));
     assert(!parse(root));cJSON_Delete(root);
 }
+static void http_dates(void) {
+    const char *dates[]={
+        "Thu, 01 Jan 2026 00:30:00 GMT", "Sun, 01 Feb 2026 00:30:00 GMT",
+        "Sun, 01 Mar 2026 00:30:00 GMT", "Wed, 01 Apr 2026 00:30:00 GMT",
+        "Fri, 01 May 2026 00:30:00 GMT", "Mon, 01 Jun 2026 00:30:00 GMT",
+        "Wed, 01 Jul 2026 00:30:00 GMT", "Sat, 01 Aug 2026 00:30:00 GMT",
+        "Tue, 01 Sep 2026 00:30:00 GMT", "Thu, 01 Oct 2026 00:30:00 GMT",
+        "Sun, 01 Nov 2026 00:30:00 GMT", "Tue, 01 Dec 2026 00:30:00 GMT"
+    };
+    for(unsigned i=0;i<12;++i) {
+        char iso[21];snprintf(iso,sizeof(iso),"2026-%02u-01T00:30:00Z",i+1);
+        assert(weather_http_date(dates[i])==weather_timestamp(iso));
+    }
+    assert(weather_http_date("Tue, 29 Feb 2028 23:59:59 GMT")==weather_timestamp("2028-02-29T23:59:59Z"));
+    assert(weather_http_date("Mon, 01 Jan 2024 00:00:00 GMT")==1704067200);
+    assert(weather_http_date("Thu, 31 Dec 2099 23:59:59 GMT")==4102444799LL);
+    const char *bad[]={NULL,"","Mon, 02 Nov 2026 00:30:00 GMT trailing",
+        "Mon, 02 Nov 2026 00:30:00 GMT\r\n", "Mon, 02 Nov 2026 00:30:00 UTC",
+        "Mon, 02 Nov 2026 00:30:00 +0800", "Tue, 02 Nov 2026 00:30:00 GMT",
+        "mon, 02 Nov 2026 00:30:00 GMT", "Mon, 02 Foo 2026 00:30:00 GMT",
+        "Mon, 02 Nov 2026 24:30:00 GMT", "Mon, 02 Nov 2026 00:60:00 GMT",
+        "Mon, 02 Nov 2026 00:30:60 GMT", "Mon, 00 Nov 2026 00:30:00 GMT",
+        "Mon, 31 Nov 2026 00:30:00 GMT", "Sun, 29 Feb 2026 00:30:00 GMT",
+        "Mon, 02 Nov 2026 00:30:00 gmt", "Mon, 2 Nov 2026 00:30:00 GMT",
+        "Monday, 02-Nov-26 00:30:00 GMT", "Mon Nov  2 00:30:00 2026",
+        "2026-11-02T00:30:00Z", "Mon; 02 Nov 2026 00:30:00 GMT",
+        "Mon, 02 Nov 20x6 00:30:00 GMT", "Mon, 02 Nov 2026 0x:30:00 GMT",
+        "Sun, 31 Dec 2023 23:59:59 GMT", "Fri, 01 Jan 2100 00:00:00 GMT"};
+    for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i)assert(!weather_http_date(bad[i]));
+    char truncated[30];const char *valid="Mon, 02 Nov 2026 00:30:00 GMT";
+    for(size_t i=0;i<29;++i){memcpy(truncated,valid,i);truncated[i]=0;assert(!weather_http_date(truncated));}
+}
 int main(void) {
+    http_dates();
     now=weather_timestamp("2026-11-02T00:30:00Z");assert(now);
     assert(weather_location_parse(WEATHER_TEST_CITY,strlen(WEATHER_TEST_CITY),&city));
     weather_forecast_t f={0};
@@ -33,6 +66,7 @@ int main(void) {
     weather_time_text(f.days[0].sunset,text,sizeof(text));assert(!strcmp(text,"17:12"));
     weather_time_text(0,text,sizeof(text));assert(!strcmp(text,"--:--"));
     assert(weather_forecast_valid(&f,f.serve-1)&&!weather_forecast_valid(&f,f.serve));
+    assert(weather_forecast_valid(&f,f.fetched-120)&&!weather_forecast_valid(&f,f.fetched-121));
     assert(!weather_day_for(&f,0,false)&&!weather_forecast_valid(&f,now-3600));
     assert(!weather_forecast_parse("{} trailing",11,now,&city,&f));
     invalid_field("source","Other");invalid_field("fetchedAt","2026-11-02T08:20:00Z");

@@ -67,6 +67,7 @@ bool app_home_has_widget(app_home_widget_t widget){return slots[0]==widget||slot
 static int epd_rotated_display_width(void){return 684;}
 static int epd_rotated_display_height(void){return 1216;}
 const app_weather_view_t *app_weather_view(void){return &view;}
+int64_t app_weather_now(void){return 1793579400;}
 bool app_weather_request(app_weather_request_t type,const char *query){
     ++requests;if(type==APP_WEATHER_LOCATE){assert(!query);++locates;}
     if(type==APP_WEATHER_SEARCH){assert(query==s_query);++searches;}return request_ok;
@@ -129,7 +130,7 @@ static int ui_text_fixed_width_px(int px,const char *value){return px*(int)strle
 static bool ui_rect_hit(EpdRect r,uint16_t x,uint16_t y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static void ui_text_input_draw(uint8_t *fb,int *edit,EpdRect rect,int px,bool masked,void *suffix){(void)fb;(void)edit;(void)rect;(void)px;(void)masked;(void)suffix;++fields;}
 static void ui_keyboard_draw(uint8_t *fb,int top){(void)fb;assert(top==560);++draws;}
-void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_view_t *v,int64_t now){(void)fb;assert(region.x==0&&region.y==236&&region.width==684&&region.height==472);(void)tomorrow;(void)v;(void)now;}
+void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_view_t *v,int64_t now){(void)fb;assert(region.x==0&&region.y==236&&region.width==684&&region.height==472);(void)tomorrow;(void)v;assert(now==1793579400);}
 '''
 unit += re.search(r'static const app_home_widget_t s_choices\[\]=\{[^;]+;', PAGE.read_text()).group(0)
 for name, path in (("valid_region", ROOT / "main/ui/ui_weather.c"), ("refresh_button", ROOT / "main/ui/ui_weather.c"),

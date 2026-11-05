@@ -95,7 +95,7 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
     } else if(!s_city) {
         text(fb,36,189,28,"天气",EPD_DRAW_ALIGN_LEFT);
         text(fb,648,189,23,app_home_has_widget(APP_HOME_WIDGET_WEATHER)?"已添加":"未添加",EPD_DRAW_ALIGN_RIGHT);
-        ui_weather_draw(fb,(EpdRect){0,236,684,472},s_tomorrow,v,time(NULL));
+        ui_weather_draw(fb,(EpdRect){0,236,684,472},s_tomorrow,v,app_weather_now());
         ui_draw_separator(fb,790,36,612,0x90);
         text(fb,36,838,28,"自动刷新",EPD_DRAW_ALIGN_LEFT);
         text(fb,528,838,22,"每6小时",EPD_DRAW_ALIGN_RIGHT);
