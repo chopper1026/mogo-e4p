@@ -214,6 +214,8 @@ typedef int esp_err_t;
 static void device_power_batt_log_event(int event) { assert(event == DEVICE_POWER_BATT_LOG_OFF); }
 static bool device_power_batt_log_flush(unsigned ms) { assert(ms == 250); return true; }
 static unsigned edges, fail_edge, delays, elapsed, deep_sleeps;
+static unsigned battery_saves;
+static void batt_save_current(void) { assert(!edges); ++battery_saves; }
 static bool charger_fault;
 static esp_err_t cx_charger_park(void){return charger_fault ? ESP_FAIL : ESP_OK;}
 static bool level;
@@ -234,11 +236,13 @@ shutdown_unit += r'''
 int main(void) {
     assert(device_power_report_sleep() == ESP_ERR_NOT_SUPPORTED && !edges);
     charger_fault=true;assert(device_power_power_off()==ESP_FAIL && !edges && !deep_sleeps);
+    assert(!battery_saves);
     charger_fault=false;
     for (unsigned fault = 1; fault <= 9; ++fault) {
-        edges = delays = elapsed = deep_sleeps = 0; level = false; fail_edge = fault;
+        edges = delays = elapsed = deep_sleeps = battery_saves = 0; level = false; fail_edge = fault;
         assert(device_power_power_off() == ESP_FAIL);
         assert(edges == fault && delays == fault - 1 && !deep_sleeps);
+        assert(battery_saves==1);
     }
     edges = delays = elapsed = deep_sleeps = fail_edge = 0; level = false;
     assert(device_power_power_off() == ESP_OK);

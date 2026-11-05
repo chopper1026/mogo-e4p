@@ -386,13 +386,14 @@ static int64_t s_batt_ic_us;
 static bool batt_log_enabled(void){return logging;}
 static int64_t batt_log_wall(void){return 0;}
 static void batt_log_notify(void){}
+static int32_t s_batt_persisted_permille=-1;
 static void batt_save(int32_t value){(void)value;}
 void batt_log_observe(batt_log_state_t *state,const batt_log_sample_t *sample){
     assert(state==&s_batt_log && sample);++observations;
 }
 '''
     for name in ('bq_read_voltage', 'bq_read_current', 'bq_read_soc',
-                 'batt_curve_soc', 'batt_filter_step', 'batt_full_now',
+                 'batt_compensated_mv', 'batt_curve_soc', 'batt_filter_step', 'batt_full_now',
                  'poll_key', 'poll_battery', 'wake_battery_snapshot_reusable',
                  'device_power_poll', 'device_power_take_key_wakeup'):
         code += function(name, path) + '\n'

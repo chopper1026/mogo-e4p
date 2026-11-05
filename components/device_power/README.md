@@ -19,6 +19,23 @@ The local component is `device_power`, derived from `mindreset/read_pico_pmu`; r
 - 电源交接：`device_power_report_sleep()` 返回不支持，由应用按当前板路径转入关机；`device_power_power_off()` 发送关机脉冲，耗尽重试后进入 ESP 深睡。/ Soft sleep reports not supported so the application escalates along the current board's power-off path; power-off sends the pulse train and falls back to ESP deep sleep after its retry limit.
 - 面板 VCOM：启动读取已有标定值，写入接口仅供出厂流程使用。/ Reads existing calibration at boot; the write API is reserved for factory setup.
 
+## 电量显示 / Battery display
+
+电压补偿采用 BQ27220 的有符号电流：正向充电减压、负向放电加压，内阻按 180 mΩ、补偿封顶 150 mV。CX 状态仍决定充电标志，但不决定补偿方向，避免插拔时两个芯片读数暂时不同步导致反向补偿。日志 `comp` 与实际滤波共用同一换算。
+Compensate voltage using signed BQ27220 current: subtract while charging and add while discharging, using 180 milliohms capped at 150 mV. CX still selects the charging flag but not the compensation sign, avoiding reversed compensation when chip readings temporarily disagree during cable changes. Logged `comp` uses the same conversion as the filter.
+
+普通区间每 60 秒最多变化 1%，充放电切换后重新计时；确认充满仍直接对齐 100%。放电目标不高于 14% 时保留每 10 秒最多下降 1%，空电目标允许清掉不足 1% 的尾数，不让死区长期显示 1%。这是显示平滑，不是延长实际续航。
+Normal levels move at most 1% every 60 seconds, rearming after charging transitions; confirmed full still aligns directly to 100%. Discharge targets at or below 14% retain 1% steps every ten seconds, and an empty target can clear a sub-1% remainder. Smoothing does not extend physical runtime.
+
+中段 4.05/4.00/3.95 V 目标为 73.3/69.5/62.9%，来自连续清醒采样的相对放电量，以既有 4.10 V / 79% 和假定 2050 mAh 为基准。它们不是绝对电量实测；锁屏空白、校时跳变和芯片 SOC 不参与容量真值拟合。3.95–3.60 V 暂用直线衔接，3.60 V 及以下沿用原锚点；完整低段与实际可用容量仍须完整充放电验证。
+Targets at 4.05/4.00/3.95 V are 73.3/69.5/62.9%, derived from relative discharge over continuous awake samples, anchored to the existing 4.10 V / 79% and assumed 2050 mAh capacity. They are not measured absolute SOC. Sleep gaps, wall-clock jumps and gauge SOC are not calibration ground truth. The 3.95–3.60 V range provisionally interpolates to unchanged anchors at/below 3.60 V; the full low range and usable capacity still require a complete charge/discharge validation.
+
+高压近零电流判满需要连续有效采样；超过 5 秒的采样空白、读数失败或明显放电会重新确认，保留硬件 top-off 和原电压门槛。显示算法不修改充电电流、截止电压、终止策略或欠压保护。
+High-voltage near-zero-current full confirmation requires continuous valid sampling. Gaps longer than five seconds, read failures or material discharge restart confirmation, retaining hardware top-off and existing voltage gates. Display logic does not change charge current, regulation voltage, termination policy or undervoltage protection.
+
+NVS 百分比带 `soc_ver` 算法版本；旧的无版本记录和不兼容记录不恢复，首次按新曲线估算，不清空其他设置。以后在五分钟周期、充电状态变化、累计变化至少 2%（至少隔一分钟）及正常重启/关机前保存有效值，相同值不重复写。保存失败不记作成功；意外断电仍可能丢失最近变化，启动时仍按电压容差决定是否恢复。
+NVS percentages carry an algorithm revision in `soc_ver`. Unversioned or incompatible records are ignored so the first start estimates from the new curve without erasing other settings. Save valid values every five minutes, on charger changes, after at least 2% movement (at least one minute apart), and before normal restart/shutdown; duplicate values skip writes. Failed saves are not cached as successes. Unexpected power loss may still lose recent movement, and boot restoration remains subject to voltage tolerance.
+
 ## 电源键采样 / Power-key sampling
 
 主循环启动默认暂停的快采任务，正常页面启用后每轮只读 P17，轮间等待 10 ms；原有 20 ms 按下复查、30 ms 短按门限与 1 s 长按门限保持不变。事件与直读共用互斥锁及原有短按/长按待处理标记，长按优先；快采不执行电量采样、文件写入或绘屏。主循环恢复处理前保留待处理动作，不承诺在硬件推屏中途立即锁屏。

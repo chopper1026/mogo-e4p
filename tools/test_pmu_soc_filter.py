@@ -4,6 +4,7 @@ English: Metalio battery filter replay: noise immunity, one-direction stepping, 
 limit, charge-done snap, boot restore and load compensation."""
 from pathlib import Path
 import subprocess, tempfile, re
+from run_reader_baseline import toolchain
 root=Path(__file__).resolve().parents[1]
 source=(root/'components/device_power/device_power_metalio.c').read_text()
 def extract(name):
@@ -22,7 +23,7 @@ with tempfile.TemporaryDirectory() as tmp:
     p=Path(tmp)
     code='#include <assert.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n'
     code+=defines+'\n'+curve+'\n'+typedef+'\n'
-    code+='\n'.join(extract(f) for f in ['batt_curve_soc','batt_filter_step','batt_full_now'])
+    code+='\n'.join(extract(f) for f in ['batt_compensated_mv','batt_curve_soc','batt_filter_step','batt_full_now'])
     code+='''
 static batt_filter_t f;
 static int32_t s_mv;
@@ -36,18 +37,22 @@ static bool full(int64_t t, int mv, int ma, bool chg, bool done) {
  return batt_full_now(done, chg, true, mv, true, (int16_t)ma, t, &s_since);
 }
 int main(void) {
+ // 插拔时 CX 与 BQ 可不同步；补偿必须跟随有符号电流。
+ // CX and BQ can disagree during cable transitions; compensation follows signed current.
+ reset(); step(0, 3866, -87, true, true, false, -1); assert(s_mv==3881);
+ reset(); step(0, 4174, 868, true, false, false, -1); assert(s_mv==4024);
  // 1) 瞬时 ±8mV 抖动整段不动显示 / instantaneous +-8mV noise never moves the display
  reset();
  int first=-1;
  for (int i=0;i<600;i++) {
-  step((int64_t)i*200000, 3900+((i&1)?8:-8), 30, true, false, false, -1);
+  step((int64_t)i*200000, 3900+((i&1)?8:-8), -30, true, false, false, -1);
   if (first<0) first=s_pm; else assert(s_pm==first);
  }
  // 2) 放电单调不升 / discharge never rises
  reset();
  int prev=1<<30;
  for (int i=0;i<1400;i++) {
-  step((int64_t)i*200000, 4000-i/2, 40, true, false, false, -1);
+  step((int64_t)i*1000000, 4000-i/2, -40, true, false, false, -1);
   assert(s_pm<=prev);
   prev=s_pm;
  }
@@ -60,17 +65,17 @@ int main(void) {
   assert(s_pm>=prev);
   prev=s_pm;
  }
- // 4) 限速：可见变化至少隔 10s、单步最多 1% / rate limit: >=10s apart, <=1% per step
+ // 4) 正常电量限速：至少隔 60s、单步最多 1% / normal range: >=60s apart, <=1% per step
  reset();
  step(0, 4000, 0, false, false, false, -1);
- assert(s_pm==560);
+ assert(s_pm==695);
  int64_t last_t=0;
  int changes=0;
- prev=560;
- for (int i=1;i<=2100;i++) {
+ prev=695;
+ for (int i=1;i<=6300;i++) {
   step((int64_t)i*200000, 3700, 0, false, false, false, -1);
   if (s_pm!=prev) {
-   assert((int64_t)i*200000-last_t>=10000000);
+   assert((int64_t)i*200000-last_t>=60000000);
    assert(prev-s_pm>0 && prev-s_pm<=10);
    changes++;
    last_t=(int64_t)i*200000;
@@ -84,29 +89,30 @@ int main(void) {
  assert(s_pm==1000);
  reset();
  step(0, 4000, 0, false, true, true, -1);
- assert(s_pm==560);
+ assert(s_pm==695);
  // 6) 开机恢复容差 / boot restore tolerance
- reset(); step(0, 3900, 0, false, false, false, 430); assert(s_pm==430);
- reset(); step(0, 3900, 0, false, false, false, 200); assert(s_pm==450);
- reset(); step(0, 3900, 0, false, false, false, -1);  assert(s_pm==450);
+ reset(); step(0, 3900, 0, false, false, false, 540); assert(s_pm==540);
+ reset(); step(0, 3900, 0, false, false, false, 200); assert(s_pm==batt_curve_soc(3900));
+ reset(); step(0, 3900, 0, false, false, false, -1);  assert(s_pm==batt_curve_soc(3900));
  // 7) EMA 收敛到补偿后电压 / EMA converges on the compensated voltage
  reset();
  step(0, 3950, 0, false, false, false, -1);
  for (int i=1;i<900;i++) step((int64_t)i*200000, 3900, 0, false, false, false, -1);
  assert(s_mv>=3899 && s_mv<=3901);
  // 8) 负载补偿方向与封顶 / load compensation direction and cap
- reset(); step(0, 3800, 3000, true, false, false, -1); assert(s_mv==3950);
- reset(); step(0, 3800, 800, true, false, false, -1);  assert(s_mv==3944);
+ reset(); step(0, 3800, -3000, true, false, false, -1); assert(s_mv==3950);
+ reset(); step(0, 3800, -800, true, false, false, -1);  assert(s_mv==3944);
  reset(); step(0, 3800, 800, true, true, false, -1);   assert(s_mv==3656);
  // 9) 涓流判满 / taper-full
  s_since=-1;
  assert(full(0,4380,0,true,false)==false);              // 立即不算满 / not full instantly
  assert(full(299999999,4380,10,true,false)==false);    // 差 1µs 不算 / 1µs short stays unfilled
  assert(full(300000000,4380,10,true,false)==true);     // 满 5 分钟判满 / held 5 min: full
- assert(full(300000001,4380,-80,true,false)==true);    // 负向浪涌不清已满 / negative surges keep full
+ assert(full(300000001,4380,-80,true,false)==false && s_since==-1); // 明显放电撤销确认 / discharge restarts confirmation
  s_since=-1;
- assert(full(100000000,4380,-80,true,false)==false);   // 负向浪涌不清确认窗口 / surges keep the window
- assert(full(400000000,4380,5,true,false)==true);      // 窗口跨浪涌累计到 5 分钟 / the window still accrues to 5 min
+ assert(full(100000000,4380,-80,true,false)==false && s_since==-1);
+ assert(full(400000000,4380,5,true,false)==false);     // 放电不算尾充 / discharge cannot count as taper
+ assert(full(700000000,4380,5,true,false)==true);
  s_since=-1;
  assert(full(0,4380,117,true,false)==false&&s_since==-1);  // 大电流重置 / real charge current resets
  assert(full(0,4340,0,true,false)==false&&s_since==-1);    // 电压不够重置 / low voltage resets
@@ -150,26 +156,42 @@ int main(void) {
  reset(); step(0, 4300, 0, false, false, false, -1); assert(s_pm==955);
  reset(); step(0, 4200, 0, false, false, false, -1); assert(s_pm==875);
  reset(); step(0, 4100, 0, false, false, false, -1); assert(s_pm==790);
- // 4.09 V 以下无数据，锚点不动 / no data below 4.09 V, low anchors untouched
- reset(); step(0, 4000, 0, false, false, false, -1); assert(s_pm==560);
+ // 12) 2026-11-05 连续区间的相对容量，不把芯片 SOC 当真值。
+ // Relative sampled capacity from the 2026-11-05 continuous segment, not gauge SOC truth.
+ const int mv[] = {4100,4050,4000,3950};
+ const int q[] = {326016,442395,521732,656160};
+ for (unsigned i=0;i<4;i++) {
+  int relative=790-(q[i]-q[0])*1000LL/2050000;
+  int error=batt_curve_soc(mv[i])-relative;
+  assert(error>=-1 && error<=1);
+ }
+ assert(batt_curve_soc(3600)==140 && batt_curve_soc(3500)==80);
+ assert(batt_curve_soc(3400)==40 && batt_curve_soc(3300)==0);
+ for(int v=2501;v<=5000;v++) {
+  int delta=batt_curve_soc(v)-batt_curve_soc(v-1);
+  assert(delta>=0 && delta<=2);
+ }
+ // 13) 插拔重新计时，正常区间不在几秒内连跳；低电量不受一分钟限制。
+ // Rearm on transitions; no immediate normal-range jumps, but low levels retain fast tracking.
+ reset();step(0,4000,0,true,true,false,-1);
+ int before=s_pm;
+ step(60000000,3960,-100,true,false,false,-1);assert(s_pm==before);
+ step(119999999,3960,-100,true,false,false,-1);assert(s_pm==before);
+ step(120000000,3960,-100,true,false,false,-1);assert(s_pm==before-10);
+ reset();step(0,3450,0,true,false,false,-1);
+ before=s_pm;step(10000000,3300,0,true,false,false,-1);assert(s_pm==before-10);
+ reset();step(0,3300,0,true,false,false,5);
+ step(10000000,3300,0,true,false,false,-1);assert(s_pm==0);
+ // 有符号极值不会溢出，无电流时不补偿。/ Signed extremes cannot overflow; missing current disables compensation.
+ assert(batt_compensated_mv(4000,true,INT16_MIN)==4150);
+ assert(batt_compensated_mv(4000,true,INT16_MAX)==3850);
+ assert(batt_compensated_mv(4000,false,INT16_MIN)==4000);
  puts("PASS: battery filter noise immunity, monotonic one-direction stepping, rate limit, charge-done snap, boot restore tolerance, EMA convergence, load compensation, taper-full and the full-charge plateau");
 }
 '''
     (p/'test.c').write_text(code)
-    # 本机 CommandLineTools 27.0 SDK 的 tbd 损坏时逐个旧 SDK 回退。 / Fall back through the
-    # older SDKs when the local CommandLineTools 27.0 tbd files are broken.
-    cands=[['cc']]
-    sdkdir=Path('/Library/Developer/CommandLineTools/SDKs')
-    if sdkdir.is_dir():
-        cands+= [['cc','-isysroot',str(s)] for s in sorted(sdkdir.glob('MacOSX*.sdk'),reverse=True)]
-    err=None
-    for cmd in cands:
-        # 本机 ASan 主机测试会挂（见 IDF 构建环境记忆），只用基础告警编译。
-        # ASan host tests hang on this machine (see the IDF build-env note); plain warnings only.
-        r=subprocess.run(cmd+['-std=c11','-Wall','-Wextra','-Werror',str(p/'test.c'),'-o',str(p/'test')],capture_output=True)
-        if r.returncode==0 and subprocess.run([str(p/'test')],capture_output=True).returncode==0:
-            print(subprocess.run([str(p/'test')],capture_output=True,text=True).stdout.strip())
-            break
-        err=r
-    else:
-        raise RuntimeError(err.stderr.decode() if err else 'no working compiler')
+    (p/'toolchain').mkdir()
+    env,_=toolchain(p/'toolchain')
+    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
+                    str(p/'test.c'),'-o',str(p/'test')],env=env,check=True)
+    subprocess.run([str(p/'test')],env=env,check=True)
