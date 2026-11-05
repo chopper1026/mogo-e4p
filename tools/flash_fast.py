@@ -22,7 +22,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 STORE = ROOT / "build/flash-fast"
-LIMIT = 110
+LIMIT = 180
 CLEANUP_SECONDS = 10
 SECTOR = 4096
 STARTED = min(float(os.environ.get("_E4P_FLASH_STARTED", time.monotonic())), time.monotonic())
@@ -449,7 +449,7 @@ def main():
     parser.add_argument("--expect-mac", help="Required device identity, otherwise use native USB serial")
     parser.add_argument("--yes", action="store_true", help="Confirm a current user-authorized app-only flash")
     parser.add_argument("--rewrite-app", action="store_true", help="Explicitly rewrite the selected app even if already installed")
-    parser.add_argument("--timeout", type=int, default=LIMIT, choices=range(1, LIMIT + 1), metavar="1..110")
+    parser.add_argument("--timeout", type=int, default=LIMIT, choices=range(1, LIMIT + 1), metavar=f"1..{LIMIT}")
     args = parser.parse_args()
     require(args.mode != "flash" or args.yes, "Flashing requires current user authorization and --yes.")
     require(not args.rewrite_app or args.mode == "flash", "--rewrite-app is only valid with flash.")

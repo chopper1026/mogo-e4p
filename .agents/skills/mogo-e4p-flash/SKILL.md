@@ -10,8 +10,8 @@ Use only this checkout's helper; never install this skill globally or apply it t
 
 ## 时限 / Deadline
 
-- 从收到普通刷机请求到给出结果，以 **120 秒**为总预算；立即执行入口，不先跑索引、全量测试、全片备份或重读历史。脚本最长 **110 秒**，其中末尾 **10 秒**留给失败退出和设备启动恢复，另外留出回复时间。普通刷机不修改生产函数，因此不需要为这次硬件操作重新做代码编辑的图分析。
-  Finish or report a concrete failure within 120 seconds. The 110-second helper reserves its last 10 seconds for safe cleanup and boot restoration; do not add unrelated audits to flash-only work.
+- 用户 2026-11-05 要求放宽脚本时限，取代此前两分钟总预算。脚本默认及上限改为 **180 秒**，其中末尾 **10 秒**留给失败退出和设备启动恢复；可用 `--timeout 1..180` 缩短本次时限。立即执行入口，不先跑索引、全量测试、全片备份或重读历史。普通刷机不修改生产函数，因此不需要为这次硬件操作重新做代码编辑的图分析。
+  The user's 2026-11-05 request supersedes the two-minute total budget. The helper now defaults to a 180-second maximum, reserving its last ten seconds for safe cleanup and boot restoration; `--timeout 1..180` can shorten a run. Do not add unrelated audits to flash-only work.
 - “最新代码”指当前 checkout，包含未提交修改；不擅自拉远端、切分支、递增版本或重写已发布文件。
   Latest means the current checkout, including uncommitted changes, without an implicit pull, branch switch or version change.
 - 这是时限要求，不是保证冷构建、断连设备也能刷成。缺少构建、20 秒增量编译失败、端口异常、分区/bootloader 不兼容或预算不足时，立即报告失败，不换旧 Bin，不自动重试，不延长时限。需要完整构建/整机恢复时，单独说明并取得用户对超时准备或恢复的授权。
@@ -22,7 +22,7 @@ Use only this checkout's helper; never install this skill globally or apply it t
 用户本轮明确要求刷机才可使用 `flash --yes`。请求设计/修改工具、查看状态或旧聊天许可均不算授权；不要为测试 skill 自动访问串口。
 Only a current explicit flash request authorizes `flash --yes`; tool creation, status checks and historical permissions do not.
 
-用户明确要求恢复当前异常设备、调试刷机故障时，可针对该设备验证只读检查、失败复位及当前应用刷写；这不授权改刷其他固件、整机恢复或反复试刷。需要验证实际写入路径时用一次 `flash --yes --rewrite-app`，仍受同一 110 秒限制。
+用户明确要求恢复当前异常设备、调试刷机故障时，可针对该设备验证只读检查、失败复位及当前应用刷写；这不授权改刷其他固件、整机恢复或反复试刷。需要验证实际写入路径时用一次 `flash --yes --rewrite-app`，仍受同一 180 秒限制。
 An explicit request to recover this device or debug its failed flash permits bounded read/reset and current-app validation, not unrelated firmware or whole-device recovery. One `flash --yes --rewrite-app` run can validate real writes under the same deadline.
 
 已有本机准备记录时只执行一次：

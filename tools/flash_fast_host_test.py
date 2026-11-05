@@ -227,6 +227,20 @@ class FlashTests(unittest.TestCase):
         self.assertFalse(self.receipt["write_started"])
         self.assertEqual(device.writes, [])
 
+    def test_extended_budget_accepts_full_app_after_preflight(self):
+        image = b"a" * 4523184
+        self.bundle["padded"] = image + b"\xff" * (-len(image) % fast.SECTOR)
+        self.slots[0].size = 0x500000
+        device = MemoryDevice(self.bundle)
+        with patch.object(fast.time, "monotonic", return_value=fast.STARTED + 35):
+            with self.assertRaisesRegex(fast.FlashError, "Insufficient time"):
+                self.execute(device, fast.Budget(110 - fast.CLEANUP_SECONDS))
+            self.assertEqual(device.writes, [])
+            self.assertFalse(self.receipt["write_started"])
+            self.execute(device, fast.Budget(fast.LIMIT - fast.CLEANUP_SECONDS))
+        self.assertTrue(self.receipt["flash_verified"])
+        self.assertEqual(device.writes, [(self.slots[0].offset, len(self.bundle["padded"]))])
+
     def test_write_and_digest_failure_cannot_be_reported_as_success(self):
         for attribute in ("fail_write", "corrupt_write"):
             with self.subTest(attribute=attribute):
@@ -451,10 +465,28 @@ class FlashTests(unittest.TestCase):
 
     def test_flash_without_confirmation_and_excessive_timeout_are_rejected(self):
         script = Path(fast.__file__).resolve()
-        for arguments in (("flash",), ("status", "--timeout", "111")):
+        for arguments in (("flash",), ("status", "--timeout", "0"),
+                          ("status", "--timeout", "-1"), ("status", "--timeout", "181")):
             result = subprocess.run([sys.executable, str(script), *arguments], capture_output=True, timeout=3)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn(b"Connect S31", result.stdout)
+
+    def test_default_and_explicit_extended_timeouts_keep_cleanup_reserve(self):
+        for timeout in (None, 111, 180):
+            with self.subTest(timeout=timeout):
+                device = MemoryDevice(self.bundle)
+                arguments = ["flash_fast.py", "flash", "--yes"]
+                if timeout is not None:
+                    arguments.extend(["--timeout", str(timeout)])
+                with self.main_mocks("flash", device), patch.object(sys, "argv", arguments), \
+                        patch.object(fast, "STORE", self.folder / str(timeout)), \
+                        patch.object(fast, "flash_bundle", wraps=fast.flash_bundle) as flash, \
+                        patch.object(fast, "cleanup_device", wraps=fast.cleanup_device) as cleanup:
+                    self.assertEqual(fast.main(), 0)
+                    expected = fast.STARTED + (180 if timeout is None else timeout)
+                    self.assertEqual(flash.call_args.args[3].end, expected - fast.CLEANUP_SECONDS)
+                    self.assertEqual(cleanup.call_args.args[2].end, expected)
+                self.assertTrue(device.closed)
 
     def run_boot(self, log):
         clock = [100.0]

@@ -38,10 +38,10 @@ CI 只证明能编译；真机时序与行为仍须设备验证。/ CI proves co
 
 ### 版本号与本地测试 / Versions and local tests
 
-用户 2026-11-04 要求普通烧录/刷机请求在 2 分钟内完成或报告具体失败；本仓库必须优先使用项目级 [mogo-e4p-flash skill](.agents/skills/mogo-e4p-flash/SKILL.md) 和 `python3 tools/flash_fast.py flash --yes`。脚本限时 110 秒，刷机阶段不重复全量测试、索引或全片备份，不使用固定活动槽地址，不自动退回整机擦写；新功能在开发构建阶段先用 `prepare --build-dir` 准备当前产品构建。冷构建、设备异常或兼容性检查失败时及时停止说明，不刷旧包或虚报成功；超过时限的准备/恢复需另行说明并获授权。skill 仅放在本仓库 `.agents/skills/`，不安装到全局。设计/测试工具不代表刷机授权。
-Per the user's 2026-11-04 decision, ordinary flash requests must finish or report a concrete failure within two minutes. Use the repository-scoped skill and 110-second helper, prepare known product builds during development, and omit redundant tests/indexing/full-flash backups during flash-only work. Never hardcode the active slot, fall back to whole-device writes, substitute stale firmware or claim failure as success. Longer preparation/recovery needs separate authorization; tool creation/testing does not authorize flashing.
+用户 2026-11-05 要求放宽脚本时限，取代此前两分钟总预算；本仓库必须优先使用项目级 [mogo-e4p-flash skill](.agents/skills/mogo-e4p-flash/SKILL.md) 和 `python3 tools/flash_fast.py flash --yes`。脚本默认及上限改为 180 秒，可用 `--timeout 1..180` 缩短本次时限。刷机阶段不重复全量测试、索引或全片备份，不使用固定活动槽地址，不自动退回整机擦写；新功能在开发构建阶段先用 `prepare --build-dir` 准备当前产品构建。冷构建、设备异常或兼容性检查失败时及时停止说明，不刷旧包或虚报成功；超过时限的准备/恢复需另行说明并获授权。skill 仅放在本仓库 `.agents/skills/`，不安装到全局。设计/测试工具不代表刷机授权。
+The user's 2026-11-05 request to relax the script deadline supersedes the two-minute total budget. Use the repository-scoped skill and helper, now defaulting to a 180-second maximum; `--timeout 1..180` can shorten a run. Prepare known product builds during development and omit redundant tests/indexing/full-flash backups during flash-only work. Never hardcode the active slot, fall back to whole-device writes, substitute stale firmware or claim failure as success. Longer preparation/recovery needs separate authorization; tool creation/testing does not authorize flashing.
 
-快速刷机使用官方 S31 RAM stub，不回退到已复现连续读取故障的 ROM 读取接口。110 秒中预留最后 10 秒清理：失败且未写入或已完整校验时，若尚未尝试启动，应复位并确认原应用/首页恢复；仅关闭串口不算恢复。部分写入未校验时不启动未知应用，不自动重刷；已尝试启动仍失败时不循环复位，按实际状态报告。
+快速刷机使用官方 S31 RAM stub，不回退到已复现连续读取故障的 ROM 读取接口。180 秒中预留最后 10 秒清理：失败且未写入或已完整校验时，若尚未尝试启动，应复位并确认原应用/首页恢复；仅关闭串口不算恢复。部分写入未校验时不启动未知应用，不自动重刷；已尝试启动仍失败时不循环复位，按实际状态报告。
 Use the official S31 RAM stub rather than the failing ROM read path. Reserve the last ten seconds for cleanup: safely reset and confirm an unbooted intact application after failure. Port closure alone is not recovery. Do not boot an incomplete write, retry flashing or repeatedly reset an unconfirmed boot.
 
 用户 2026-10-06 确认：本地测试沿用当前正式发布的固件版本号，用测试日期和说明区分；正式上线时才递增版本号，并同步设备、刷机页、升级包与日志。不要为每次本地修复另增 rc 编号。
