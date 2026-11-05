@@ -10,6 +10,8 @@
 阅读 EPUB 与 TXT，用自己的字体和排版，记住每一次停下的位置。<br>
 从书架到天气，从无线传书到阅读手账，都在这一块墨水屏上。
 
+基于 [kiikoread](https://github.com/wegooo-cell/read-pico-reader) 开发。
+
 [![Release](https://img.shields.io/github/v/release/chopper1026/mogo-e4p?label=release&color=24292f)](https://github.com/chopper1026/mogo-e4p/releases/latest)
 [![Build](https://github.com/chopper1026/mogo-e4p/actions/workflows/build.yml/badge.svg)](https://github.com/chopper1026/mogo-e4p/actions/workflows/build.yml)
 [![ESP32-S31](https://img.shields.io/badge/ESP32--S31-4.7%22_E--Ink-397568)](#硬件)
@@ -240,6 +242,8 @@ python3 tools/flash_fast.py prepare --build-dir build
 代码贡献前请阅读[贡献指南](CONTRIBUTING.md)与[中文提交规范](docs/COMMIT_CONVENTION.md)。
 
 ## 致谢与许可
+
+特别感谢原项目 [kiikoread](https://github.com/wegooo-cell/read-pico-reader)，mogo 在其基础上继续开发与适配。
 
 感谢 [MindReset](https://github.com/MindReset/read_pico_firmware) 的固件基础、Metalio 的 E-INK4 Plus 板级实现，以及 [epdiy](https://github.com/vroland/epdiy) 和其他上游项目。完整来源与许可见[第三方声明](THIRD_PARTY_NOTICES.md)。
 
