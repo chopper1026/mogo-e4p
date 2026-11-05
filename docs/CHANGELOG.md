@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.4 · 本地测试 / Local testing · 2026-11-05
 
+- 移除文件管理单目录最多96项的固定限制，列表按需使用外部内存；内存不足时明确提示，不再静默显示不完整目录。/ Remove the file manager's fixed 96-entry directory limit with an on-demand PSRAM list; report insufficient memory instead of silently showing an incomplete directory.
 - 页眉页脚设置收紧标题下方留白，首屏同时显示六个内容槽位；高度调节与恢复默认仍通过滑动访问。/ Reduce whitespace below the header/footer settings title, showing all six content slots together; height controls and reset remain accessible by scrolling.
 - 优化电量显示：依据连续采样修正中段相对曲线，修复插拔时负载补偿反向，普通区间每分钟最多变化 1%；完善重启保存、判满采样连续性和低电量尾数处理。低段仍待整周期验证，不改变硬件充电及欠压保护。/ Improve battery display with sampled midrange estimates, signed load compensation, normal-range 1% per minute steps, restart checkpoints, continuous full confirmation and empty-level settling. Full-cycle low-range validation remains pending; hardware charging and undervoltage protection are unchanged.
 - 默认头像改为压缩后的 mogo logo，默认锁屏与开机准备画面共用同一张 684×1216 logo 图片，移除旧文字锁屏及独立 init-loading 资源；保留自定义头像和壁纸。/ Use the compressed mogo logo for default avatars and one shared 684x1216 logo image for fallback lock and startup screens, removing the old text art and separate init-loading asset while preserving custom avatars and wallpapers.

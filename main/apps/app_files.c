@@ -16,6 +16,7 @@
 #include "storage_jobs.h"
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +48,6 @@
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 
-#define FILE_MAX 96
 #define FILE_ROWS 9
 typedef struct { char path[288]; char name[128]; off_t size; bool is_dir; } file_item_t;
 // 文件列表放 PSRAM：内部 RAM 已被静态占用到约 90%，而 BLE 控制器只能用内部 RAM，
@@ -55,11 +55,37 @@ typedef struct { char path[288]; char name[128]; off_t size; bool is_dir; } file
 // The file list lives in PSRAM. Internal RAM is already around 90% statically used and the BLE
 // controller can only use internal RAM, so a list this big has no business holding any of it.
 static file_item_t *s_files;
+static size_t s_files_capacity;
 
-static bool files_alloc(void) {
-    if (!s_files)
-        s_files = heap_caps_calloc(FILE_MAX, sizeof(file_item_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return s_files != NULL;
+static bool files_alloc(size_t needed) {
+    if (needed <= s_files_capacity) return true;
+    const size_t limit = SIZE_MAX / sizeof(*s_files) < INT_MAX - FILE_ROWS
+        ? SIZE_MAX / sizeof(*s_files) : INT_MAX - FILE_ROWS;
+    if (needed > limit) return false;
+    size_t capacity = s_files_capacity ? s_files_capacity : 32;
+    while (capacity < needed) {
+        if (capacity > limit / 2) { capacity = needed; break; }
+        capacity *= 2;
+    }
+    file_item_t *files = heap_caps_realloc(s_files, capacity * sizeof(*files),
+                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // 预留增长失败时只申请实际所需，避免空余容量提前耗尽内存。
+    // If growth slack cannot fit, request only the required entries before failing.
+    if (!files && capacity != needed) {
+        capacity = needed;
+        files = heap_caps_realloc(s_files, capacity * sizeof(*files),
+                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!files) return false;
+    s_files = files;
+    s_files_capacity = capacity;
+    return true;
+}
+
+static void files_free(void) {
+    heap_caps_free(s_files);
+    s_files = NULL;
+    s_files_capacity = 0;
 }
 static int s_count, s_folder, s_page;
 static int s_requested_folder = -1;
@@ -368,8 +394,9 @@ static int compare_files(const void *left, const void *right) {
 static int64_t s_scan_retry_ms;
 
 static void scan_folder(int folder) {
-    if (!files_alloc()) return;
+    files_free();
     s_count = s_page = 0;
+    if (folder >= 0 && folder < 3) s_counts[folder] = 0;
     s_message[0] = 0;
     s_scan_retry_ms = 0;
     board_sd_get_info(&s_sd);
@@ -390,13 +417,14 @@ static void scan_folder(int folder) {
     }
     int failed = 0;
     for (;;) {
-        if (s_count >= FILE_MAX) break;
         errno = 0;
         struct dirent *entry = readdir(dir);
         if (!entry) { if (errno) ++failed; break; }
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
-        file_item_t *item = &s_files[s_count];
-        if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
+        file_item_t candidate = {0};
+        file_item_t *item = &candidate;
+        int length = snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name);
+        if (length < 0 || (size_t)length >= sizeof(item->path)) continue;
         struct stat st;
         bool is_dir = false, is_file = false;
         if (!stat(item->path, &st)) {
@@ -414,7 +442,14 @@ static void scan_folder(int folder) {
         if (strnlen(entry->d_name, sizeof(item->name)) >= sizeof(item->name)) continue;
         strcpy(item->name, entry->d_name);
         item->is_dir = is_dir;
-        ++s_count;
+        if (!files_alloc((size_t)s_count + 1)) {
+            closedir(dir);
+            files_free();
+            s_count = 0;
+            snprintf(s_message, sizeof(s_message), "内存不足，无法加载目录");
+            return;
+        }
+        s_files[s_count++] = candidate;
     }
     closedir(dir);
     // 多数条目都读不出来才重扫：单个坏条目不该让页面每 1.5 秒重画一次。
@@ -423,7 +458,7 @@ static void scan_folder(int folder) {
         s_scan_retry_ms = esp_timer_get_time() / 1000 + FILE_SCAN_RETRY_MS;
         if (!s_count) snprintf(s_message, sizeof(s_message), "TF 卡读取失败，请稍后重试");
     }
-    qsort(s_files, s_count, sizeof(s_files[0]), compare_files);
+    if (s_count > 1) qsort(s_files, s_count, sizeof(s_files[0]), compare_files);
     if (folder >= 0 && folder < 3) s_counts[folder] = s_count;
 }
 
@@ -728,8 +763,9 @@ static void on_enter(app_ctx_t *ctx) {
     else scan_folder(3);
 }
 static void on_media_lost(app_ctx_t *ctx) {
+    files_free();
     s_pager_pressed=UI_PAGER_NONE;s_pager_paint_pending=false;
-    (void)ctx; ui_keyboard_end(); s_folder = -1; s_count = 0; s_scan_pending = false;
+    (void)ctx; ui_keyboard_end(); s_folder = -1; s_count = s_page = 0; s_scan_pending = false;
     s_view = FILE_VIEW_LIST; s_delete_confirm = false;
     memset(s_counts, 0, sizeof(s_counts)); board_sd_get_info(&s_sd);
 }
@@ -1091,7 +1127,12 @@ static bool main_page_visible(app_ctx_t *ctx) {
     return s_view == FILE_VIEW_LIST && s_folder < 0 && !strcmp(s_dir, "/sdcard") && !s_delete_confirm;
 }
 static void files_before_lock(app_ctx_t *ctx) { (void)ctx;s_pager_pressed=UI_PAGER_NONE;s_pager_paint_pending=false; }
-static void files_exit(app_ctx_t *ctx) { files_before_lock(ctx); ui_keyboard_end(); }
+static void files_exit(app_ctx_t *ctx) {
+    files_before_lock(ctx);
+    ui_keyboard_end();
+    files_free();
+    s_count = s_page = 0;
+}
 
 const app_desc_t app_files = {
     .title = "文件管理 Files", .detail = "TF 卡文件与传输", .enter_full = false,

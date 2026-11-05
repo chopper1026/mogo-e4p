@@ -23,6 +23,7 @@ python3 tools/reader_tap_dismiss_host_test.py
 python3 tools/reader_ui_scale_host_test.py
 python3 tools/lock_font_host_test.py
 python3 tools/file_sd_format_host_test.py
+python3 tools/file_listing_host_test.py
 python3 tools/lock_collage_host_test.py
 python3 tools/lock_pin_host_test.py
 python3 tools/ui_pinpad_host_test.py
