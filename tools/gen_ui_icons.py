@@ -95,6 +95,7 @@ ICONS = (
     "sun",               # 快捷栏·前光 / quick layer, frontlight
     "thermometer",       # 快捷栏·色温 / quick layer, colour temperature
     "vibrate",           # 设置·触摸震动 / settings, touch vibration
+    "usb",               # 文件·USB 传输 / files, USB transfer
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")

@@ -10,8 +10,10 @@
  * Authorized keyboard revision: rename uses shared T9/QWERTY and a steady caret; exit frees candidates.
  * 用户修订：输入只刷新变化区域，布局切换局部灰阶，避免打字累计整屏清残影。
  * User revision: input refreshes changed regions; layout switches use local grayscale, without accumulating whole-page cleanup.
- * 用户修订：存储卡未挂载时点卡片手动重挂；深睡唤醒后的挂载失败不再无路可走。
- * User revision: tapping the storage card remounts it while unmounted; a mount failure after deep-sleep wake is no longer a dead end.
+ * 用户修订：存储卡未挂载时点信息区手动重挂；保留格式化二次确认。
+ * User revision: tap the storage information to remount; retain two-tap format confirmation.
+ * 用户修订：去掉文件大标题与外框，根目录六行；传输入口使用图标和文字。
+ * User revision: remove the large title and frames, show six root rows and icon-labelled transfer routes.
  */
 #include "storage_jobs.h"
 #include <dirent.h>
@@ -124,7 +126,23 @@ static const char *folder_root(int folder) {
     return s_dir;
 }
 static int visible_rows(void) { return s_view == FILE_VIEW_MOVE ? 7 : FILE_ROWS; }
-static int root_rows(void) { return 5; }
+static int root_rows(void) { return 6; }
+// 绘制、分页和触摸使用同一行几何；移动页保留七行与原操作栏。
+// Share row geometry across drawing and hits; retain seven rows and the move toolbar.
+static EpdRect file_row_rect(int row) {
+    if (s_folder < 0) return (EpdRect){36, 488 + row * 84, 612, 84};
+    if (s_view == FILE_VIEW_MOVE) return (EpdRect){36, 214 + row * 88, 612, 88};
+    return (EpdRect){36, 215 + row * 86, 612, 86};
+}
+static int file_row_index(int x, int y) {
+    int rows = s_folder < 0 ? root_rows() : visible_rows();
+    for (int row = 0; row < rows; ++row) {
+        int index = s_page * rows + row;
+        if (index >= s_count) break;
+        if (ui_rect_hit(file_row_rect(row), x, y)) return index;
+    }
+    return -1;
+}
 static int file_pager_pages(void) {
     int rows=s_folder<0?root_rows():visible_rows();
     return s_count?1+(s_count-1)/rows:1;
@@ -157,12 +175,12 @@ static bool file_pager_event(app_ctx_t *ctx,const ui_gesture_event_t *ev,app_red
     return true;
 }
 static EpdRect home_transfer_rect(int index) {
-    return (EpdRect){36 + index * 208, 346, 196, 100};
+    return (EpdRect){36 + index * 204, 274, 204, 132};
 }
 
-// 存储卡卡片的位置，绘制与命中测试共用一份，免得两处各写一个坐标。
-// The storage card's rect, shared by drawing and hit testing so the two cannot drift apart.
-static EpdRect storage_card_rect(void) { return (EpdRect){36, 171, 612, 112}; }
+// 无边框存储信息区，包含容量条；绘制与命中共用。
+// Unframed storage information including its capacity bar, shared by rendering and hits.
+static EpdRect storage_card_rect(void) { return (EpdRect){36, 87, 612, 126}; }
 
 // 需要格式化：卡在、没挂上、而且不是超时。超时是接触或供电问题，格式化解决不了，那种情况下
 // 说"格式化可能可以解决"会把用户带偏。
@@ -515,6 +533,60 @@ static void fit_name(char *name, int px, int width) {
     }
 }
 
+static void file_list_name(char out[160], const file_item_t *item, int px, int width) {
+    copy_utf8(out, 160, item->name);
+    if (ui_text_fixed_width_px(px, out) <= width) return;
+    char stem[128], suffix[16] = "";
+    copy_utf8(stem, sizeof(stem), item->name);
+    char *dot = item->is_dir ? NULL : strrchr(stem, '.');
+    if (dot && dot != stem && strlen(dot) < sizeof(suffix)) {
+        copy_utf8(suffix, sizeof(suffix), dot);
+        *dot = 0;
+    }
+    // 扩展名太宽时也必须保证边界；不切断 UTF-8 字符。
+    // Even an oversized extension must fit; never split a UTF-8 character.
+    snprintf(out, 160, "…%s", suffix);
+    if (ui_text_fixed_width_px(px, out) > width) {
+        suffix[0] = 0;
+        copy_utf8(stem, sizeof(stem), item->name);
+    }
+    do {
+        size_t n = strlen(stem);
+        if (n) {
+            --n;
+            while (n && ((unsigned char)stem[n] & 0xc0) == 0x80) --n;
+            stem[n] = 0;
+        }
+        snprintf(out, 160, "%s…%s", stem, suffix);
+    } while (*stem && ui_text_fixed_width_px(px, out) > width);
+    if (ui_text_fixed_width_px(px, out) > width) out[0] = 0;
+}
+
+static void draw_file_row(uint8_t *fb, int row, int index) {
+    const file_item_t *item = &s_files[index];
+    EpdRect rect = file_row_rect(row);
+    int cy = rect.y + rect.height / 2;
+    ui_draw_icon(fb, 58, cy, 40, item->is_dir ? UI_ICON_FOLDER : UI_ICON_FILE, UI_GRAY_BLACK);
+    const char *tag = s_folder < 0 ? NULL :
+        !strcmp(item->path, app_settings_books_dir()) ? "书籍目录" :
+        !strcmp(item->path, app_settings_fonts_dir()) ? "字体目录" : NULL;
+    char name[160], detail[48];
+    int px = ui_text_effective_px(23);
+    file_list_name(name, item, px, 492);
+    bool two_lines = !item->is_dir || tag;
+    ui_text_box(fb, (EpdRect){100, cy - (two_lines ? 32 : 20), 492, two_lines ? 34 : 40},
+                23, name, EPD_DRAW_ALIGN_LEFT, false);
+    if (two_lines) {
+        file_detail(detail, sizeof(detail), item);
+        ui_text_box(fb, (EpdRect){100, cy + 6, 492, 28}, 16,
+                    tag ? tag : detail, EPD_DRAW_ALIGN_LEFT, false);
+    }
+    ui_draw_icon(fb, 630, cy, 26, UI_ICON_CHEVRON_RIGHT, 0x50);
+    int rows = s_folder < 0 ? root_rows() : visible_rows();
+    if (row + 1 < rows)
+        ui_fill_rect_fast((EpdRect){100, rect.y + rect.height - 2, 548, 2}, 0xc0, fb);
+}
+
 
 
 static void editor_start(void) {
@@ -627,50 +699,37 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     }
     if (s_folder >= 0) {
         ui_nav_back(fb, 36, 79);
-        ui_text_vc(fb, 342, 107, 34, s_view == FILE_VIEW_MOVE ? "选择目标文件夹" : names[s_folder], EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){112, 90, s_view == FILE_VIEW_MOVE ? 536 : 270, 48}, 28,
+                    s_view == FILE_VIEW_MOVE ? "选择目标文件夹" : names[s_folder], EPD_DRAW_ALIGN_LEFT, false);
         char path[144];
         snprintf(path, sizeof(path), "TF卡%s", folder_root(s_folder) + 7);
-        ui_text(fb, 36, 172, 20, path, EPD_DRAW_ALIGN_LEFT, false);
+        fit_name(path, 18, 612);
+        ui_text_box(fb, (EpdRect){36, 160, 612, 40}, 18,
+                    s_message[0] ? s_message : path, EPD_DRAW_ALIGN_LEFT, false);
         int folders = 0, files = 0;
         for (int i = 0; i < s_count; ++i) s_files[i].is_dir ? ++folders : ++files;
-        char summary[48]; snprintf(summary, sizeof(summary), "%d个文件夹 · %d个文件", folders, files);
-        ui_text(fb, 648, 172, 20, summary, EPD_DRAW_ALIGN_RIGHT, false);
-        file_rule(fb, 36, 202, 612);
-        if (s_message[0]) ui_text(fb, 36, 238, 27, s_message, EPD_DRAW_ALIGN_LEFT, false);
-        else if (!s_count) ui_text(fb, 36, 238, 27, "此目录还没有文件", EPD_DRAW_ALIGN_LEFT, false);
+        char summary[64];
+        if (folders) snprintf(summary, sizeof(summary), "%d 个文件夹 · %d 个文件", folders, files);
+        else snprintf(summary, sizeof(summary), "%d 个文件", files);
+        if (s_view != FILE_VIEW_MOVE)
+            ui_text_box(fb, (EpdRect){398, 94, 250, 40}, 18, summary, EPD_DRAW_ALIGN_RIGHT, false);
+        ui_fill_rect_fast((EpdRect){36, 211, 612, 2}, 0xc0, fb);
+        if (!s_count && !s_message[0])
+            ui_text_box(fb, (EpdRect){36, 342, 612, 48}, 20, "此目录还没有文件", EPD_DRAW_ALIGN_CENTER, false);
         for (int row = 0; row < visible_rows(); ++row) {
             int index = s_page * visible_rows() + row;
             if (index >= s_count) break;
-            int y = 214 + row * 88;
-            char name[128]; snprintf(name, sizeof(name), "%s", s_files[index].name);
-            while (*name && ttf_text_width_px(ui_text_effective_px(23), name) > 450) {
-                size_t n = strlen(name) - 1;
-                while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
-                name[n] = 0;
-            }
-            file_icon(fb, 48, y + 20, s_files[index].is_dir);
-            ui_text(fb, 101, y + 11, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            char detail[32]; file_detail(detail, sizeof(detail), &s_files[index]);
-            ui_text(fb, 101, y + 49, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
-            const char *tag = !strcmp(s_files[index].path, app_settings_books_dir()) ? "书籍目录" :
-                              !strcmp(s_files[index].path, app_settings_fonts_dir()) ? "字体目录" : NULL;
-            if (tag) ui_text(fb, 588, y + 35, 18, tag, EPD_DRAW_ALIGN_RIGHT, false);
-            ui_text(fb, 640, y + 30, 22, "›", EPD_DRAW_ALIGN_RIGHT, false);
-            file_rule(fb, 101, y + 82, 547);
+            draw_file_row(fb, row, index);
         }
         if (s_view == FILE_VIEW_MOVE) {
             ui_draw_control_frame(fb, (EpdRect){36, 875, 293, 76}, 8, UI_GRAY_BLACK);
             ui_draw_control_frame(fb, (EpdRect){355, 875, 293, 76}, 8, UI_GRAY_BLACK);
             ui_text(fb, 182, 897, 24, "取消移动", EPD_DRAW_ALIGN_CENTER, false);
             ui_text(fb, 501, 897, 24, "移动到此处", EPD_DRAW_ALIGN_CENTER, false);
-            if (s_message[0]) ui_text(fb, 36, 995, 22, s_message, EPD_DRAW_ALIGN_LEFT, false);
         }
     } else {
-        ui_text(fb, 36, 91, 52, "文件", EPD_DRAW_ALIGN_LEFT, false);
         EpdRect storage = storage_card_rect();
-        ui_fill_round_rect(fb, storage, 24, UI_GRAY_WHITE);
-        file_card_border(fb, storage, 24);
-        ui_text(fb, 58, 188, 27, "存储卡", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){storage.x, storage.y + 10, 250, 40}, 21, "存储卡", EPD_DRAW_ALIGN_LEFT, false);
         char total[32], usage[80];
         if (s_sd.mounted) {
             storage_usage(&s_sd,total,sizeof(total),usage,sizeof(usage));
@@ -685,58 +744,39 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             // 探测失败不会自动重试，卡片本身就是重挂入口：提示语直接写出来。
             // A failed probe never retries on its own and the card is the remount entry: say so in the hint.
             snprintf(usage, sizeof(usage),
-                     s_scan_pending ? "正在尝试挂载…" : "请检查 TF 卡，点击卡片重新挂载");
+                     s_scan_pending ? "正在尝试挂载…" : "请检查 TF 卡，点击重新挂载");
         }
-        ui_text(fb, 624, 191, 21, total, EPD_DRAW_ALIGN_RIGHT, false);
-        ui_text(fb, 58, 231, 19, usage, EPD_DRAW_ALIGN_LEFT, false);
-        EpdRect capacity = {58, 263, 566, 6};
-        ui_fill_round_rect(fb, capacity, 3, 0xa0);
+        ui_text_box(fb, (EpdRect){348, storage.y + 10, 300, 40}, 20, total, EPD_DRAW_ALIGN_RIGHT, false);
+        ui_text_box(fb, (EpdRect){storage.x, storage.y + 55, storage.width, 38}, 16, usage, EPD_DRAW_ALIGN_LEFT, false);
+        EpdRect capacity = {storage.x, storage.y + 107, storage.width, 6};
+        ui_fill_rect_fast(capacity, 0xd0, fb);
         if (storage_space_valid(&s_sd)) {
-            capacity.width = (int)((s_sd.filesystem_bytes - s_sd.free_bytes) * 566 / s_sd.filesystem_bytes);
-            if (capacity.width > 0) ui_fill_round_rect(fb, capacity, 3, 0x68);
+            capacity.width = (int)((s_sd.filesystem_bytes - s_sd.free_bytes) * storage.width / s_sd.filesystem_bytes);
+            if (capacity.width > 0) ui_fill_rect_fast(capacity, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 42, 308, 21, "传输文件", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){36, 229, 612, 40}, 18, "传输文件", EPD_DRAW_ALIGN_LEFT, false);
         static const char *const methods[] = {"WiFi传输", "热点传输", "USB传输"};
         static const char *const details[] = {"同一网络", "连接设备热点", "连接电脑"};
+        static const ui_icon_t icons[] = {UI_ICON_WIFI, UI_ICON_RADIO_TOWER, UI_ICON_USB};
         for (int i = 0; i < 3; ++i) {
             EpdRect card = home_transfer_rect(i);
-            ui_fill_round_rect(fb, card, 20, UI_GRAY_WHITE);
-            ui_draw_control_frame(fb, card, 20, UI_GRAY_BLACK);
-            ui_text_vc(fb, card.x + card.width / 2, card.y + 35, 21, methods[i],
-                       EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, card.x + card.width / 2, card.y + 75, 19, details[i],
-                       EPD_DRAW_ALIGN_CENTER, false);
+            ui_draw_icon(fb, card.x + card.width / 2, card.y + 28, 40, icons[i], UI_GRAY_BLACK);
+            ui_text_box(fb, (EpdRect){card.x + 6, card.y + 54, card.width - 12, 38},
+                        21, methods[i], EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){card.x + 6, card.y + 95, card.width - 12, 32},
+                        16, details[i], EPD_DRAW_ALIGN_CENTER, false);
         }
+        ui_fill_rect_fast((EpdRect){36, 422, 612, 2}, 0xc0, fb);
         char summary[48]; snprintf(summary, sizeof(summary), "根目录 · %d 项", s_count);
-        ui_text(fb, 36, 482, 21, summary, EPD_DRAW_ALIGN_LEFT, false);
-        ui_fill_round_rect(fb, (EpdRect){537, 458, 111, 50}, 23, UI_GRAY_WHITE);
-        ui_draw_control_frame(fb, (EpdRect){537, 458, 111, 50}, 23, 0x70);
-        ui_text_vc(fb, 592, 483, 19, "名称 ↑", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){36, 440, 440, 40}, 20, summary, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){500, 440, 148, 40}, 16, "名称 ↑", EPD_DRAW_ALIGN_RIGHT, false);
         int first = s_page * root_rows();
-        int rows = s_count - first;
-        if (rows > root_rows()) rows = root_rows();
-        if (rows < 0) rows = 0;
-        EpdRect list = {36, 520, 612, root_rows() * 91};
-        ui_fill_round_rect(fb, list, 24, UI_GRAY_WHITE);
-        file_card_border(fb, list, 24);
-        if (!s_count) ui_text_vc(fb, 342, 565, 22, s_message[0] ? s_message : "根目录为空", EPD_DRAW_ALIGN_CENTER, false);
+        if (!s_count) ui_text_box(fb, (EpdRect){36, 583, 612, 48}, 20,
+            s_message[0] ? s_message : s_sd.mounted ? "根目录为空" : "TF 卡未挂载", EPD_DRAW_ALIGN_CENTER, false);
         for (int row = 0; row < root_rows(); ++row) {
             int index = first + row;
             if (index >= s_count) break;
-            int y = 520 + row * 91;
-            if (row) file_rule(fb, 96, y, 532);
-            char name[128]; copy_utf8(name, sizeof(name), s_files[index].name); fit_name(name, 23, 430);
-            file_icon(fb, 52, y + 24, s_files[index].is_dir);
-            if (s_files[index].is_dir)
-                ui_text_vc(fb, 101, y + 46, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            else
-                ui_text(fb, 101, y + 20, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            char detail[32]; file_detail(detail, sizeof(detail), &s_files[index]);
-            if (s_files[index].is_dir) ui_text_vc(fb, 628, y + 46, 24, "›", EPD_DRAW_ALIGN_RIGHT, false);
-            else {
-                ui_text(fb, 101, y + 55, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
-                ui_text_vc(fb, 624, y + 44, 22, "›", EPD_DRAW_ALIGN_RIGHT, false);
-            }
+            draw_file_row(fb, row, index);
         }
     }
     draw_file_pager(fb);
@@ -984,9 +1024,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             else return move_selected();
             return APP_REDRAW_PAGE;
         }
-        int row = (ev->y0 - 214) / 88;
-        int index = s_page * visible_rows() + row;
-        if (ev->y0 >= 214 && row >= 0 && row < visible_rows() && index < s_count) {
+        int index = file_row_index(ev->x0, ev->y0);
+        if (index >= 0) {
             copy_utf8(s_dir, sizeof(s_dir), s_files[index].path);
             scan_folder(3);
             return APP_REDRAW_PAGE;
@@ -999,7 +1038,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (ev->type == UI_GESTURE_SWIPE_R && s_folder < 0 && s_page > 0) { --s_page; return APP_REDRAW_PAGE; }
     if (ev->type != UI_GESTURE_TAP && ev->type != UI_GESTURE_LONG_PRESS) return APP_REDRAW_NONE;
     bool long_press = ev->type == UI_GESTURE_LONG_PRESS;
-    if (long_press && ev->y0 < (s_folder >= 0 ? 214 : 520)) return APP_REDRAW_NONE;
+    if (long_press && file_row_index(ev->x0, ev->y0) < 0) return APP_REDRAW_NONE;
     int tab = ui_nav_hit(ev->x0, ev->y0);
     if (!long_press && tab >= 0) { ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
     if (s_folder >= 0) {
@@ -1010,9 +1049,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             } else s_folder = -1;
             return APP_REDRAW_PAGE;
         }
-        int row = (int)(ev->y0 - 214) / 88;
-        int index = s_page * visible_rows() + row;
-        if (ev->y0 >= 214 && row >= 0 && row < visible_rows() && index < s_count) {
+        int index = file_row_index(ev->x0, ev->y0);
+        if (index >= 0) {
             if (long_press) {
                 s_selected = s_files[index]; s_view = FILE_VIEW_ACTIONS;
                 s_delete_confirm = false; s_message[0] = 0;
@@ -1081,10 +1119,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_app = &app_transfer;
         return APP_REDRAW_NONE;
     }
-    if (ev->y0 >= 520 && ev->y0 < 975) {
-        int row = (ev->y0 - 520) / 91;
-        int index = s_page * root_rows() + row;
-        if (row >= 0 && row < root_rows() && index < s_count) {
+    {
+        int index = file_row_index(ev->x0, ev->y0);
+        if (index >= 0) {
             if (long_press) {
                 s_selected = s_files[index]; s_view = FILE_VIEW_ACTIONS;
                 s_delete_confirm = false; s_message[0] = 0;

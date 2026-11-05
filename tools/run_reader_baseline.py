@@ -56,6 +56,7 @@ SUITES = {
     "shelf": [sys.executable, "tools/shelf_categories_host_test.py"],
     "management": [sys.executable, "tools/book_ui_host_test.py"],
     "files": [sys.executable, "tools/file_listing_host_test.py"],
+    "files_ui": [sys.executable, "tools/file_ui_host_test.py"],
     "session": [sys.executable, "tools/reader_session_host_test.py"],
     "chapter": [sys.executable, "tools/reader_chapter_host_test.py"],
     "open": [sys.executable, "tools/reader_open_host_test.py"],
