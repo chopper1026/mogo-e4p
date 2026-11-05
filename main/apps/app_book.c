@@ -2398,14 +2398,14 @@ static void draw_key_picker(uint8_t *fb) {
 }
 
 /* ---- 页眉页脚设置面板 / Header & footer chrome panels ---- */
-// 六个槽位、两条高度加「恢复默认」整行滚动，视口四行；选择页复用动作卡样式，超出视口两行。
-// Six slots, two heights and a reset row scroll whole rows in a four-row viewport; the picker reuses the
+// 六个槽位、两条高度加「恢复默认」整行滚动，标题下首屏显示全部六槽；选择页复用动作卡样式，超出视口两行。
+// Six slots, two heights and a reset row scroll whole rows, with all six slots below the title; the picker reuses the
 // action-card style and outgrows its viewport by two rows.
-#define CHROME_ROW_TOP 640
-#define CHROME_ROW_HEIGHT 96
-#define CHROME_ROW_GAP 12
+#define CHROME_ROW_TOP (KEY_SETTINGS_TOP + 104)
+#define CHROME_ROW_HEIGHT 88
+#define CHROME_ROW_GAP 8
 #define CHROME_ROW_PITCH (CHROME_ROW_HEIGHT + CHROME_ROW_GAP)
-#define CHROME_ROW_VISIBLE 4
+#define CHROME_ROW_VISIBLE 6
 #define CHROME_ROW_VIEW_HEIGHT (CHROME_ROW_VISIBLE * CHROME_ROW_HEIGHT + (CHROME_ROW_VISIBLE - 1) * CHROME_ROW_GAP)
 #define CHROME_ROW_COUNT 9
 #define CHROME_ROW_MAX_SCROLL ((CHROME_ROW_COUNT - CHROME_ROW_VISIBLE) * CHROME_ROW_PITCH)
@@ -2424,7 +2424,8 @@ static const app_reader_slot_item_t s_chrome_item_order[] = {
 };
 #define READER_CHROME_ITEM_ROWS ((int)(sizeof(s_chrome_item_order) / sizeof(s_chrome_item_order[0])))
 #define CHROME_PICK_MAX_SCROLL ((READER_CHROME_ITEM_ROWS - CHROME_PICK_VISIBLE) * CHROME_PICK_PITCH)
-_Static_assert(CHROME_ROW_TOP + CHROME_ROW_VIEW_HEIGHT < 1112, "chrome rows must clear the hint");
+_Static_assert(CHROME_ROW_TOP >= KEY_SETTINGS_TOP + 92, "chrome rows must clear the title");
+_Static_assert(CHROME_ROW_TOP + CHROME_ROW_VIEW_HEIGHT <= 1090, "chrome rows must clear the hint");
 _Static_assert(CHROME_PICK_TOP + CHROME_PICK_VIEW_HEIGHT < 1112, "chrome picker must clear the hint");
 static EpdRect chrome_row_rect(int row) {
     return (EpdRect){36, CHROME_ROW_TOP - s_chrome_scroll + row * CHROME_ROW_PITCH, 612, CHROME_ROW_HEIGHT};
@@ -2439,27 +2440,28 @@ static void draw_chrome_row(uint8_t *fb, int row) {
                                         "页脚左侧", "页脚中间", "页脚右侧"};
     EpdRect card = chrome_row_rect(row);
     if (!chrome_row_visible(card, CHROME_ROW_TOP, CHROME_ROW_VIEW_HEIGHT)) return;
+    const int cy = card.y + card.height / 2;
     ui_fill_round_rect(fb, card, 20, 0xf0);
     ui_draw_control_frame(fb, card, 20, 0x58);
     if (row == CHROME_ROW_COUNT - 1) {
-        reader_panel_text_vc(fb, 342, card.y + 48, 26, "恢复默认布局", EPD_DRAW_ALIGN_CENTER, false);
+        reader_panel_text_vc(fb, 342, cy, 26, "恢复默认布局", EPD_DRAW_ALIGN_CENTER, false);
         return;
     }
     if (row >= 6) {
         const unsigned bar = (unsigned)row - 6;
         char value[24];
         snprintf(value, sizeof(value), "%d px", s_chrome_height[bar]);
-        ui_text_box(fb, (EpdRect){58, card.y + 24, 238, 48}, 26,
+        ui_text_box(fb, (EpdRect){58, cy - 24, 238, 48}, 26,
                     bar ? "页脚高度" : "页眉高度", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_box(fb, (EpdRect){414, card.y + 24, 140, 48}, 25, value, EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_box(fb, (EpdRect){338, card.y + 16, 72, 64}, 32, "−", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_box(fb, (EpdRect){566, card.y + 16, 72, 64}, 32, "+", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){414, cy - 24, 140, 48}, 25, value, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){338, cy - 32, 72, 64}, 32, "−", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){566, cy - 32, 72, 64}, 32, "+", EPD_DRAW_ALIGN_CENTER, false);
         return;
     }
     const app_reader_slot_item_t item = app_settings_reader_chrome_item((unsigned)row / 3, (unsigned)row % 3);
-    ui_text_box(fb,(EpdRect){58,card.y+24,238,48},26,names[row],EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){322,card.y+24,270,48},25,reader_chrome_item_label(item),EPD_DRAW_ALIGN_RIGHT,false);
-    ui_draw_icon(fb, 625, card.y + 48, 20, UI_ICON_CHEVRON_DOWN, 0x38);
+    ui_text_box(fb,(EpdRect){58,cy-24,238,48},26,names[row],EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,cy-24,270,48},25,reader_chrome_item_label(item),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, cy, 20, UI_ICON_CHEVRON_DOWN, 0x38);
 }
 static void draw_chrome_settings(uint8_t *fb) {
     draw_sheet(fb, KEY_SETTINGS_TOP, "页眉页脚");

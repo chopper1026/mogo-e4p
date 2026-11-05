@@ -21,8 +21,31 @@ unit = r'''
 #include "settings.h"
 #include "reader_chrome.h"
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {int unused;} app_ctx_t;
-typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
+typedef struct {uint8_t *fb;} app_ctx_t;
+typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_AREA} app_redraw_t;
+enum {UI_GESTURE_MOVE,UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D};
+typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
+enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGHT};
+enum {MODE_GL16,UI_GRAY_BLACK,UI_ICON_CHEVRON_DOWN};
+static EpdRect s_area,drawn_card;
+static unsigned renders,drawn_rows;
+static void render(app_ctx_t *ctx,uint8_t *fb){assert(ctx->fb==fb);++renders;}
+static void ui_fill_round_rect(uint8_t *fb,EpdRect card,int radius,int gray){(void)fb;(void)radius;(void)gray;drawn_card=card;++drawn_rows;}
+static void ui_draw_control_frame(uint8_t *fb,EpdRect card,int radius,int gray){(void)fb;(void)card;(void)radius;(void)gray;}
+static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inverted){
+ (void)fb;(void)px;(void)text;(void)align;(void)inverted;
+ assert(box.x>=drawn_card.x&&box.x+box.width<=drawn_card.x+drawn_card.width);
+ assert(box.y>=drawn_card.y&&box.y+box.height<=drawn_card.y+drawn_card.height);
+ assert(box.y+box.height/2==drawn_card.y+drawn_card.height/2);
+}
+static void reader_panel_text_vc(uint8_t *fb,int x,int cy,int px,const char *text,enum EpdFontFlags align,bool inverted){
+ (void)fb;(void)x;(void)px;(void)text;(void)align;(void)inverted;
+ assert(cy==drawn_card.y+drawn_card.height/2);
+}
+static void ui_draw_icon(uint8_t *fb,int x,int cy,int size,int icon,int gray){
+ (void)fb;(void)x;(void)size;(void)icon;(void)gray;
+ assert(cy==drawn_card.y+drawn_card.height/2);
+}
 enum {READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_CHROME_SETTINGS,READER_PANEL_CHROME_PICKER};
 static app_reader_slot_item_t items[2][3];
 static unsigned s_chrome_pick_bar,s_chrome_pick_slot;
@@ -68,11 +91,16 @@ for name in ('chrome_copy', 'cut_last_utf8', 'slot_text', 'slot_measure', 'slot_
     unit += function(name, chrome) + '\n'
 unit += '\n'.join(re.findall(r'^#define CHROME_.*', page, re.M)) + '\n'
 unit += re.search(r'static const app_reader_slot_item_t s_chrome_item_order\[\] = \{.*?\};', page, re.S)[0] + '\n'
-unit += '#define READER_CHROME_ITEM_ROWS 10\n#define KEY_SETTINGS_TOP 530\n'
+unit += '#define READER_CHROME_ITEM_ROWS 10\n'
+unit += '\n'.join(re.findall(r'^#define UI_LOCK_(?:WIDTH|HEIGHT) .*', (ROOT / 'main/ui/ui_kit.h').read_text(), re.M)) + '\n'
+unit += re.search(r'^#define KEY_SETTINGS_TOP .*', page, re.M)[0] + '\n'
 for name in ('chrome_row_rect', 'chrome_pick_card'):
     unit += function(name, book) + '\n'
 if 'static bool chrome_row_visible(' in page:
     unit += function('chrome_row_visible', book) + '\n'
+unit += function('reader_chrome_item_label', chrome) + '\n'
+unit += function('draw_chrome_row', book) + '\n'
+unit += function('chrome_list_scroll', book) + '\n'
 unit += function('apply_reader_chrome_heights', book) + '\n'
 action = function('reader_panel_action', book)
 start = action.index('    if (s_reader_panel == READER_PANEL_CHROME_SETTINGS ||')
@@ -98,9 +126,20 @@ int main(void){
   data.clock="";data.date="";check_layout(&data);data.clock="12:34";data.date="11-01 周日";
  }
  app_ctx_t ctx={0};
+ assert(CHROME_ROW_VISIBLE==6&&CHROME_ROW_HEIGHT>=80);
+ assert(CHROME_ROW_TOP>=KEY_SETTINGS_TOP+92&&CHROME_ROW_TOP<=KEY_SETTINGS_TOP+108);
+ assert(CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT<=1090);
+ for(int row=0;row<CHROME_ROW_COUNT;++row)
+  assert(chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT)==(row<6));
  for(s_chrome_scroll=0;s_chrome_scroll<=CHROME_ROW_MAX_SCROLL;s_chrome_scroll+=CHROME_ROW_PITCH){
+  drawn_rows=0;
+  for(int row=0;row<CHROME_ROW_COUNT;++row)draw_chrome_row(NULL,row);
+  assert(drawn_rows==6);
   s_reader_panel=READER_PANEL_CHROME_SETTINGS;unsigned before=saves;
   assert(action(&ctx,300,1112)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_CHROME_SETTINGS&&saves==before);
+  assert(action(&ctx,300,CHROME_ROW_TOP-1)==APP_REDRAW_NONE);
+  assert(action(&ctx,300,CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT)==APP_REDRAW_NONE);
+  assert(action(&ctx,300,CHROME_ROW_TOP+CHROME_ROW_HEIGHT)==APP_REDRAW_NONE);
   for(int row=0;row<CHROME_ROW_COUNT;++row){
    EpdRect card=chrome_row_rect(row);
    if(card.y<CHROME_ROW_TOP||card.y+card.height>CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT)continue;
@@ -138,6 +177,30 @@ int main(void){
  assert(action(&ctx,602,height.y+48)==APP_REDRAW_NONE&&saves==before);
  assert(action(&ctx,474,height.y+48)==APP_REDRAW_NONE&&saves==before);
  assert(action(&ctx,374,height.y+48)==APP_REDRAW_PAGE&&s_chrome_height[0]==APP_READER_HEADER_HEIGHT_MAX-8);
+ int scroll=0;bool drag=false;
+ ui_gesture_event_t ev={.type=UI_GESTURE_SWIPE_U,.x0=300,.x=300,.y0=CHROME_ROW_TOP+120,.y=CHROME_ROW_TOP};
+ for(int step=0;step<CHROME_ROW_COUNT-CHROME_ROW_VISIBLE;++step){
+  unsigned old_renders=renders;
+  assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA);
+  assert(scroll==(step+1)*CHROME_ROW_PITCH&&renders==old_renders+1);
+  assert(s_area.x==0&&s_area.y==CHROME_ROW_TOP&&s_area.width==UI_LOCK_WIDTH&&s_area.height==CHROME_ROW_VIEW_HEIGHT&&s_mode==MODE_GL16);
+ }
+ assert(scroll==CHROME_ROW_MAX_SCROLL);
+ s_chrome_scroll=scroll;
+ assert(chrome_row_visible(chrome_row_rect(CHROME_ROW_COUNT-1),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT));
+ unsigned old_renders=renders;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&renders==old_renders);
+ ev.type=UI_GESTURE_SWIPE_D;
+ while(scroll)assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA);
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE);
+ ev.type=UI_GESTURE_SWIPE_U;ev.y0=CHROME_ROW_TOP-1;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&scroll==0);
+ ev.y0=CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&scroll==0);
+ ev.type=UI_GESTURE_MOVE;ev.y0=CHROME_ROW_TOP+120;ev.y=ev.y0-108;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA&&drag&&scroll==CHROME_ROW_PITCH);
+ ev.type=UI_GESTURE_SWIPE_U;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&!drag&&scroll==CHROME_ROW_PITCH);
  puts("PASS: all chrome slot combinations stay bounded and disjoint; visible rows alone accept taps; reset reports failures");
  (void)s_mode;
 }

@@ -115,6 +115,7 @@ for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slid
 for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_panel_text_vc',book)+'\n'
+unit+=re.search(r'^#define KEY_SETTINGS_TOP .*',s,re.M)[0]+'\n'
 unit+='\n'.join(re.findall(r'^#define CHROME_ROW_.*',s,re.M))+'\n'
 unit+=r'''
 static int s_chrome_scroll,s_chrome_height[2]={144,121};
