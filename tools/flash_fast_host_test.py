@@ -483,9 +483,9 @@ class FlashTests(unittest.TestCase):
                         patch.object(fast, "flash_bundle", wraps=fast.flash_bundle) as flash, \
                         patch.object(fast, "cleanup_device", wraps=fast.cleanup_device) as cleanup:
                     self.assertEqual(fast.main(), 0)
-                    expected = fast.STARTED + (180 if timeout is None else timeout)
-                    self.assertEqual(flash.call_args.args[3].end, expected - fast.CLEANUP_SECONDS)
-                    self.assertEqual(cleanup.call_args.args[2].end, expected)
+                    expected = 180 if timeout is None else timeout
+                    self.assertEqual(flash.call_args.args[3].end, fast.STARTED + (expected - fast.CLEANUP_SECONDS))
+                    self.assertEqual(cleanup.call_args.args[2].end, fast.STARTED + expected)
                 self.assertTrue(device.closed)
 
     def run_boot(self, log):

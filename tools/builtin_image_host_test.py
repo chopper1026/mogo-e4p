@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # 中文：真实逐行解压与原全屏绘制四方向逐像素对比，覆盖损坏及内存不足。
 # English: Compare real row decoding with original full-frame rendering in four rotations, including corruption and OOM.
+from io import BytesIO
 from pathlib import Path
 import struct
 import subprocess
@@ -14,7 +15,13 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 with Image.open(SOURCE) as source:
     for path, data in outputs(source.convert('L')).items():
-        assert path.read_bytes() == data, f'Regenerate {path}'
+        if path.suffix == '.png':
+            # PNG压缩字节可随zlib变化，解码像素必须一致。/ Compression bytes may vary with zlib; decoded pixels must match.
+            with Image.open(path) as actual, Image.open(BytesIO(data)) as expected:
+                assert actual.size == expected.size, f'Regenerate {path}'
+                assert actual.convert('RGBA').tobytes() == expected.convert('RGBA').tobytes(), f'Regenerate {path}'
+        else:
+            assert path.read_bytes() == data, f'Regenerate {path}'
 assert not (ROOT / 'assets/image/init-loading.png').exists()
 assert not (ROOT / 'main/assets/loading_4bpp.bin').exists()
 cmake = (ROOT / 'main/CMakeLists.txt').read_text()

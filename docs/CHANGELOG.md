@@ -3,6 +3,14 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.5 · 2026-11-05
+
+- 重新设计阅读手账像素画风格。
+- 优化天气接口逻辑，不再强制校验设备时间。
+- 移除文件管理内文件夹最大显示96个文件的限制。
+- 优化中段电量显示。
+- 文件页面 UI 改版。
+
 ## v1.0.4 · 本地测试 / Local testing · 2026-11-05
 
 - 文件页移除大标题和外框，存储信息与三种传输入口改为简洁排版；根目录每页六行，子目录九行，长文件名保留扩展名并显示省略号，点击区域同步调整。/ Simplify Files with unframed storage and three icon-labelled transfer routes, six root rows and nine directory rows; ellipsize long names while retaining extensions and align touch targets with the new layout.
