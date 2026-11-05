@@ -55,9 +55,9 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 | :-- | :-- |
 | `mogo-e4p-<版本号>-usb.zip` | 完整 USB 刷机包，包含操作说明、镜像与校验值 |
 | `mogo-e4p-<版本号>-full.bin` | USB 单文件整机镜像，使用对应版本说明中的刷写方式 |
-| `mogo-e4p-update-<版本号>.bin` | TF / OTA 应用镜像，不是整机镜像，不能当作完整 USB 包使用 |
+| `mogo-e4p-update-<版本号>.bin` | 设备升级用的应用镜像，不是整机镜像，不能当作完整 USB 包使用 |
 
-当前设置页提供联网 OTA；TF 升级底层仍保留，但设置入口隐藏。首次安装、恢复或基础布局不兼容时使用完整 USB 包，不手写分区地址。版本号不含 `v`，Git 标签使用 `v<版本号>`。
+已安装的用户可在设备设置中检查更新。首次安装或恢复设备时使用完整 USB 包，并按对应版本的说明操作。
 
 </details>
 
@@ -187,7 +187,7 @@ idf.py --preview set-target esp32s31
 idf.py --preview build
 ```
 
-`IDF_PATH` 应指向本机的 ESP-IDF v6.1 安装目录。产品与 OTA 使用 `sdkconfig.defaults`；已有 `sdkconfig` 会保留旧值，修改 defaults 后应核对生成配置。
+`IDF_PATH` 应指向本机的 ESP-IDF v6.1 安装目录。产品配置使用 `sdkconfig.defaults`；已有 `sdkconfig` 会保留旧值，修改 defaults 后应核对生成配置。
 
 <details>
 <summary>CI 配置、宿主回归与本地刷写</summary>
@@ -212,18 +212,6 @@ python3 tools/flash_fast.py prepare --build-dir build
 需要本地刷写且已确认目标设备与操作授权时，按[项目刷机说明](.agents/skills/mogo-e4p-flash/SKILL.md)执行 `python3 tools/flash_fast.py flash --yes`。脚本默认及上限为 180 秒，动态识别活动应用分区，不自动退回整机擦写。不要刷入旧包或把局部写入失败当作成功。
 
 本地测试沿用当前正式版本号，用日期和说明区分；产物留在忽略的构建目录，不覆盖已经发布的同版本文件。
-
-</details>
-
-<a id="联网升级--online-updates"></a>
-<details>
-<summary>联网 OTA 与发布边界</summary>
-
-默认 stable 清单为 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json`。设备接受该平台 `/files/firmware/ota/` 下的 HTTPS 镜像，以及已有 GitHub 来源和显式配置的额外来源；保留 GitHub 回退路径。清单的 project、board、layout、版本、大小与 SHA-256 必须匹配设备，旧板清单不能用于 E4P。
-
-已有 `sdkconfig` 不会自动采用新的默认地址，需在 menuconfig 更新 Primary manifest URL 或重新生成配置；已安装设备需要先刷入包含新配置的构建。
-
-正式发布时，GitHub Release、官网刷机包与 OTA 提交必须来自同一次正式构建。标签构建提交的是平台草稿，管理员审核发布后才上线；草稿成功不等于设备已可升级。详见[平台 OTA 操作](docs/development/guides/PLATFORM_OTA.md)。
 
 </details>
 
