@@ -8,9 +8,32 @@ menu "Built-in components"
             requires a configured platform and confirmed attribution/license.
 endmenu
 
-# 触摸丢点诊断开关；仅排查构建启用，正式版保持关闭。
-# Touch tap-drop diagnostics; enable only on investigation builds.
+# 触摸阈值与丢点诊断；诊断日志仅在排查构建启用。
+# Touch threshold and tap-drop diagnostics; enable diagnostic logging only for investigations.
 menu "Touch diagnostics"
+
+    config TOUCH_FT6336U_THRESHOLD_PERCENT
+        int "Experimental FT6336U touch threshold (% of module reset value)"
+        depends on IDF_TARGET_ESP32S31
+        range 50 100
+        default 100
+        help
+            100 保留模组阈值，不新增寄存器访问。75/50 将正常模式 0x80
+            检测阈值降至复位实际值的 75%/50%（向上取整，不写零）。
+            初始化和唤醒时重新应用，写后校验，失败恢复原值。
+            这是整颗触摸芯片的实验调校，不保证单独作用于盖板三键；
+            产品配置采用75%，100%可恢复原阈值。不同膜厚、屏幕误触
+            及充电噪声仍需在对应样机验证。
+            不进入工厂/校准/升级模式，不写 0xA9 量产测试阈值。
+            100 preserves the module default without extra register access.
+            75/50 scales normal-mode register 0x80 to 75%/50% of its reset
+            value, rounded up and never zero. Apply after init/wake resets,
+            verify readback and restore the original on failure. This is an
+            experimental chip-wide setting, not a proven cover-key-only
+            control. Product defaults select 75%; use 100% to restore the
+            original. Validate each glass, screen false touches and charger
+            noise on hardware. No factory, calibration,
+            upgrade or production-test threshold (0xA9) writes.
 
     config TOUCH_DIAG
         bool "Enable touch tap-drop diagnostics logging"

@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.5 · 本地测试 / Local testing · 2026-11-06
+
+- FT6336U 检测阈值采用模组复位原值的75%，提升弱触摸响应；支持恢复100%原阈值，初始化与唤醒均读回校验、失败恢复。此为通用阈值，不是三键专用参数，不同厚膜、屏幕误触与充电噪声仍需对应样机验证。/ Use 75% of the FT6336U module reset threshold for weaker touches, with 100% available to preserve the original and verified readback/rollback at init/wake. This is a general threshold, not key-specific; different protectors, screen false touches and charger noise still need hardware checks.
+- 修复刷新等阻塞期间盖板左、中、右三键积压回放漏按；保留原按键映射，中键短按/长按按采样时间区分，切页后的新返回请求不再被清除。宿主回归覆盖实时与回放交错。/ Fix lost left/middle/right panel presses buffered during refresh and other blocking work; preserve mappings, distinguish middle taps/holds by sample time and retain fresh Back requests after navigation. Host regressions cover mixed live/replayed input.
+
 ## v1.0.5 · 2026-11-05
 
 - 重新设计阅读手账像素画风格。

@@ -255,6 +255,128 @@ int main(void){
     puts("PASS: FT hardware reset/mode init, dual tracking IDs, invalid frames, exact cover-key bounds, landscape and failed wake/init");
 }
 '''
+TOUCH_THRESHOLD_MODEL = r'''
+static unsigned threshold_reads, threshold_writes, tuning_reads;
+static unsigned threshold_read_failures, threshold_write_failures;
+static bool threshold_partial_write, threshold_ignore_write;
+static uint8_t module_threshold;
+static esp_err_t threshold_read(i2c_master_dev_handle_t dev,uint8_t reg,uint8_t *data,size_t n,int timeout){
+    if(reg==0x00 || reg==0x9f || reg==0xa0 || reg==0x80)++tuning_reads;
+    if(reg==0x80){
+        assert(n==1);++threshold_reads;
+        if(threshold_read_failures&(1u<<(threshold_reads-1)))return ESP_FAIL;
+    }
+    return board_i2c_read(dev,reg,data,n,timeout);
+}
+static esp_err_t threshold_transmit(i2c_master_dev_handle_t dev,const uint8_t *data,size_t n,int timeout){
+    assert(n==2 && (data[0]==0xa4 || data[0]==0x80));
+    if(data[0]==0x80){
+        ++threshold_writes;
+        if(threshold_write_failures&(1u<<(threshold_writes-1))){
+            if(threshold_partial_write)assert(board_i2c_transmit(dev,data,n,timeout)==ESP_OK);
+            return ESP_FAIL;
+        }
+        if(threshold_ignore_write && threshold_writes==1)return ESP_OK;
+    }
+    return board_i2c_transmit(dev,data,n,timeout);
+}
+#define board_i2c_read threshold_read
+#define board_i2c_transmit threshold_transmit
+'''
+TOUCH_THRESHOLD_TEST = r'''
+static int threshold_reset(void){
+    ++resets;devices[0x38].regs[0x80]=module_threshold;devices[0x38].regs[0xa4]=1;
+    vTaskDelay(310);return ESP_OK;
+}
+static void threshold_fixture(uint8_t base){
+    model_reset();module_threshold=base;
+    threshold_reads=threshold_writes=tuning_reads=0;
+    threshold_read_failures=threshold_write_failures=0;
+    threshold_partial_write=threshold_ignore_write=false;
+    uint8_t *r=devices[0x38].regs;
+    r[0xa3]=0x64;r[0x9f]=0x26;r[0xa0]=2;
+    r[0xa9]=0x19;r[0x85]=0xa0;r[0x86]=1;r[0x88]=8;
+}
+static cst836u_handle_t threshold_open(void){
+    cst836u_config_t cfg={.int_gpio=3,.rst_gpio=-1,.reset_fn=threshold_reset};
+    cst836u_handle_t h=NULL;
+    assert(cst836u_init((void*)1,&cfg,&h)==ESP_OK && h);
+    const uint8_t *r=devices[0x38].regs;
+    assert(r[0xa9]==0x19 && r[0x85]==0xa0 && r[0x86]==1 && r[0x88]==8);
+    return h;
+}
+static unsigned scaled_threshold(unsigned base){
+    return (base*CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT+99)/100;
+}
+int main(void){
+    const uint8_t bases[]={0,1,2,3,4,5,22,40,187,255};
+    for(unsigned i=0;i<sizeof(bases);++i){
+        threshold_fixture(bases[i]);cst836u_handle_t h=threshold_open();
+        assert(devices[0x38].regs[0x80]==scaled_threshold(bases[i]));
+        assert(threshold_writes==(scaled_threshold(bases[i])!=bases[i]));
+        if(CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT==100)assert(!tuning_reads);
+        assert(cst836u_deinit(h)==ESP_OK);
+    }
+    if(CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT==100){
+        puts("PASS: FT threshold 100% preserves reset values with no additional register access");return 0;
+    }
+    // 每次复位重新取模组值，唤醒不能把阈值越降越低。/ Resets re-read module values; wakes must not compound tuning.
+    threshold_fixture(40);cst836u_handle_t h=threshold_open();
+    for(int i=0;i<3;++i){
+        assert(cst836u_set_mode(h,CST836U_MODE_DEEPSLEEP)==ESP_OK);
+        assert(cst836u_wake(h)==ESP_OK && devices[0x38].regs[0x80]==scaled_threshold(40));
+    }
+    module_threshold=80;
+    assert(cst836u_wake(h)==ESP_OK && devices[0x38].regs[0x80]==scaled_threshold(80));
+    assert(cst836u_deinit(h)==ESP_OK);
+    // 型号、工作模式和初始读取不可信时，保留原值。/ Preserve defaults for unknown chips/modes or a failed initial read.
+    const uint8_t guards[]={0xa3,0x9f,0xa0,0x00};
+    for(unsigned i=0;i<sizeof(guards);++i){
+        threshold_fixture(40);devices[0x38].regs[guards[i]]=0x40;h=threshold_open();
+        assert(!threshold_writes && devices[0x38].regs[0x80]==40);
+        assert(cst836u_deinit(h)==ESP_OK);
+    }
+    for(int i=0;i<3;++i){
+        threshold_fixture(40);fail_read_reg=i==0?0x00:(i==1?0x9f:0xa0);h=threshold_open();
+        assert(!threshold_writes && devices[0x38].regs[0x80]==40);
+        assert(cst836u_deinit(h)==ESP_OK);
+    }
+    threshold_fixture(40);threshold_read_failures=1;h=threshold_open();
+    assert(!threshold_writes && devices[0x38].regs[0x80]==40);assert(cst836u_deinit(h)==ESP_OK);
+    // 写失败可能已经生效；不论读回不符或读错，均恢复并验证原值。
+    // Failed writes may take effect; restore and verify on errors or mismatched readback.
+    for(int i=0;i<4;++i){
+        threshold_fixture(40);
+        if(i<2){threshold_write_failures=1;threshold_partial_write=i==1;}
+        if(i==2)threshold_ignore_write=true;
+        if(i==3)threshold_read_failures=2;
+        h=threshold_open();assert(threshold_writes==2 && devices[0x38].regs[0x80]==40);
+        assert(cst836u_deinit(h)==ESP_OK);
+    }
+    threshold_fixture(40);threshold_read_failures=2;threshold_write_failures=2;
+    threshold_partial_write=true;h=threshold_open();
+    assert(threshold_writes==2 && devices[0x38].regs[0x80]==40);assert(cst836u_deinit(h)==ESP_OK);
+    // 恢复无法验证时不得宣称启动或唤醒成功。/ Unverified recovery must fail initialization or wake.
+    threshold_fixture(40);threshold_read_failures=2;threshold_write_failures=2;
+    cst836u_config_t cfg={.int_gpio=3,.rst_gpio=-1,.reset_fn=threshold_reset};h=NULL;
+    assert(cst836u_init((void*)1,&cfg,&h)!=ESP_OK && !h && removals==1);
+    threshold_fixture(40);threshold_read_failures=2|4;h=NULL;
+    assert(cst836u_init((void*)1,&cfg,&h)!=ESP_OK && !h && removals==1);
+    threshold_fixture(40);h=threshold_open();
+    assert(cst836u_set_mode(h,CST836U_MODE_DEEPSLEEP)==ESP_OK);
+    threshold_reads=threshold_writes=0;threshold_read_failures=2;threshold_write_failures=2;
+    assert(cst836u_wake(h)!=ESP_OK && cst836u_get_mode(h)==CST836U_MODE_DEEPSLEEP);
+    threshold_reads=threshold_writes=threshold_read_failures=threshold_write_failures=0;
+    assert(cst836u_wake(h)==ESP_OK && devices[0x38].regs[0x80]==scaled_threshold(40));
+    assert(cst836u_get_mode(h)==CST836U_MODE_NORMAL);
+    threshold_reads=threshold_writes=0;threshold_read_failures=2;threshold_write_failures=2;
+    assert(cst836u_wake(h)!=ESP_OK && cst836u_get_mode(h)==CST836U_MODE_DEEPSLEEP);
+    cst836u_touch_t t;unsigned before=combined_count;
+    assert(cst836u_read(h,&t)==ESP_OK && !t.touched && combined_count==before);
+    assert(cst836u_deinit(h)==ESP_OK);
+    puts("PASS: FT threshold scaling, chip/mode guards, reset/wake reapply, partial writes, readback and verified rollback");
+}
+'''
 ACCEL_TEST = r'''
 int main(void){
     model_reset();struct sc7a20h_dev_t storage={.dev=&devices[0x19],.int1_gpio=2,.cfg=SC7A20H_CONFIG_IDLE};
@@ -788,6 +910,11 @@ def main():
                  ('wake_poll', wake_poll_source(), WAKE_POLL_TEST),
                  ('sleep', sleep_source(), SLEEP_TEST),
                  ('sleep_off', sleep_source(False), SLEEP_TEST)]
+        for percent in (100,75,50):
+            source = (f'#define CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT {percent}\n' +
+                      TOUCH_THRESHOLD_MODEL + '#include "' +
+                      str(ROOT/'components/cst836u/cst836u.c') + '"\n')
+            cases.append((f'touch_threshold_{percent}',source,TOUCH_THRESHOLD_TEST))
         for name, source, test in cases:
             c, binary = work/(name+'.c'), work/name
             c.write_text(MODEL + bus + source + test)
