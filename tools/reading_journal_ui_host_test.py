@@ -24,7 +24,7 @@ def source(path):
 
 
 def unit():
-    code = host.host_preamble()
+    code = host.host_preamble().replace("#define UI_GRAY_LIGHT 224", "#define UI_GRAY_LIGHT 144")
     begin, end = code.index("static struct {void *p;"), code.index("static enum EpdRotation")
     code = code[:begin] + r'''
 void *heap_caps_malloc(size_t n,int c){(void)c;return malloc(n);}
@@ -61,7 +61,7 @@ static void ui_clear_page(uint8_t *f){memset(f,255,684*1216/2);}
     code += host.epdiy_slices()
     code += host.function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
     code += "\n".join(host.function(name, KIT) for name in (
-        "clamp_radius", "draw_arc", "ui_draw_round_rect_raw", "ui_draw_round_rect", "ui_inset_rect",
+        "clamp_radius", "draw_arc", "ui_draw_round_rect_raw", "ui_draw_round_rect", "ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_inset_rect",
         "ui_draw_separator", "icon_nibble", "ui_draw_icon", "ui_read_pixel", "ui_text_fixed_context_width_px",
         "ui_text_fixed_width_px", "ui_text_fixed_context_vc", "ui_text_fixed_vc", "ui_text_fixed_context_aa_vc"))
     code += r'''
@@ -82,6 +82,9 @@ static void checked_text(uint8_t *f,int x,int y,int px,const char *s,enum EpdFon
 '''
     code += source("main/services/reading_journal_model.c")
     code += source("main/ui/ui_reading_journal.c")
+    # 同样的原生字体/4bpp环境执行真实打卡题头。/ Run the real streak header with the same native font and 4bpp setup.
+    code += '\n#include "ui_reading_streak.h"\n'
+    code += source("main/ui/ui_reading_streak.c").replace("static void fitted(", "static void streak_fitted(").replace("fitted(fb,", "streak_fitted(fb,")
     code += r'''
 #undef ui_text_fixed_vc
 static reading_journal_model_t journal;
@@ -164,9 +167,38 @@ static void widget(uint8_t *fb,unsigned slot){
     for(int y=0;y<1216;++y)if(y<r.y||y>=r.y+r.height)for(int x=0;x<684;++x)assert(pixel_at(fb,x,y)==0x70);
     allowed_top=0;allowed_bottom=1216;
 }
+static void streak_header(uint8_t *fb,const char *folder){
+    reading_journal_date_t d=date(2026,11,6);
+    const uint32_t ms[7]={READING_STREAK_GOAL_MS,12*60000,READING_STREAK_GOAL_MS,0,READING_STREAK_GOAL_MS,READING_STREAK_GOAL_MS,READING_STREAK_GOAL_MS};
+    reading_journal_model_t model={0};reading_journal_sync(&model,&d);
+    for(unsigned i=0;i<7;++i)reading_journal_streak_add(&model,d.serial-6+(int)i,ms[i]);
+    reading_streak_view_t view=reading_journal_streak_view(&model,&d);
+    assert(view.days==3&&view.dates[0]==31&&view.dates[6]==6);
+    allowed_top=62;allowed_bottom=168;
+    for(unsigned state=0;state<8;++state){
+        if(state==1){view.milliseconds[6]=29*60000;view.days=2;}
+        if(state==2){view.milliseconds[6]=READING_STREAK_GOAL_MS;view.days=3;}
+        if(state==3){for(unsigned i=0;i<7;++i)view.milliseconds[i]=READING_STREAK_GOAL_MS;view.days=128;}
+        if(state==4)view.days=27759;
+        if(state==5){view.days=0;memset(view.milliseconds,0,sizeof(view.milliseconds));}
+        if(state==6)memset(&view,0,sizeof(view));
+        if(state==7){view.valid=true;view.days=12;}
+        memset(fb,0x77,684*1216/2);
+        EpdRect area=ui_reading_streak_area();ui_fill_rect_fast(area,255,fb);ui_reading_streak_draw(fb,&view);
+        for(int y=0;y<1216;++y)for(int x=0;x<684;++x)
+            if(x<area.x||x>=area.x+area.width||y<area.y||y>=area.y+area.height)assert(pixel_at(fb,x,y)==0x70);
+        if(!state){
+            assert(pixel_at(fb,115,125)==0x90&&pixel_at(fb,133,125)==0xf0&&pixel_at(fb,227,125)==0);
+        }
+        char name[48];snprintf(name,sizeof(name),"streak-%u",state);snapshot(fb,folder,name);
+    }
+    allowed_top=0;allowed_bottom=1216;
+    puts("PASS: real seven-spine header, three state pixels, 29/30 minutes, 0/3/12/128/27759 days, invalid time and header-only bounds");
+}
 int main(int argc,char **argv){
     assert(argc==2&&ttf_font_open_builtin()==ESP_OK);
     uint8_t *fb=malloc(684*1216/2);assert(fb);app_ctx_t ctx={.fb=fb};interaction(&ctx);
+    streak_header(fb,argv[1]);
     set_date(2026,11,4);
     add(1,1,"瓦尔登湖",5,44,64);add(2,1,"瓦尔登湖",7,67,102);add(2,2,"月亮与六便士",4,35,49);
     add(3,2,"月亮与六便士",6,80,111);add(4,3,"山茶文具店",3,28,40);add(4,1,"瓦尔登湖",6,58,86);
@@ -243,6 +275,8 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
         if raw.stem.startswith("widget"):
             top = 168 if raw.stem.startswith("widget-upper") else 640
             image = image.crop((0, top, 684, top + 472))
+        elif raw.stem.startswith("streak"):
+            image = image.crop((24, 62, 576, 168)).resize((1104, 212), Image.Resampling.NEAREST)
         image.save(raw.with_suffix(".png"))
         raw.unlink()
     scenes = json.loads((ROOT / "main/assets/reading-scenes/scenes.json").read_text())["scenes"]

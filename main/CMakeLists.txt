@@ -109,6 +109,7 @@ idf_component_register(
         "ui/ui_kit.c"
         "ui/ui_weather.c"
         "ui/ui_reading_journal.c"
+        "ui/ui_reading_streak.c"
         "ui/ui_reader_heading.c"
         "ui/ui_reader_settings.c"
         "ui/ui_builtin_image.c"

@@ -88,6 +88,50 @@ static void model_cases(void){
     reading_journal_clear(&m);reading_journal_clear(&decoded);
     puts("PASS: civil dates, leap years, six-row months, scene sequence/rollback, identity, chapter dedup, totals, limits, allocation failure and every-byte snapshot corruption");
 }
+static void streak_cases(void){
+    reading_journal_model_t m={0},decoded={0};reading_journal_date_t d=date(2026,10,25);
+    reading_journal_sync(&m,&d);
+    for(int i=0;i<12;++i){
+        d=date(2026,10,25);d.serial+=i;
+        time_t epoch=(time_t)d.serial*86400-8*3600;
+        assert(reading_journal_date((int64_t)epoch*1000,&d));reading_journal_sync(&m,&d);
+        reading_journal_streak_add(&m,d.serial,READING_STREAK_GOAL_MS-1);
+        assert(reading_journal_streak_view(&m,&d).days==(unsigned)i);
+        reading_journal_streak_add(&m,d.serial,1);
+        assert(reading_journal_streak_view(&m,&d).days==(unsigned)i+1);
+    }
+    assert(d.month==11&&d.day==5&&!m.count);
+    reading_streak_view_t view=reading_journal_streak_view(&m,&d);
+    assert(view.valid&&view.days==12&&view.dates[0]==30&&view.dates[6]==5);
+    size_t length=reading_journal_encode(&m,8,NULL,0);uint8_t *data=malloc(length);
+    assert(reading_journal_encode(&m,8,data,length)==length&&reading_journal_decode(&decoded,NULL,data,length));
+    assert(reading_journal_streak_view(&decoded,&d).days==12);free(data);
+    d=date(2026,11,7);reading_journal_sync(&m,&d);assert(!reading_journal_streak_view(&m,&d).days);
+    reading_journal_streak_add(&m,d.serial,READING_STREAK_GOAL_MS);assert(reading_journal_streak_view(&m,&d).days==1);
+    d=date(2026,11,6);reading_journal_sync(&m,&d);assert(!reading_journal_streak_view(&m,&d).days);
+    d=date(2026,11,20);reading_journal_sync(&m,&d);assert(!m.streak.before);
+    assert(!reading_journal_streak_view(&m,NULL).valid);
+    reading_journal_clear(&m);memset(&m,0,sizeof(m));d=date(2028,3,1);reading_journal_sync(&m,&d);
+    view=reading_journal_streak_view(&m,&d);assert(view.dates[5]==29&&view.dates[6]==1);
+    d=date(2027,1,1);reading_journal_sync(&m,&d);view=reading_journal_streak_view(&m,&d);assert(view.dates[5]==31);
+    reading_journal_clear(&m);memset(&m,0,sizeof(m));d=date(2026,11,12);reading_journal_sync(&m,&d);
+    for(unsigned day=1;day<=12;++day){
+        assert(reading_journal_add(&m,day,1,"First",0,15*60000,0));
+        assert(reading_journal_add(&m,day,2,"Second",0,15*60000,0));
+    }
+    assert(reading_journal_streak_import(&m,&d)&&reading_journal_streak_view(&m,&d).days==12);
+    length=reading_journal_encode(&m,9,NULL,0);data=malloc(length);reading_journal_encode(&m,9,data,length);
+    // 重建真实旧版布局，验证升级只导入仍存在的当月记录。/ Rebuild the legacy layout and import only existing monthly records.
+    memmove(data+32,data+68,length-68);length-=36;memcpy(data,"KJR1",4);put32(data+4,(uint32_t)length);put32(data+28,checksum(data,length));
+    assert(reading_journal_decode(&decoded,NULL,data,length)&&!decoded.streak.day);
+    reading_journal_sync(&decoded,&d);assert(reading_journal_streak_view(&decoded,&d).days==12);
+    reading_journal_clear(&m);memset(&m,0,sizeof(m));d=date(2026,10,31);reading_journal_sync(&m,&d);
+    assert(reading_journal_add(&m,31,1,"October",0,READING_STREAK_GOAL_MS,0));
+    memset(&m.streak,0,sizeof(m.streak));d=date(2026,11,1);reading_journal_sync(&m,&d);
+    assert(!m.count&&reading_journal_streak_view(&m,&d).days==1&&m.streak.milliseconds[5]==READING_STREAK_GOAL_MS);
+    free(data);reading_journal_clear(&m);reading_journal_clear(&decoded);
+    puts("PASS: 29:59.999/30:00 threshold, multi-book totals, 12-day cross-month run, missing days, leap/year dates, clock rollback and KJR1 migration");
+}
 static void simulate_restart(void){
     reading_journal_clear(&s_model);memset(&s_model,0,sizeof(s_model));memset(&s_today,0,sizeof(s_today));
     s_started=s_loaded=s_dirty=s_manual=s_storage_error=s_capacity_error=false;
@@ -139,7 +183,41 @@ static void service_cases(void){
     simulate_restart();remove_slots();
     puts("PASS: reboot persistence, shared manual scenes, flash guard/write failure, partial-new-slot fallback, late-mount merge, midnight/month split, invalid time and idempotent category identity merge");
 }
-int main(void){model_cases();service_cases();assert(guards>=ends);return 0;}
+static void streak_service_cases(void){
+    remove_slots();clock_ms=civil(2026,10,31,23,59,59)+900;simulate_restart();app_reading_journal_poll();
+    for(unsigned i=0;i<359;++i)record(0,5000,0);
+    record(0,4700,0);assert(s_model.streak.milliseconds[6]==1799700);assert(app_reading_journal_flush());
+    clock_ms=civil(2026,11,1,0,0,0)+200;record(0,500,0);
+    assert(!s_model.streak.milliseconds[4]&&s_model.streak.milliseconds[5]==READING_STREAK_GOAL_MS);
+    assert(s_model.streak.milliseconds[6]==200&&reading_journal_streak_view(&s_model,&s_today).days==1);
+    assert(s_model.count==1&&reading_journal_totals(&s_model,1).milliseconds==200);
+    assert(app_reading_journal_flush());simulate_restart();app_reading_journal_poll();
+    assert(s_model.streak.milliseconds[5]==READING_STREAK_GOAL_MS&&s_model.streak.milliseconds[6]==200);
+    clock_ms=civil(2026,11,1,12,0,0);
+    for(unsigned i=0;i<200;++i)record(0,5000,0);assert(app_reading_journal_flush());
+    simulate_restart();mount_ok=false;
+    for(unsigned i=0;i<160;++i)record(0,5000,0);
+    assert(!s_loaded&&s_model.streak.milliseconds[6]==800000);
+    mount_ok=true;monotonic_us+=31000000;app_reading_journal_poll();
+    assert(s_loaded&&s_model.streak.milliseconds[6]==READING_STREAK_GOAL_MS);
+    assert(reading_journal_streak_view(&s_model,&s_today).days==2);
+    assert(app_reading_journal_flush());simulate_restart();app_reading_journal_poll();
+    assert(reading_journal_streak_view(&s_model,&s_today).days==2);
+    clock_ms=0;app_reading_journal_poll();assert(!reading_journal_streak_view(&s_model,&s_today).valid);
+    simulate_restart();remove_slots();
+    clock_ms=civil(2026,10,31,12,0,0);app_reading_journal_poll();assert(app_reading_journal_flush());
+    simulate_restart();mount_ok=false;
+    for(unsigned i=0;i<360;++i)record(0,5000,0);
+    assert(!s_loaded&&reading_journal_streak_view(&s_model,&s_today).days==1);
+    clock_ms=civil(2026,11,1,12,0,0);mount_ok=true;monotonic_us+=31000000;app_reading_journal_poll();
+    assert(s_loaded&&!s_model.count&&s_model.month==202611);
+    assert(reading_journal_streak_view(&s_model,&s_today).days==1&&s_model.streak.milliseconds[5]==READING_STREAK_GOAL_MS);
+    assert(app_reading_journal_flush());simulate_restart();app_reading_journal_poll();
+    assert(reading_journal_streak_view(&s_model,&s_today).days==1);
+    simulate_restart();remove_slots();
+    puts("PASS: month-midnight threshold splits, summary reboot, late storage merge and invalid-time suppression");
+}
+int main(void){model_cases();streak_cases();service_cases();streak_service_cases();assert(guards>=ends);return 0;}
 '''
 
 with tempfile.TemporaryDirectory(prefix="reading-journal-") as directory:
