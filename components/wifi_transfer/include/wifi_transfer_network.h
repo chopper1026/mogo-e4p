@@ -8,6 +8,12 @@
 #include <stdint.h>
 
 #define WIFI_TRANSFER_SCAN_MAX 16
+#define WIFI_TRANSFER_SAVED_MAX 8
+typedef struct {
+    char ssid[33]; ///< 已保存的网络名，不含密码 / Saved network name without its password
+    bool requires_password; ///< 保存的是加密网络 / Saved network uses a password
+} wifi_transfer_saved_network_t;
+
 typedef struct {
     char ssid[33]; ///< 最多32字节SSID / SSID of at most 32 bytes
     int8_t rssi; ///< 信号强度dBm / Signal strength in dBm

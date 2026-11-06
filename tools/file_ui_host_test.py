@@ -111,7 +111,7 @@ static const char *esp_err_to_name(esp_err_t err){(void)err;return "ERROR";}
     return code
 
 
-def run(output):
+def run(output, source=None):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="files-raster-") as directory:
         work = Path(directory)
@@ -137,7 +137,7 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
         with (work / "assets.c").open("a") as assets:
             assets.write('const uint8_t hanzi[] asm("_binary_ui_hanzi_bin_start")={' + ','.join(map(str, payload)) + '};\n')
             assets.write(f'asm(".globl _binary_ui_hanzi_bin_end\\n.set _binary_ui_hanzi_bin_end, _binary_ui_hanzi_bin_start + {len(payload)}");\n')
-        (work / "test.c").write_text(unit())
+        (work / "test.c").write_text(unit() if source is None else source)
         env, compiler = toolchain(work)
         flags = compiler + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
                             "-Wno-unused-function", "-Wno-deprecated-declarations", "-fsanitize=address,undefined", "-g"]

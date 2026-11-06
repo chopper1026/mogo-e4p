@@ -43,12 +43,14 @@ static void *s_http,*s_netif;
 '''
 harness += "\n".join(function(name) for name in (
     "wifi_transfer_get_status", "claim_config", "release_config",
-    "publish_credentials", "wifi_transfer_forget_wifi"))
+    "publish_credentials", "wifi_transfer_get_saved_networks", "wifi_transfer_select_saved_wifi",
+    "wifi_transfer_forget_saved_wifi", "wifi_transfer_forget_wifi"))
 harness += r'''
 static void saved_network(int mode, int state) {
     fail_open=fail_write=fail_commit=0;
     s_wifi=s_started=s_config_busy=false;s_http=s_netif=NULL;
     s_status=(wifi_transfer_status_t){.mode=mode,.state=state};
+    assert(store_credentials(NULL)==ESP_OK);
     transfer_credentials_t c;
     assert(credentials_from_text("saved", "12345678", &c));
     assert(store_credentials(&c)==ESP_OK);publish_credentials(&c);
@@ -89,6 +91,28 @@ int main(void) {
         saved_network(mode, WIFI_TRANSFER_UPLOADING);
         assert(wifi_transfer_forget_wifi()==ESP_ERR_INVALID_STATE && present);
     }
+    saved_network(WIFI_TRANSFER_MODE_STA, WIFI_TRANSFER_STOPPED);
+    transfer_credentials_t second;
+    assert(credentials_from_text("second", "abcdefgh", &second));
+    assert(store_credentials(&second)==ESP_OK);publish_credentials(&second);
+    wifi_transfer_saved_network_t networks[WIFI_TRANSFER_SAVED_MAX];size_t count=0;
+    assert(wifi_transfer_get_saved_networks(networks,&count)==ESP_OK && count==2);
+    assert(!strcmp(networks[0].ssid,"second") && networks[0].requires_password);
+    fail_commit=1;
+    assert(wifi_transfer_select_saved_wifi("saved")==ESP_FAIL && !strcmp(s_status.wifi_ssid,"second"));
+    fail_commit=0;
+    assert(wifi_transfer_select_saved_wifi("saved")==ESP_OK && !strcmp(s_status.wifi_ssid,"saved"));
+    assert(wifi_transfer_forget_saved_wifi("second")==ESP_OK && !strcmp(s_status.wifi_ssid,"saved"));
+    assert(wifi_transfer_get_saved_networks(networks,&count)==ESP_OK && count==1);
+    assert(wifi_transfer_select_saved_wifi("missing")==ESP_ERR_NOT_FOUND);
+    assert(wifi_transfer_forget_saved_wifi("missing")==ESP_ERR_NOT_FOUND && s_status.wifi_configured);
+    s_config_busy=true;count=99;memset(networks,0xa5,sizeof(networks));
+    assert(wifi_transfer_get_saved_networks(networks,&count)==ESP_ERR_INVALID_STATE && !count && !networks[0].ssid[0]);
+    assert(wifi_transfer_select_saved_wifi("saved")==ESP_ERR_INVALID_STATE);
+    s_config_busy=false;s_wifi=true;
+    assert(wifi_transfer_select_saved_wifi("saved")==ESP_ERR_INVALID_STATE);
+    s_wifi=false;
+    assert(wifi_transfer_forget_saved_wifi("saved")==ESP_OK && !s_status.wifi_configured && !handles);
     puts("transfer WiFi forget: failed-start recovery, persistence faults, busy/upload and resource guards PASS");
 }
 '''

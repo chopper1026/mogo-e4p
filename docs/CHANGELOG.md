@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-06
 
+- WiFi 最多保存八个网络并兼容旧配置，附近列表标记已保存，新增已保存列表及连接、改密码、逐个确认遗忘；存满不覆盖。修复翻页箭头缺字，移除底部两行说明，改为每页六行。/ Save eight WiFi profiles with legacy compatibility and saved markers; manage connections, passwords and confirmed individual removal without eviction. Use glyph-independent paging icons and six rows instead of footer hints.
 - 移除书架题头下重复的书籍数量，搜索、选择、管理、导入改为同排等距，点击区域同步调整；底部分页数量与多选布局保留。/ Remove the duplicate shelf header count and evenly space search, select, manage and import in one row with matching hit targets; retain the pager count and selection layout.
 
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-05

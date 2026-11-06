@@ -19,6 +19,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | 数据 / Data | 所有者与兼容要求 / Ownership And Compatibility |
 | --- | --- |
 | 系统与阅读偏好 / System and reader settings | `main/settings` 持有 NVS 与备份协议；原键、备份文件名及旧格式兼容独立于源码目录。/ Settings owns NVS/backup contracts; keys, filenames and compatibility do not follow source moves. |
+| WiFi 凭据 / WiFi credentials | `wifi_transfer` 在 `rp_wifi/profiles` 的版本化 blob 保存最多八组，缺少新键时兼容旧 `credentials`；最近选择的网络为默认，公开快照不含密码。现有 TF 备份只导出默认网络；单网络恢复保留其他项，空记录清空全部。/ A versioned blob holds eight profiles with legacy fallback only when the new key is absent. The latest selection is preferred and public snapshots exclude passwords. Existing TF backups export only that network; restoring one retains others, while an empty record clears all. |
 | 首页布局与天气 / Home and weather | `read_pico/home_regions` 一次保存上下布局并纳入 v33 备份；`kiiko_weather` 独立保存城市、偏好和有期限的缓存，不纳入设置/书籍备份。/ Atomic Home layout participates in v33 backup; standalone weather state/cache does not. |
 | 阅读手账 / Reading journal | UI任务服务将当月逐日逐书明细与共享插画写入内置卷双快照，非格式化挂载、不依赖TF卡；不纳入设置/书籍备份，旧票根不补造明细。/ The UI-thread service owns internal-volume dual snapshots of current-month book/day rows and shared scenes, without formatting or SD dependency; excluded from backups and not synthesized from old tickets. |
 | 书籍、字体、图片与缓存 / Content and caches | TF/内部书籍库由 `book_store` 与媒体/USB 服务交接；`.readpico` 缓存、进度、书签及资源借用保留既有标识。/ Content stores coordinate with media/USB; retain cache/progress/bookmark identities and borrowing contracts. |

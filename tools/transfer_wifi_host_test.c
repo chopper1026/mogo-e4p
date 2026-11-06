@@ -42,42 +42,110 @@ static void test_body_deadline(void) {
 #define WIFI_TRANSFER_NVS_TEST
 typedef int esp_err_t;
 typedef unsigned nvs_handle_t;
-enum { ESP_OK, ESP_ERR_NVS_NOT_FOUND, ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG, ESP_FAIL };
+enum { ESP_OK, ESP_ERR_NVS_NOT_FOUND, ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG, ESP_FAIL,
+       ESP_ERR_NO_MEM, ESP_ERR_NOT_FOUND };
 enum { NVS_READONLY, NVS_READWRITE };
 static transfer_credentials_t committed, staged;
 static bool present, pending_present;
+static bool legacy_present, pending_legacy, profiles_present, pending_profiles;
+static unsigned char committed_profiles[1024], staged_profiles[1024];
+static size_t committed_size, staged_size;
 static int fail_open, fail_write, fail_commit, handles;
 static esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *handle) {
     assert(!strcmp(name, "rp_wifi")); (void)mode;
     if (fail_open) return ESP_FAIL;
-    ++handles; *handle = 1; staged = committed; pending_present = present; return ESP_OK;
+    ++handles; *handle = 1; staged = committed; pending_present = present;
+    pending_legacy = legacy_present; pending_profiles = profiles_present;
+    staged_size = committed_size; memcpy(staged_profiles, committed_profiles, sizeof(staged_profiles));
+    return ESP_OK;
 }
 static esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out, size_t *size) {
-    assert(handle == 1 && !strcmp(key, "credentials"));
-    if (!present) return ESP_ERR_NVS_NOT_FOUND;
+    assert(handle == 1);
+    if (!strcmp(key, "profiles")) {
+        if (!profiles_present) return ESP_ERR_NVS_NOT_FOUND;
+        assert(*size >= committed_size); *size = committed_size;
+        memcpy(out, committed_profiles, committed_size); return ESP_OK;
+    }
+    assert(!strcmp(key, "credentials"));
+    if (!legacy_present) return ESP_ERR_NVS_NOT_FOUND;
     assert(*size >= sizeof(committed)); *size = sizeof(committed); memcpy(out, &committed, *size); return ESP_OK;
 }
 static esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *in, size_t size) {
-    assert(handle == 1 && !strcmp(key, "credentials") && size == sizeof(staged));
+    assert(handle == 1 && !strcmp(key, "profiles") && size <= sizeof(staged_profiles));
     if (fail_write) return ESP_FAIL;
-    memcpy(&staged, in, size); pending_present = true; return ESP_OK;
+    memcpy(staged_profiles, in, size); staged_size = size;
+    pending_profiles = true; pending_present = ((const unsigned char *)in)[1] != 0; return ESP_OK;
 }
 static esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {
     assert(handle == 1 && !strcmp(key, "credentials"));
     if (fail_write) return ESP_FAIL;
-    pending_present = false; return present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+    pending_legacy = false; return legacy_present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
 }
 static esp_err_t nvs_commit(nvs_handle_t handle) {
     assert(handle == 1);
     if (fail_commit) return ESP_FAIL;
-    committed = staged; present = pending_present; return ESP_OK;
+    committed = staged; present = pending_present; legacy_present = pending_legacy;
+    profiles_present = pending_profiles; committed_size = staged_size;
+    memcpy(committed_profiles, staged_profiles, sizeof(committed_profiles)); return ESP_OK;
 }
-static void nvs_close(nvs_handle_t handle) { assert(handle == 1); --handles; clear_secret(&staged, sizeof(staged)); }
+static void nvs_close(nvs_handle_t handle) {
+    assert(handle == 1); --handles; clear_secret(&staged, sizeof(staged));
+    clear_secret(staged_profiles, sizeof(staged_profiles));
+}
 #include "../components/wifi_transfer/transfer_credentials_store.h"
+
+static void test_profiles(void) {
+    profiles_present = false; legacy_present = true;
+    assert(credentials_from_text("legacy", "12345678", &committed));
+    transfer_profiles_t profiles;
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 1 && !profiles_present);
+    assert(!strcmp(profiles.items[0].ssid, "legacy"));
+    transfer_credentials_t next;
+    assert(credentials_from_text("second", "abcdefgh", &next));
+    fail_commit = 1;
+    assert(store_credentials(&next) == ESP_FAIL && !profiles_present && legacy_present && !handles);
+    fail_commit = 0;
+    assert(store_credentials(&next) == ESP_OK && profiles_present && !legacy_present);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 2);
+    assert(!strcmp(profiles.items[0].ssid, "second") && !strcmp(profiles.items[1].ssid, "legacy"));
+    assert(credentials_from_text("legacy", "newpassword", &next));
+    assert(store_credentials(&next) == ESP_OK);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 2);
+    assert(!strcmp(profiles.items[0].password, "newpassword") && !strcmp(profiles.items[1].password, "abcdefgh"));
+    for (size_t i = 2; i < WIFI_TRANSFER_SAVED_MAX; ++i) {
+        char name[33]; snprintf(name, sizeof(name), "profile-%u", (unsigned)i);
+        assert(credentials_from_text(name, "12345678", &next));
+        assert(store_credentials(&next) == ESP_OK);
+    }
+    assert(credentials_from_text("overflow", "12345678", &next));
+    assert(store_credentials(&next) == ESP_ERR_NO_MEM);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == WIFI_TRANSFER_SAVED_MAX);
+    assert(profile_index(&profiles, "legacy") >= 0 && profile_index(&profiles, "overflow") < 0);
+    fail_commit = 1;
+    assert(forget_credentials("legacy", &next) == ESP_FAIL && !next.version && !handles);
+    fail_commit = 0;
+    assert(forget_credentials("legacy", &next) == ESP_OK && next.version == 1);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == WIFI_TRANSFER_SAVED_MAX - 1);
+    assert(profile_index(&profiles, "legacy") < 0 && profile_index(&profiles, "second") >= 0);
+    assert(forget_credentials("missing", &next) == ESP_ERR_NOT_FOUND && !next.version);
+    assert(forget_credentials(NULL, &next) == ESP_OK);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == WIFI_TRANSFER_SAVED_MAX - 2);
+    profiles.items[1] = profiles.items[0];
+    assert(!profiles_valid(&profiles));
+    profiles.count = WIFI_TRANSFER_SAVED_MAX + 1; assert(!profiles_valid(&profiles));
+    assert(store_credentials(NULL) == ESP_OK);
+    legacy_present = true;
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 0);
+    committed_profiles[0] = 99;
+    assert(load_profiles(&profiles) == ESP_ERR_INVALID_STATE && profiles.count == 0);
+    assert(store_credentials(NULL) == ESP_OK && !handles);
+    clear_secret(&profiles, sizeof(profiles)); clear_secret(&next, sizeof(next));
+}
 
 static bool parse(const char *json, transfer_credentials_t *c) { return parse_credentials(json, strlen(json), c); }
 int main(void) {
     test_body_deadline();
+    test_profiles();
     bool stopping = false, uploading = false;
     assert(admission_begin(stopping, &uploading));
     assert(!admission_stop(&stopping, uploading) && !stopping);
