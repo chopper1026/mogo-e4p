@@ -191,8 +191,9 @@ static bool book_progress_load(const char* p,uint32_t n,book_progress_t* out){
     *out=(book_progress_t){0};return false;
 }
 static bool book_progress_last_path(char* out,size_t cap){if(!test_recent_path[0])return false;snprintf(out,cap,"%s",test_recent_path);return true;}
-static int book_epub_metadata(const char* path,char* title,size_t tcap,char* author,size_t acap){(void)path;snprintf(title,tcap,"原书名");snprintf(author,acap,"作者");return ESP_OK;}
-static int book_epub_metadata_cached(const char* path,char* title,size_t tcap,char* author,size_t acap){return book_epub_metadata(path,title,tcap,author,acap);}
+static bool book_metadata_supported(const char *path){const char *ext=strrchr(path,'.');return ext&&(!strcasecmp(ext,".epub")||!strcasecmp(ext,".mobi"));}
+static int book_metadata_read(const char* path,char* title,size_t tcap,char* author,size_t acap){(void)path;snprintf(title,tcap,"原书名");snprintf(author,acap,"作者");return ESP_OK;}
+static int book_metadata_cached(const char* path,char* title,size_t tcap,char* author,size_t acap){return book_metadata_read(path,title,tcap,author,acap);}
 static bool book_title_get(const char* path,char* out,size_t cap){(void)path;(void)out;(void)cap;return false;}
 static void book_title_clean_import(char* title){(void)title;}
 static bool book_title_from_path(const char* path,char* out,size_t cap){const char* name=strrchr(path,'/');name=name?name+1:path;size_t n=strlen(name);const char* dot=strrchr(name,'.');if(dot)n=(size_t)(dot-name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;return n>0;}

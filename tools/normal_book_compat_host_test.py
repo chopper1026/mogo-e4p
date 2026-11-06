@@ -55,25 +55,36 @@ static bool book_title_from_path(const char *p,char *out,size_t cap){const char 
 static void clean_filename(char *out,size_t cap,const char *s){copy_text(out,cap,s);}
 static bool pico_boot_asset_allowed(const char *p){(void)p;return true;}
 static bool book_search_match(const char *name,const char *query){(void)name;(void)query;return true;}
-static int book_epub_metadata_cached(const char *p,char *title,size_t tcap,char *author,size_t acap){assert(book_file_path_supported(p));title[0]=author[0]=0;(void)tcap;(void)acap;return ESP_FAIL;}
-static int book_epub_metadata(const char *p,char *title,size_t tcap,char *author,size_t acap){return book_epub_metadata_cached(p,title,tcap,author,acap);}
+static bool book_metadata_supported(const char *path){const char *ext=strrchr(path,'.');return ext&&(!strcasecmp(ext,".epub")||!strcasecmp(ext,".mobi"));}
+static int book_metadata_cached(const char *p,char *title,size_t tcap,char *author,size_t acap){assert(book_file_path_supported(p));title[0]=author[0]=0;(void)tcap;(void)acap;return ESP_FAIL;}
+static int book_metadata_read(const char *p,char *title,size_t tcap,char *author,size_t acap){return book_metadata_cached(p,title,tcap,author,acap);}
 '''
 unit += 'typedef book_shelf_entry_t shelf_entry_t;\n'
 unit += r'''
-static shelf_entry_t s_shelf[8];
+static shelf_entry_t s_shelf_storage[8],*s_shelf=s_shelf_storage;
 static int s_count,s_visible_count,s_view=0;
 enum {SHELF};
 static char s_query[65],s_latest_path[288],s_requested_open[288];
 static bool s_recent_sort=true,s_requested_open_home,s_requested_fullscreen;
 static bool app_settings_reader_open_fullscreen(void){return true;}
-typedef struct {nvs_handle_t favorites,hidden;bool truncated;} shelf_backfill_t;
+typedef struct {shelf_entry_t **entries;int *count;size_t *capacity;} book_shelf_catalog_t;
+typedef struct {book_shelf_catalog_t catalog;const char *query;bool (*favorite_read)(nvs_handle_t,const char*);bool (*hidden_read)(nvs_handle_t,const char*);} book_shelf_scan_t;
+typedef struct {const book_shelf_scan_t *scan;nvs_handle_t favorites,hidden;bool truncated;} shelf_backfill_t;
 static bool shelf_reserve(void){++reserves;return s_count<8;}
+static bool book_shelf_catalog_reserve(const book_shelf_catalog_t *catalog){assert(catalog->count==&s_count);return shelf_reserve();}
+static book_shelf_scan_t shelf_scan_context(app_ctx_t *ctx){(void)ctx;return (book_shelf_scan_t){.catalog={&s_shelf,&s_count,NULL},.query=s_query,.favorite_read=favorite_read_handle,.hidden_read=shelf_hidden_read_handle};}
+typedef struct {bool recent_sort;} query_t;
+static query_t shelf_query(void){return (query_t){s_recent_sort};}
+static bool shelf_collection_sync(bool added){(void)added;return true;}
 static void shelf_category_restore(app_ctx_t *ctx){(void)ctx;}
 static void shelf_categories_recount(void){}
 static void sort_shelf(app_ctx_t *ctx){(void)ctx;++sorts;s_visible_count=s_count;}
 '''
-for name in ('app_book_request_open','app_book_request_open_from_home','app_book_request_resume',
-             'shelf_backfill_visit','shelf_backfill_read_books','refresh_cached_progress'):
+for name in ('app_book_request_open','app_book_request_open_from_home','app_book_request_resume'):
+    unit += function(name, reader) + '\n'
+for name in ('shelf_backfill_visit', 'book_shelf_scan_backfill'):
+    unit += function(name, ROOT / 'main/book/book_shelf_scan.c') + '\n'
+for name in ('shelf_backfill_read_books', 'refresh_cached_progress'):
     unit += function(name, reader) + '\n'
 unit += r'''
 typedef struct {char path[288],title[256],author[128];time_t modified;bool has_progress;book_progress_t progress;} home_book_t;
@@ -113,13 +124,18 @@ int main(int argc,char **argv){
   assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
   assert(app_book_request_resume(records[1].path,false)&&!s_requested_fullscreen&&!strcmp(s_requested_open,records[1].path));
  }
+ saved_t saved=records[2];snprintf(records[2].path,288,"%s/cache/third.MOBI",argv[1]);strcpy(last,records[2].path);
+ assert(app_book_request_resume(records[2].path,true)&&s_requested_fullscreen&&!strcmp(s_requested_open,records[2].path));
+ s_count=s_visible_count=0;bool truncated=false;assert(shelf_backfill_read_books(&truncated)&&!truncated&&s_count==3);
+ memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));scan_books();assert(!strcmp(s_current.path,records[2].path)&&s_current.has_progress&&s_current.progress.byte_off==17);
+ records[2]=saved;strcpy(last,oldlast);
  assert(!memcmp(before,records,sizeof(before))&&!strcmp(last,oldlast));
  printf("PASS: %s ignores unsupported shared records, accepts real local paths and preserves history\n",argv[2]);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='normal-book-compat-') as directory:
     tmp = Path(directory)
-    names = ['books/first.TXT','books/second.EpUb','cache/catalog.wread','cache/catolog.weread','cache/other.bin']
+    names = ['books/first.TXT','books/second.EpUb','cache/catalog.wread','cache/catolog.weread','cache/other.bin','cache/third.MOBI']
     for name in names:
         p = tmp / name
         p.parent.mkdir(parents=True, exist_ok=True)

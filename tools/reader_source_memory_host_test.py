@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import summarize_reader_memory as summary
 from test_book_epub import make_book, make_large_book
+from test_book_mobi import make_mobi
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,31 +53,34 @@ def main():
         make_book(folder / 'small.epub', lambda files: files.update({'OPS/fonts/Example.ttf': b'font-test'}))
         make_large_book(folder / 'large.epub', 256)
         (folder / 'sample.txt').write_text('第一章 开始\n正文\n第二章 返回\n正文\n')
+        make_mobi(folder / 'sample.mobi', hybrid=True)
         (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 1\n')
         heap = (ROOT / 'tools/book_epub_stubs/esp_heap_caps.h').read_text()
         (folder / 'esp_heap_caps.h').write_text(heap + '\nsize_t heap_caps_get_allocated_size(void *pointer);\n')
         flags = ['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror', '-g',
                  '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-I'+str(folder),
                  '-Itools/book_epub_stubs', '-Itools/zip_host_stubs', '-Itools/book_layout_stubs',
-                 '-Imain', "-Imain/diagnostics", '-Imain/book']
+                 '-Imain', "-Imain/diagnostics", '-Imain/book', '-Icomponents/mobi_codec/include']
         objects = []
         for name in ('book_source', 'book_txt', 'gbk', 'book_epub', 'book_index_cache',
-                     'book_image_header', 'zip_reader', 'html_text'):
+                     'book_mobi', 'book_mobi_markup', 'palm_doc', 'book_image_header', 'zip_reader', 'html_text'):
             obj = folder / (name+'.o')
+            source = ('components/mobi_codec/' if name == 'palm_doc' else
+                      'main/image/' if name == 'book_image_header' else 'main/book/') + name + '.c'
             subprocess.run(flags + ['-Dmalloc=tracked_malloc', '-Dcalloc=tracked_calloc',
                                    '-Drealloc=tracked_realloc', '-Dfree=tracked_free',
-                                   '-c', ('main/image/' if name == 'book_image_header' else 'main/book/')+name+'.c', '-o', str(obj)], cwd=ROOT, check=True)
+                                   '-c', source, '-o', str(obj)], cwd=ROOT, check=True)
             objects.append(str(obj))
         exe = folder / 'source-memory'
         subprocess.run(flags + ['tools/reader_source_memory_host_test.c', *objects, '-lz', '-o', str(exe)],
                        cwd=ROOT, check=True)
         subprocess.run([str(exe), str(folder/'sample.txt'), str(folder/'small.epub'),
-                        str(folder/'large.epub')], cwd=ROOT, check=True)
+                        str(folder/'large.epub'), str(folder/'sample.mobi')], cwd=ROOT, check=True)
         # 产品和纯计时配置不得引入资源遍历符号。/ Product and timing-only configurations must not introduce resource-walk symbols.
         for config in ('#define CONFIG_READER_PERF 0\n',
                        '#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 0\n'):
             (folder/'sdkconfig.h').write_text(config)
-            for name in ('book_source', 'book_epub', 'zip_reader'):
+            for name in ('book_source', 'book_epub', 'book_mobi', 'zip_reader'):
                 obj = folder/(name+'-disabled.o')
                 subprocess.run(flags+['-c', 'main/book/'+name+'.c', '-o', str(obj)], cwd=ROOT, check=True)
                 assert 'memory_stats' not in subprocess.check_output(['nm', str(obj)], text=True)

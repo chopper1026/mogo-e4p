@@ -60,7 +60,7 @@ static esp_err_t delete_book(void) {
     char recorded[PICO_BOOT_PATH_MAX];
     if (!pico_boot_interrupted_book(recorded, sizeof(recorded)) || strcmp(recorded, s_path)) return ESP_ERR_INVALID_STATE;
     const char *name = strrchr(s_path, '/'), *ext = strrchr(s_path, '.');
-    if (!name || !ext || (strcasecmp(ext, ".epub") && strcasecmp(ext, ".txt"))) return ESP_ERR_INVALID_ARG;
+    if (!name || !ext || (strcasecmp(ext, ".epub") && strcasecmp(ext, ".txt") && strcasecmp(ext, ".mobi"))) return ESP_ERR_INVALID_ARG;
     if (!strncmp(s_path, "/sdcard/", 8)) {
         board_sd_info_t sd = {0}; board_sd_get_info(&sd);
         if (!sd.present || !sd.mounted) return ESP_ERR_INVALID_STATE;

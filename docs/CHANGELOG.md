@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-06
 
+- 新增无 DRM 传统 MOBI 原生阅读，支持未压缩/PalmDOC、UTF-8/Windows-1252、目录、续读、书签、JPEG/PNG 封面与插图，接入书架/文件管理/网页传书。混合书固定读取 MOBI6；暂不支持 HUFF/CDIC、纯 KF8、DRM 和书内字体。保持 TXT/EPUB 兼容，实机待验收。/ Add native DRM-free traditional MOBI with raw/PalmDOC, UTF-8/Windows-1252, navigation/resume/bookmarks, JPEG/PNG covers/images and shelf/files/web transfer integration. Hybrids always use MOBI6; HUFF/CDIC, pure KF8, DRM and embedded fonts are unsupported. Preserve TXT/EPUB compatibility; device acceptance pending.
 - 移除书架题头下重复的书籍数量，搜索、选择、管理、导入改为同排等距，点击区域同步调整；底部分页数量与多选布局保留。/ Remove the duplicate shelf header count and evenly space search, select, manage and import in one row with matching hit targets; retain the pager count and selection layout.
 
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-05

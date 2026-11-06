@@ -4,8 +4,10 @@
  *
  * 双模式传书生命周期和跨任务状态；存储策略由调用方注入。
  * AP/STA transfer lifecycle and cross-task status; caller supplies storage policy.
- * 冻结：图书仅接收 TXT/EPUB；字体与图片只进入各自固定目录；不依赖页面或图书实现。
- * Frozen: book uploads accept TXT/EPUB only; font and image uploads use fixed directories; no page or book implementation dependency.
+ * 冻结：图书仅接收 TXT/EPUB/MOBI；字体与图片只进入各自固定目录；不依赖页面或图书实现。
+ * Frozen: book uploads accept TXT/EPUB/MOBI only; font and image uploads use fixed directories; no page or book implementation dependency.
+ * 中文：按用户新增 MOBI 阅读要求扩大扩展名白名单，内容仍由书源后端校验。
+ * English: User-requested MOBI reading expands the extension whitelist; source backends still validate content.
  * 冻结：热点网页或停服后的设备触屏可配网；已有WiFi模式不接受远程修改凭据。
  * Frozen: AP webpage or stopped-service device UI may provision; STA rejects remote credential changes.
  */

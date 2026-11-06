@@ -17,7 +17,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "book_cover.h"
-#include "book_epub.h"
+#include "book_metadata.h"
 #include "book_progress.h"
 #include "book_title.h"
 #include "epdiy.h"
@@ -274,10 +274,9 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     bool progress_valid = file_valid && book_progress_load(path, st.st_size, &progress);
     char title[256] = {0}, author[128] = {0};
     if (!book_title_from_path(path, title, sizeof(title))) snprintf(title, sizeof(title), "未命名");
-    const char *ext = strrchr(path, '.');
-    if (ext && !strcasecmp(ext, ".epub")) {
+    if (book_metadata_supported(path)) {
         char meta_title[256] = {0};
-        (void)book_epub_metadata_cached(path, meta_title, sizeof(meta_title), author, sizeof(author));
+        (void)book_metadata_cached(path, meta_title, sizeof(meta_title), author, sizeof(author));
     }
     ticket_stats_t stats; stats_load(&stats);
     uint32_t day = local_day();

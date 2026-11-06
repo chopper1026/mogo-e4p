@@ -91,7 +91,7 @@ static esp_err_t transfer_signature_set(const char *text) {
 
 static bool transfer_book_file(const char *path) {
     const char *ext = strrchr(path, '.');
-    return ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt"));
+    return ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt") || !strcasecmp(ext, ".mobi"));
 }
 
 static void transfer_file_deleted(const char *path) {

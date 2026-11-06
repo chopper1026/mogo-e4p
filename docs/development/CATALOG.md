@@ -26,6 +26,7 @@
 - [docs/README.md](../README.md)
 - [docs/development/FEATURES.md](FEATURES.md)
 - [docs/development/INDEX.md](INDEX.md)
+- [docs/development/guides/MOBI.md](guides/MOBI.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_PERFORMANCE.md](guides/READER_PERFORMANCE.md)
 - [docs/development/guides/READING_JOURNAL.md](guides/READING_JOURNAL.md)

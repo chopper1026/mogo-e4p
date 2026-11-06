@@ -50,7 +50,7 @@ static bool category(const char *root, const char *path) {
 }
 static bool book_file(const char *path) {
     const char *dot = strrchr(path, '.');
-    return dot && (!strcasecmp(dot, ".txt") || !strcasecmp(dot, ".epub"));
+    return dot && (!strcasecmp(dot, ".txt") || !strcasecmp(dot, ".epub") || !strcasecmp(dot, ".mobi"));
 }
 static int inspect(const char *path, struct stat *st) {
 #ifdef ESP_PLATFORM

@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include "esp_heap_caps.h"
 #include "book_file_path.h"
-#include "book_epub.h"
+#include "book_metadata.h"
 #include "book_progress.h"
 #include "book_title.h"
 #include "boot_state.h"
@@ -105,7 +105,6 @@ void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool i
             continue;
         }
         if (!S_ISREG(st.st_mode)) continue;
-        const char *ext = strrchr(ent->d_name, '.');
         if (!book_file_path_supported(path)) continue;
         // 移出书架只隐藏文件，重新打开才恢复上架。
         // Removal hides a file from the shelf until the book is reopened.
@@ -118,12 +117,12 @@ void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool i
         copy_text(item->path, sizeof(item->path), path);
         if (!book_title_from_path(item->path, item->name, sizeof(item->name)))
             clean_filename(item->name, sizeof(item->name), ent->d_name);
-        if (!strcasecmp(ext, ".epub")) {
+        if (book_metadata_supported(item->path)) {
             char title[sizeof(item->name)] = {0};
             char author[sizeof(item->author)] = {0};
-            // 首屏列书只读已有元数据缓存，不逐本解析EPUB。
-            // Listing reads cached metadata only, without parsing every EPUB before first paint.
-            if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
+            // 首屏只读已有元数据缓存，不逐本解析正文。
+            // First paint reads cached metadata only, without scanning every book.
+            if (book_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
                 copy_text(item->author, sizeof(item->author), author);
         }
         item->search_match = book_search_match(item->name, scan->query);
@@ -170,11 +169,10 @@ static bool shelf_backfill_visit(const char *path, const book_progress_t *progre
     if (!book_title_from_path(item->path, item->name, sizeof(item->name)))
         clean_filename(item->name, sizeof(item->name), base);
     if (!item->name[0]) return true;
-    const char *ext = strrchr(base, '.');
-    if (ext && !strcasecmp(ext, ".epub") && pico_boot_asset_allowed(item->path)) {
+    if (book_metadata_supported(item->path) && pico_boot_asset_allowed(item->path)) {
         char title[sizeof(item->name)] = {0};
         char author[sizeof(item->author)] = {0};
-        if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
+        if (book_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
             copy_text(item->author, sizeof(item->author), author);
     }
     item->size = (uint32_t)st.st_size;

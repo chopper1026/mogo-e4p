@@ -59,7 +59,7 @@ def summarize(samples):
 
 
 
-SOURCE_FIELDS = ('id txt_index epub_state epub_index epub_text epub_faces zip_state '
+SOURCE_FIELDS = ('id txt_index mobi_state mobi_index epub_state epub_index epub_text epub_faces zip_state '
                  'zip_index zip_names zip_directory open_files').split()
 
 
@@ -74,6 +74,9 @@ def parse_source_samples(text):
             row = dict(word.split('=', 1) for word in words)
             if len(row) != len(words) or row.get('v') != '1' or row.get('event') not in EVENTS:
                 raise ValueError('schema, duplicate key or event')
+            legacy = (set(SOURCE_FIELDS) - {'mobi_state', 'mobi_index'}) | {'v', 'event'}
+            if set(row) == legacy:
+                row.update(mobi_state='0', mobi_index='0')
             if set(row) != set(SOURCE_FIELDS) | {'v', 'event'}:
                 raise ValueError('missing or extra fields')
             for key in SOURCE_FIELDS:

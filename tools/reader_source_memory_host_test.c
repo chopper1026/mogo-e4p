@@ -53,7 +53,7 @@ int ttf_font_open_mem(uint8_t *data,size_t size,const char *label) {
 }
 void ttf_font_close_embedded(void) {}
 static size_t capacity(reader_source_memory_stats_t s) {
-    return s.txt_index+s.epub_state+s.epub_index+s.epub_text+s.epub_faces+
+    return s.txt_index+s.mobi_state+s.mobi_index+s.epub_state+s.epub_index+s.epub_text+s.epub_faces+
         s.zip_state+s.zip_index+s.zip_names+s.zip_directory;
 }
 static reader_source_memory_stats_t snapshot(void) {
@@ -66,12 +66,14 @@ static void closed(void) {
     assert(!capacity(s)&&!s.open_files&&!live);
 }
 int main(int argc,char **argv) {
-    assert(argc==4);closed();assert(!queries);
-    for(unsigned round=0;round<20;++round)for(int book=1;book<=3;++book) {
+    assert(argc==5);closed();assert(!queries);
+    for(unsigned round=0;round<20;++round)for(int book=1;book<=4;++book) {
         assert(book_open(argv[book])==ESP_OK);
         reader_source_memory_stats_t before=snapshot();
         assert(capacity(before)==live&&before.open_files==1);
         if(book==1) assert(before.txt_index&&!before.epub_state&&!before.zip_state);
+        else if(book==4) assert(book_kind()==BOOK_KIND_MOBI&&before.mobi_state&&before.mobi_index&&
+                               !before.txt_index&&!before.epub_state&&!before.zip_state);
         else assert(!before.txt_index&&before.epub_state&&before.epub_index&&before.epub_text&&
                     before.zip_state&&before.zip_index&&before.zip_names&&!before.zip_directory);
         size_t last=book_chapter_count()-1;
@@ -85,14 +87,28 @@ int main(int argc,char **argv) {
         (void)book_navigation_count();assert(capacity(snapshot())==live);
         closed();
     }
-    calls=0;assert(book_open(argv[2])==ESP_OK);size_t open_calls=calls;closed();
+    size_t failures=0;
+    for(int book=2;book<=4;book+=2) {
+    calls=0;assert(book_open(argv[book])==ESP_OK);size_t open_calls=calls;closed();
+    failures+=open_calls;
     for(size_t i=0;i<open_calls;++i) {
-        calls=0;fail_at=(long)i;esp_err_t error=book_open(argv[2]);fail_at=-1;
+        calls=0;fail_at=(long)i;esp_err_t error=book_open(argv[book]);fail_at=-1;
         reader_source_memory_stats_t s=snapshot();
         if(error==ESP_OK)assert(capacity(s)==live&&s.open_files==1);
         else assert(!capacity(s)&&!s.open_files&&!live);
         closed();
     }
+    }
+    assert(book_open(argv[4])==ESP_OK);
+    calls=0;html_text_t text={0};assert(book_chapter_load_blocks(1,&text)==ESP_OK);
+    size_t load_calls=calls;html_text_free(&text);
+    failures+=load_calls;
+    for(size_t i=0;i<load_calls;++i) {
+        calls=0;fail_at=(long)i;esp_err_t error=book_chapter_load_blocks(1,&text);fail_at=-1;
+        if(error!=ESP_OK)assert(!text.utf8&&!text.blocks&&!text.links);
+        html_text_free(&text);assert(capacity(snapshot())==live);
+    }
+    closed();
     assert(book_open("/tmp/source-memory-missing.unknown")==ESP_ERR_NOT_SUPPORTED);closed();
-    printf("PASS: 60 real TXT/EPUB open/parse/navigation/close cycles, %zu allocation-failure points, allocation capacities, live-base-only queries and repeated zero exit\n",open_calls);
+    printf("PASS: 80 real TXT/EPUB/MOBI open/parse/navigation/close cycles, %zu allocation-failure points, allocation capacities, live-base-only queries and repeated zero exit\n",failures);
 }

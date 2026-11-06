@@ -23,7 +23,8 @@
 #include "boot_state.h"
 #include "book_cover.h"
 #include "book_cover_auto.h"
-#include "book_epub.h"
+#include "book_metadata.h"
+#include "book_file_path.h"
 #include "book_progress.h"
 #include "book_store.h"
 #include "book_title.h"
@@ -135,8 +136,7 @@ static int book_order(const lock_book_t *a, const lock_book_t *b) {
 }
 static void collect_book(lock_library_t *library, const char *path,
                           const struct stat *st, const book_progress_t *saved) {
-    const char *ext = strrchr(path, '.');
-    if (!ext || (strcasecmp(ext, ".epub") && strcasecmp(ext, ".txt")) ||
+    if (!book_file_path_supported(path) ||
         !S_ISREG(st->st_mode) || st->st_size < 0 || (uint64_t)st->st_size > UINT32_MAX ||
         strlen(path) >= BOOK_STORE_PATH_MAX || hidden_book(library->hidden, path)) return;
     // 只保留常读/最近的十五条；总数继续完整统计，目录和字体不作书籍计数。
@@ -346,10 +346,9 @@ static uint8_t *cover_load_bounded(lock_book_t *book, bool *complete, size_t lim
     size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     size_t budget = available > LOCK_RESERVE + 512u * 1024u ? available - LOCK_RESERVE - 512u * 1024u : 0;
     if (budget > limit) budget = limit;
-    const char *ext = strrchr(book->path, '.');
     esp_err_t error = ESP_ERR_NOT_FOUND;
-    if (budget && ext && !strcasecmp(ext, ".epub") && pico_boot_asset_allowed(book->path))
-        error = book_epub_cover_bounded(book->path, &data, &bytes, &png, budget);
+    if (budget && book_metadata_supported(book->path) && pico_boot_asset_allowed(book->path))
+        error = book_metadata_cover_bounded(book->path, &data, &bytes, &png, budget);
     if (error == ESP_OK && book_image_dimensions(data, bytes, png, &sw, &sh) &&
         sw && sh && sw <= 65535 && sh <= 65535) {
         unsigned h = 334, w = (unsigned)(((uint64_t)h * sw + sh / 2u) / sh);

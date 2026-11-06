@@ -127,10 +127,14 @@ async function edit(t,action,name){
     {action:'mkdir',path:'books',target:'books/新目录'},
     {action:'copy',path:'books/封面.jpg',target:'books/封面副本.jpg'},
     {action:'delete',path:'books/封面.jpg'}]);
-  for(const [kind,name,endpoint]of[['book','海边的信.epub','/upload'],['font','思源宋体.otf','/font-upload'],['picture','封面.jpeg','/image-upload']]){
+  assert.ok(t.get('filePicker').accept.split(',').includes('.mobi'));
+  for(const [kind,name,endpoint]of[['book','海边的信.epub','/upload'],['book','测试书.MOBI','/upload'],['font','思源宋体.otf','/font-upload'],['picture','封面.jpeg','/image-upload']]){
     await t.context.sendFiles([file(name)],kind,{book:'books',font:'fonts',picture:'pictures'}[kind]);
     assert.ok(t.state.sent.at(-1).url.startsWith(endpoint+'?name='));assert.match(t.get('uploadResult').textContent,/已保存 1 个文件/);
   }
+  const longMobi='字'.repeat(70)+'Book.mobi';
+  await t.context.sendFiles([file(longMobi)],'file','books');
+  assert.equal(new URL('http://mogo'+t.state.sent.at(-1).url).searchParams.get('path'),'books/'+longMobi);
   for(const mode of ['ap','sta']){
     t=await setup({mode});assert.equal(t.get('signatureText').value,'慢慢阅读');
     for(const value of ['我的 Pico','']){

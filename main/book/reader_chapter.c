@@ -39,7 +39,7 @@ esp_err_t reader_chapter_read(reader_chapter_t *out, size_t chapter, const char 
     if (err != ESP_OK) return err;
     char *heading = out->heading, *label = out->label;
     char toc_title[128] = {0};
-    if (book_kind() == BOOK_KIND_EPUB && out->content.len) {
+    if (book_has_chapter_headings() && out->content.len) {
         // 已识别的正文编号题头优先；没有时沿用书内导航或备用标题。
         // Prefer a recognized numbered body heading, then authored navigation or a fallback title.
         if (book_chapter_title(chapter, toc_title, sizeof(toc_title)) != ESP_OK)
