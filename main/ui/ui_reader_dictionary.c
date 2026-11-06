@@ -135,7 +135,11 @@ int ui_reader_dictionary_action(const ui_reader_dictionary_t *v, int x, int y) {
     if (!v->open) return -1;
     if (y < v->top || y >= v->top + 584) return 0;
     if (x >= 540 && y < v->top + 82) return 0;
-    if (y >= v->top + 472 && y < v->top + 536) return x < 228 ? 1 : x >= 456 ? 2 : 3;
+    if (y >= v->top + 472 && y < v->top + 536) {
+        if (v->installing) return -1;
+        if (v->install_available) return x >= 180 && x < 504 ? 4 : -1;
+        return x < 228 ? 1 : x >= 456 ? 2 : 3;
+    }
     return -1;
 }
 void ui_reader_dictionary_draw(uint8_t *fb, const ui_reader_dictionary_t *v,
@@ -157,10 +161,11 @@ void ui_reader_dictionary_draw(uint8_t *fb, const ui_reader_dictionary_t *v,
         char line[512];(void)wrap(r->reading,0,line,588,30);text(fb,40,top+80,30,line);
     } else text(fb,40,top+80,28,v->loading?"正在查询…":"词库未提供读音");
     const char *message=NULL;
-    if(v->loading)message="正在读取离线词库…";
+    if(v->install_message[0])message=v->install_message;
+    else if(v->loading)message="正在读取离线词库…";
     else switch(r->status) {
         case BOOK_DICTIONARY_OK:break;
-        case BOOK_DICTIONARY_MISSING:message="未安装词库\n请把 chinese.mgdict 放入 TF 卡 dictionaries 目录";break;
+        case BOOK_DICTIONARY_MISSING:message="未安装词库\n点“下载安装”从官网下载到 TF 卡\n请先保存 WiFi 网络，预留约 72 MB 空间";break;
         case BOOK_DICTIONARY_NOT_FOUND:message="未收录这个词语，可点“逐字”查询单字";break;
         case BOOK_DICTIONARY_UNSUPPORTED:message="词库版本不支持，请重新转换安装";break;
         case BOOK_DICTIONARY_CORRUPT:message="词库损坏，请重新安装";break;
@@ -176,7 +181,11 @@ void ui_reader_dictionary_draw(uint8_t *fb, const ui_reader_dictionary_t *v,
         text(fb,40,top+136+i*48,32,line);
     }
     if (!ttf_font_has_text(query)) text(fb,40,top+438,22,"当前字体缺字，可更换 TF 卡字体");
-    text(fb,50,top+490,28,"上一屏");text(fb,300,top+490,28,"逐字");text(fb,520,top+490,28,"下一屏");
+    if(v->installing) {
+        char progress[64];snprintf(progress,sizeof(progress),"安装进度 %u%% · 关闭可取消",v->progress);
+        text(fb,80,top+490,28,progress);
+    } else if(v->install_available) text(fb,274,top+490,28,"下载安装");
+    else {text(fb,50,top+490,28,"上一屏");text(fb,300,top+490,28,"逐字");text(fb,520,top+490,28,"下一屏");}
     (void)wrap(r->source[0]?r->source:"离线中文词典",0,line,588,22);text(fb,40,top+550,22,line);
     ttf_font_select(previous);
 }

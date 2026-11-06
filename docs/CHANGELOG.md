@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.6 · 本地测试 / Local testing · 2026-11-06
 
+- 未安装或损坏词库时可从官网下载，校验后自动安装到 TF 卡并继续查询，显示进度、错误与取消；保留手工安装，安装期间暂缓自动锁屏，并容忍卡健康检查的短暂忙状态。真机本地下载、TF校验及查词通过；正式HTTPS与断电待验证。/ Download missing or damaged dictionaries from the official site, verify and install to the card, then resume lookup; show progress/errors/cancellation and retain manual installation, deferring automatic locking and tolerating transient card probes. Device-local download, card hashes and lookups pass; production HTTPS and power-loss behavior remain unverified.
+
 - 首页题头改为连续天数、七本紧贴递增书脊及今日状态，移除「首页」文字；每天有效阅读满30分钟达标，今日黑色、往日灰色、未达标虚线。打卡摘要跨月保存并兼容旧手账快照；宿主回归与S31构建通过，实屏与真实写盘待验收。/ Replace the Home title with streak days, seven touching ascending spines and today's status; thirty eligible minutes completes a day, shown black today, gray on earlier days and dashed otherwise. Persist streaks across months with legacy-journal compatibility; host tests and S31 build pass, with panel and physical persistence pending.
 - 阅读正文新增离线选字/拖选查词、可调整选区与释义分页；字典使用当前阅读字体，支持逐字查询并区分缺字、缺释义和词库异常。词库独立安装到 TF 卡；移除正文及留白长按打开目录，保留工具栏目录入口。实机触摸、速度与残影待验收。/ Add offline character/phrase selection, adjustable ranges and paged definitions in the current reader face, with per-character lookup and explicit missing-data/font/package states. Install dictionaries separately on the card; TOC remains on the toolbar. Device touch, timing and optical acceptance are pending.
 - 字典补充中文词语、成语与单字释义，修复未标简体词头漏查，释义及例句统一转简体；关闭字典回到文字页时整屏归一，阅读背景保留灰阶。/ Supplement Chinese word/idiom/character glosses, add missing simplified aliases, simplify definitions/examples and normalize the whole text page when closing the dictionary while preserving background grays.

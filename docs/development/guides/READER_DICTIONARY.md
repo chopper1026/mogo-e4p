@@ -11,11 +11,25 @@ All sheet text uses the current reader face directly, independently of the UI fa
 
 ## 安装 / Installation
 
-把格式版本 1 的 `chinese.mgdict` 放入 TF 卡根目录的 `dictionaries/`，完整路径为 `/sdcard/dictionaries/chinese.mgdict`。先退出 USB 读卡模式，再进入阅读。词库不嵌入固件，不自动下载，也不需要网络；文件名大小写须一致。更新词库前关闭阅读或退出到书架，保留安装包的许可、署名、来源清单与校验值。
-Place a version-1 `chinese.mgdict` under the card's root `dictionaries/` directory, leave USB export, then read. The firmware neither embeds nor downloads dictionary data. Close reading before replacing a package and retain its attribution, licenses, manifest and checksums.
+未安装、格式不支持或词库损坏时，卡片提供「下载安装」。先在 WiFi 设置中保存网络，插入可写 TF 卡并退出 USB 读卡模式，再点此按钮；设备自动连接网络、从官网获取词库与完整许可、逐文件校验 SHA-256 后安装，成功后自动重查当前字词。卡片显示进度和错误，关闭卡片、离开阅读或手动锁屏会取消并等待句柄交还；重试从头下载。下载期间暂缓自动锁屏和后台天气、OTA 检查与自动对时。空间要求为清单总大小加 1 MiB，保留旧词库时还需容纳新包（当前新包约 72 MB）。安装完成后查词不需要网络。
+When missing, corrupt or unsupported, the sheet offers “下载安装”. Save a WiFi network, insert a writable card and leave USB export; the device downloads the official package and licenses, verifies every SHA-256, installs and repeats the query. Closing, leaving or manual locking cancels and joins handles; retries restart the download. Automatic locking and competing background networking wait during installation. Free space must cover the new package plus 1 MiB; the previous package remains. Lookups are offline after installation.
+
+自动安装目录为 `/sdcard/dictionaries/installed/`，其中保留 `chinese.mgdict`、`chinese.manifest.json`、`chinese.LICENSE.txt` 与 `licenses/`。手动安装仍可把格式版本 1 的 `chinese.mgdict` 放在 `/sdcard/dictionaries/chinese.mgdict`；读取优先级为自动安装、上一份目录、手工文件。手工更新前关闭阅读或退出到书架；要切回手工词库，先在设备安全退出/USB 读卡状态下移走 `installed/` 和 `.previous/`，保留所有许可、署名、来源与校验值。文件名区分大小写。
+Automatic installation uses `/sdcard/dictionaries/installed/` and preserves provenance, attribution and full licenses. The manual version-1 path remains `/sdcard/dictionaries/chinese.mgdict`, after the installed and previous generations in lookup priority. Close reading before manually replacing files or removing automatic generations to return to manual data; retain all notices and checksums.
 
 支持 TXT、EPUB 和已支持的传统 MOBI 的可选择正文；图片、章节装饰题头、页眉页脚及跨页选词不在选区内。每次最多32个 Unicode 标量、128个 UTF-8 字节。极密页面超过2048个字格，或字格表分配/绘制失败时，本页拒绝选字并提示；调整字号后可重试。用户阅读字体本身缺字时须更换覆盖这些字的字体，词库数量不能证明字体覆盖。
 Selection covers text in TXT, EPUB and supported traditional MOBI, excluding pictures, decorative chapter headers, chrome and cross-page ranges. A range is capped at 32 Unicode scalars/128 UTF-8 bytes. Pages exceeding 2048 glyph cells or failing map allocation/drawing refuse selection explicitly. Dictionary coverage does not establish font coverage.
+
+## 官网下载契约 / Official Download Contract
+
+设备仅访问 `https://mogo.mantake.shop/api/v2/components/dictionary/manifest`，不自动跟随重定向。清单最大 8192 字节，`schemaVersion=1`、`format=1`，`packageId` 为64位小写十六进制；八个文件名固定为词库、来源清单、署名摘要及 CC BY-SA、Unicode、码谱 MIT、OpenCC Apache/NOTICE。每项包含字节数、SHA-256 和 `/api/v2/components/dictionary/packages/<packageId>/files/<name>` 相对地址；拒绝其他域名、任意路径、重复文件和超限大小。词库上限128 MiB，侧文件各256 KiB，流式缓冲4096字节。
+Only the official HTTPS manifest is accepted, without redirects. Its bounded schema fixes eight filenames, byte sizes, SHA-256 and content-addressed relative URLs; arbitrary origins/paths, duplicates and oversized files are rejected. Dictionary data caps at 128 MiB and each sidecar at 256 KiB, streamed through 4096 bytes.
+
+TF 卡健康检查期间的短暂忙状态最多等待2秒后复查，不当作掉卡；等待期间仍响应取消。持续忙碌、真实掉卡或写入失败会结束本次安装，保留可用旧词库。
+Wait up to two seconds for a transient card health probe while remaining cancellable. Persistent busy states, media loss and write failures stop installation and preserve the usable previous dictionary.
+
+后端在管理后台「组件管理 → 离线词库」上传完整 ZIP 后启用。后台累计/今日/本月下载量只计服务端完整传输的 `chinese.mgdict`，以北京时间记录开始、完成及耗时；清单、许可和 HEAD 不计。下载完成不等于设备已校验或安装成功。未配置或停用返回503，固件显示错误并允许稍后重试。
+The website admin imports and enables the complete ZIP. Counts describe full server transmissions of `chinese.mgdict`, with Beijing start/finish times and durations; they do not prove device installation. An absent/disabled package returns 503 and remains retryable.
 
 ## 来源与转换 / Sources And Conversion
 
@@ -52,6 +66,7 @@ Repeat `--wiktionary` for related labels; the optional supplemental folder conta
 - `ttf_*_observed` 在真实落笔过程中同步交付原文字节范围和字格，`book_layout` 使用本页/预绘页双表，只有完整且同代次的预绘结果随画面接管；观察器不分配、不读词库。/ Actual glyph draws report source spans/cells to bounded current/prefetch maps; only complete matching generations may be adopted.
 - `reader_selection` 只借用本次调用的章节和字格；工作任务只复制最多128字节的查询。`reader_dictionary` 串行替换查询，取消后等待退出并关闭文件，再释放任务结果；不触碰字体、画面或阅读进度。/ The worker owns a small query copy, drains cancellation and never touches chapter buffers, fonts, frames or progress.
 - 卡失效、USB、换章节、离页、锁屏和字体/布局失效均撤销旧选区或查询。`render` 只画已有结果，查询在事件/工作任务运行，结果在主任务 tick 接收。/ Media/USB/lifecycle/layout changes invalidate results; rendering consumes completed state only.
+- `dictionary_install` 独占下载任务、流式校验和 TF 写句柄；`dictionary_package` 固定清单与 `.install` 暂存目录，全部文件及词库探测通过后以目录改名启用，上一份保留在 `.previous`。失败只清理暂存，切换中断可读上一份；这不等于 FAT 卡物理断电原子性已经验证。/ The download service owns networking/card writes; the package module stages and probes the complete generation before directory handoff, retaining the previous copy. Physical FAT power-loss behavior still requires device validation.
 - 双表最多64KiB，单词条解压最多8192字节；文件最大为有符号32位长度、最多100万词头，每次二分索引并校验头、来源和词条 CRC。词条损坏、版本不兼容、卡读错与未安装分别返回。/ Maps cap at 64KiB and decoded entries at 8192 bytes; bounded binary search validates header/source/entry CRC and distinguishes package/version/I/O errors.
 
 格式1：64字节小端文件头含 magic `MGDICT\r\n`、版本、文件长度、词条数、索引/键/压缩数据/来源区起点及来源长度；偏移40是来源CRC，偏移60是前60字节CRC。每条20字节索引为 `<IIHHIHH>`：键偏移、数据偏移、压缩长度、原始长度、原始CRC、键长度、保留0。解压内容为四个16位字段长度和对应UTF-8的读音、释义、例句、对应词头。其余字段含义以转换器和读取器共同测试为准，格式不兼容时递增版本。
@@ -63,5 +78,5 @@ python3 tools/book_layout_draw_host_test.py
 python3 tools/check_architecture.py
 ```
 
-宿主测试覆盖 UTF-8/变体、真实字体观察及混合字体、双页接管、旋转选区、异步取消/替换、损坏包和面板编排。S31 编译、TF 卡冷/热查询时间、额外RAM峰值、常规翻页 p50/p95、实屏字形、触摸手柄和残影须分别验证，不能由主机通过推定。
+宿主测试覆盖 UTF-8/变体、真实字体观察及混合字体、双页接管、旋转选区、异步取消/替换、损坏包、八文件安装失败保旧、目录切换恢复、下载任务短流/校验失败/超时/拔卡/取消、分块清单和面板编排。S31 编译、TF 卡冷/热查询时间、额外RAM峰值、常规翻页 p50/p95、实屏字形、触摸手柄和残影须分别验证，不能由主机通过推定。
 Host coverage includes Unicode, real font observations/mixed faces, map adoption, rotated selection, cancellation/replacement, corrupt packages and page orchestration. Build, real-card timing/RAM, turn latency and physical touch/optical acceptance remain separate evidence.

@@ -16,6 +16,7 @@ unit=r'''
 #include "reader_selection.h"
 #include "book_dictionary.h"
 #include "ui_reader_dictionary.h"
+#include "dictionary_install.h"
 #include "reader_session_test.h"
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
@@ -29,6 +30,10 @@ static bool s_dictionary_feedback_pending,s_dictionary_presented;static EpdRect 
 static struct {struct {size_t page,chapter;}position;}s_reader_session;
 static int64_t s_dictionary_notice_until;
 static unsigned generation=1,queries,cancels,draws;static bool pending,ready,map_missing;
+static unsigned installs,install_cancels;static dictionary_install_status_t install_status;
+bool dictionary_install_start(void){++installs;install_status.busy=true;return true;}
+void dictionary_install_cancel(void){++install_cancels;install_status.busy=false;}
+void dictionary_install_get_status(dictionary_install_status_t *status){*status=install_status;}
 static book_layout_glyph_t glyphs[]={{0,3,10,20,30,40},{3,3,40,20,30,40},{6,3,70,20,30,40},{9,3,100,20,30,40}};
 const book_layout_glyph_t *book_layout_glyphs(size_t page,size_t *n){(void)page;*n=4;return map_missing?NULL:glyphs;}
 uint32_t book_layout_generation(void){return generation;}
@@ -45,7 +50,7 @@ static const char *s_font_path="reader.ttf",*active_font="reader.ttf";
 static const char *ttf_font_path(void){return active_font;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++draws;}
 EpdRect ui_reader_dictionary_selection(uint8_t *fb,const reader_selection_t *s,const book_layout_glyph_t *g,size_t n){(void)fb;uint32_t a,b;assert(reader_selection_range(s,g,n,&a,&b));return(EpdRect){10,20,120,40};}
-int ui_reader_dictionary_action(const ui_reader_dictionary_t *v,int x,int y){(void)x;return y<v->top?0:-1;}
+int ui_reader_dictionary_action(const ui_reader_dictionary_t *v,int x,int y){(void)x;return y<v->top?0:v->install_available&&!v->installing?4:-1;}
 size_t ui_reader_dictionary_page_end(const book_dictionary_result_t *r,size_t off){(void)r;return off;}
 size_t ui_reader_dictionary_content_size(const book_dictionary_result_t *r){return strlen(r->definition);}
 static app_redraw_t dictionary_dismiss(void);
@@ -92,6 +97,16 @@ int main(void){
  assert(dictionary_tick(&ctx)==APP_REDRAW_NONE);
  s_dictionary_selection.dragging=true;touch.touched=false;assert(dictionary_tick(&ctx)==APP_REDRAW_NONE);
  s_dictionary_selection.dragging=false;assert(dictionary_tick(&ctx)==APP_REDRAW_PAGE);
+ s_dictionary_presented=false;
+ assert(event(UI_GESTURE_LONG_PRESS,15,30)==APP_REDRAW_AREA);assert(event(UI_GESTURE_RELEASE,15,30)==APP_REDRAW_PAGE);
+ s_dictionary_view.loading=false;s_dictionary_view.install_available=true;s_dictionary_view.top=0;
+ strcpy(s_dictionary_result.query,"踽");
+ assert(event(UI_GESTURE_TAP,15,30)==APP_REDRAW_PAGE&&installs==1&&s_dictionary_view.installing);
+ assert(event(UI_GESTURE_TAP,15,30)==APP_REDRAW_NONE&&installs==1);
+ install_status.busy=false;install_status.installed=true;before=queries;
+ assert(dictionary_tick(&ctx)==APP_REDRAW_PAGE&&queries==before+1&&!strcmp(s_dictionary_result.query,"踽"));
+ s_dictionary_view.installing=true;before=install_cancels;
+ assert(dictionary_dismiss()==APP_REDRAW_PAGE&&install_cancels==before+1&&!s_dictionary_selection.active);
  puts("PASS: actual reader orchestration, AREA drag, one query per release, cancel/no query, modal dismissal, stale layout and USB invalidation");
 }
 '''
@@ -102,6 +117,6 @@ with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
     header+='\ntypedef enum { APP_REDRAW_NONE, APP_REDRAW_AREA, APP_REDRAW_PAGE } app_redraw_t;\n'
     (work/'app.h').write_text(header)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections',
-        '-I'+str(work),'-I'+str(ROOT/'tools/ui_gesture_stubs'),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'tools/book_layout_stubs'),'-I'+str(ROOT/'tools/book_source_host_stubs'),
+        '-I'+str(work),'-I'+str(ROOT/'tools/ui_gesture_stubs'),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'main/services'),'-I'+str(ROOT/'tools/book_layout_stubs'),'-I'+str(ROOT/'tools/book_source_host_stubs'),
         str(work/'test.c'),str(ROOT/'main/book/reader_selection.c'),'-o',str(work/'test')],check=True)
     subprocess.run([str(work/'test')],check=True)

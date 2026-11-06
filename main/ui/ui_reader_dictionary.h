@@ -8,6 +8,9 @@ typedef struct {
     bool open, loading;
     int top;
     size_t offset;
+    bool install_available, installing;
+    unsigned progress;
+    char install_message[160];
 } ui_reader_dictionary_t;
 /// XOR 选区可重复调用擦除，允许动态背景不重排。/ Repeated XOR erases the selection without reflowing dynamic backgrounds.
 EpdRect ui_reader_dictionary_selection(uint8_t *fb, const reader_selection_t *selection,

@@ -63,6 +63,10 @@ int main(void) {
     assert(pages>1&&ui_reader_dictionary_action(&v,30,100)==0);
     assert(ui_reader_dictionary_action(&v,570,660)==0);
     assert(ui_reader_dictionary_action(&v,50,1130)==1&&ui_reader_dictionary_action(&v,300,1130)==3&&ui_reader_dictionary_action(&v,550,1130)==2);
+    v.install_available=true;assert(ui_reader_dictionary_action(&v,300,1130)==4);
+    v.installing=true;assert(ui_reader_dictionary_action(&v,300,1130)==-1);
+    strcpy(v.install_message,"正在下载并校验词库…");v.progress=35;ui_reader_dictionary_draw(fb,&v,&r,"青铜");
+    v.install_available=v.installing=false;v.install_message[0]=0;
     r.definition[0]=0;assert(ui_reader_dictionary_content_size(&r)>strlen(r.reading));
     for(int status=BOOK_DICTIONARY_OK;status<=BOOK_DICTIONARY_BUSY;++status){r.status=status;v.offset=0;ui_reader_dictionary_draw(fb,&v,&r,"𠮷");}
     ui_reader_dictionary_notice(fb);
