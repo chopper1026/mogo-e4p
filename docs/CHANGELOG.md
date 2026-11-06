@@ -9,6 +9,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 阅读正文新增离线选字/拖选查词、可调整选区与释义分页；字典使用当前阅读字体，支持逐字查询并区分缺字、缺释义和词库异常。词库独立安装到 TF 卡；移除正文及留白长按打开目录，保留工具栏目录入口。实机触摸、速度与残影待验收。/ Add offline character/phrase selection, adjustable ranges and paged definitions in the current reader face, with per-character lookup and explicit missing-data/font/package states. Install dictionaries separately on the card; TOC remains on the toolbar. Device touch, timing and optical acceptance are pending.
 - 字典补充中文词语、成语与单字释义，修复未标简体词头漏查，释义及例句统一转简体；关闭字典回到文字页时整屏归一，阅读背景保留灰阶。/ Supplement Chinese word/idiom/character glosses, add missing simplified aliases, simplify definitions/examples and normalize the whole text page when closing the dictionary while preserving background grays.
 - 修复 S31 读写 Flash 关闭缓存期间，中断调用 FreeRTOS 协处理器函数而触发的缓存异常；相关函数放入内部 RAM，构建时检查最终地址。/ Keep S31 FreeRTOS coprocessor helpers in internal RAM to prevent cache errors when interrupts run during cache-off flash operations; validate final placement at build time.
+- 修复绑定上键关闭前光后，锁屏将快捷栏旧开灯状态重新保存，导致浅睡后关机再次开机时自动亮灯；保留快捷栏滑杆提交及睡眠恢复逻辑，真机待验收。/ Prevent lock-time quick-layer cleanup from overwriting a bound up-key light-off setting with a stale on preview and relighting after timed shutdown/reboot; retain slider commits and sleep restoration, with device acceptance pending.
 
 ## v1.0.6 · 2026-11-06
 
