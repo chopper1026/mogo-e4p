@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.6 · 本地测试 / Local testing · 2026-11-06
+
+- 修复绑定上键关闭前光后，锁屏将快捷栏旧开灯状态重新保存，导致浅睡后关机再次开机时自动亮灯；保留快捷栏滑杆提交及睡眠恢复逻辑，真机待验收。/ Prevent lock-time quick-layer cleanup from overwriting a bound up-key light-off setting with a stale on preview and relighting after timed shutdown/reboot; retain slider commits and sleep restoration, with device acceptance pending.
+
 ## v1.0.6 · 2026-11-06
 
 - 重构书架分类功能。
