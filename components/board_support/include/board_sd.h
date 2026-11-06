@@ -23,6 +23,7 @@ typedef struct {
     bool mounted;
     bool needs_format;
     char name[8];
+    char identity[40]; ///< 只读CID身份，供书库隔离；未挂载时为空。/ Read-only CID identity for library isolation; empty when unmounted.
     uint64_t capacity_bytes;
     // capacity 是物理卡大小；已用/可用只按挂载的文件系统统计。
     // Physical card size is separate from the mounted filesystem's usable capacity.

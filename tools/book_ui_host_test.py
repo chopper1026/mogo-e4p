@@ -58,7 +58,7 @@ typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GE
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NVS_NOT_FOUND -2
-#define ESP_ERR_INVALID_STATE -3
+#define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NOT_FINISHED 7
 #define ESP_ERR_NO_MEM 0x101
 typedef struct {uint8_t usage,mods;} ble_pt_event_t;
@@ -231,8 +231,20 @@ static void invalidate_covers(void){}
 static shelf_entry_t s_managed;
 static bool s_delete_confirm,s_file_removed,s_clear_confirm;
 static char s_manage_message[128];
-typedef enum {SHELF,SETTINGS,READING,TOC,MANAGE,BULK,IMPORT,SEARCH,EDIT} book_view_t;
+typedef enum {SHELF,SETTINGS,READING,TOC,MANAGE,BULK,IMPORT,SEARCH,EDIT,CATEGORIES} book_view_t;
 static book_view_t s_view,s_search_parent;
+static bool s_shelf_selecting;
+static char s_category_result[128],s_cache_library[40]="builtin";
+static struct {char query[65];bool review;int page;} s_category_ui;
+static unsigned test_category_entries;
+static void category_begin(app_ctx_t *ctx,bool picker,bool bulk){(void)ctx;(void)bulk;assert(picker);++test_category_entries;s_view=CATEGORIES;}
+static void category_reset(void){}
+static app_redraw_t category_back(app_ctx_t *ctx){(void)ctx;s_view=SHELF;return APP_REDRAW_PAGE;}
+static int category_extra_state(const char *old,const char *next,uint32_t size){(void)old;(void)next;(void)size;return ESP_OK;}
+static bool book_category_pending(const char *root){(void)root;return false;}
+static bool category_storage_ready(void){return true;}
+static void pending_drop_invalidated(void);
+static int book_category_recover(const char *root,int (*extra)(const char*,const char*,uint32_t)){(void)root;(void)extra;return ESP_OK;}
 static bool test_draw_locked,test_system_face=true;
 static void lock_draw(void){assert(!test_draw_locked);test_draw_locked=true;}
 static void unlock_draw(void){assert(test_draw_locked);test_draw_locked=false;}
@@ -369,7 +381,7 @@ static void book_layout_set_right_slack(int px){(void)px;}
 static void book_layout_set_vertical(bool vertical){test_book_vertical=vertical;}
 static bool app_settings_book_shake(void){return false;}
 static void board_sd_start_probe(void){}
-typedef struct {bool present,mounted;} board_sd_info_t;
+typedef struct {bool present,mounted;char identity[40];} board_sd_info_t;
 static int board_sd_get_info(board_sd_info_t* out){*out=(board_sd_info_t){0};return 0;}
 static bool s_shelf_cache_valid,s_cache_sd_present,s_cache_sd_mounted;
 static uint8_t s_cache_shelf_style;
@@ -464,6 +476,10 @@ static void refresh_chapter_lead(void) { apply_chapter_lead(s_chapter_heading_ti
 '''
 unit += r"""
 static book_shelf_categories_t s_shelf_categories;
+static book_shelf_categories_t s_legacy_categories;
+static book_collection_t s_collection;
+static bool shelf_collection_sync(bool complete){(void)complete;return true;}
+static bool legacy_category_recover(void){return true;}
 """
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
@@ -665,10 +681,15 @@ int main(void) {
     shelf_entry_t a={.search_match=true,.name="Same.txt",.path="/sdcard/books/A/Same.txt"};
     shelf_entry_t b={.search_match=true,.name="Same.txt",.path="/sdcard/books/B/Same.txt"};
     assert(compare_books(&a,&b)<0);
-    b.recent=10;s_recent_sort=true;assert(compare_books(&a,&b)>0);
-    s_recent_sort=false;a.favorite=true;
+    b.recent=10;s_recent_sort=true;
+    // 全局默认不能覆盖已访问分类的排序；用户切换通过分类接口更新。
+    // The global default cannot override a visited category; user changes update its state.
+    assert(compare_books(&a,&b)<0);
+    book_shelf_categories_set_sort(&s_shelf_categories,true);assert(compare_books(&a,&b)>0);
+    s_recent_sort=false;book_shelf_categories_set_sort(&s_shelf_categories,false);a.favorite=true;
     for(int style=1;style<=4;style++){test_shelf_style=style;assert(compare_books(&a,&b)<0);}
-    s_recent_sort=true;assert(compare_books(&a,&b)<0);s_recent_sort=false;test_shelf_style=0;
+    s_recent_sort=true;book_shelf_categories_set_sort(&s_shelf_categories,true);assert(compare_books(&a,&b)<0);
+    s_recent_sort=false;book_shelf_categories_set_sort(&s_shelf_categories,false);test_shelf_style=0;
     b.is_flash=true;s_filter=1;assert(compare_books(&a,&b)<0);
     s_filter=2;assert(compare_books(&a,&b)>0);
     s_filter=0;s_recent_sort=false;
@@ -753,8 +774,12 @@ int main(void) {
     s_view=BULK;ctx.leaf=0;ctx.request_menu=false;clear_selection();s_batch_confirm=false;
     assert(!menu_handle_enabled(&ctx));
     EpdRect entry=row_rect(0),hit;
+    assert(bulk_control_at(&ctx,620,107,&hit)==718);
+    assert(bulk_action(&ctx,620,107)==APP_REDRAW_PAGE&&s_view==BULK&&!test_category_entries&&s_batch_message[0]);
     assert(bulk_control_at(&ctx,entry.x+10,entry.y+10,&hit)==0);
     assert(bulk_action(&ctx,entry.x+10,entry.y+10)==APP_REDRAW_PAGE&&selected_count()==1);
+    assert(bulk_action(&ctx,620,107)==APP_REDRAW_PAGE&&s_view==CATEGORIES&&test_category_entries==1);
+    s_view=BULK;
     for(int page=1;page<=10;++page){
         assert(bulk_control_at(&ctx,636,1150,&hit)==102);
         assert(bulk_action(&ctx,636,1150)==APP_REDRAW_PAGE&&ctx.leaf==page);
@@ -777,6 +802,9 @@ int main(void) {
     assert(bulk_turn_page(&ctx,-1)==APP_REDRAW_NONE);
     s_scan_pending=true;assert(bulk_turn_page(&ctx,1)==APP_REDRAW_NONE);s_scan_pending=false;
         ctx.leaf=3;s_view=MANAGE;s_clear_confirm=false;s_file_removed=false;
+    EpdRect move=manage_panel();
+    assert(manage_action(&ctx,UI_MARGIN+10,move.y+move.height-230)==APP_REDRAW_PAGE&&s_view==CATEGORIES&&test_category_entries==2);
+    s_view=MANAGE;
     EpdRect back=manage_rect(0,4);manage_action(&ctx,back.x+1,back.y+1);
     assert(s_view==SHELF&&ctx.leaf==3);
     EpdRect circle=manage_back_rect();assert(circle.y==92&&circle.height==44);
@@ -814,7 +842,8 @@ int main(void) {
     for(int i=0;i<80;i++){memcpy(long_name+i*3,"书",3);}long_name[240]=0;test_wrapped[0]=0;
     assert(draw_wrapped_name(NULL,long_name,176)+104<870);assert(!strcmp(test_wrapped,long_name));
     scan_shelf(&ctx);s_view=BULK;toggle_selection(0);toggle_selection(14);assert(selected_count()==2);
-    s_recent_sort=true;sort_shelf(&ctx);assert(selected_count()==2);select_page(1);assert(selected_count()==8);
+    s_recent_sort=true;book_shelf_categories_set_sort(&s_shelf_categories,true);sort_shelf(&ctx);
+    assert(shelf_query().recent_sort&&selected_count()==2);select_page(1);assert(selected_count()==8);
     ctx.leaf=2;strcpy(s_query,"book");search_begin();strcpy(s_search_draft,"bad");search_finish(&ctx,false);
     assert(ctx.leaf==2&&!strcmp(s_query,"book")&&selected_count()==8);
     search_begin();assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE&&ctx.leaf==2&&s_view==BULK);
@@ -825,6 +854,15 @@ int main(void) {
     search_begin();memset(s_search_draft,'x',64);s_search_draft[64]=0;ui_text_edit_place(&s_search_input,64);
     assert(!ui_text_edit_insert(&s_search_input,"a"));assert(ui_text_edit_backspace(&s_search_input));
     assert(strlen(s_search_draft)==63);s_search_draft[0]=0;search_finish(&ctx,false);
+    // 分类选择跨搜索保留；旧文件批量管理仍按原契约清选择。/ Classification selections survive search; legacy file batches still clear them.
+    s_view=SHELF;s_shelf_selecting=true;toggle_selection(0);unsigned classified_count=selected_count();
+    search_begin();strcpy(s_search_draft,"no-matching-title");search_finish(&ctx,true);
+    assert(selected_count()==classified_count&&!s_visible_count&&s_view==SHELF);
+    s_shelf_selecting=false;s_view=CATEGORIES;strcpy(s_category_ui.query,"原搜索");s_category_ui.review=true;s_category_ui.page=2;
+    search_begin();strcpy(s_search_draft,"新搜索");search_finish(&ctx,false);
+    assert(s_view==CATEGORIES&&!strcmp(s_category_ui.query,"原搜索")&&s_category_ui.review&&s_category_ui.page==2);
+    search_begin();strcpy(s_search_draft,"新搜索");search_finish(&ctx,true);
+    assert(s_view==CATEGORIES&&!strcmp(s_category_ui.query,"新搜索")&&!s_category_ui.review&&!s_category_ui.page&&selected_count()==classified_count);
     strcpy(s_query,"");refresh_search_matches();sort_shelf(&ctx);clear_selection();s_view=BULK;toggle_selection(0);toggle_selection(1);
     s_batch_confirm=true;calls=test_delete_calls;EpdRect bc=ui_row_rect(0,2,620,UI_BTN_H);batch_action(&ctx,bc.x+1,bc.y+1);assert(!s_batch_confirm&&test_delete_calls==calls);
     s_batch_kind=BATCH_DELETE;test_removed=true;test_delete_error=-1;batch_apply(&ctx);assert(selected_count()==2);
@@ -956,7 +994,7 @@ int main(void) {
     s_reader_return_home=false;
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
-    free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);
+    free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
     puts("book_ui_host_test: PASS");
@@ -968,7 +1006,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"
     c.write_text(unit.replace("SHELF_CONTEXT_DECLARATIONS",cover_declarations())+cover_implementation(), encoding="utf-8")
-    subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
+    subprocess.run(["gcc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
                     "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[2] / "tools/shelf_categories_host_stubs"), "-I", str(source.parents[2] / "tools/book_source_host_stubs"), "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
-                    str(c), str(source.parents[1] / "book/book_shelf_category_state.c"), str(source.parents[1] / "book/book_shelf_model.c"), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
+                    str(c), str(source.parents[1] / "book/book_shelf_category_state.c"), str(source.parents[1] / "book/book_collection.c"), str(source.parents[1] / "book/book_shelf_model.c"), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

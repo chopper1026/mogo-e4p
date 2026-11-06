@@ -4,6 +4,7 @@
  */
 #pragma once
 #include "book_shelf_model.h"
+#include "book_collection.h"
 
 #define BOOK_SHELF_CATEGORY_LIMIT 128
 #define BOOK_SHELF_CATEGORY_MENU_ROWS 7
@@ -14,10 +15,17 @@ typedef struct {
     int count, capacity, selected, menu_page; ///< 内部状态，仅通过下列接口访问。/ Internal state, accessed only through the API below.
     bool menu_open; ///< 分类菜单状态，不持有绘制或输入对象。/ Menu state without drawing or input objects.
     char root[BOOK_STORE_PATH_MAX]; ///< 本次开机的根目录副本。/ Owned root path for this boot.
+    const book_collection_t *collection; ///< 借用已提交分类；为空时只供旧目录迁移。/ Borrow committed categories; NULL retains legacy migration mode.
 } book_shelf_categories_t;
 
 /// 初始化或重试分配；返回根目录是否变化，变化时丢弃原分类和页码。/ Initialize or retry allocation; report root changes, which discard old folders and pages.
 bool book_shelf_categories_init(book_shelf_categories_t *state, const char *root);
+/// 按稳定ID刷新显示顺序，保留原页码和选择；失败不替换现有表。/ Refresh order by stable IDs, preserving pages/selection; allocation failure leaves the old table intact.
+bool book_shelf_categories_bind(book_shelf_categories_t *state, const book_collection_t *collection);
+/// 当前分类表是否已绑定逻辑索引。/ Whether the current table is bound to a logical index.
+bool book_shelf_categories_logical(const book_shelf_categories_t *state);
+uint32_t book_shelf_categories_id(const book_shelf_categories_t *state, int index);
+int book_shelf_categories_index(const book_shelf_categories_t *state, uint32_t id);
 /// 释放目录并恢复零状态；不可在持有借用字符串时调用。/ Release the table and restore zero state; no borrowed strings may remain in use.
 void book_shelf_categories_dispose(book_shelf_categories_t *state);
 /// 按原顺序登记或重新启用目录，分配失败或达到上限返回 -1。/ Register or re-enable a folder in original order; return -1 on allocation failure or the limit.
@@ -28,8 +36,14 @@ void book_shelf_categories_begin_scan(book_shelf_categories_t *state);
 void book_shelf_categories_recount(book_shelf_categories_t *state, const book_shelf_entry_t *entries, int count);
 /// 构造同步排序查询；路径借用至目录表或根目录下次变化。/ Build a synchronous sort query; paths are borrowed until the table or root next changes.
 book_shelf_query_t book_shelf_categories_query(const book_shelf_categories_t *state, int filter, bool recent_sort);
+/// 记住当前分类本次开机的排序；未设置时沿用全局默认。/ Remember this boot's category sort; untouched categories use the global default.
+void book_shelf_categories_set_sort(book_shelf_categories_t *state, bool recent_sort);
 /// 原显示名；返回值仅供同步使用，不转移所有权。/ Original display name, borrowed for synchronous use.
 const char *book_shelf_categories_name(const book_shelf_categories_t *state, int index);
+/// 一级目录的借用路径；系统分类返回根目录。/ Borrow a direct folder path; system categories return the root.
+const char *book_shelf_categories_path(const book_shelf_categories_t *state, int index);
+/// 本机改名保留页码；删除释放对应槽位。/ Local renames preserve pages; removals release their slot.
+void book_shelf_categories_rebase(book_shelf_categories_t *state, const char *old_path, const char *new_path);
 /// 返回分类书籍数，越界返回零。/ Return a category's book count, or zero outside the table.
 int book_shelf_categories_count(const book_shelf_categories_t *state, int index);
 /// 返回已选分类；分配失败时为全部。/ Return the selection, defaulting to all on allocation failure.

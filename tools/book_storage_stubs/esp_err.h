@@ -8,4 +8,9 @@ typedef int esp_err_t;
 #define ESP_ERR_NVS_NOT_FOUND 3
 #define ESP_ERR_NVS_INVALID_LENGTH 4
 #define ESP_ERR_NVS_NOT_ENOUGH_SPACE 5
+#define ESP_ERR_INVALID_SIZE 6
+#define ESP_ERR_NO_MEM 7
+#define ESP_ERR_NOT_SUPPORTED 8
+#define ESP_ERR_NOT_FOUND 9
+#define ESP_ERR_INVALID_RESPONSE 10
 static inline const char* esp_err_to_name(int err) { (void)err; return "test"; }

@@ -10,6 +10,7 @@
 #include "board_sd.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -248,6 +249,8 @@ static void fill_info(board_sd_info_t* info, esp_err_t mount_err) {
     info->mounted = true;
     info->needs_format = false;
     strlcpy(info->name, card->cid.name, sizeof(info->name));
+    snprintf(info->identity, sizeof(info->identity), "%02x-%04x-%08" PRIx32 "-%04x", (unsigned)card->cid.mfg_id,
+             (unsigned)card->cid.oem_id, (uint32_t)card->cid.serial, (unsigned)card->cid.date);
     info->capacity_bytes = (uint64_t)card->csd.capacity * card->csd.sector_size;
     // 空间统计失败不覆盖「挂载成功」，仍允许正常读取文件。
     // Allocation-query failure must not turn a mounted filesystem into a mount failure.

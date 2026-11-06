@@ -126,8 +126,18 @@ static void service_cases(void){
     assert(wall_reads==1&&s_today.day==5&&reading_journal_totals(&s_model,5).milliseconds==500);
     assert(!reading_journal_at(&s_model,4,0));clock_step=0;
     monotonic_us+=61000000;app_reading_journal_poll();assert(!s_dirty);
+    simulate_restart();remove_slots();clock_ms=civil(2026,11,4,12,0,0);app_reading_journal_poll();
+    record(1,1000,1);
+    app_reading_journal_record("/sdcard/books/分类/A.epub","A",10,2,500,2);
+    write_ok=false;assert(!app_reading_journal_relocate("/sdcard/books/A.epub","/sdcard/books/分类/A.epub",10));
+    write_ok=true;assert(app_reading_journal_relocate("/sdcard/books/A.epub","/sdcard/books/分类/A.epub",10));
+    assert(s_model.count==1&&reading_journal_totals(&s_model,4).milliseconds==1500);
+    assert(reading_journal_totals(&s_model,4).chapters==2&&reading_journal_totals(&s_model,4).turns==3);
+    simulate_restart();app_reading_journal_poll();assert(s_model.count==1);
+    assert(app_reading_journal_relocate("/sdcard/books/A.epub","/sdcard/books/分类/A.epub",10));
+    assert(reading_journal_totals(&s_model,4).milliseconds==1500);
     simulate_restart();remove_slots();
-    puts("PASS: reboot persistence, shared manual scenes, flash guard/write failure, partial-new-slot fallback, late-mount merge, midnight/month split and invalid time");
+    puts("PASS: reboot persistence, shared manual scenes, flash guard/write failure, partial-new-slot fallback, late-mount merge, midnight/month split, invalid time and idempotent category identity merge");
 }
 int main(void){model_cases();service_cases();assert(guards>=ends);return 0;}
 '''

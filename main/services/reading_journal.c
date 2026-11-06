@@ -128,6 +128,33 @@ static bool poll_at(int64_t wall) {
     return changed || old_error!=s_storage_error;
 }
 bool app_reading_journal_poll(void) { return poll_at(wall_ms()); }
+bool app_reading_journal_relocate(const char *old_path, const char *new_path, uint32_t size) {
+    (void)app_reading_journal_poll();
+    if (!s_loaded) return false;
+    uint64_t old = reading_journal_book_id(old_path, size), next = reading_journal_book_id(new_path, size);
+    if (old == next) return app_reading_journal_flush();
+    reading_journal_record_t **p = &s_model.records;
+    while (*p) {
+        reading_journal_record_t *r = *p;
+        if (r->book != old) { p = &r->next; continue; }
+        reading_journal_record_t *match = s_model.records;
+        while (match && (match->book != next || match->day != r->day)) match = match->next;
+        if (match) {
+            uint64_t ms = (uint64_t)match->milliseconds + r->milliseconds;
+            uint64_t turns = (uint64_t)match->turns + r->turns;
+            match->milliseconds = ms > UINT32_MAX ? UINT32_MAX : (uint32_t)ms;
+            match->turns = turns > UINT32_MAX ? UINT32_MAX : (uint32_t)turns;
+            match->chapters = 0;
+            for (unsigned i = 0; i < sizeof(match->visited); ++i) {
+                match->visited[i] |= r->visited[i];
+                for (unsigned bits = match->visited[i]; bits; bits &= bits - 1) ++match->chapters;
+            }
+            *p = r->next; free(r); --s_model.count;
+        } else { r->book = next; p = &r->next; }
+        s_dirty = true;
+    }
+    return app_reading_journal_flush();
+}
 void app_reading_journal_record(const char *path, const char *title, uint32_t size,
                                 unsigned chapter, uint32_t milliseconds, uint32_t turns) {
     if (!path || !*path || !title || !*title) return;

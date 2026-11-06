@@ -84,11 +84,15 @@ typedef struct {uint8_t pct;uint32_t chapter,last_open_s;} book_progress_t;
 typedef struct {char path[288];bool removed,has_progress;uint32_t size,chapter,recent;uint8_t pct;} shelf_entry_t;
 static shelf_entry_t s_shelf[1];
 static int s_count=1,sorts;
+static unsigned collection_syncs;
+static bool shelf_collection_sync(bool complete){(void)complete;++collection_syncs;return true;}
 static uint32_t s_progress_revision=UINT32_MAX,progress_revision=1;
 static uint32_t book_progress_revision(void){return progress_revision;}
 static void shelf_category_restore(app_ctx_t* ctx){(void)ctx;}
 static void shelf_categories_recount(void){}
 static bool s_recent_sort=true,added,last_valid=true,progress_valid=true;
+typedef struct {bool recent_sort;} shelf_query_t;
+static shelf_query_t shelf_query(void){return (shelf_query_t){.recent_sort=s_recent_sort};}
 static char s_latest_path[288];
 static book_progress_t test_progress={37,9,42};
 static bool shelf_backfill_read_books(bool* trunc){assert(!trunc);return added;}
@@ -165,12 +169,12 @@ int main(void) {
     invalidate_covers();style=2;rows=9;
     app_ctx_t ctx={0};strcpy(s_shelf[0].path,"/test.epub");s_shelf[0].size=100;s_shelf[0].recent=42;
     for(int i=0;i<80;++i)refresh_cached_progress(&ctx);
-    assert(sorts==0 && s_shelf[0].pct==37 && s_shelf[0].chapter==9);
+    assert(sorts==0 && s_shelf[0].pct==37 && s_shelf[0].chapter==9&&!collection_syncs);
     ++test_progress.last_open_s;++progress_revision;refresh_cached_progress(&ctx);assert(sorts==1);
     refresh_cached_progress(&ctx);assert(sorts==1);
     progress_valid=false;++progress_revision;refresh_cached_progress(&ctx);assert(sorts==2 && s_shelf[0].recent==0);
     refresh_cached_progress(&ctx);assert(sorts==2);
-    added=true;s_recent_sort=false;++progress_revision;refresh_cached_progress(&ctx);assert(sorts==3);
+    added=true;s_recent_sort=false;++progress_revision;refresh_cached_progress(&ctx);assert(sorts==3&&collection_syncs==3);
     added=false;last_valid=false;++progress_revision;refresh_cached_progress(&ctx);assert(sorts==3);
     puts("shelf fast cache: 40,446-byte PSRAM bound; 80 hot reuses without allocation; exact cover pixels, contrast/phase invalidation, mutually exclusive gray/BW ownership, immediate gray release, low-memory/OOM fallback, reader/media release and unchanged-progress sort avoidance passed");
 }

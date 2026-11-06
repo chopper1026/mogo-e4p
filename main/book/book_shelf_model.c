@@ -22,7 +22,10 @@ bool book_shelf_category_matches(const book_shelf_query_t *query, const char *pa
 }
 
 bool book_shelf_matches(const book_shelf_query_t *query, const book_shelf_entry_t *item) {
-    return book_shelf_category_matches(query, item->path) && item->search_match &&
+    bool category = query->logical_categories ?
+        (query->uncategorized ? item->category_id == 0 : !query->category_id || item->category_id == query->category_id) :
+        book_shelf_category_matches(query, item->path);
+    return category && item->search_match &&
         (query->filter == 0 || (query->filter == 1 && !item->is_flash) ||
          (query->filter == 2 && item->is_flash));
 }

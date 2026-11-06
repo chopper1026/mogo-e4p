@@ -60,7 +60,7 @@ typedef struct {
 } sdmmc_host_t;
 typedef struct { int width,clk,cmd,d0,d1,d2,d3,cd,wp,flags; } sdmmc_slot_config_t;
 typedef struct { bool format_if_mount_failed; int max_files,allocation_unit_size; } esp_vfs_fat_sdmmc_mount_config_t;
-typedef struct { struct { char name[8]; } cid; struct { uint32_t capacity,sector_size; } csd; } sdmmc_card_t;
+typedef struct { struct { char name[8]; int mfg_id,oem_id,serial,date; } cid; struct { uint32_t capacity,sector_size; } csd; } sdmmc_card_t;
 #define MALLOC_CAP_INTERNAL 1
 #define MALLOC_CAP_DMA 2
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
@@ -89,7 +89,7 @@ static bool present=true, drop_during_mount=false, unmount_fail=false, detect_fa
 static bool has_cd=true, health_started;
 static int mounts, unmounts, formats;
 static bool made_books, made_fonts, made_pictures;
-static sdmmc_card_t mock_card={.cid={"MOCK"},.csd={2048,512}};
+static sdmmc_card_t mock_card={.cid={.name="MOCK",.mfg_id=0xab,.oem_id=0x1234,.serial=-1,.date=0x0123},.csd={2048,512}};
 static void (*pending)(void*);
 esp_err_t board_sd_detect(bool* detected);
 static void vTaskDelay(int n) {(void)n;}
@@ -161,6 +161,7 @@ int main(void) {
     assert(board_sd_sync()==ESP_ERR_NOT_FINISHED);
     finish_probe();
     assert(board_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);
+    assert(!strcmp(info.identity,"ab-1234-ffffffff-0123"));
     assert(made_books && made_fonts && made_pictures);
     detect_fail=true;
     for(int i=0;i<20;i++) assert(board_sd_get_info(&info)==ESP_OK && info.mounted && info.capacity_bytes);

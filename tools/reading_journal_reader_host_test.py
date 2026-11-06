@@ -17,7 +17,7 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 #define ESP_OK 0
-enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_SETTINGS};
+enum {READING,SHELF,CATEGORIES,SEARCH,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_SETTINGS};
 typedef struct {int64_t now_ms;} app_ctx_t;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
@@ -36,6 +36,17 @@ static bool app_reading_journal_poll(void){++polls;return false;}
 static bool app_reading_journal_flush(void){++flushes;return true;}
 static void middle_pending_clear(void){}
 static void reader_indent_hold_cancel(void){}
+static int s_category_ui;
+static unsigned category_suspends;
+static void book_category_ui_suspend(int *ui){assert(ui==&s_category_ui);++category_suspends;}
+static int s_search_parent;
+static bool s_shelf_selecting;
+static unsigned keyboard_ends,category_resets,selections_cleared,shelf_sorts,shelf_restores;
+static void ui_keyboard_end(void){++keyboard_ends;}
+static void category_reset(void){++category_resets;}
+static void clear_selection(void){++selections_cleared;}
+static void sort_shelf(app_ctx_t *ctx){(void)ctx;++shelf_sorts;}
+static void shelf_category_restore(app_ctx_t *ctx){(void)ctx;++shelf_restores;}
 static bool s_shake_cfg_pending,s_shelf_key_mode,s_shelf_key_paint_pending;
 static int s_shelf_key_delta,s_shelf_key_pressed,s_shelf_categories;
 static void shelf_category_remember(app_ctx_t *ctx){(void)ctx;}
@@ -71,6 +82,13 @@ int main(void){
     s_stats_pending_ms=29999;ctx.now_ms+=1000;track_ticket_stats(&ctx);assert(ticket_seconds>=30&&s_stats_pending_ms==999);
     ticket_ok=false;s_stats_pending_ms=30000;s_stats_pending_turns=2;flush_ticket_stats();assert(s_stats_pending_ms==30000&&s_stats_pending_turns==2);
     ticket_ok=true;flush_ticket_stats();assert(!s_stats_pending_ms&&!s_stats_pending_turns&&ticket_turns==2);
+    uint32_t before_category=journal_ms;
+    s_view=CATEGORIES;s_text=NULL;before_lock(&ctx);assert(category_suspends==1&&journal_ms==before_category&&flushes==2);
+    assert(s_view==SHELF&&keyboard_ends==1&&category_resets==1&&selections_cleared==1&&shelf_sorts==1&&shelf_restores==1);
+    s_view=SEARCH;s_search_parent=CATEGORIES;before_lock(&ctx);
+    assert(s_view==SHELF&&category_suspends==2&&keyboard_ends==2&&category_resets==2);
+    s_view=SHELF;s_shelf_selecting=true;before_lock(&ctx);
+    assert(!s_shelf_selecting&&s_view==SHELF&&category_suspends==3&&selections_cleared==3&&shelf_restores==3);
     puts("PASS: actual reader timing excludes panels/shelf/unloaded/sleep/backward/gapped/idle intervals; idle polls, lock tail and ticket retries stay coherent");
 }
 '''

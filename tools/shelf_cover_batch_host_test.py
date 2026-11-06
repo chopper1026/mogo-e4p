@@ -16,7 +16,7 @@ unit=r'''
 #include <string.h>
 #include "book_cover_jobs.h"
 typedef struct{int x,y,width,height;}EpdRect;
-enum{SHELF,MANAGE};
+enum{SHELF,MANAGE,CATEGORIES,CATEGORY_BOOKS};
 typedef struct{bool touched;}touch_t;
 typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;}app_ctx_t;
 #define UI_LOCK_WIDTH 684
@@ -31,6 +31,8 @@ static int64_t esp_timer_get_time(void){return fake_us;}
 static void vTaskDelay(unsigned ticks){assert(ticks==1);fake_us+=1000;if(ready_after&&fake_us>=(int64_t)ready_after*1000)ready_mask=511;}
 
 SHELF_CONTEXT_DECLARATIONS
+static book_shelf_covers_t s_category_covers;
+static struct{int screen;}s_category_ui;
 static struct{char path[32],name[32],author[32];bool removed;}s_shelf[9];
 static int shelf_rows(void){return rows;}
 static int app_settings_shelf_style(void){return 2;}

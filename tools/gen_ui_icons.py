@@ -96,6 +96,12 @@ ICONS = (
     "thermometer",       # 快捷栏·色温 / quick layer, colour temperature
     "vibrate",           # 设置·触摸震动 / settings, touch vibration
     "usb",               # 文件·USB 传输 / files, USB transfer
+    "plus",              # 新增分类 / add category
+    "ellipsis",          # 分类操作 / category actions
+    "check",             # 保存分类 / save category
+    "folder-input",      # 移入分类 / move into category
+    "search",            # 书架搜索 / shelf search
+    "undo-2",            # 撤销归类 / undo classification
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")

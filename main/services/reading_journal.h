@@ -15,6 +15,8 @@ void app_reading_journal_record(const char *path, const char *title, uint32_t fi
                                 unsigned chapter, uint32_t milliseconds, uint32_t turns);
 /// 锁屏/离页立即尝试保存；失败保留内存，下次重试。/ Flush on lock/exit; retain memory on failure for retry.
 bool app_reading_journal_flush(void);
+/// 分类改名/移书时保持当月书籍身份；失败由卡上路径日志重试。/ Retain monthly book identity during category moves; retry failures through the card's path journal.
+bool app_reading_journal_relocate(const char *old_path, const char *new_path, uint32_t file_size);
 bool app_reading_journal_next_scene(void);
 /// 只读快照；未校时显示无日期状态，不把旧记录当成今天。/ Read-only views; invalid time never relabels old records as today.
 const reading_journal_model_t *app_reading_journal_model(void);

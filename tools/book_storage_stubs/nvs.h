@@ -16,6 +16,8 @@ esp_err_t nvs_erase_key(nvs_handle_t, const char*);
 esp_err_t nvs_commit(nvs_handle_t);
 esp_err_t nvs_get_u32(nvs_handle_t, const char*, uint32_t*);
 esp_err_t nvs_set_u32(nvs_handle_t, const char*, uint32_t);
+esp_err_t nvs_get_u8(nvs_handle_t, const char*, uint8_t*);
+esp_err_t nvs_set_u8(nvs_handle_t, const char*, uint8_t);
 /* 枚举替身：只覆盖 book_progress_list 用到的部分。/ Iterator stand-in, only what book_progress_list uses. */
 #define NVS_DEFAULT_PART_NAME "nvs"
 typedef enum { NVS_TYPE_ANY = 0, NVS_TYPE_BLOB } nvs_type_t;

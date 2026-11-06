@@ -76,6 +76,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
 static int s_view=0,style=5,s_pressed_control=-1;
+static bool s_shelf_selecting;
 enum {SHELF,BULK};
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
@@ -160,7 +161,21 @@ int main(int argc,char **argv){
  // A long title stays in the two-line text region without touching author/progress.
  memset(fb,255,684*1216/2);draw_list_title(fb,"名字很长名字很长名字很长名字很长名字很长名字很长名字很长",258);
  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)if(pixel(fb,x,y)!=240)assert(x>=244&&x<622&&y>=237&&y<313);
- free(fb);ttf_font_unload();puts("PASS: native list painting and bounded bounce/settle with no extra frame; uniform boxes, aspect-fill crop, 4 rows, favorites, progress, two-line UTF-8 bounds");
+ s_shelf_selecting=true;memset(fb,255,684*1216/2);
+ for(int row=0;row<4;++row){
+  EpdRect card=row_rect(row),cover=shelf_cover_image(row);
+  assert(card.x==36&&card.y==280+row*180&&card.width==612&&card.height==180);
+  assert(cover.y>=card.y&&cover.y+cover.height<card.y+card.height&&card.y+card.height<=1000);
+  draw_list_row(fb,row,&items[row]);
+ }
+ for(int row=0;row<3;++row)for(int yy=0;yy<2;++yy)assert(pixel(fb,300,280+row*180+179+yy)<128);
+ style=2;
+ for(int row=0;row<9;++row){
+  EpdRect card=row_rect(row),cover=shelf_cover_image(row);
+  assert(card.y==280+row/3*244&&card.height==240&&card.y+card.height<=1008);
+  assert(cover.width==164&&cover.height==214&&cover.y==card.y);
+ }
+ free(fb);ttf_font_unload();puts("PASS: native list painting and bounded bounce/settle with no extra frame; uniform boxes, aspect-fill crop, 4 rows, favorites, progress, two-line UTF-8 bounds and selection geometry");
 }
 '''
  (p/'test.c').write_text(unit)

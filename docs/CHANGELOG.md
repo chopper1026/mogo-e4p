@@ -3,6 +3,16 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.5 · 本地测试 / Local testing · 2026-11-06
+
+- 移除书架题头下重复的书籍数量，搜索、选择、管理、导入改为同排等距，点击区域同步调整；底部分页数量与多选布局保留。/ Remove the duplicate shelf header count and evenly space search, select, manage and import in one row with matching hit targets; retain the pager count and selection layout.
+
+## v1.0.5 · 本地测试 / Local testing · 2026-11-05
+
+- 调整分类选书与书架多选间距，为筛选和批量操作增加独立按钮；底部固定已选核对与提交，书架多选暂时隐藏导航，类内移出收进更多菜单。修复未选书时「添加」被灰块覆盖，禁用态保留白底灰字；普通书架布局不变，实屏待验收。/ Separate category filters and batch actions into spaced controls, pin review/submit actions, hide navigation during shelf selection and move scoped unclassification into More. Fix the disabled Add control's gray block with gray ink on white; normal browsing is unchanged and panel acceptance is pending.
+- 书架改用独立分类，不搬动原文件；新建后立即选书，支持跨页/搜索/筛选勾选、已选核对、类内添加、批量归类/移出、改名/顺序/删除及最近一次撤销。旧目录只迁移一次，双副本保存按TF卡隔离；设置备份暂未纳入分类资料，真机验收待完成。/ Independent categories leave files untouched; create/pick, retained selections/review, add/classify/unclassify, rename/order/remove and session undo. Migrate folders once and persist checked copies per card; settings backup and device acceptance remain pending.
+- 修复分类命名未走编辑刷新出口的问题，恢复按键反馈、输入与键盘切换；用户已确认旧版键盘实机恢复，新版分类仍待实屏验收。/ Restore category key feedback/input/layout changes through the editor presentation path; the prior keyboard fix was user-confirmed, while logical categories await device acceptance.
+
 ## v1.0.5 · 2026-11-05
 
 - 重新设计阅读手账像素画风格。

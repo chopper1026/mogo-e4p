@@ -43,6 +43,7 @@ unit = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "book_shelf_categories.h"
 #include "book_shelf_category_state.h"
 #define SHELF 0
@@ -70,7 +71,14 @@ static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=
 static int ui_nav_hit(int x,int y){return y>=1135?x/171:-1;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){ctx->requested_tab=tab;}
 static book_shelf_categories_t s_shelf_categories;
+static book_shelf_categories_t s_legacy_categories;
+static book_collection_t s_collection;
+static bool s_shelf_selecting;
+static struct {bool blocked;} s_category_ui;
+static void book_category_ui_edit(void *ui,const book_shelf_categories_t *c,bool rename){(void)ui;(void)c;assert(!rename);}
 static int s_view=SHELF;
+static unsigned manager_entries;
+static void category_begin(app_ctx_t *ctx,bool picker,bool bulk){(void)ctx;assert(!picker&&!bulk);++manager_entries;}
 static bool s_scan_pending,s_shelf_cache_valid,s_recent_sort;
 static int s_count,s_visible_count,s_filter;
 static book_shelf_entry_t s_shelf[40];
@@ -81,7 +89,8 @@ for name in ('shelf_category_add', 'shelf_category_init', 'shelf_category_name',
              'shelf_category_at', 'shelf_category_available', 'shelf_category_box', 'shelf_category_gesture'):
     unit += function(name) + '\n'
 unit += r'''
-int main(void){
+int main(int argc,char **argv){
+ assert(argc==2);
  char child[288];assert(book_shelf_child("/sdcard/books/","/sdcard/books/文学/深层/a.epub",child,sizeof(child))&&!strcmp(child,"文学"));
  assert(!book_shelf_child("/sdcard/books","/sdcard/books/a.epub",child,sizeof(child)));
  assert(!book_shelf_child("/sdcard/books","/sdcard/books2/文学/a.epub",child,sizeof(child)));
@@ -168,8 +177,8 @@ int main(void){
  int paints=render_count;
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&render_count==paints+1);
  assert(book_shelf_categories_menu_is_open(&s_shelf_categories)&&s_mode==MODE_GL16);
- EpdRect box=shelf_category_box();assert(box.x==36&&box.y==158&&box.width==400&&box.height==348);
- assert(s_area.x==24&&s_area.y==79&&s_area.width==424&&s_area.height==431);
+ EpdRect box=shelf_category_box();assert(box.x==36&&box.y==158&&box.width==400&&box.height==476);
+ assert(s_area.x==24&&s_area.y==79&&s_area.width==424&&s_area.height==559);
  event.type=UI_GESTURE_SWIPE_D;paints=render_count;
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_NONE&&render_count==paints);
  event.type=UI_GESTURE_SWIPE_L;assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_NONE);
@@ -195,13 +204,26 @@ int main(void){
  event=(ui_gesture_event_t){UI_GESTURE_SWIPE_U,100,300};
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&book_shelf_categories_menu_page(&s_shelf_categories)==1);
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_NONE);
- box=shelf_category_box();event=(ui_gesture_event_t){UI_GESTURE_TAP,100,box.y+box.height-25};
+ box=shelf_category_box();event=(ui_gesture_event_t){UI_GESTURE_TAP,100,box.y+box.height-128-25};
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&book_shelf_categories_menu_page(&s_shelf_categories)==0);
- event=(ui_gesture_event_t){UI_GESTURE_TAP,350,shelf_category_box().y+shelf_category_box().height-25};
+ event=(ui_gesture_event_t){UI_GESTURE_TAP,350,shelf_category_box().y+shelf_category_box().height-128-25};
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&book_shelf_categories_menu_page(&s_shelf_categories)==1);
  event=(ui_gesture_event_t){UI_GESTURE_TAP,100,158+8+40};
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_PAGE&&book_shelf_categories_selected(&s_shelf_categories)==7);
  assert(!ctx.leaf&&!s_visible_count);
+ event=(ui_gesture_event_t){UI_GESTURE_TAP,100,110};shelf_category_gesture(&ctx,&event);
+ box=shelf_category_box();event=(ui_gesture_event_t){UI_GESTURE_TAP,200,box.y+box.height-20};
+ assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_PAGE&&manager_entries==1);
+ assert(!book_shelf_categories_menu_is_open(&s_shelf_categories));
+ // 改名保持页码，删除释放槽位并回到未分类。/ Renames retain pages; removals release slots and select uncategorized.
+ book_shelf_categories_select(&s_shelf_categories,literature);
+ book_shelf_categories_remember(&s_shelf_categories,false,3);
+ book_shelf_categories_rebase(&s_shelf_categories,"/sdcard/books/文学","/sdcard/books/小说");
+ assert(!strcmp(book_shelf_categories_path(&s_shelf_categories,literature),"/sdcard/books/小说"));
+ assert(book_shelf_categories_saved_page(&s_shelf_categories,false)==3);
+ book_shelf_categories_rebase(&s_shelf_categories,"/sdcard/books/小说",NULL);
+ assert(book_shelf_categories_selected(&s_shelf_categories)==1);
+ assert(shelf_category_add("/sdcard/books/新分类")==literature);
 
  // 根目录变化先释放旧记录，分配失败时仍按新根查询并允许再次初始化。/ Root changes release old records; allocation failure still exposes the new root and permits retry.
  books_root="/sdcard/newbooks";fail_alloc=true;shelf_category_init();assert(!s_shelf_cache_valid);
@@ -217,7 +239,49 @@ int main(void){
  assert(book_shelf_categories_add(&unicode,long_path)==2);
  assert(strlen(book_shelf_categories_name(&unicode,2))==286);
  book_shelf_categories_dispose(&unicode);
+ // 逻辑绑定保留首次旧目录选择和两套页码，后续改名/排序只认稳定ID。/ Logical binding preserves migrated selection/pages, then follows stable IDs through rename/order.
+ char prefix[288];snprintf(prefix,sizeof(prefix),"%s/library",argv[1]);
+ book_collection_t library={0};assert(book_collection_open(&library,prefix)==ESP_OK);
+ book_shelf_categories_t logical={0};book_shelf_categories_init(&logical,"/library");
+ int old=book_shelf_categories_add(&logical,"/library/文学");
+ const char *folders[]={"/library/文学","/library/未分类"};
+ int reserved=book_shelf_categories_add(&logical,folders[1]);
+ assert(book_shelf_categories_select(&logical,old));book_shelf_categories_remember(&logical,false,3);book_shelf_categories_remember(&logical,true,6);
+ book_shelf_categories_set_sort(&logical,true);
+ book_shelf_entry_t members[3]={0};
+ snprintf(members[0].path,288,"/library/文学/a.txt");snprintf(members[1].path,288,"/library/root.txt");snprintf(members[2].path,288,"/library/未分类/b.txt");
+ for(int i=0;i<3;++i)members[i].search_match=true;
+ assert(book_collection_sync(&library,"/library",folders,2,members,3,true)==ESP_OK);
+ assert(book_shelf_categories_bind(&logical,&library)&&book_shelf_categories_logical(&logical));
+ uint32_t stable=members[0].category_id;
+ assert(book_shelf_categories_id(&logical,book_shelf_categories_selected(&logical))==stable);
+ assert(book_shelf_categories_saved_page(&logical,false)==3&&book_shelf_categories_saved_page(&logical,true)==6);
+ assert(book_shelf_categories_query(&logical,0,false).recent_sort);
+ assert(book_shelf_categories_select(&logical,0));book_shelf_categories_set_sort(&logical,false);
+ assert(!book_shelf_categories_query(&logical,0,true).recent_sort);
+ assert(book_shelf_categories_select(&logical,book_shelf_categories_index(&logical,stable))&&book_shelf_categories_query(&logical,0,false).recent_sort);
+ book_shelf_categories_recount(&logical,members,3);assert(book_shelf_categories_count(&logical,0)==3&&book_shelf_categories_count(&logical,1)==1);
+ assert(book_shelf_categories_count(&logical,book_shelf_categories_index(&logical,stable))==1);
+ book_shelf_categories_t alias={0};book_shelf_categories_init(&alias,"/library");book_shelf_categories_add(&alias,folders[0]);
+ assert(book_shelf_categories_add(&alias,folders[1])==reserved&&book_shelf_categories_select(&alias,reserved));
+ book_shelf_categories_remember(&alias,false,9);assert(book_shelf_categories_bind(&alias,&library));
+ assert(book_shelf_categories_id(&alias,book_shelf_categories_selected(&alias))==members[2].category_id&&book_shelf_categories_saved_page(&alias,false)==9);
+ book_shelf_categories_dispose(&alias);
+ assert(book_collection_rename(&library,stable,"改名后") == ESP_OK&&book_collection_order(&library,stable,1)==ESP_OK);
+ fail_alloc=true;assert(!book_shelf_categories_bind(&logical,&library));fail_alloc=false;
+ assert(book_shelf_categories_id(&logical,book_shelf_categories_selected(&logical))==stable&&!strcmp(book_shelf_categories_name(&logical,2),"文学"));
+ assert(book_shelf_categories_bind(&logical,&library));
+ assert(book_shelf_categories_id(&logical,book_shelf_categories_selected(&logical))==stable&&book_shelf_categories_selected(&logical)==3);
+ assert(!strcmp(book_shelf_categories_name(&logical,3),"改名后")&&book_shelf_categories_saved_page(&logical,true)==6);
+ assert(book_shelf_categories_query(&logical,0,false).recent_sort);
+ book_shelf_query_t logical_query=book_shelf_categories_query(&logical,0,false);assert(logical_query.logical_categories&&logical_query.category_id==stable);
+ members[0].removed=true;book_shelf_categories_recount(&logical,members,3);assert(book_shelf_categories_count(&logical,0)==2&&book_shelf_categories_count(&logical,3)==0);
+ assert(book_collection_remove(&library,stable)==ESP_OK&&book_shelf_categories_bind(&logical,&library));
+ assert(book_shelf_categories_selected(&logical)==1);
+ book_shelf_categories_dispose(&logical);book_collection_close(&library);
+ for(int slot=0;slot<2;++slot){char path[300];snprintf(path,sizeof(path),"%s.%d",prefix,slot);unlink(path);}
  book_shelf_categories_dispose(&s_shelf_categories);
+ book_shelf_categories_dispose(&s_legacy_categories);
  puts("PASS: real category module and page adapters; folders, pages, filters, OOM/retry/limits, menu navigation, independent contexts and teardown");
 }
 '''
@@ -225,8 +289,10 @@ with tempfile.TemporaryDirectory() as directory:
     c = Path(directory) / 'shelf.c'
     binary = c.with_suffix('')
     c.write_text(unit)
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+    subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I' + str(root / 'tools/shelf_categories_host_stubs'), '-I' + str(root / 'main/book'),
+                    '-I' + str(root / 'tools/book_storage_stubs'),
                     str(root / 'main/book/book_shelf_model.c'), str(root / 'main/book/book_shelf_category_state.c'),
+                    str(root / 'main/book/book_collection.c'),
                     str(c), '-o', str(binary)], check=True)
-    subprocess.run([str(binary)], check=True)
+    subprocess.run([str(binary), directory], check=True)
