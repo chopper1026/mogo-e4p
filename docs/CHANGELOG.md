@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.5 · 本地测试 / Local testing · 2026-11-06
+
+- WiFi 最多保存八个网络并兼容旧配置，附近列表标记已保存，新增已保存列表及连接、改密码、逐个确认遗忘；存满不覆盖。修复翻页箭头缺字，移除底部两行说明，改为每页六行。/ Save eight WiFi profiles with legacy compatibility and saved markers; manage connections, passwords and confirmed individual removal without eviction. Use glyph-independent paging icons and six rows instead of footer hints.
+
 ## v1.0.5 · 2026-11-05
 
 - 重新设计阅读手账像素画风格。

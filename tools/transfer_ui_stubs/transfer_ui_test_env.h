@@ -67,7 +67,10 @@ static inline void ui_clear_rect_fast(uint8_t* f,EpdRect r) {(void)f;(void)r;}
 static inline void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t* f) {(void)r;(void)gray;(void)f;}
 static inline void ui_draw_header(uint8_t* f,...) {(void)f;}
 static inline void ui_draw_button(uint8_t* f,...) {(void)f;}
-static inline void ui_draw_icon(uint8_t* f,...) {(void)f;}
+static unsigned test_icons[UI_ICON_COUNT];
+static inline void ui_draw_icon(uint8_t* f,int x,int y,int size,ui_icon_t icon,uint8_t gray) {
+    (void)f;(void)x;(void)y;(void)size;(void)gray; ++test_icons[icon];
+}
 static inline void ui_draw_pressed_round_rect(uint8_t* f,...) {(void)f;}
 static inline void ui_draw_round_rect(uint8_t* f,...) {(void)f;}
 static inline void ui_fill_round_rect(uint8_t* f,...) {(void)f;}
@@ -76,6 +79,9 @@ static inline void ui_hairline(uint8_t* f,...) {(void)f;}
 static inline void ui_text(uint8_t* f,...) {(void)f;}
 static inline int ui_text_effective_px(int px) {return px + 2;}
 static inline void ui_text_vc(uint8_t* f,...) {(void)f;}
+static inline void ui_text_box(uint8_t* f,EpdRect box,int px,const char* text,int align,bool inverted) {
+    (void)f;(void)box;(void)px;(void)text;(void)align;(void)inverted;
+}
 static inline void ui_text_fixed_vc(uint8_t* f,...) {(void)f;}
 static inline int ui_text_fixed_width_px(int px,const char* s) {return (int)strlen(s)*px/2;}
 static inline int ui_text_fixed_context_width_px(int px,const char* s,const char* sample) {(void)sample;return ui_text_fixed_width_px(px,s);}
@@ -115,12 +121,37 @@ static bool test_configured = true;
 static int test_scan_error, test_save_count;
 static size_t test_scan_count = 8;
 static char test_saved_ssid[33];
+static bool test_multi_profiles;
+static wifi_transfer_saved_network_t test_profiles[WIFI_TRANSFER_SAVED_MAX];
+static size_t test_profile_count;
 static inline bool wifi_transfer_try_stop_if_idle(void) {return !test_busy;}
 static int test_stop_count;
 static bool test_wifi_running;
 static inline void wifi_transfer_stop(void) { ++test_stop_count; test_wifi_running=false; }
 static inline void wifi_transfer_get_status(wifi_transfer_status_t* s) {*s=test_status;}
-static inline int wifi_transfer_get_saved_wifi(char* s,bool* c) {strcpy(s,test_configured?"saved":"");*c=test_configured;return 0;}
+static inline int wifi_transfer_get_saved_wifi(char* s,bool* c) {
+    *c=test_multi_profiles?test_profile_count!=0:test_configured;
+    strcpy(s,*c?(test_multi_profiles?test_profiles[0].ssid:"saved"):"");return 0;
+}
+static inline int wifi_transfer_get_saved_networks(wifi_transfer_saved_network_t* out,size_t* count) {
+    memset(out,0,sizeof(*out)*WIFI_TRANSFER_SAVED_MAX);
+    if(test_multi_profiles){*count=test_profile_count;memcpy(out,test_profiles,sizeof(test_profiles));}
+    else {*count=test_configured?1:0;if(*count){strcpy(out[0].ssid,"saved");out[0].requires_password=true;}}
+    return ESP_OK;
+}
+static int test_selected_count;
+static inline int wifi_transfer_select_saved_wifi(const char* ssid) {
+    if(test_wifi_running)return ESP_FAIL;
+    ++test_selected_count;
+    if(test_multi_profiles){
+        for(size_t i=0;i<test_profile_count;++i)if(!strcmp(test_profiles[i].ssid,ssid)){
+            wifi_transfer_saved_network_t item=test_profiles[i];
+            memmove(test_profiles+1,test_profiles,i*sizeof(item));test_profiles[0]=item;return ESP_OK;
+        }
+        return ESP_FAIL;
+    }
+    return !strcmp(ssid,"saved")?ESP_OK:ESP_FAIL;
+}
 static inline int wifi_transfer_start(const wifi_transfer_cfg_t* c) {if (test_wifi_running) return ESP_FAIL;if (!c->network_only && (!c->file_changed_cb || !c->wallpaper_set_cb || c->file_changed_cb("/flash/books/test.txt"))) return ESP_FAIL;return 0;}
 static inline void wifi_transfer_service_poll(void) {}
 static inline int wifi_transfer_save_wifi(const char* s,const char* p) {(void)p;test_save_count++;snprintf(test_saved_ssid,33,"%s",s);return test_save_error;}
@@ -135,6 +166,16 @@ static inline bool ui_wifi_qr_prepare_url(const char* s) {++test_qr_encodes;snpr
 static inline void ui_wifi_qr_draw(uint8_t* fb,EpdRect r) {(void)fb;(void)r;}
 
 static inline int wifi_transfer_forget_wifi(void) { ++test_forget_count; if (test_wifi_running) return ESP_FAIL; if (!test_forget_error) test_configured=false; return test_forget_error; }
+static inline int wifi_transfer_forget_saved_wifi(const char *ssid) {
+    if(!test_multi_profiles)return wifi_transfer_forget_wifi();
+    ++test_forget_count;
+    if(test_wifi_running||test_forget_error)return ESP_FAIL;
+    for(size_t i=0;i<test_profile_count;++i)if(!strcmp(test_profiles[i].ssid,ssid)){
+        --test_profile_count;memmove(test_profiles+i,test_profiles+i+1,(test_profile_count-i)*sizeof(*test_profiles));
+        memset(test_profiles+test_profile_count,0,sizeof(*test_profiles));return ESP_OK;
+    }
+    return ESP_FAIL;
+}
 
 static inline int book_progress_forget(const char* path) {(void)path;return ESP_OK;}
 typedef struct {uint32_t file_size;} book_progress_t;

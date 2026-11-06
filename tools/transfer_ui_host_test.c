@@ -155,6 +155,61 @@ static void password_caret_regression(app_ctx_t *ctx) {
     assert(on_tick(ctx)==APP_REDRAW_NONE&&!strcmp(s_password,"abcde"));ctx->touch=NULL;ctx->now_ms=0;
     clear_password();ui_keyboard_begin(&s_password_input,true);
 }
+
+static void multi_network_regression(app_ctx_t *ctx) {
+    test_multi_profiles = true; test_profile_count = WIFI_TRANSFER_SAVED_MAX;
+    test_status = (wifi_transfer_status_t){0}; test_busy = test_wifi_running = false;
+    test_scan_count = 8; test_scan_error = test_forget_error = ESP_OK;
+    for (size_t i = 0; i < test_profile_count; ++i) {
+        test_profiles[i].requires_password = true;
+        snprintf(test_profiles[i].ssid, 33, "saved-%u", (unsigned)i);
+    }
+    strcpy(test_profiles[0].ssid, "中文家庭网络");
+    app_transfer_request_wifi_setup(); on_enter(ctx); network_ui_tick(ctx);
+    assert(s_saved_count == WIFI_TRANSFER_SAVED_MAX && !s_show_saved);
+    for (int i = 0; i < NETWORK_ROWS; ++i) {
+        EpdRect row = network_control_rect(i);
+        assert(row.y == 442 + 88 * i && row.y + row.height <= 970);
+        assert(provisioning_hit(row.x, row.y) == i);
+        assert(provisioning_hit(row.x + row.width, row.y) != i);
+    }
+    unsigned left = test_icons[UI_ICON_CHEVRON_LEFT], right = test_icons[UI_ICON_CHEVRON_RIGHT];
+    draw_networks(ctx->fb);
+    assert(test_icons[UI_ICON_CHEVRON_LEFT] > left && test_icons[UI_ICON_CHEVRON_RIGHT] > right);
+    assert(provisioning_hit(40, 991) == -1);
+    tap(ctx, network_control_rect(7)); assert(s_network_page == 0);
+    int saves = test_save_count, selects = test_selected_count;
+    tap(ctx, network_control_rect(0));
+    assert(test_selected_count == selects + 1 && test_save_count == saves && s_network_connect_pending);
+    assert(s_view == TRANSFER_NETWORKS && !s_password[0]);
+    network_ui_tick(ctx);
+    // 存满时不覆盖其他网络；改密码与遗忘仍可用。/ A full store never evicts profiles; edit and forget remain available.
+    tap(ctx, network_control_rect(1));
+    assert(s_view == TRANSFER_NETWORKS && strstr(s_network_message, "8") && test_save_count == saves);
+    tap(ctx, network_control_rect(16)); assert(s_show_saved && s_saved_count == 8);
+    tap(ctx, network_control_rect(9)); assert(s_network_page == 1);
+    tap(ctx, network_control_rect(9)); assert(s_network_page == 1);
+    tap(ctx, network_control_rect(0)); assert(s_saved_detail && !strcmp(s_selected.ssid, "saved-6"));
+    ctx->request_return = false;
+    tap(ctx, (EpdRect){36, 79, 50, 50}); assert(!s_saved_detail && !ctx->request_return && s_show_saved);
+    tap(ctx, network_control_rect(0)); tap(ctx, network_control_rect(11));
+    assert(s_forget_confirm && !strcmp(s_forget_ssid, "saved-6"));
+    tap(ctx, network_control_rect(12)); assert(s_saved_detail && !s_forget_confirm);
+    tap(ctx, network_control_rect(11)); tap(ctx, network_control_rect(11));
+    assert(!s_saved_detail && !s_forget_confirm && s_saved_count == 7 && s_saved_configured);
+    assert(!strcmp(s_saved_ssid, "中文家庭网络") && saved_network_index("saved-6") < 0);
+    tap(ctx, network_control_rect(0)); assert(s_saved_detail && !strcmp(s_selected.ssid, "saved-7"));
+    tap(ctx, network_control_rect(14)); assert(s_view == TRANSFER_PASSWORD && !s_password[0]);
+    tap(ctx, password_control_rect(44)); assert(s_view == TRANSFER_NETWORKS && s_show_saved);
+    tap(ctx, network_control_rect(0));
+    assert(on_key(ctx, UI_KEY_1) == APP_REDRAW_PAGE && !s_saved_detail && !ctx->request_return);
+    tap(ctx, network_control_rect(15)); assert(!s_show_saved && !s_network_page);
+    tap(ctx, network_control_rect(1)); assert(s_view == TRANSFER_PASSWORD);
+    clear_password();
+    test_multi_profiles = false; s_wifi_settings_only = false;
+    s_view = TRANSFER_METHODS;
+}
+
 int main(void) {
     assert(transfer_signature_valid("",0)&&transfer_signature_valid("中文🙂",10));
     assert(!transfer_signature_valid("a\0b",3)&&!transfer_signature_valid("\xed\xa0\x80",3));
@@ -242,7 +297,7 @@ int main(void) {
     s_start_pending = false; s_view = TRANSFER_NETWORKS;
     tap(&ctx, network_control_rect(9));
     assert(s_network_page == 1);
-    tap(&ctx, network_control_rect(3));
+    tap(&ctx, network_control_rect(1));
     assert(s_view == TRANSFER_PASSWORD && !strcmp(s_selected.ssid, "network7"));
     s_view = TRANSFER_NETWORKS; s_network_page = 0;
     tap(&ctx, network_control_rect(0));
@@ -351,5 +406,6 @@ int main(void) {
     test_scan_count = 8; test_scan_error = ESP_OK;
     network_ui_tick(&ctx);
     wifi_recovery_regression(&ctx);
+    multi_network_regression(&ctx);
     puts("transfer_ui_host_test: PASS");
 }

@@ -84,21 +84,27 @@ void wifi_transfer_get_status(wifi_transfer_status_t *out);
 void wifi_transfer_service_poll(void);
 /// 只读已保存SSID；未配置仍返回ESP_OK。/ Read only the saved SSID; unconfigured still returns ESP_OK.
 esp_err_t wifi_transfer_get_saved_wifi(char ssid[33], bool *configured);
+/// 按最近选择顺序列出所有已保存网络，不返回密码。/ List saved networks by latest selection without exposing passwords.
+esp_err_t wifi_transfer_get_saved_networks(wifi_transfer_saved_network_t out[WIFI_TRANSFER_SAVED_MAX], size_t *count);
+/// 停服后选择已保存网络作为后续连接目标，不自动连接。/ Select a saved network for subsequent connections while stopped.
+esp_err_t wifi_transfer_select_saved_wifi(const char *ssid);
+/// 遗忘指定网络，保留其余网络；资源与上传保护同默认网络。/ Forget one network, preserving the others with the same resource/upload guards.
+esp_err_t wifi_transfer_forget_saved_wifi(const char *ssid);
 typedef struct {
     uint8_t configured; ///< 是否已配网 / Whether STA credentials are configured
     char ssid[33]; ///< 已保存的网络名称 / Saved network name
     char password[65]; ///< 明文密码，调用者使用后必须清零 / Plaintext secret; caller must erase after use
 } wifi_transfer_wifi_backup_t;
-/// 仅供用户主动保存配置到 TF 卡；返回明文凭据，调用者负责清零。
-/// Export credentials only for user-requested TF backup; caller must erase the plaintext.
+/// 兼容现有 TF 备份格式，只导出默认网络；返回明文凭据，调用者负责清零。
+/// Export only the preferred network for the existing user-requested TF backup format; caller must erase plaintext.
 esp_err_t wifi_transfer_export_wifi_backup(wifi_transfer_wifi_backup_t *out);
 /// 恢复前校验凭据格式；不读写设备。/ Validate a backup record without accessing the device.
 bool wifi_transfer_wifi_backup_valid(const wifi_transfer_wifi_backup_t *backup);
-/// 恢复单个 NVS 凭据；已运行的 WiFi 会话在下次重连时采用新配置。
-/// Restore the single NVS record; an active WiFi session adopts it on its next connection.
+/// 兼容旧备份的单网络恢复；保留其他网络，空记录清除全部；正在运行的会话不变。
+/// Restore a legacy single-network backup, retaining others; an empty record clears all; active sessions stay unchanged.
 esp_err_t wifi_transfer_import_wifi_backup(const wifi_transfer_wifi_backup_t *backup);
-/// 仅热点或 STA 资源已释放时可遗忘（含启动失败）；上传中拒绝。
-/// Forget while AP or after releasing STA resources, including a failed start; rejected during upload.
+/// 遗忘默认网络并保留其他网络；仅热点或 STA 已释放时可用，上传中拒绝。
+/// Forget the preferred network only, while AP or after releasing STA resources; reject during upload.
 esp_err_t wifi_transfer_forget_wifi(void);
 /// 停服后同步扫描2.4GHz网络；最多16个去重SSID，按信号降序，临时射频和STA接口均释放。/ Scan synchronously while stopped; up to 16 unique SSIDs by descending RSSI; release temporary radio and STA resources.
 esp_err_t wifi_transfer_scan_wifi(wifi_transfer_network_t out[WIFI_TRANSFER_SCAN_MAX], size_t *count);

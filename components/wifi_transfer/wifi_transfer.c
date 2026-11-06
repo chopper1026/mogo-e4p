@@ -9,8 +9,10 @@
  * 为传入升级包等其他文件增加目录上传；分类上传仍保持原有限额和失败清理。
  * Directory uploads also accept upgrade packages; typed uploads retain their limits and failed-part cleanup.
  * 冻结：热点网页或停服设备触屏可配置网络，不自动切模式；凭据只存单个NVS blob，状态不含密码。
- * 冻结：显式对时优先复用已连接的 STA；停服时才短暂连接，用毕释放；凭据只保存在原 NVS blob。
- * Frozen: Explicit time sync reuses connected STA; only a stopped service connects briefly and releases WiFi; credentials stay in the original NVS blob.
+ * 用户要求保存多网络：版本化 NVS blob 最多保存八组，兼容旧单网络，最近选择的网络用于连接与对时。
+ * User-requested multi-network storage: a versioned NVS blob holds eight profiles, accepts legacy data and connects/syncs using the latest selection.
+ * 冻结：显式对时优先复用已连接的 STA；停服时才短暂连接，用毕释放；密码不进入公开状态。
+ * Frozen: Explicit time sync reuses connected STA; only a stopped service connects briefly and releases WiFi; public state never contains passwords.
  * 已连接后仍启动临时 WiFi 会返回状态错误，因此改为按连接状态分流。
  * Starting temporary WiFi while already connected returned invalid state, so sync now routes by connection state.
  */
@@ -568,6 +570,51 @@ esp_err_t wifi_transfer_get_saved_wifi(char ssid[33], bool *configured) {
     return err;
 }
 
+esp_err_t wifi_transfer_get_saved_networks(wifi_transfer_saved_network_t out[WIFI_TRANSFER_SAVED_MAX], size_t *count) {
+    if (!out || !count) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out) * WIFI_TRANSFER_SAVED_MAX);
+    *count = 0;
+    if (!claim_config()) return ESP_ERR_INVALID_STATE;
+    transfer_profiles_t profiles;
+    esp_err_t err = load_profiles(&profiles);
+    if (err == ESP_OK) {
+        *count = profiles.count;
+        for (size_t i = 0; i < profiles.count; ++i) {
+            memcpy(out[i].ssid, profiles.items[i].ssid, sizeof(out[i].ssid));
+            out[i].requires_password = profiles.items[i].password[0] != 0;
+        }
+    }
+    clear_secret(&profiles, sizeof(profiles));
+    release_config();
+    return err;
+}
+
+esp_err_t wifi_transfer_select_saved_wifi(const char *ssid) {
+    if (!ssid || !ssid[0] || strnlen(ssid, 33) > 32) return ESP_ERR_INVALID_ARG;
+    if (!cancel_time_sync(true)) return ESP_ERR_INVALID_STATE;
+    wifi_transfer_status_t status;
+    wifi_transfer_get_status(&status);
+    if (s_wifi || s_http || s_netif || status.state != WIFI_TRANSFER_STOPPED) return ESP_ERR_INVALID_STATE;
+    if (!claim_config()) return ESP_ERR_INVALID_STATE;
+    transfer_profiles_t profiles;
+    esp_err_t err = load_profiles(&profiles);
+    if (err == ESP_OK) {
+        int index = profile_index(&profiles, ssid);
+        if (index < 0) err = ESP_ERR_NOT_FOUND;
+        else {
+            transfer_credentials_t selected = profiles.items[index];
+            memmove(&profiles.items[1], &profiles.items[0], (size_t)index * sizeof(selected));
+            profiles.items[0] = selected;
+            err = store_profiles(&profiles);
+            if (err == ESP_OK) publish_credentials(&selected);
+            clear_secret(&selected, sizeof(selected));
+        }
+    }
+    clear_secret(&profiles, sizeof(profiles));
+    release_config();
+    return err;
+}
+
 esp_err_t wifi_transfer_export_wifi_backup(wifi_transfer_wifi_backup_t *out) {
     if (!out) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
@@ -1004,7 +1051,8 @@ cleanup:
     return err;
 }
 
-esp_err_t wifi_transfer_forget_wifi(void) {
+esp_err_t wifi_transfer_forget_saved_wifi(const char *ssid) {
+    if (ssid && (!ssid[0] || strnlen(ssid, 33) > 32)) return ESP_ERR_INVALID_ARG;
     if (!cancel_time_sync(true)) return ESP_ERR_INVALID_STATE;
     wifi_transfer_status_t status;
     wifi_transfer_get_status(&status);
@@ -1014,12 +1062,18 @@ esp_err_t wifi_transfer_forget_wifi(void) {
         (status.mode == WIFI_TRANSFER_MODE_STA && (s_wifi || s_started || s_http || s_netif)))
         return ESP_ERR_INVALID_STATE;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
-    esp_err_t err = store_credentials(NULL);
+    transfer_credentials_t preferred;
+    esp_err_t err = forget_credentials(ssid, &preferred);
     if (err == ESP_OK) {
-        publish_credentials(NULL);
-        ESP_LOGI("transfer", "wifi saved configured=0");
+        publish_credentials(&preferred);
+        ESP_LOGI("transfer", "wifi saved configured=%d", preferred.version == 1);
     }
+    clear_secret(&preferred, sizeof(preferred));
     release_config(); return err;
+}
+
+esp_err_t wifi_transfer_forget_wifi(void) {
+    return wifi_transfer_forget_saved_wifi(NULL);
 }
 
 static void set_error(esp_err_t err) {
