@@ -73,6 +73,8 @@ int main(void){
     reset(&ctx);progress_fail=true;assert(delete_book()==ESP_FAIL&&s_removed&&deletes==1);
     reset(&ctx);strcpy(recorded_path,"/flash/books/bad.epub");on_enter(&ctx);flash_ready=false;assert(delete_book()==ESP_ERR_INVALID_STATE&&!deletes);flash_ready=true;assert(delete_book()==ESP_OK&&s_removed);
     reset(&ctx);ui_gesture_event_t ev={UI_GESTURE_MOVE,340,850};assert(on_gesture(&ctx,&ev)==APP_REDRAW_NONE&&!s_confirm&&!deletes);
+    for(int i=0;i<2;++i){reset(&ctx);strcpy(recorded_path,i?"/flash/books/bad.MOBI":"/sdcard/books/bad.mobi");on_enter(&ctx);tap(&ctx,340,850);assert(!deletes&&s_confirm);tap(&ctx,340,850);assert(s_removed&&deletes==1&&forgets==1&&!recorded);}
+    reset(&ctx);strcpy(recorded_path,"/sdcard/books/bad.mobi.exe");on_enter(&ctx);assert(delete_book()==ESP_ERR_INVALID_ARG&&!deletes&&!forgets);
     puts("PASS: recovery page never deletes on first tap; cancellation/Home remain usable; exact-file guard; absent card retry; directory/backup refusal; I/O failure; missing file; progress cleanup; internal-flash gate");
 }
 '''

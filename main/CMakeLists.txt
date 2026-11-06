@@ -9,6 +9,7 @@ set(main_requires
     frontlight
     wifi_transfer
     book_search
+    mobi_codec
     espressif__qrcode
     espressif__esp_jpeg
     # 渐进式 JPEG；基线仍走 esp_jpeg。/ Progressive JPEG; baseline stays on esp_jpeg.
@@ -169,6 +170,9 @@ idf_component_register(
         "book/book_index_cache.c"
         "book/book_txt.c"
         "book/book_epub.c"
+        "book/book_mobi.c"
+        "book/book_mobi_markup.c"
+        "book/book_metadata.c"
         "book/book_cover.c"
         "image/image_decode.c"
         "image/image_webp.c"

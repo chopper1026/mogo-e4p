@@ -62,7 +62,7 @@ static bool decode_name_limit(const char *encoded, char *out, size_t cap, unsign
     const char *ext = strrchr(out, '.');
     if (!ext || (kind == 1 ? (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg") && strcasecmp(ext, ".png"))
                : kind == 2 ? (strcasecmp(ext, ".ttf") && strcasecmp(ext, ".otf"))
-                           : (strcasecmp(ext, ".txt") && strcasecmp(ext, ".epub")))) return false;
+                           : (strcasecmp(ext, ".txt") && strcasecmp(ext, ".epub") && strcasecmp(ext, ".mobi")))) return false;
     // 拒绝非规范 UTF-8、代理项与越界码点。/ Reject noncanonical UTF-8, surrogates and out-of-range code points.
     for (size_t i = 0; i < n;) {
         uint32_t cp; unsigned more; unsigned char c = (unsigned char)out[i++];
@@ -369,7 +369,7 @@ static file_result_t upload_directory_file(const char *root, const char *relativ
     }
     const char *ext = strrchr(name, '.');
     file_result_t result = changed_result(path,
-        ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt")) ? changed : NULL);
+        ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt") || !strcasecmp(ext, ".mobi")) ? changed : NULL);
     result.storage_cleanup_failed = status == TRANSFER_COMMITTED_BACKUP_RETAINED;
     return result;
 }
@@ -1768,7 +1768,7 @@ static int copy_sd_file(const char *source, const char *target, uint64_t free_by
 static void forget_sd_book(const char *path) {
     if (s_cfg.file_deleted_cb) { s_cfg.file_deleted_cb(path); return; }
     const char *ext = strrchr(path, '.');
-    if (s_cfg.file_changed_cb && ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt")))
+    if (s_cfg.file_changed_cb && ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt") || !strcasecmp(ext, ".mobi")))
         (void)s_cfg.file_changed_cb(path);
 }
 

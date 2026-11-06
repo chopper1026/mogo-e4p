@@ -36,7 +36,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | `main/boot/` | 启动保护、开书事务及深睡恢复检查点。/ Startup protection, book-open transactions and deep-sleep resume checkpoints. |
 | `main/app/` | 页面契约、跨页请求接口、输入、导航、介质与生命周期调度。/ Page contracts, cross-page request APIs, input, navigation, media and lifecycle coordination. |
 | `main/apps/` | 产品页面控制器及页面专用的目录、文件树视图。/ Product page controllers and their TOC/file-tree views. |
-| `main/book/` | 书源、TXT/EPUB、排版、阅读会话、书架规则、进度与封面缓存。/ Sources, TXT/EPUB, layout, reader sessions, shelf rules, progress and cover caches. |
+| `main/book/` | 书源、TXT/EPUB/MOBI、排版、阅读会话、书架规则、进度与封面缓存。/ Sources, TXT/EPUB/MOBI, layout, reader sessions, shelf rules, progress and cover caches. |
 | `main/image/` | 通用图像探测、JPEG/PNG/静态 WebP 解码、裁剪与缩放，包含硬件 JPEG 适配。不得依赖书籍、UI、字体或页面。/ Generic image probing, JPEG/PNG/static WebP decoding, crop/scale and hardware JPEG adaptation; no book, UI, font or page dependencies. |
 | `main/ui/` | 公共绘制、控件、交互反馈及题头样式；绘制接口不承担页面状态转换。/ Shared drawing, controls, feedback and heading styles; paint APIs do not own page transitions. |
 | `main/font/` | 字体来源、加载、字形缓存与渲染。系统/阅读字体的选择策略在 services。/ Font sources, loading, glyph caches and rendering; services owns system/reader face policy. |
@@ -83,6 +83,8 @@ After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier s
   `book_shelf_covers` owns shelf pixels, job generations, grouped presentation markers and warm-up progress. Pages mutate through the API and borrow slots synchronously for reading. Ordinary exits cancel jobs while retaining artwork; opening a book, changing mode or losing media cancels before release. Only successful page or cover-batch output acknowledges artwork, so failures retain dirty markers. The module shares the single global `book_cover_jobs` queue rather than decoding multiple pages concurrently; pages still own navigation, geometry, settings, conversion, painting and decorative caches.
 - `ui_reader_settings` 接收只读值快照，负责阅读设置控件、翻页模式示意和完成键的绘制；字号几何同时用于绘制与命中。页面保留面板壳、返回键反馈、设置读取/保存、点击处理、重排和刷新调度。模块不直接依赖页面、book 或系统设置，不持有快照、字体或帧缓冲；通用开关由字体与按键面板复用。
   `ui_reader_settings` paints reading-setting controls, turn-zone diagrams and Done from a read-only value snapshot, with scaled geometry shared by drawing and hit testing. The page retains sheet shells, Back feedback, settings reads/writes, actions, reflow and presentation scheduling. The module does not directly depend on pages, book modules or system settings and retains no snapshot, font or framebuffer; font and key sheets reuse its switch painter.
+- MOBI 通过 `book_source` 的同一会话接入共享 HTML/排版；`book_metadata` 分派 EPUB/MOBI 轻量元数据及封面，独立于活动阅读句柄。`mobi_codec` 只含有界 PalmDOC 解压，不依赖 main；原始坐标、缓存兼容及限制见 [MOBI 契约](development/guides/MOBI.md)。
+  MOBI uses the same source/session and HTML/layout contracts; `book_metadata` dispatches independent EPUB/MOBI metadata/covers. `mobi_codec` is a main-independent bounded PalmDOC decoder. See the MOBI contract for coordinates, caches and limits.
 - 书籍封面依赖 image；壁纸、阅读背景和图片页直接依赖 image。book_cover.h 暂时转出原有图像声明以兼容既有调用方，新增通用图像调用应直接使用 image_decode.h。
   Book covers depend on image; wallpaper, reader backgrounds and image pages use image directly. book_cover.h forwards legacy image declarations for compatibility; new generic consumers should include image_decode.h.
 - `components/webp_decoder` 保留 libwebp 1.6.0 的可移植解码子集和原许可，PSRAM 分配适配不改上游源码。`image_webp` 限制源像素和一屏输出、合成白底灰阶；上游互斥保护初始化，不开解码工作线程。EPUB 层解析书内路径与样式表相对 URL，HTML 层只将 `body` 的单图背景转为页首插图；不扩展为浏览器背景渲染，也不改变用户阅读背景。独立图片文件入口仍只列出 JPG/PNG。

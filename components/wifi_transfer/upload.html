@@ -151,7 +151,7 @@ ul{list-style:none;padding:0;margin:0}svg{fill:none;stroke:currentColor;stroke-l
 const $ = id => document.getElementById(id);
 const types = {
   file: {title:'添加文件', formats:'任意文件格式', accept:'', re:null, url:'/file-upload', limit:0},
-  book: {title:'添加书籍', formats:'EPUB / TXT', accept:'.epub,.txt', re:/\.(epub|txt)$/i, url:'/upload', limit:0},
+  book: {title:'添加书籍', formats:'EPUB / TXT / MOBI', accept:'.epub,.txt,.mobi', re:/\.(epub|txt|mobi)$/i, url:'/upload', limit:0},
   font: {title:'添加字体', formats:'TTF / OTF', accept:'.ttf,.otf', re:/\.(ttf|otf)$/i, url:'/font-upload', limit:33554432},
   picture: {title:'添加图片', formats:'JPG / JPEG / PNG', accept:'.jpg,.jpeg,.png', re:/\.(jpg|jpeg|png)$/i, url:'/image-upload', limit:20971520}
 };

@@ -2626,7 +2626,7 @@ static EpdRect title_style_window_rect(int index) {
 // The line above the cards: a book without a horizontal heading says so, otherwise the selected
 // style's description.
 static const char* title_style_note(void) {
-    if (book_kind() != BOOK_KIND_EPUB) return "当前书籍没有章节题头，样式对 EPUB 生效";
+    if (!book_has_chapter_headings()) return "当前书籍没有章节题头，样式对 EPUB / MOBI 生效";
     if (app_settings_book_vertical()) return "竖排沿用两列题头，样式对横排生效";
     return s_title_style_details[app_settings_book_title_style()];
 }
@@ -3328,7 +3328,7 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
 // sheets that should have none, leaving it side by side with the body's own copy.
 static void apply_chapter_lead(const char *title, const char *label, size_t skip, unsigned height) {
     s_chapter_lead_skip = skip;
-    if (book_kind() != BOOK_KIND_EPUB || title == NULL || title[0] == 0 || !height) {
+    if (!book_has_chapter_headings() || title == NULL || title[0] == 0 || !height) {
         s_chapter_lead_height = s_chapter_lead_width = 0;
         book_layout_set_chapter_lead(0, 0);
         book_layout_set_chapter_lead_width(0);
@@ -4257,7 +4257,7 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
     READER_PERF_SCOPE(READER_PERF_ACTION);
 #endif
     if (!book_file_path_supported(path)) {
-        copy_text(s_message, sizeof(s_message), "此版本仅支持 TXT 和 EPUB 书籍");
+        copy_text(s_message, sizeof(s_message), "此版本仅支持 TXT、EPUB 和 MOBI 书籍");
         return false;
     }
     s_reader_return_home = false;
@@ -4614,7 +4614,7 @@ static void scan_shelf(app_ctx_t* ctx) {
     else if (skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
     else if (s_pending_invalidated) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "图书已更新，旧待保存进度已作废");
     if (!recovered_legacy) copy_text(s_shelf_warning,sizeof(s_shelf_warning),"旧分类整理未完成，请在管理分类中重试恢复");
-    if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT 或 EPUB");
+    if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT、EPUB 或 MOBI");
     board_sd_info_t cache_sd = {0};
     board_sd_get_info(&cache_sd);
     copy_text(s_cache_library,sizeof(s_cache_library),cache_sd.mounted?cache_sd.identity:"builtin");

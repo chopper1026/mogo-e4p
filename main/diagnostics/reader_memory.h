@@ -28,6 +28,8 @@ typedef struct {
 
 typedef struct {
     size_t txt_index; ///< TXT 目录容量 / TXT index capacity
+    size_t mobi_state; ///< MOBI 实例 / MOBI instance
+    size_t mobi_index; ///< MOBI 记录、分段和导航表 / MOBI records, segments and navigation tables
     size_t epub_state; ///< EPUB 实例 / EPUB instance
     size_t epub_index; ///< spine、导航及可见索引，不含池内字符串 / Spine, navigation and visible indices excluding pooled strings
     size_t epub_text; ///< 标题与锚点池，不重复计算内部别名 / Title and anchor pools without recounting interior aliases
@@ -40,12 +42,14 @@ typedef struct {
 } reader_source_memory_stats_t;
 
 struct book_epub;
+struct book_mobi;
 struct zip_reader;
 /// UI 串行书源访问并交还预绘后，覆盖当前书源的全部字段；不遍历封面任务的独立书源。
 /// Replace all current-source fields after serialized UI source access and prefetch handoff; exclude independent cover-job sources.
 void book_source_memory_stats(reader_source_memory_stats_t *stats);
 /// 只统计实例直接拥有的分配，字体槽镜像归字体统计。/ Count directly owned allocations; font-slot images belong to font stats.
 void book_epub_memory_stats(const struct book_epub *book, reader_source_memory_stats_t *stats);
+void book_mobi_memory_stats(const struct book_mobi *book, reader_source_memory_stats_t *stats);
 /// 只在串行访问边界读取 ZIP；不读取文件或遍历 libc 内部。/ Read ZIP at serialized boundaries without file I/O or libc traversal.
 void zip_reader_memory_stats(const struct zip_reader *zip, reader_source_memory_stats_t *stats);
 /// 与原资源记录独立输出，不改变原日志协议；调用方先结束操作计时。

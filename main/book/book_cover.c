@@ -4,7 +4,7 @@
  */
 #include "book_cover.h"
 #include "book_cover_auto.h"
-#include "book_epub.h"
+#include "book_metadata.h"
 #include "book_title.h"
 #include <errno.h>
 #include <stdio.h>
@@ -106,14 +106,13 @@ static bool book_cover_load_gray_impl(const char *path, const char *title, const
 
     bool good = false;
     bool cache_result = true;
-    const char *ext = strrchr(path, '.');
-    if (ext && !strcasecmp(ext, ".epub")) {
+    if (book_metadata_supported(path)) {
         uint8_t *data = NULL;
         size_t size = 0;
         bool png = false;
         size_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         size_t budget=free_bytes>2u*1024u*1024u?free_bytes-2u*1024u*1024u:0;
-        esp_err_t err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
+        esp_err_t err = budget ? book_metadata_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
         if (err == ESP_OK) good = book_cover_thumbnail(data, size, png, out);
         free(data);
         if (err == ESP_ERR_NO_MEM) cache_result = false;
@@ -159,13 +158,12 @@ static bool book_cover_load_list_gray_impl(const char *path, const char *title, 
     }
     if (!allow_decode) { if (pending) *pending = true; return false; }
     bool good = false, cacheable = true;
-    const char *ext = strrchr(path, '.');
-    if (ext && !strcasecmp(ext, ".epub")) {
+    if (book_metadata_supported(path)) {
         uint8_t *data = NULL; size_t size = 0; bool png = false;
         size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         size_t budget = available > 1536u*1024u ? available - 1536u*1024u : 0;
         if (budget > 4u*1024u*1024u) budget = 4u*1024u*1024u;
-        esp_err_t error = budget ? book_epub_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
+        esp_err_t error = budget ? book_metadata_cover_bounded(path, &data, &size, &png, budget) : ESP_ERR_NO_MEM;
         unsigned sw = 0, sh = 0;
         if (error == ESP_OK && book_image_dimensions(data, size, png, &sw, &sh) && sw && sh) {
             if ((uint64_t)sw*BOOK_COVER_H > (uint64_t)sh*BOOK_COVER_W) {

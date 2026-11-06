@@ -60,6 +60,7 @@ static inline void host_log(const char *tag,const char *fmt,...){(void)tag;(void
 #define MALLOC_CAP_8BIT 2
 void *heap_caps_malloc(size_t n,int caps);
 void *heap_caps_calloc(size_t n,size_t s,int caps);
+void *heap_caps_realloc(void *p,size_t n,int caps);
 void heap_caps_free(void *p);
 size_t heap_caps_get_largest_free_block(int caps);
 size_t heap_caps_get_free_size(int caps);
@@ -144,7 +145,8 @@ esp_err_t book_progress_list(book_progress_visit_fn f,void *c){(void)f;(void)c;r
 bool book_progress_load(const char *p,uint32_t s,book_progress_t *out){(void)s;const char *name=strrchr(p,'/');int id=atoi(name+1);out->last_open_s=100-(unsigned)id+recent_bump+(id==promoted?1000:0);return true;}
 bool book_title_from_path(const char *p,char *s,size_t n){const char *name=strrchr(p,'/');snprintf(s,n,"%s",name?name+1:p);char *ext=strrchr(s,'.');if(ext)*ext=0;return true;}
 bool pico_boot_asset_allowed(const char *p){(void)p;return true;}
-esp_err_t book_epub_cover_bounded(const char *p,uint8_t **d,size_t *n,bool *png,size_t budget){++cover_requests;FILE *book=fopen(p,"rb");if(!book)return ESP_ERR_NOT_FOUND;int id=fgetc(book);fclose(book);char path[256];snprintf(path,sizeof(path),"%s/images/%02d.raw",fixtures,id);FILE *f=fopen(path,"rb");if(!f)return ESP_ERR_NOT_FOUND;assert(!fseek(f,0,SEEK_END));*n=ftell(f);rewind(f);if(*n>budget){fclose(f);return ESP_ERR_NO_MEM;}*d=heap_caps_malloc(*n,3);if(!*d){fclose(f);return ESP_ERR_NO_MEM;}assert(fread(*d,1,*n,f)==*n);fclose(f);*png=true;return ESP_OK;}
+bool book_metadata_supported(const char *path){const char *ext=strrchr(path,'.');return ext&&(!strcasecmp(ext,".epub")||!strcasecmp(ext,".mobi"));}
+esp_err_t book_metadata_cover_bounded(const char *p,uint8_t **d,size_t *n,bool *png,size_t budget){++cover_requests;FILE *book=fopen(p,"rb");if(!book)return ESP_ERR_NOT_FOUND;int id=fgetc(book);fclose(book);char path[256];snprintf(path,sizeof(path),"%s/images/%02d.raw",fixtures,id);FILE *f=fopen(path,"rb");if(!f)return ESP_ERR_NOT_FOUND;assert(!fseek(f,0,SEEK_END));*n=ftell(f);rewind(f);if(*n>budget){fclose(f);return ESP_ERR_NO_MEM;}*d=heap_caps_malloc(*n,3);if(!*d){fclose(f);return ESP_ERR_NO_MEM;}assert(fread(*d,1,*n,f)==*n);fclose(f);*png=true;return ESP_OK;}
 bool book_image_dimensions(const uint8_t *d,size_t n,bool png,unsigned *w,unsigned *h){(void)png;if(n<16)return false;uint32_t header[4];memcpy(header,d,16);*w=header[0];*h=header[1];return true;}
 bool book_image_grayscale(const uint8_t *d,size_t n,bool png,unsigned w,unsigned h,uint8_t *out){(void)png;uint32_t header[4];memcpy(header,d,16);assert(n==16+(size_t)header[2]*header[3]);++decoded;for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x)out[y*w+x]=d[16+(y*header[3]/h)*header[2]+x*header[2]/w];return true;}
 bool book_auto_cover_render(const char *p,const char *t,const char *a,unsigned w,unsigned h,uint8_t *out){(void)p;(void)t;(void)a;memset(out,200,w*h);return true;}

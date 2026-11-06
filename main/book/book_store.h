@@ -42,8 +42,8 @@ uint64_t book_store_free_bytes(const book_store_root_t* root);
 bool book_store_flash_ready(void);
 /// 为本机数据挂载已有内置卷，绝不格式化或访问TF卡。/ Mount an existing internal volume for local data; never format or access SD.
 esp_err_t book_store_prepare_data(void);
-/// 仅删除已挂载书根内的直接 TXT/EPUB 普通文件，然后清对应进度及 last。
-/// Delete only a direct regular TXT/EPUB file in a mounted book root, then forget its progress and last path.
+/// 仅删除已挂载书根内的直接 TXT/EPUB/MOBI 普通文件，然后清对应进度及 last。
+/// Delete only a direct regular TXT/EPUB/MOBI file in a mounted book root, then forget its progress and last path.
 /// 先清同名普通覆盖备份；仅有备份时先恢复再删除，失败不声称文件已删。
 /// Clear matching regular replacement backups first; restore backup-only files before deletion and report failures as not removed.
 /// removed 为文件已删或已不存在；此时 NVS 仍可能失败，可再次调用清理。调用方负责关闭句柄及通知版本。

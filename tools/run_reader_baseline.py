@@ -28,6 +28,7 @@ SUITES = {
     "font_policy": [sys.executable, "tools/lock_font_host_test.py"],
     "memory": [sys.executable, "tools/reader_memory_host_test.py"],
     "source_memory": [sys.executable, "tools/reader_source_memory_host_test.py"],
+    "mobi": [sys.executable, "tools/test_book_mobi.py"],
     "perf": [sys.executable, "tools/reader_perf_host_test.py"],
     "clock": [sys.executable, "tools/time_service_host_test.py"],
     "time_policy": ["bash", "tools/run_time_sync_host_test.sh"],
