@@ -3,6 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.6 · 2026-11-06
+
+- 重构书架分类功能。
+- 支持保存多个 WiFi。
+- 支持 MOBI 格式。
+- 提高底部三键灵敏度。
+
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-06
 
 - FT6336U 检测阈值采用模组复位原值的75%，提升弱触摸响应；支持恢复100%原阈值，初始化与唤醒均读回校验、失败恢复。此为通用阈值，不是三键专用参数，不同厚膜、屏幕误触与充电噪声仍需对应样机验证。/ Use 75% of the FT6336U module reset threshold for weaker touches, with 100% available to preserve the original and verified readback/rollback at init/wake. This is a general threshold, not key-specific; different protectors, screen false touches and charger noise still need hardware checks.

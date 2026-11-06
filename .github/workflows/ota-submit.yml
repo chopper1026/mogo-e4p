@@ -46,6 +46,19 @@ jobs:
           idf.py --preview set-target esp32s31
           idf.py --preview build
           idf.py --preview size
+      - name: Verify LGPL relinking inputs
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          ninja -C build -t commands Read_Pico.elf | tail -n 1 > build/relink-command.sh
+          test -s build/relink-command.sh
+          cp build/Read_Pico.elf build/Read_Pico.original.elf
+          (cd build && bash relink-command.sh)
+          cmp build/Read_Pico.original.elf build/Read_Pico.elf
+          printf 'workspace=%s\nidf_path=%s\ncontainer=espressif/idf:v6.1\n' "$PWD" "$IDF_PATH" > build/relink-environment.txt
+          idf.py --version >> build/relink-environment.txt
+          riscv32-esp-elf-g++ --version >> build/relink-environment.txt
+          git -c safe.directory="$IDF_PATH" -C "$IDF_PATH" rev-parse HEAD >> build/relink-environment.txt
       - name: Prepare strict host compiler
         shell: bash
         run: |
@@ -104,6 +117,23 @@ jobs:
             build/flasher_args.json
             build/flash_args
             build/platform-submission.json
+      - name: Preserve LGPL relinking inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: lgpl-relink-${{ env.RELEASE_TAG }}-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            build/esp-idf/**/*.a
+            build/esp-idf/**/*.ld
+            build/CMakeFiles/Read_Pico.elf.dir/**/*.obj
+            build/Read_Pico.elf
+            build/Read_Pico.map
+            build/compile_commands.json
+            build/config/
+            build/relink-command.sh
+            build/relink-environment.txt
+            sdkconfig
+            managed_components/
       - name: Preserve host regression diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
