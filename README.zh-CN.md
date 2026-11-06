@@ -1,5 +1,7 @@
 # mogo
 
+本地开发版支持正文长按选字、拖选词语，松手打开离线字典；释义、读音及按钮全部跟随当前阅读字体，不使用界面内置字库补字。词语未收录时点「逐字」，长内容用「上一屏 / 下一屏」查看。正文与留白长按不再打开目录，目录保留在阅读工具栏。将 `chinese.mgdict` 放入 TF 卡 `dictionaries/` 目录；来源、许可、字体限制和转换方法见[阅读字典](docs/development/guides/READER_DICTIONARY.md)。本地代码与宿主验证不代表已发布或已通过实屏验收。
+
 > 当前仓库目标为 Metalio E-INK4 Plus（ESP32-S31）。开发请读[上手指南](docs/ONBOARDING.md)、[代码结构](docs/ARCHITECTURE.md)和[测试工具](tools/README.md)；以下上游旧板介绍不作为当前硬件或构建参数。
 
 > Metalio E-INK4 Plus（ESP32-S31）移植版的硬件、构建与代码边界见根目录 [README.md](README.md)。旧演示页、示例正文和 continuous_du 已移除；现有产品功能保留。本文其余旧板说明仅作上游背景。

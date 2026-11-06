@@ -21,6 +21,7 @@ typedef enum {
     UI_GESTURE_SWIPE_U, ///< 上滑 / Swipe up
     UI_GESTURE_SWIPE_D, ///< 下滑 / Swipe down
     UI_GESTURE_CANCEL, ///< 取消 / Cancel
+    UI_GESTURE_RELEASE, ///< 长拖正常释放，仅显式启用 / Normal long-drag release, opt-in only
 } ui_gesture_type_t;
 
 typedef struct ui_gesture_event_s {
@@ -37,6 +38,7 @@ typedef struct {
     int64_t t0_ms; ///< 起始时刻 / Start time
     int64_t last_ms; ///< 最近时刻，倒退时取消 / Last time, cancel on clock regression
     bool moved; ///< 曾超出容差 / Has exceeded movement slop
+    bool long_drag; ///< 接触起点固定的长拖能力 / Long-drag option captured at press
     bool long_fired; ///< 已发出长按 / Long press emitted
 } ui_gesture_t;
 
@@ -45,3 +47,7 @@ void ui_gesture_reset(ui_gesture_t *gesture);
 /// 每次最多一个事件；consumed、多点或缺失快照取消活动序列。
 /// Emit at most one event; consumed, multitouch or a missing snapshot cancels an active sequence.
 bool ui_gesture_feed(ui_gesture_t *gesture, const app_ctx_t *ctx, ui_gesture_event_t *out);
+
+/// 长拖能力只在按下时采样，默认接口保持原行为。/ Capture long-drag capability at press; the default API stays unchanged.
+bool ui_gesture_feed_options(ui_gesture_t *gesture, const app_ctx_t *ctx,
+                             ui_gesture_event_t *out, bool long_drag);

@@ -23,6 +23,7 @@ static const char* td_gest_name(ui_gesture_type_t t) {
         case UI_GESTURE_SWIPE_U: return "SWIPE_U";
         case UI_GESTURE_SWIPE_D: return "SWIPE_D";
         case UI_GESTURE_CANCEL: return "CANCEL";
+        case UI_GESTURE_RELEASE: return "RELEASE";
         default: return "?";
     }
 }
@@ -97,7 +98,8 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
                                    bool owned_by_other, app_input_present_t present) {
     if (owned_by_other || !current->on_gesture || err != ESP_OK) return;
     ui_gesture_event_t event;
-    if (ui_gesture_feed(gesture, ctx, &event)) {
+    if (ui_gesture_feed_options(gesture, ctx, &event,
+            current->gesture_long_drag && current->gesture_long_drag(ctx))) {
 #if CONFIG_TOUCH_DIAG
         // MOVE 逐帧太多不记；按下与终态全记。MOVE frames are too noisy; log press + terminal.
         if (event.type != UI_GESTURE_MOVE) {

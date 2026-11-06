@@ -22,7 +22,7 @@ static bool emit(const ui_gesture_t *g, ui_gesture_type_t type, int64_t now, ui_
     return true;
 }
 
-bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out) {
+bool ui_gesture_feed_options(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out, bool long_drag) {
     if (!g || !ctx || !out) return false;
     const app_touch_t *touch = ctx->touch;
     bool invalid = ctx->consumed || !touch || ctx->now_ms < 0;
@@ -37,7 +37,7 @@ bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *
     if (!g->active) {
         if (!ctx->pressed || ctx->released || !touch->touched) return false;
         *g = (ui_gesture_t){ .active = true, .x0 = touch->x, .y0 = touch->y,
-            .x = touch->x, .y = touch->y, .t0_ms = ctx->now_ms, .last_ms = ctx->now_ms };
+            .x = touch->x, .y = touch->y, .t0_ms = ctx->now_ms, .last_ms = ctx->now_ms, .long_drag = long_drag };
         return emit(g, UI_GESTURE_PRESS, ctx->now_ms, out);
     }
     g->last_ms = ctx->now_ms;
@@ -48,6 +48,7 @@ bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *
     if ((int64_t)dx * dx + (int64_t)dy * dy > (int64_t)UI_TOUCH_SLOP_PX * UI_TOUCH_SLOP_PX) g->moved = true;
     if (ctx->released || !touch->touched) {
         ui_gesture_type_t type = UI_GESTURE_CANCEL;
+        if (ctx->released && g->long_fired && g->long_drag) type = UI_GESTURE_RELEASE;
         if (ctx->released && !g->long_fired) {
             if (ax >= UI_SWIPE_MIN_PX && ax > ay) type = dx < 0 ? UI_GESTURE_SWIPE_L : UI_GESTURE_SWIPE_R;
             else if (ay >= UI_SWIPE_MIN_PX && ay > ax) type = dy < 0 ? UI_GESTURE_SWIPE_U : UI_GESTURE_SWIPE_D;
@@ -61,6 +62,10 @@ bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *
         g->long_fired = true;
         return emit(g, UI_GESTURE_LONG_PRESS, ctx->now_ms, out);
     }
-    if (g->moved && !g->long_fired) return emit(g, UI_GESTURE_MOVE, ctx->now_ms, out);
+    if (g->moved && (!g->long_fired || g->long_drag)) return emit(g, UI_GESTURE_MOVE, ctx->now_ms, out);
     return false;
+}
+
+bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out) {
+    return ui_gesture_feed_options(g, ctx, out, false);
 }

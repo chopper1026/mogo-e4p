@@ -20,6 +20,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 - [组件与天气](guides/WEATHER.md)：首页布局、选城、网络生命周期与缓存。/ Home layout, city selection, networking and cache.
 - [阅读手账](guides/READING_JOURNAL.md)：当月逐日统计、日历、六图轮换与本机存储边界。/ Monthly daily records, calendar, six-scene rotation and local persistence limits.
 - [阅读性能测量](guides/READER_PERFORMANCE.md)：诊断开关、资源归属和样本解释边界。/ Diagnostic flags, resource ownership and measurement limits.
+- [阅读字典](guides/READER_DICTIONARY.md)：选字交互、阅读字体、TF 词库安装、来源许可、格式和取消边界。/ Selection, reader fonts, card packages, licensing, format and cancellation.
 - [MOBI 阅读](guides/MOBI.md)：格式边界、目录与进度坐标、缓存和资源限制，以及解码组件许可。/ Format scope, navigation/progress coordinates, caches, resource limits and decoder licensing.
 - [平台 OTA 操作](guides/PLATFORM_OTA.md)、[OTA 日志要求](../ota-release-notes/README.md)：构建提交草稿与管理员发布不同。/ Draft submission is distinct from administrator publication.
 - [板级入口](../../components/board_support/README.md)、[电源组件](../../components/device_power/README.md)、[离线检索](../../components/book_search/README.md)：模块旁文档保留原位。电源组件的 `docs/` 是旧 CW32 协议参考，不是当前板级事实。/ Keep component documentation in place; the power component's docs are legacy CW32 references, not current board specifications.

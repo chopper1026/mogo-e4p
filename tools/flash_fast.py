@@ -340,7 +340,10 @@ class Device:
                 captured.extend(data)
                 log.write(data)
                 text = captured.decode("utf-8", errors="replace")
-                require(not re.search(r"Guru Meditation|panic|abort\(\)|Brownout|Rebooting", text),
+                # 中文：首页在 UI ready 后打印 RTC 中的上次崩溃，仅该固定日志前缀不是本次异常。
+                # English: Home logs the retained RTC crash after UI ready; only that exact prefix denotes history.
+                fatal_text = re.sub(r"(?m)^(E \(\d+\) crash: )panic", r"\1previous crash", text)
+                require(not re.search(r"Guru Meditation|panic|abort\(\)|Brownout|Rebooting", fatal_text),
                         f"Boot reported a fatal error; see {logfile.name}. No automatic rollback.")
                 if bundle is not None:
                     checks = boot_checks(text, bundle, offset)

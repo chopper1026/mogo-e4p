@@ -1,5 +1,7 @@
 # mogo
 
+ローカル開発版では本文を長押しして文字を選択し、ドラッグで語句を選び、指を離すとオフライン辞書を開きます。見出し・読み・説明・ボタンは現在の読書フォントを使い、内蔵UI字形で補いません。「逐字」で一文字ずつ検索し、「上一屏 / 下一屏」で続きを読むことができます。本文と余白の長押しでは目次を開かず、目次は読書ツールバーから開きます。TFカードの `dictionaries/` に `chinese.mgdict` を配置してください。[導入・出典・ライセンスと制限](docs/development/guides/READER_DICTIONARY.md)。実機のタッチ操作と表示の確認は未完了です。
+
 > このリポジトリの対象は Metalio E-INK4 Plus（ESP32-S31）です。[開発ガイド](docs/ONBOARDING.md)、[コード構造](docs/ARCHITECTURE.md)、[テストツール](tools/README.md)を参照してください。以下の旧基板情報は現在のハードウェア・ビルド設定ではありません。
 
 > Metalio E-INK4 Plus（ESP32-S31）移植版的硬件、构建与代码边界见根目录 [README.md](README.md)。旧演示页、示例正文和 continuous_du 已移除；现有产品功能保留。本文其余旧板说明仅作上游背景。

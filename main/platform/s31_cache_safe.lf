@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
+# 中文：S31 的中断入口及协处理器切换可能在读写 Flash 的缓存关闭窗口执行。
+# English: S31 interrupt entry and coprocessor switching can run while flash operations suspend caches.
+# 中文：IDF 6.1 的默认映射遗漏这些汇编入口依赖；同时保留错误分支的只读数据。
+# English: IDF 6.1 omits these assembly-entry dependencies; retain their error-path rodata internally too.
+[mapping:s31_cache_safe_coproc]
+archive: libfreertos.a
+entries:
+    if IDF_TARGET_ESP32S31 = y:
+        port:pxPortGetCoprocArea (noflash)
+        port:pxPortUpdateCoprocOwner (noflash)
+        port:vPortTaskPinToCore (noflash)
+        port:vPortTaskUsedPIEOnCPU0 (noflash)

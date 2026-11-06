@@ -36,6 +36,7 @@ typedef struct {
 } ttf_slot_t;
 static ttf_slot_t s_slots[TTF_FONT_SLOTS];
 static void *work,*s_catalog,*s_pages,*s_line,*s_images,*s_page_img_start,*s_next_fb,*s_gray;
+static struct {void *glyphs;}s_glyph_maps[2];
 static void *s_prep_task;
 static struct {html_text_t content;} s_reader_session;
 static const html_text_t *reader_session_content(const void *session){assert(session==&s_reader_session);return &s_reader_session.content;}
@@ -111,6 +112,7 @@ int main(void){
  s_slots[0].f_glyphs.head=a;
  work=own(112);s_catalog=own(113);
  s_pages=own(114);s_line=own(115);s_images=own(116);s_page_img_start=own(117);
+ s_glyph_maps[0].glyphs=own(32768);s_glyph_maps[1].glyphs=own(32768);
  s_next_fb=own(118);s_gray=own(119);s_prep_task=borrowed;
  html_text_t *ch=&s_reader_session.content;
  ch->utf8=own(120);ch->blocks=own(121);ch->runs=own(122);ch->links=own(123);
@@ -121,7 +123,7 @@ int main(void){
  ready=false;unsigned before_queries=queries;reader_memory_snapshot("test");assert(queries==before_queries&&logs==1&&source_snapshots==1&&source_logs==1);ready=true;
  reader_memory_snapshot("test");assert(listed()==live&&captured.font_source==101&&captured.font_tables==522);
  assert(captured.font_glyphs==2*sizeof(*a)+111&&captured.font_slots==2);
- assert(captured.layout==462&&captured.prefetch==118&&captured.background==119);
+ assert(captured.layout==462+2*32768&&captured.prefetch==118&&captured.background==119);
  assert(captured.prefetch_worker==1&&captured.prefetch_stack_free==1234);
  reader_memory_stats_t old=captured;reader_memory_snapshot("test");assert(!memcmp(&old,&captured,sizeof(old)));
  // 部分失败和关闭后的NULL指针不受旧长度影响；保留块工作区单独可见。
@@ -135,6 +137,7 @@ int main(void){
  for(unsigned i=0;i<64;++i)if(allocated[i].pointer){free(allocated[i].pointer);allocated[i].pointer=NULL;}
  memset(s_slots,0,sizeof(s_slots));memset(&s_reader_session,0,sizeof(s_reader_session));memset(s_covers,0,sizeof(s_covers));
  work=s_catalog=s_pages=s_line=s_images=s_page_img_start=s_shelf=s_guard_cache=s_editor_cover=NULL;
+ s_glyph_maps[0].glyphs=s_glyph_maps[1].glyphs=NULL;
  s_page_images=NULL;s_page_image_count=0;
  reader_memory_snapshot("test");reader_memory_snapshot("test");assert(!listed()&&logs==6&&source_snapshots==6&&source_logs==6);
  puts("PASS: actual owner snapshots, borrowed/static exclusion, CFF alias, glyph lists, partial allocation, retained workspaces and repeated exit");

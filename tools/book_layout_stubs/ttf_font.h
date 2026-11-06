@@ -33,3 +33,21 @@ int ttf_draw_text_px_rotated(uint8_t* fb, int x, int y, int px, const char* text
 int ttf_draw_text_px_vertical(uint8_t* fb, int x, int y, int px, const char* text,
                               int tracking_px, uint8_t fg, uint8_t bg);
 int ttf_vertical_text_height_px(int px, const char* text, int tracking_px);
+
+typedef struct {
+    size_t start, end; ///< 输入 UTF-8 字节区间 / Input UTF-8 byte span
+    uint32_t codepoint; ///< 原始码点 / Original codepoint
+    int x, y, width, height; ///< 推进字格 / Pen advance cell
+} ttf_glyph_position_t;
+typedef void (*ttf_glyph_observer_fn)(void *context, const ttf_glyph_position_t *position);
+typedef struct { ttf_glyph_observer_fn record; void *context; } ttf_glyph_observer_t;
+
+/// 可选逐字观察；空观察器保持原像素与推进。/ Optional observation with unchanged pixels and advances.
+void ttf_draw_text_px_observed(uint8_t *fb, int x, int y, int px, const char *text,
+    enum EpdFontFlags align, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer);
+void ttf_draw_text_px_spaced_observed(uint8_t *fb, int x, int y, int px, const char *text,
+    int tracking, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer);
+void ttf_draw_text_px_fitted_observed(uint8_t *fb, int x, int y, int px, const char *text,
+    int tracking, int width, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer);
+int ttf_draw_text_px_vertical_observed(uint8_t *fb, int x, int y, int px, const char *text,
+    int tracking, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer);

@@ -1,0 +1,2 @@
+# 中文：宿主制包和转换回归依赖；不进入设备固件。/ English: Host conversion/test dependency, absent from firmware.
+opencc-python-reimplemented==0.1.7

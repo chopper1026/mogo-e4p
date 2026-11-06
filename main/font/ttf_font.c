@@ -2311,6 +2311,13 @@ static uint8_t mix_ink(uint8_t alpha, uint8_t fg, uint8_t bg) {
     return (uint8_t)(bg + s_cover[alpha] * ((int)fg - (int)bg) / 255);
 }
 
+static void observe_glyph(const ttf_glyph_observer_t *observer, size_t start, size_t end,
+                          uint32_t cp, int x, int y, int width, int height) {
+    if (!observer || !observer->record) return;
+    ttf_glyph_position_t position = {start, end, cp, x, y, width > 0 ? width : 1, height};
+    observer->record(observer->context, &position);
+}
+
 void ttf_draw_text(
     uint8_t* framebuffer, int x, int y, int size, const char* text,
     enum EpdFontFlags align, uint8_t fg, uint8_t bg
@@ -2318,9 +2325,9 @@ void ttf_draw_text(
     ttf_draw_text_px(framebuffer, x, y, size_to_px(size), text, align, fg, bg);
 }
 
-void ttf_draw_text_px(
+void ttf_draw_text_px_observed(
     uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
-    enum EpdFontFlags align, uint8_t fg, uint8_t bg
+    enum EpdFontFlags align, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer
 ) {
     if (!font_ready || framebuffer == NULL || text == NULL) return;
     ttf_cover_lut_init();
@@ -2336,7 +2343,8 @@ void ttf_draw_text_px(
 
     const char* cursor = text;
     while (*cursor != '\0') {
-        run_apply((size_t)(cursor - text));
+        size_t source_start = (size_t)(cursor - text);
+        run_apply(source_start);
         uint32_t cp = decode_utf8(&cursor);
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph == NULL) continue;
@@ -2353,6 +2361,8 @@ void ttf_draw_text_px(
                 }
             }
         }
+        if (observer) observe_glyph(observer, source_start, (size_t)(cursor - text), cp, cursor_x,
+                                   y - ttf_ascender_px(pixel_height), glyph->advance_x, pixel_height);
         cursor_x += glyph->advance_x;
     }
 }
@@ -2384,12 +2394,12 @@ bool ttf_text_mask_px(uint8_t *mask, unsigned width, unsigned height, int x,
     return true;
 }
 
-void ttf_draw_text_px_spaced(
+void ttf_draw_text_px_spaced_observed(
     uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
-    int tracking_px, uint8_t fg, uint8_t bg
+    int tracking_px, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer
 ) {
     if (!tracking_px) {
-        ttf_draw_text_px(framebuffer, x, y, pixel_height, text, EPD_DRAW_ALIGN_LEFT, fg, bg);
+        ttf_draw_text_px_observed(framebuffer, x, y, pixel_height, text, EPD_DRAW_ALIGN_LEFT, fg, bg, observer);
         return;
     }
     if (!font_ready || framebuffer == NULL || text == NULL) return;
@@ -2399,7 +2409,8 @@ void ttf_draw_text_px_spaced(
     int cursor_x = x;
     const char* cursor = text;
     while (*cursor != '\0') {
-        run_apply((size_t)(cursor - text));
+        size_t source_start = (size_t)(cursor - text);
+        run_apply(source_start);
         uint32_t cp = decode_utf8(&cursor);
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph == NULL) continue;
@@ -2414,6 +2425,8 @@ void ttf_draw_text_px_spaced(
                 }
             }
         }
+        if (observer) observe_glyph(observer, source_start, (size_t)(cursor - text), cp, cursor_x,
+                                   y - ttf_ascender_px(pixel_height), glyph->advance_x + (*cursor ? tracking_px : 0), pixel_height);
         cursor_x += glyph->advance_x;
         if (*cursor) cursor_x += tracking_px;
     }
@@ -2596,9 +2609,9 @@ int ttf_draw_text_px_rotated(
     return cell;
 }
 
-int ttf_draw_text_px_vertical(
+int ttf_draw_text_px_vertical_observed(
     uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
-    int tracking_px, uint8_t fg, uint8_t bg
+    int tracking_px, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer
 ) {
     if (!font_ready || framebuffer == NULL || text == NULL) return 0;
     ttf_cover_lut_init();
@@ -2625,7 +2638,8 @@ int ttf_draw_text_px_vertical(
     int run_dx = 0;
     bool in_centered_run = false;
     while (*cursor != '\0') {
-        run_apply((size_t)(cursor - text));
+        size_t source_start = (size_t)(cursor - text);
+        run_apply(source_start);
         uint32_t cp = decode_utf8(&cursor);
         uint32_t draw_cp = cp;
         bool rotate = false;
@@ -2672,6 +2686,8 @@ int ttf_draw_text_px_vertical(
                 blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg);
             }
         }
+        observe_glyph(observer, source_start, (size_t)(cursor - text), cp, x, y + cell,
+                      cell_px, glyph->advance_x + (*cursor ? tracking_px : 0));
         cell += glyph->advance_x;
         if (*cursor != '\0') cell += tracking_px;
     }
@@ -2699,9 +2715,9 @@ int ttf_vertical_text_height_px(int pixel_height, const char* text, int tracking
     return total;
 }
 
-void ttf_draw_text_px_fitted(
+void ttf_draw_text_px_fitted_observed(
     uint8_t* framebuffer, int x, int y, int pixel_height, const char* text,
-    int tracking_px, int target_width, uint8_t fg, uint8_t bg
+    int tracking_px, int target_width, uint8_t fg, uint8_t bg, const ttf_glyph_observer_t *observer
 ) {
     if (!font_ready || !framebuffer || !text || !*text) return;
     ttf_cover_lut_init();
@@ -2723,7 +2739,7 @@ void ttf_draw_text_px_fitted(
     int adjustable = compress ? gaps : cjk_gaps;
     if (adjustable < 2 || (compress && -delta > adjustable * 3) ||
         (!compress && delta > adjustable * 12)) {
-        ttf_draw_text_px_spaced(framebuffer, x, y, pixel_height, text, tracking_px, fg, bg);
+        ttf_draw_text_px_spaced_observed(framebuffer, x, y, pixel_height, text, tracking_px, fg, bg, observer);
         return;
     }
     int quotient = delta / adjustable;
@@ -2731,7 +2747,8 @@ void ttf_draw_text_px_fitted(
     int adjusted = 0, cursor_x = x;
     cursor = text;
     while (*cursor) {
-        run_apply((size_t)(cursor - text));
+        size_t source_start = (size_t)(cursor - text);
+        run_apply(source_start);
         uint32_t cp = decode_utf8(&cursor);
         const glyph_entry_t* glyph = get_glyph(cp, pixel_height);
         if (glyph && glyph->bitmap) {
@@ -2744,6 +2761,7 @@ void ttf_draw_text_px_fitted(
                 }
             }
         }
+        int glyph_x = cursor_x;
         if (glyph) cursor_x += glyph->advance_x;
         if (*cursor) {
             const char* peek = cursor;
@@ -2757,6 +2775,8 @@ void ttf_draw_text_px_fitted(
                 ++adjusted;
             }
         }
+        if (observer) observe_glyph(observer, source_start, (size_t)(cursor - text), cp, glyph_x,
+                                   y - ttf_ascender_px(pixel_height), cursor_x - glyph_x, pixel_height);
     }
 }
 
@@ -2820,3 +2840,20 @@ void ttf_font_memory_stats(reader_memory_stats_t *stats) {
     stats->font_catalog = reader_memory_owned(s_catalog);
 }
 #endif
+
+void ttf_draw_text_px(uint8_t *fb, int x, int y, int px, const char *text,
+                      enum EpdFontFlags align, uint8_t fg, uint8_t bg) {
+    ttf_draw_text_px_observed(fb, x, y, px, text, align, fg, bg, NULL);
+}
+void ttf_draw_text_px_spaced(uint8_t *fb, int x, int y, int px, const char *text,
+                             int tracking, uint8_t fg, uint8_t bg) {
+    ttf_draw_text_px_spaced_observed(fb, x, y, px, text, tracking, fg, bg, NULL);
+}
+void ttf_draw_text_px_fitted(uint8_t *fb, int x, int y, int px, const char *text,
+                             int tracking, int width, uint8_t fg, uint8_t bg) {
+    ttf_draw_text_px_fitted_observed(fb, x, y, px, text, tracking, width, fg, bg, NULL);
+}
+int ttf_draw_text_px_vertical(uint8_t *fb, int x, int y, int px, const char *text,
+                             int tracking, uint8_t fg, uint8_t bg) {
+    return ttf_draw_text_px_vertical_observed(fb, x, y, px, text, tracking, fg, bg, NULL);
+}

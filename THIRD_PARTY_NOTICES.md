@@ -36,6 +36,8 @@ License terms apply to their respective material. The repository's
 [license-scope statement](LICENSE) and new personal-study license do not
 replace these component licenses or restrict their independently granted rights.
 
+可选的 TF 阅读字典合并中文维基词典贡献者（Kaikki/Wiktextract 提取，CC BY-SA 4.0）、[码谱汉语拼音辞典](https://github.com/mapull/chinese-dictionary)（上游 MIT 声明）及 Unicode Unihan（Unicode License v3），宿主 OpenCC（Apache-2.0）将释义转简体。补充上游说明部分收集语料原始来源无法确认。完整词库未嵌入固件或本仓库源码；转换包保留完整许可、来源、词头历史署名与修改记录，见[阅读字典](docs/development/guides/READER_DICTIONARY.md)。/ Optional card dictionaries merge Chinese Wiktionary (CC BY-SA 4.0), mapull's Chinese dictionary (upstream MIT notice) and Unihan (Unicode v3), simplified using host OpenCC (Apache-2.0). Supplemental upstream notes uncertain provenance for some collected material. Full datasets remain external; converted distributions retain all notices and provenance.
+
 各组件继续适用各自的许可，不能把整个固件简称为其中某一个组件的许可。
 
 阅读翻页适配参考 CrossMux `1512e8e049f2b1a4efc7c004a5b1a93cbc5e3f9f`

@@ -7,6 +7,8 @@
  *
  * 用户修订：阅读设置采用已确认的半屏双列排版；自动全刷与翻页效果点按轮换，保留按键控制二级页。
  * User revision: use the approved compact two-column reading sheet; tap cycles refresh/effect and key controls retain their secondary page.
+ * 用户 2026-11-06 修订：正文长按仅用于临时选字查词，留白不再打开目录，避免同一手势冲突；目录保留工具栏入口。
+ * User revision 2026-11-06: body holds select dictionary text; blank holds no longer open the TOC, avoiding a gesture conflict; the toolbar retains the TOC.
  * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
@@ -147,6 +149,9 @@
  * needed while erasing the solid progress bar left an outline; dirty-mask dilation now re-drives
  * the neighbouring rows/columns, so the full-pixel pass is no longer required.
  */
+#include "../book/reader_selection.h"
+#include "../book/reader_dictionary.h"
+#include "../ui/ui_reader_dictionary.h"
 #include "../diagnostics/reader_perf.h"
 #include "../diagnostics/reader_memory.h"
 #include <dirent.h>
@@ -302,6 +307,9 @@ static bool s_reader_tools_toggle;
 // Panel state of the last presented frame; going from a panel back to none is a close and
 // takes the whole-screen normalize pass.
 static int s_presented_panel;
+// 字典独立于设置面板，保留成功显示状态，直到收起后的整页归一成功。
+// The dictionary is separate from settings; retain its displayed state until closing normalization succeeds.
+static bool s_dictionary_presented;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
 static bool s_requested_fullscreen = true;
@@ -425,10 +433,23 @@ static reader_session_t s_reader_session;
 // 迁移期间保留页面的借用视图；已接收章节只由会话释放，交接后统一重绑定。
 // Keep borrowed page views during migration; only the session frees adopted chapters and handoffs rebind together.
 static char* s_text;
+static reader_selection_t s_dictionary_selection;
+static ui_reader_dictionary_t s_dictionary_view;
+static book_dictionary_result_t s_dictionary_result;
+static size_t s_dictionary_history[128], s_dictionary_history_count;
+static size_t s_dictionary_character;
+static size_t s_dictionary_chapter;
+static int64_t s_dictionary_feedback_ms;
+static int64_t s_dictionary_notice_until;
+static bool s_dictionary_feedback_pending;
+static void dictionary_cancel(void);
+static app_redraw_t dictionary_dismiss(void);
+static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev, bool *handled);
+static app_redraw_t dictionary_tick(app_ctx_t *ctx);
 static bool reader_text_body(void);
 static bool normalize_hold_gray(app_ctx_t* ctx);
 bool app_book_reader_body_visible(void) {
-    return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm;
+    return s_view == READING && s_text && s_reader_panel == READER_PANEL_NONE && !s_clear_confirm && !s_dictionary_selection.active;
 }
 static blk_t* s_blocks;
 // 书内字体的 run 表与块表同生共死：都来自同一次 html_text 解析，排版直接借用。
@@ -1654,6 +1675,7 @@ static void invalidate_prep(void) { reader_prefetch_invalidate(); }
 // 目录使用系统字体；切换前等待预渲染结束，回正文时恢复阅读字体与字形缓存。
 // The directory uses the system face; join painting before switching and restore the reader face on return.
 static void set_reader_view(book_view_t view) {
+    dictionary_cancel();
     reader_indent_hold_cancel();
     lock_draw();
     invalidate_prep();
@@ -3480,6 +3502,12 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         ui_text_vc(fb, 342, 184, 19, s_reader_notice, EPD_DRAW_ALIGN_CENTER, false);
     }
     draw_reader_panel(fb);
+    if (s_dictionary_notice_until) ui_reader_dictionary_notice(fb);
+    if (s_dictionary_selection.active) {
+        size_t count = 0; const book_layout_glyph_t *glyphs = book_layout_glyphs(page, &count);
+        ui_reader_dictionary_selection(fb, &s_dictionary_selection, glyphs, count);
+        ui_reader_dictionary_draw(fb, &s_dictionary_view, &s_dictionary_result, s_dictionary_result.query[0] ? s_dictionary_result.query : s_dictionary_selection.query);
+    }
 }
 static void draw_reader(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);ui_clear_page(fb);
@@ -3490,13 +3518,13 @@ static void draw_reader(uint8_t *fb,size_t page) {
 // The page authorizes prefetch; the worker borrows stable geometry and layout for this presentation.
 static bool kick_prep(void) {
     if (s_view != READING || !s_text || s_toolbar || s_clear_confirm ||
-        s_reader_panel != READER_PANEL_NONE || s_reader_session.position.page + 1 >= book_layout_page_count() ||
+        s_reader_panel != READER_PANEL_NONE || s_dictionary_selection.active || s_reader_session.position.page + 1 >= book_layout_page_count() ||
         book_layout_page_image_count(s_reader_session.position.page) || book_layout_page_image_count(s_reader_session.position.page + 1)) return false;
     return reader_prefetch_start(s_reader_session.position.page + 1, body_rect(), s_px, fb_bytes());
 }
 static void reader_prefetch_idle(app_ctx_t *ctx) {
     if (s_view != READING || !s_text || s_toolbar || s_clear_confirm ||
-        s_reader_panel != READER_PANEL_NONE || ctx->consumed || ctx->request_app ||
+        s_reader_panel != READER_PANEL_NONE || s_dictionary_selection.active || ctx->consumed || ctx->request_app ||
         ctx->request_menu || ctx->request_return || (ctx->touch && ctx->touch->touched)) return;
     if (book_layout_page_image_count(s_reader_session.position.page) || book_layout_page_image_count(s_reader_session.position.page + 1) ||
         s_reader_session.position.page + 1 >= book_layout_page_count()) return;
@@ -3728,6 +3756,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     const bool tools_toggle = s_reader_tools_toggle;
     s_reader_tools_toggle = false;
     bool tools_band = false;
+    if (s_dictionary_feedback_pending && redraw == APP_REDRAW_AREA) {
+        s_dictionary_feedback_pending = false;
+        guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
+        return true;
+    }
     if(reader_indent_present(ctx,redraw))return true;
     if(s_shelf_key_paint_pending && redraw==APP_REDRAW_AREA && s_view==SHELF && !ctx->request_app){
         s_shelf_key_paint_pending=false;
@@ -3802,8 +3835,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         .cleanup = s_reader_cleanup, .tools_toggle = tools_toggle,
         .closing_tools_to_text = s_presented_panel == READER_PANEL_TOOLS &&
             s_reader_panel == READER_PANEL_NONE && reader_text_body(),
-        .closing_panel_to_text = s_presented_panel != READER_PANEL_NONE &&
-            s_reader_panel == READER_PANEL_NONE && reader_text_body(),
+        .closing_panel_to_text = (s_presented_panel != READER_PANEL_NONE || s_dictionary_presented) &&
+            s_reader_panel == READER_PANEL_NONE && !s_dictionary_view.open && reader_text_body(),
         .feedback = s_view == SHELF && s_shelf_feedback_pending,
         .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
         .water_turn_pending = s_water_turn_pending,
@@ -3860,6 +3893,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     }
     const bool reader_frame_ok = err == EPD_DRAW_SUCCESS && s_view == READING && s_text &&
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
+        !s_dictionary_selection.active && !s_dictionary_view.open &&
         book_layout_page_image_count(s_reader_session.position.page) == 0;
     s_reader_text_frame = reader_frame_ok && !app_settings_book_background_path()[0];
     s_reader_stable_frame = reader_frame_ok;
@@ -3867,6 +3901,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_reader_image_refresh_pending = false;
     s_presented_view = (int)s_view;
     s_presented_panel = (int)s_reader_panel;
+    if (err == EPD_DRAW_SUCCESS && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL))
+        s_dictionary_presented = s_view == READING && s_dictionary_view.open;
     s_reader_footer_pending = false;
     s_reader_footer_strong = false;
     s_water_turn_pending = false;
@@ -3975,6 +4011,7 @@ static void reader_bind_chapter(void) {
     s_image_count = content->image_count;
 }
 static void free_book(void) {
+    dictionary_cancel();
     flush_ticket_stats();
     (void)app_reading_journal_flush();
     e0470_page_turn_release();
@@ -4146,6 +4183,7 @@ static void chapter_restore_lead(void *ctx) {
 
 static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
                             bool last_page, const char *anchor, size_t source_offset) {
+    dictionary_cancel();
     bool clear_toc = chapter != s_reader_session.position.chapter || (!anchor && source_offset == SIZE_MAX);
     reader_chapter_t candidate = {0};
     esp_err_t err = reader_chapter_read(&candidate, chapter, anchor, source_offset,
@@ -4981,6 +5019,7 @@ static bool reader_turn_load(void *context, size_t chapter, bool last) {
 }
 
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
+    if (s_dictionary_selection.active) return dictionary_dismiss();
 #if CONFIG_READER_PERF
     reader_perf_begin("turn");
     READER_PERF_SCOPE(READER_PERF_ACTION);
@@ -6296,6 +6335,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     return APP_REDRAW_NONE;
 }
 static void on_enter(app_ctx_t* ctx) {
+    book_layout_enable_selection(true);
     category_reset();
     s_shelf_selecting=false;s_category_result[0]=0;
     reader_indent_hold_cancel();
@@ -6678,7 +6718,154 @@ static app_redraw_t key_settings_scroll_gesture(app_ctx_t *ctx, const ui_gesture
     return APP_REDRAW_AREA;
 }
 
+static void dictionary_cancel(void) {
+    reader_dictionary_cancel();
+    reader_selection_cancel(&s_dictionary_selection);
+    s_dictionary_view = (ui_reader_dictionary_t){0};
+    s_dictionary_feedback_pending = false;
+    s_dictionary_notice_until = 0;
+    s_dictionary_history_count = 0;
+}
+static app_redraw_t dictionary_dismiss(void) {
+    dictionary_cancel();
+    middle_pending_clear();
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+static bool dictionary_long_drag(app_ctx_t *ctx) {
+    (void)ctx;
+    return s_view == READING && s_text && !s_toolbar && !s_clear_confirm;
+}
+static void dictionary_query(const char *query) {
+    memset(&s_dictionary_result, 0, sizeof(s_dictionary_result));
+    copy_text(s_dictionary_result.query, sizeof(s_dictionary_result.query), query);
+    s_dictionary_view.loading = reader_dictionary_start(query);
+    if (!s_dictionary_view.loading) s_dictionary_result.status = BOOK_DICTIONARY_BUSY;
+    s_dictionary_view.open = true; s_dictionary_view.offset = 0;
+    s_dictionary_history_count = 0;
+    s_dictionary_chapter = s_reader_session.position.chapter;
+}
+static EpdRect dictionary_union(EpdRect a, EpdRect b) {
+    int right = a.x + a.width > b.x + b.width ? a.x + a.width : b.x + b.width;
+    int bottom = a.y + a.height > b.y + b.height ? a.y + a.height : b.y + b.height;
+    if (b.x < a.x) a.x = b.x;
+    if (b.y < a.y) a.y = b.y;
+    a.width = right - a.x; a.height = bottom - a.y; return a;
+}
+static bool dictionary_handle(const book_layout_glyph_t *g, size_t count, int x, int y, bool *first) {
+    if (!g || !s_dictionary_selection.active) return false;
+    size_t ends[] = {s_dictionary_selection.anchor, s_dictionary_selection.focus};
+    for (int i = 0; i < 2; ++i) if (ends[i] < count) {
+        const book_layout_glyph_t *p = &g[ends[i]];
+        if (x >= p->x - 20 && x < p->x + p->width + 20 && y >= p->y - 20 && y < p->y + p->height + 28) { *first = i == 0; return true; }
+    }
+    return false;
+}
+static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev, bool *handled) {
+    if (s_view != READING || !s_text) return APP_REDRAW_NONE;
+    bool active = s_dictionary_selection.active;
+    if (!active && (ev->type != UI_GESTURE_LONG_PRESS || s_toolbar || s_clear_confirm)) return APP_REDRAW_NONE;
+    *handled = true;
+    size_t count = 0;
+    const book_layout_glyph_t *g = book_layout_glyphs(s_reader_session.position.page, &count);
+    if (active && (s_dictionary_selection.generation != book_layout_generation() ||
+        s_dictionary_selection.page != s_reader_session.position.page || !g)) return dictionary_dismiss();
+    if (ev->type == UI_GESTURE_CANCEL) {
+        if (!s_dictionary_selection.dragging) return APP_REDRAW_NONE;
+        EpdRect old = ui_reader_dictionary_selection(ctx->fb, &s_dictionary_selection, g, count);
+        dictionary_cancel(); s_area = old; s_mode = MODE_DU; s_dictionary_feedback_pending = true;
+        return APP_REDRAW_AREA;
+    }
+    if (active && s_dictionary_view.open &&
+        (ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R ||
+         ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) return dictionary_dismiss();
+    if (ev->type == UI_GESTURE_LONG_PRESS) {
+        if (active && s_dictionary_view.open) {
+            bool first = false;
+            if (!dictionary_handle(g, count, ev->x0, ev->y0, &first)) return APP_REDRAW_NONE;
+            if (first) { size_t at = s_dictionary_selection.anchor; s_dictionary_selection.anchor = s_dictionary_selection.focus; s_dictionary_selection.focus = at; }
+            reader_dictionary_cancel(); s_dictionary_view.open = false;
+            s_dictionary_selection.dragging = true;
+            // 当前接触只能区域绘制；先重绘原页，再恢复选区。/ Active contacts use area output; restore the base page and then its selection.
+            render(ctx, ctx->fb); s_area = (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT};
+            s_mode = MODE_DU; s_dictionary_feedback_pending = true; return APP_REDRAW_AREA;
+        }
+        lock_draw(); invalidate_prep(); unlock_draw();
+        middle_pending_clear();
+        if (!g) {
+            s_dictionary_notice_until = ctx->now_ms + 2400;
+            render(ctx, ctx->fb); s_area = (EpdRect){208,150,268,68};
+            s_mode = MODE_DU; s_dictionary_feedback_pending = true; return APP_REDRAW_AREA;
+        }
+        s_dictionary_notice_until = 0;
+        if (!reader_selection_begin(&s_dictionary_selection, s_text, s_text_len, g, count,
+            s_reader_session.position.page, book_layout_generation(), ev->x0, ev->y0)) return APP_REDRAW_NONE;
+        s_dictionary_chapter = s_reader_session.position.chapter;
+        s_dictionary_feedback_ms = ctx->now_ms;
+        s_area = ui_reader_dictionary_selection(ctx->fb, &s_dictionary_selection, g, count);
+        s_mode = MODE_DU; s_dictionary_feedback_pending = true; return APP_REDRAW_AREA;
+    }
+    if (ev->type == UI_GESTURE_MOVE && s_dictionary_selection.dragging && ctx->now_ms - s_dictionary_feedback_ms >= 120) {
+        reader_selection_t previous = s_dictionary_selection;
+        if (!reader_selection_move(&s_dictionary_selection, s_text, s_text_len, g, count, ev->x, ev->y)) return APP_REDRAW_NONE;
+        EpdRect old = ui_reader_dictionary_selection(ctx->fb, &previous, g, count);
+        EpdRect next = ui_reader_dictionary_selection(ctx->fb, &s_dictionary_selection, g, count);
+        s_area = dictionary_union(old, next); s_mode = MODE_DU; s_dictionary_feedback_pending = true;
+        s_dictionary_feedback_ms = ctx->now_ms; return APP_REDRAW_AREA;
+    }
+    if (ev->type == UI_GESTURE_RELEASE && s_dictionary_selection.dragging) {
+        (void)reader_selection_move(&s_dictionary_selection, s_text, s_text_len, g, count, ev->x, ev->y);
+        s_dictionary_selection.dragging = false;
+        uint32_t start, end; int max_y = 0;
+        if (reader_selection_range(&s_dictionary_selection, g, count, &start, &end))
+            for (size_t i = 0; i < count; ++i) if (g[i].start >= start && g[i].start < end && g[i].y + g[i].height > max_y) max_y = g[i].y + g[i].height;
+        s_dictionary_view.top = max_y >= 608 ? 0 : 632;
+        s_dictionary_character = 0; dictionary_query(s_dictionary_selection.query); return APP_REDRAW_PAGE;
+    }
+    if (ev->type == UI_GESTURE_TAP && s_dictionary_view.open) {
+        int action = ui_reader_dictionary_action(&s_dictionary_view, ev->x0, ev->y0);
+        if (action == 0) return dictionary_dismiss();
+        if (action == 1 && s_dictionary_history_count) s_dictionary_view.offset = s_dictionary_history[--s_dictionary_history_count];
+        else if (action == 2) {
+            size_t next = ui_reader_dictionary_page_end(&s_dictionary_result, s_dictionary_view.offset);
+            if (next < ui_reader_dictionary_content_size(&s_dictionary_result) && s_dictionary_history_count < 128) {
+                s_dictionary_history[s_dictionary_history_count++] = s_dictionary_view.offset; s_dictionary_view.offset = next;
+            }
+        } else if (action == 3) {
+            char one[READER_SELECTION_BYTES + 1];
+            s_dictionary_character = reader_selection_character(s_dictionary_selection.query, s_dictionary_character, one);
+            if (!one[0]) return APP_REDRAW_NONE;
+            dictionary_query(one);
+        } else return APP_REDRAW_NONE;
+        return APP_REDRAW_PAGE;
+    }
+    return APP_REDRAW_NONE;
+}
+static app_redraw_t dictionary_tick(app_ctx_t *ctx) {
+    // 调整端点时只做跟手输出；取消并抬手后再归一，不把整页刷新塞进拖动中。
+    // Endpoint drags use live output; normalize a cancelled drag after release, outside the active contact.
+    if (s_view == READING && s_dictionary_presented && !s_dictionary_view.open &&
+        !s_dictionary_selection.dragging && (!ctx->touch || !ctx->touch->touched))
+        return APP_REDRAW_PAGE;
+    if (s_dictionary_notice_until && ctx->now_ms >= s_dictionary_notice_until &&
+        (!ctx->touch || !ctx->touch->touched)) {
+        s_dictionary_notice_until = 0;
+        return APP_REDRAW_PAGE;
+    }
+    if (!s_dictionary_selection.active) return APP_REDRAW_NONE;
+    if (s_view != READING || !s_text || s_dictionary_chapter != s_reader_session.position.chapter ||
+        s_dictionary_selection.generation != book_layout_generation() ||
+        s_dictionary_selection.page != s_reader_session.position.page || usb_storage_active() ||
+        strcmp(s_font_path, ttf_font_path())) return dictionary_dismiss();
+    if (s_dictionary_view.loading && (!ctx->touch || !ctx->touch->touched) &&
+        reader_dictionary_poll(&s_dictionary_result)) { s_dictionary_view.loading = false; return APP_REDRAW_PAGE; }
+    return APP_REDRAW_NONE;
+}
+
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    bool dictionary_handled = false;
+    app_redraw_t dictionary = dictionary_gesture(ctx, ev, &dictionary_handled);
+    if (dictionary_handled) return dictionary;
     if (s_view == CATEGORIES) return category_gesture(ctx, ev);
     if(s_view==SHELF && s_shelf_selecting) {
         if(ev->type==UI_GESTURE_TAP){
@@ -6877,14 +7064,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
             copy_text(s_manage_message, sizeof(s_manage_message), s_file_removed ? "文件已删除，进度清理失败，请重试" : "");
             return APP_REDRAW_PAGE;
         }
-        if (s_view == READING && !s_toolbar && !s_clear_confirm && ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
-            save_progress();
-            set_reader_view(TOC);
-            s_message[0] = 0;
-            size_t toc = current_toc_position();
-            ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
-            return APP_REDRAW_PAGE;
-        }
+
     }
     if (ev->type == UI_GESTURE_TAP && !s_scan_pending) {
         if (start >= 0 && start == end) {
@@ -6923,6 +7103,7 @@ static void toggle_reader_tools_panel(void) {
     if (pure) s_reader_tools_toggle = true;
 }
 static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
+    if (s_dictionary_selection.active) return dictionary_dismiss();
     switch (action) {
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:
             s_stats_activity_ms = ctx->now_ms;
@@ -6979,6 +7160,7 @@ static app_redraw_t middle_pending_tick(app_ctx_t *ctx) {
     return reader_key_action(ctx, s_middle_pending_action);
 }
 static app_redraw_t on_key(app_ctx_t* ctx, int key) {
+    if (s_dictionary_selection.active) return dictionary_dismiss();
     reader_indent_hold_cancel();
     s_pressed_control = -1;
     if (s_view == CATEGORIES) {
@@ -7046,6 +7228,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     return APP_REDRAW_PAGE;
 }
 static app_redraw_t on_power_short(app_ctx_t* ctx) {
+    if (s_dictionary_selection.active) { dictionary_cancel(); return APP_REDRAW_NONE; }
     if (s_view != READING || !s_text || s_clear_confirm ||
         !app_settings_reader_power_turn()) return APP_REDRAW_NONE;
     s_stats_activity_ms = ctx->now_ms;
@@ -7053,6 +7236,7 @@ static app_redraw_t on_power_short(app_ctx_t* ctx) {
     return result == APP_REDRAW_NONE ? APP_REDRAW_DONE : result;
 }
 static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
+    if (s_dictionary_selection.active) return dictionary_dismiss();
     reader_indent_hold_cancel();
     if (key != UI_KEY_2) return APP_REDRAW_NONE;
     // 长按是新的明确手势，吃掉未到期的单击，避免先翻页再回首页。
@@ -7082,7 +7266,7 @@ static bool menu_handle_enabled(app_ctx_t* ctx) {
 // views let the quick-layer close run the full normalization pass.
 static bool normalize_hold_gray(app_ctx_t* ctx) {
     (void)ctx;
-    return s_view == READING && s_text && app_settings_book_background_path()[0] != '\0';
+    return s_view == READING && s_text && !s_dictionary_view.open && app_settings_book_background_path()[0] != '\0';
 }
 static app_redraw_t shelf_turn_page(app_ctx_t *ctx, int direction) {
     int next = ctx->leaf + direction;
@@ -7141,7 +7325,7 @@ static int book_remote_direction(void) {
 static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
     static int64_t s_poll_ms;
     static uint8_t s_last_keys = 0xff;
-    if (!app_settings_reader_volume_turn() || !app_book_reader_body_visible()) {
+    if (!app_settings_reader_volume_turn() || (!app_book_reader_body_visible() && !s_dictionary_selection.active)) {
         s_last_keys = 0xff;
         return APP_REDRAW_NONE;
     }
@@ -7168,7 +7352,7 @@ static app_redraw_t reader_up_key_tick(app_ctx_t* ctx) {
     static bool s_down;
     static int64_t s_down_ms;
     app_reader_key_action_t action = app_settings_reader_up_action();
-    if (action == APP_READER_KEY_NONE || !app_book_reader_body_visible()) {
+    if (action == APP_READER_KEY_NONE || (!app_book_reader_body_visible() && !s_dictionary_selection.active)) {
         s_down = false;
         return APP_REDRAW_NONE;
     }
@@ -7227,7 +7411,8 @@ static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
     static int64_t s_poll_ms, s_cfg_fail_ms, s_sleep_retry_ms;
     if (ctx->touch && ctx->touch->touched) s_shake_touch_ms = ctx->now_ms;
     const bool active = app_settings_reader_shake_turn() &&
-                        app_book_reader_body_visible() && ctx->acc != NULL;
+                        (app_book_reader_body_visible() || (s_view == READING && s_text && s_dictionary_view.open)) &&
+                        ctx->acc != NULL;
     if (!active) {
         if (s_shake_sensor_on && ctx->acc && ctx->now_ms >= s_sleep_retry_ms) {
             board_sensor_sleep(ctx->acc);
@@ -7264,6 +7449,8 @@ static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
     return turn_page(ctx, dir);
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    app_redraw_t dictionary = dictionary_tick(ctx);
+    if (dictionary != APP_REDRAW_NONE) return dictionary;
     if (s_view == CATEGORIES) return category_tick(ctx);
     app_redraw_t indent=reader_indent_hold_tick(ctx);
     if(indent!=APP_REDRAW_NONE)return indent;
@@ -7383,6 +7570,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     return APP_REDRAW_NONE;
 }
 static void before_lock(app_ctx_t* ctx) {
+    dictionary_cancel();
     // 锁屏期间不补发按键动作，唤醒后从干净状态开始。
     // Never replay a key action across lock; resume from a clean state.
     middle_pending_clear();
@@ -7423,6 +7611,7 @@ const app_desc_t app_book = {
     .render = render, .present = present, .on_enter = on_enter, .on_exit = book_on_exit,
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
+    .gesture_long_drag = dictionary_long_drag,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,
     .on_power_short = on_power_short,
     .on_tick = on_tick, .area_hint = area_hint,

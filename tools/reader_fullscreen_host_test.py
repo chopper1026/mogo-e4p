@@ -37,6 +37,8 @@ static bool s_requested_fullscreen=true,s_requested_open_home;
 static const char *s_text="text";
 static size_t s_text_len=900,s_block_count,s_jump_offset;
 static void *s_blocks;
+static struct {bool active;} s_dictionary_selection;
+static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static int s_px=48,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_view=READING;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
 static bool s_reader_fullscreen,s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;

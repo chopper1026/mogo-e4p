@@ -81,7 +81,7 @@ static void invalidate_prep(void){++invalidated;}
 unit+='enum EpdDrawError {EPD_DRAW_SUCCESS};\n'+area_boundary(root,feedback_only=True)
 header=(root/'main/ui/ui_gesture.h').read_text()
 unit+=header[header.index('typedef enum {'):header.index('/// 清除状态')]
-for name in ('ui_gesture_reset','emit','ui_gesture_feed'):
+for name in ('ui_gesture_reset','emit','ui_gesture_feed_options','ui_gesture_feed'):
     unit+=function(name,root/'main/ui/ui_gesture.c')+'\n'
 for name in ('indent_adjust_rect','reader_layout_back_rect','indent_adjust_hit','reader_indent_hold_cancel','draw_indent_adjustments','reader_indent_feedback','reader_indent_present','reader_indent_finish','reader_indent_gesture','reader_indent_hold_tick'):
     unit+=function(name,book)+'\n'

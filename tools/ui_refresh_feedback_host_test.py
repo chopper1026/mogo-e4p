@@ -25,12 +25,13 @@ shelf = r'''
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
-enum {SHELF,MANAGE,READING,READER_PANEL_NONE,TOC,EDIT,SEARCH};
+enum {SHELF,MANAGE,READING,READER_PANEL_NONE,TOC,EDIT,SEARCH,CATEGORIES};
 enum EpdDrawMode {MODE_GL16,MODE_DU,MODE_GC16};
 enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_ERROR,EPD_DRAW_INVALID_CROP,EPD_DRAW_NO_PHASES_AVAILABLE};
 #define APP_PAGE_REFRESH_MODE MODE_GL16
 #define SHELF_BOOK_LIFT_PX 16
 #define portMAX_DELAY 0
+static const int normalize_wave=5,normalize_gray_wave=6;
 static const int E0470_WAVEFORM=0,E0470_FULL_WAVEFORM=1,E0470_FOLLOW_WAVEFORM=2,E0470_TEXTTURN_WAVEFORM=3,E0470_SOFT_TEXTTURN_WAVEFORM=4;
 static const int* display_reader_text_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
 static const char *TAG="test";
@@ -66,7 +67,24 @@ static int app_settings_shelf_style(void){return test_style;}
 static bool app_settings_main_fast_refresh(void){return test_fast;}
 static int shelf_rows(void){return test_style==5?4:9;}
 static bool s_cover_batch_present_pending,s_reader_tools_toggle,s_reader_footer_strong,s_reader_stable_frame;
+static bool s_shelf_selecting;
+static EpdRect shelf_manage_rect(void){return (EpdRect){442,94,97,54};}
+static EpdRect shelf_import_rect(void){return (EpdRect){551,94,97,54};}
+static EpdRect shelf_header_action_rect(int action){return (EpdRect){40+action*100,80,80,80};}
+static bool display_present_begin(void){return true;}
+static void display_present_end(bool held){assert(held);}
+static app_redraw_t dictionary_dismiss(void);
 static int s_presented_panel;
+static bool s_dictionary_presented,s_dictionary_feedback_pending;
+static struct {bool active;} s_dictionary_selection;
+static struct {bool open;int top;} s_dictionary_view;
+static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;s_dictionary_view.open=false;return APP_REDRAW_PAGE;}
+static unsigned s_reader_chrome_fp;static bool s_reader_chrome_fp_valid;
+static unsigned reader_chrome_fingerprint(void){return 0;}
+static int s_category_covers;
+static struct {int screen;}s_category_ui;
+#define CATEGORY_BOOKS 1
+static bool book_shelf_covers_pending(int *cover){(void)cover;return false;}
 static int s_reader_power;
 static int64_t s_reader_clock_minute;
 static int reader_status_power(void){return 0;}
@@ -169,7 +187,8 @@ for rel in ('main/display/display_refresh.h','main/display/display_waveform_cata
 shelf+=r'''
 #define APP_DYNAMIC_REFRESH_MODE MODE_DU
 static EpdRect reader_tools_area(void){return (EpdRect){0,920,684,296};}
-static bool normalize_hold_gray(app_ctx_t *ctx){(void)ctx;return false;}
+static bool test_hold_gray;
+static bool normalize_hold_gray(app_ctx_t *ctx){(void)ctx;return test_hold_gray;}
 static int reader_image_slots(unsigned page){return book_layout_page_image_count(page);}
 static int s_shelf_covers;
 static void book_shelf_covers_ack(int *state,bool ok,bool full,bool batch){(void)state;(void)ok;(void)full;(void)batch;}
@@ -180,7 +199,11 @@ const EpdWaveform *display_waveform_get(display_waveform_id_t id){
  case DISPLAY_WAVE_FOLLOW: return &E0470_FOLLOW_WAVEFORM;
  case DISPLAY_WAVE_READER_TEXT: return display_reader_text_waveform();
  case DISPLAY_WAVE_READER_INK: return &E0470_WAVEFORM;
+ case DISPLAY_WAVE_READER_IMAGE: return &E0470_WAVEFORM;
+ case DISPLAY_WAVE_READER_BACKGROUND: return &E0470_WAVEFORM;
  case DISPLAY_WAVE_FULL: return &E0470_FULL_WAVEFORM;
+ case DISPLAY_WAVE_NORMALIZE: return &normalize_wave;
+ case DISPLAY_WAVE_NORMALIZE_GRAY: return &normalize_gray_wave;
  default: assert(false);return NULL;
  }
 }
@@ -373,6 +396,28 @@ int main(void){
  test_full_pages=0;test_effect=0;s_page=0;test_types[0][0]=1;test_image.gray=NULL;
  trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));assert(!s_reader_text_frame);
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending);
+
+ // 实际页面 present：上下半屏词典关闭共用全屏归一，失败保留重试状态。
+ // Actual page present: either sheet position closes with whole-screen normalization and retains failures.
+ s_view=s_presented_view=READING;s_reader_panel=s_presented_panel=READER_PANEL_NONE;
+ test_image.gray=(uint8_t*)"gray";test_hide_images=false;test_types[0][0]=0;s_page=s_chapter=0;
+ s_reader_tools_toggle=s_reader_cleanup=false;
+ for(int gray=0;gray<2;++gray)for(int top=0;top<2;++top){
+  test_hold_gray=gray;s_dictionary_view.top=top?632:0;s_dictionary_view.open=s_dictionary_selection.active=true;
+  trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+  assert(s_dictionary_presented&&!s_reader_text_frame&&!s_reader_stable_frame);
+  s_dictionary_view.open=s_dictionary_selection.active=false;
+  test_push_error=EPD_DRAW_ERROR;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(s_dictionary_presented);
+  test_push_error=0;trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+  assert(!s_dictionary_presented&&trace_count==1&&trace_route[0]==LOCAL_FULL);
+  assert(trace_wave[0]==(gray?normalize_gray_wave:normalize_wave));
+  assert(trace_area[0].x==0&&trace_area[0].y==0&&trace_area[0].width==684&&trace_area[0].height==1216);
+ }
+ // 插图页保留图片刷新，避免文字归一波形改动图片灰阶。
+ // Illustration pages retain picture output to avoid changing image grays with text normalization.
+ s_dictionary_view.open=s_dictionary_selection.active=true;present(&ctx,APP_REDRAW_PAGE);
+ s_dictionary_view.open=s_dictionary_selection.active=false;test_types[0][0]=1;
+ trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_dictionary_presented&&trace_route[0]!=LOCAL_FULL);
  puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 36 bidirectional chapter transitions with GL16 footer/progress, failed image/display/load guards and actual cleanup/water turns");
 }
 '''

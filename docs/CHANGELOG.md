@@ -10,8 +10,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 支持 MOBI 格式。
 - 提高底部三键灵敏度。
 
-## v1.0.5 · 本地测试 / Local testing · 2026-11-06
+## v1.0.6 · 本地测试 / Local testing · 2026-11-06
 
+- 阅读正文新增离线选字/拖选查词、可调整选区与释义分页；字典使用当前阅读字体，支持逐字查询并区分缺字、缺释义和词库异常。词库独立安装到 TF 卡；移除正文及留白长按打开目录，保留工具栏目录入口。实机触摸、速度与残影待验收。/ Add offline character/phrase selection, adjustable ranges and paged definitions in the current reader face, with per-character lookup and explicit missing-data/font/package states. Install dictionaries separately on the card; TOC remains on the toolbar. Device touch, timing and optical acceptance are pending.
+- 字典补充中文词语、成语与单字释义，修复未标简体词头漏查，释义及例句统一转简体；关闭字典回到文字页时整屏归一，阅读背景保留灰阶。/ Supplement Chinese word/idiom/character glosses, add missing simplified aliases, simplify definitions/examples and normalize the whole text page when closing the dictionary while preserving background grays.
+- 修复 S31 读写 Flash 关闭缓存期间，中断调用 FreeRTOS 协处理器函数而触发的缓存异常；相关函数放入内部 RAM，构建时检查最终地址。/ Keep S31 FreeRTOS coprocessor helpers in internal RAM to prevent cache errors when interrupts run during cache-off flash operations; validate final placement at build time.
 - FT6336U 检测阈值采用模组复位原值的75%，提升弱触摸响应；支持恢复100%原阈值，初始化与唤醒均读回校验、失败恢复。此为通用阈值，不是三键专用参数，不同厚膜、屏幕误触与充电噪声仍需对应样机验证。/ Use 75% of the FT6336U module reset threshold for weaker touches, with 100% available to preserve the original and verified readback/rollback at init/wake. This is a general threshold, not key-specific; different protectors, screen false touches and charger noise still need hardware checks.
 - 修复刷新等阻塞期间盖板左、中、右三键积压回放漏按；保留原按键映射，中键短按/长按按采样时间区分，切页后的新返回请求不再被清除。宿主回归覆盖实时与回放交错。/ Fix lost left/middle/right panel presses buffered during refresh and other blocking work; preserve mappings, distinguish middle taps/holds by sample time and retain fresh Back requests after navigation. Host regressions cover mixed live/replayed input.
 - WiFi 最多保存八个网络并兼容旧配置，附近列表标记已保存，新增已保存列表及连接、改密码、逐个确认遗忘；存满不覆盖。修复翻页箭头缺字，移除底部两行说明，改为每页六行。/ Save eight WiFi profiles with legacy compatibility and saved markers; manage connections, passwords and confirmed individual removal without eviction. Use glyph-independent paging icons and six rows instead of footer hints.

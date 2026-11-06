@@ -36,7 +36,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends clang libclang-rt-dev libssl-dev zlib1g-dev nodejs
           . "$IDF_PATH/export.sh"
-          python3 -m pip install --disable-pip-version-check "fonttools==4.63.0" "Pillow==12.2.0"
+          python3 -m pip install --disable-pip-version-check "fonttools==4.63.0" "Pillow==12.2.0" -r tools/dictionary-requirements.txt
           mkdir -p /private/tmp build/host-compiler
           # 保留严格检查，将历史 macOS 链接参数映射为 Linux 等价选项。
           # Preserve strict checks and map legacy macOS linker flags to their Linux equivalent.

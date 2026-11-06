@@ -44,6 +44,7 @@ static void *task_start(void *p){current_task=p;current_task->run(NULL);return N
 static int xTaskCreatePinnedToCore(void(*run)(void*),const char *name,int stack,void *arg,int priority,task_t **out,int core){assert(!strcmp(name,"book_prep")&&stack==12288&&!arg&&priority==3&&core==1);if(fail_task)return 0;task_t *t=calloc(1,sizeof(*t));assert(t);sem_init(&t->notify,0);t->run=run;*out=t;assert(!pthread_create(&t->thread,NULL,task_start,t));return pdPASS;}
 static void xTaskNotifyGive(task_t *task){xSemaphoreGive(&task->notify);}
 static void vTaskDelete(task_t *task){pthread_mutex_lock(&task->notify.lock);task->quit=true;pthread_cond_signal(&task->notify.cond);pthread_mutex_unlock(&task->notify.lock);pthread_join(task->thread,NULL);pthread_mutex_destroy(&task->notify.lock);pthread_cond_destroy(&task->notify.cond);free(task);}
+static struct {bool active;} s_dictionary_selection;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;static const char *s_text="text";
 static bool s_toolbar,s_clear_confirm;
 static uint32_t generation=1;

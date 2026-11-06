@@ -25,6 +25,9 @@ static book_shake_gate_t s_shake_gate;
 static int64_t s_shake_touch_ms,s_stats_activity_ms;
 static bool s_shake_sensor_on=true,s_shake_cfg_pending;
 static bool sensor_powered=true,sleep_fail,body_visible=true;
+enum {READING,SHELF};static int s_view=READING;
+static const char *s_text="正文";
+static struct {bool open;}s_dictionary_view;
 static unsigned sleeps,turns;
 static sc7a20h_sample_t next_sample;
 static bool app_settings_reader_shake_turn(void){return true;}
@@ -66,6 +69,8 @@ int main(void){
  for(int t=12000;t<=17000;t+=50){ctx.now_ms=t;reader_shake_tick(&ctx);}
  assert(sleeps>=2&&sleeps<=4&&s_shake_sensor_on&&sensor_powered);
  sleep_fail=false;ctx.now_ms=20000;reader_shake_tick(&ctx);assert(!sensor_powered&&!s_shake_sensor_on);
+ s_dictionary_view.open=true;ctx.now_ms=23000;reader_shake_tick(&ctx);assert(sensor_powered);
+ s_dictionary_view.open=false;ctx.now_ms=26000;reader_shake_tick(&ctx);assert(!sensor_powered);
  puts("PASS: held single/multitouch suppression, release quiet window and recovery, bounded sleep retries");
 }
 '''

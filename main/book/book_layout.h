@@ -126,3 +126,17 @@ typedef struct {
 /// 每次只画一行或一列，不推屏；返回-1失败、0待续、1完成。只在UI空闲线程调用。
 /// Draw at most one row/column without presenting; -1 failed,0 pending,1 complete. UI idle thread only.
 int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layout_draw_cursor_t *cursor);
+
+#define BOOK_LAYOUT_GLYPH_MAX 2048u
+/// 原文区间和实际字格；仅完整显示页有效。/ Source span and pen cell, valid only for a complete displayed page.
+typedef struct {
+    uint32_t start; ///< 章节 UTF-8 偏移 / Chapter UTF-8 offset
+    uint16_t length; ///< 字节数 / Byte length
+    int16_t x, y, width, height; ///< 实际字格 / Actual pen cell
+} book_layout_glyph_t;
+/// 借用当前显示页记录，重绘/重排前消费，不访问预绘中的候选。
+/// Borrow displayed-page positions until redraw/reflow; incomplete prefetch is never exposed.
+const book_layout_glyph_t *book_layout_glyphs(size_t page, size_t *count);
+
+/// 在事件/生命周期中启用几何采集，分配随下一次布局进行。/ Enable capture in an event/lifecycle; allocation occurs at the next layout build.
+void book_layout_enable_selection(bool enabled);

@@ -9,8 +9,8 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'main/book/book_layout.c').read_text()
-start = source.index('void book_layout_draw_page(')
-end = len(source)
+start = source.index('static void draw_page_impl(')
+end = source.index('\nvoid book_layout_draw_page(', start)
 unit = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -18,6 +18,7 @@ unit = r'''
 #include <string.h>
 #include <limits.h>
 #include "book_layout.h"
+#include "ttf_font.h"
 static const char *s_text="IMG\ntail";
 static size_t s_count=1,s_len=8,s_pages[]={0};
 static int s_px=10,s_lead_height,s_reading_line,s_reading_line_offset,s_tracking_px;
@@ -34,42 +35,55 @@ static size_t skip_image_spacing(size_t off){return off;}
 static const blk_t *block_at(size_t off){return off==0?&block:NULL;}
 int book_layout_page_image(size_t page){(void)page;return -1;}
 int book_layout_page_image_count(size_t page){(void)page;return s_page_img_start[1]-s_page_img_start[0];}
-static bool take_line(size_t off,int advance_limit,int hang_margin,size_t *next,bool *end,int *px,bool *heading,int *width,int *indent,uint8_t *align,int *before,int *after){
- (void)advance_limit;(void)hang_margin;
+static bool take_line(size_t off,int advance_limit,int hang_margin,size_t *next,bool *end,int *px,bool *heading,int *width,int *indent,uint8_t *align,int *before,int *after,size_t *line_start,size_t *line_end){
+ (void)advance_limit;(void)hang_margin;*line_start=4;*line_end=8;
  assert(off==4);strcpy(s_line,"tail");*next=8;*end=true;*px=10;*heading=false;*width=40;*indent=0;*align=0;*before=*after=0;return true;
 }
 static int line_height_for(int px){return px;}
 static int gap_for(int height,bool heading){(void)height;(void)heading;return 0;}
-static int ttf_ascender_px(int px){return px;}
+int ttf_ascender_px(int px){return px;}
 // rc93 竖排与按段换字体的状态；横排回归里竖排恒关、run 表恒空。
 // rc93 vertical and per-run state; this horizontal regression keeps vertical off and runs empty.
 static bool s_vertical;
 static uint32_t s_generation;
+static size_t s_glyph_base;
+static struct {bool overflow;} *s_glyph_out;
+static const ttf_glyph_observer_t s_glyph_observer={0};
 static book_layout_draw_cursor_t *s_idle_draw;
 #define LINE_RUN_MAX 64u
-typedef struct {uint32_t offset;uint8_t slot;} ttf_run_t;
+
 static ttf_run_t s_line_runs[LINE_RUN_MAX];
 static size_t s_line_run_count;
 #define TTF_FONT_SLOT_SYSTEM 0
 static void slot_select_for(size_t off){(void)off;}
-static void ttf_draw_set_runs(const ttf_run_t *runs,size_t count){(void)runs;(void)count;}
-static int ttf_font_select(int slot){(void)slot;return 0;}
+void ttf_draw_set_runs(const ttf_run_t *runs,size_t count){(void)runs;(void)count;}
+int ttf_font_select(int slot){(void)slot;return 0;}
 static void draw_vertical_page(uint8_t *fb,size_t page,EpdRect rect){(void)fb;(void)page;(void)rect;}
 int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;
 uint8_t test_guide_gray;
-static void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,int align,int fg,int bg){
+void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags align,uint8_t fg,uint8_t bg){
  (void)fb;(void)x;(void)px;(void)align;(void)fg;(void)bg;assert(!strcmp(text,"tail"));++painted;baseline=y;
 }
-static void ttf_draw_text_px_spaced(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int fg,int bg){(void)tracking;ttf_draw_text_px(fb,x,y,px,text,0,fg,bg);}
-static void ttf_draw_text_px_fitted(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int target,int fg,int bg){(void)target;ttf_draw_text_px_spaced(fb,x,y,px,text,tracking,fg,bg);}
+void ttf_draw_text_px_spaced(uint8_t *fb,int x,int y,int px,const char *text,int tracking,uint8_t fg,uint8_t bg){(void)tracking;ttf_draw_text_px(fb,x,y,px,text,0,fg,bg);}
+void ttf_draw_text_px_fitted(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int target,uint8_t fg,uint8_t bg){(void)target;ttf_draw_text_px_spaced(fb,x,y,px,text,tracking,fg,bg);}
+
+static void record_line_links(size_t a,size_t b,int x,int y,int px,bool h,int width,int target){(void)a;(void)b;(void)x;(void)y;(void)px;(void)h;(void)width;(void)target;}
+static unsigned s_link_hit_count,s_link_hit_count_next;
+static size_t s_link_hit_page,s_link_hit_page_next;
+static uint32_t s_link_hit_generation,s_link_hit_generation_next;
+static int s_link_hits[1],s_link_hits_next[1],*s_link_hits_out;
+static unsigned *s_link_hits_out_count;
+void ttf_draw_text_px_observed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags a,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px(fb,x,y,px,text,a,fg,bg);}
+void ttf_draw_text_px_spaced_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px_spaced(fb,x,y,px,text,tracking,fg,bg);}
+void ttf_draw_text_px_fitted_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int target,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px_fitted(fb,x,y,px,text,tracking,target,fg,bg);}
 '''+source[start:end]+r'''
 int main(void){
  uint8_t fb=0;
- book_layout_draw_page(&fb,0,s_rect,10);assert(painted==1&&baseline==45);
+ draw_page_impl(&fb,0,s_rect,10);assert(painted==1&&baseline==45);
  painted=0;s_page_img_start[1]=0;
- book_layout_draw_page(&fb,0,s_rect,10);assert(painted==1&&baseline==10);
+ draw_page_impl(&fb,0,s_rect,10);assert(painted==1&&baseline==10);
  painted=0;s_page_img_start[1]=1;s_images[0].image=7;
- book_layout_draw_page(&fb,0,s_rect,10);assert(painted==1&&baseline==10);
+ draw_page_impl(&fb,0,s_rect,10);assert(painted==1&&baseline==10);
  puts("PASS: PR9 missing/mismatched image slots skip the unmatched record and continue prose");
 }
 '''

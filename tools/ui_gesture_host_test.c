@@ -77,5 +77,15 @@ int main(void) {
     assert(feed(10, 10, INT64_MIN, true, false, false, false));
     assert(event.type == UI_GESTURE_CANCEL && event.hold_ms == 0);
     assert(!ui_gesture_feed(NULL, &ctx, &event));
+    press(50,50,0); g.long_drag=true;
+    assert(feed(50,50,500,true,false,false,false)&&event.type==UI_GESTURE_LONG_PRESS);
+    assert(feed(110,50,600,true,false,false,false)&&event.type==UI_GESTURE_MOVE);
+    assert(feed(110,50,650,false,false,true,false)&&event.type==UI_GESTURE_RELEASE);
+    assert(!feed(110,50,660,false,false,true,false));
+    press(50,50,0);g.long_drag=true;
+    assert(feed(50,50,500,true,false,false,false));touch.count=2;
+    assert(ui_gesture_feed_options(&g,&ctx,&event,true)&&event.type==UI_GESTURE_CANCEL);
+    press(50,50,0);
+    assert(!ui_gesture_feed_options(&g,&ctx,&event,true));assert(!g.long_drag);
     puts("gesture host tests passed");
 }

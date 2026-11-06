@@ -15,6 +15,16 @@ else()
 endif()
 project(Read_Pico)
 
+# 中文：检查最终链接位置，防止升级 SDK 或改动链接布局后重现缓存关闭时取指崩溃。
+# English: Check final placement to catch cache-off instruction fetch regressions after SDK/layout changes.
+idf_build_get_property(cache_check_python PYTHON)
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf POST_BUILD
+    COMMAND "${cache_check_python}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_s31_cache_safe.py"
+        --objdump "${CMAKE_OBJDUMP}" --elf "$<TARGET_FILE:${CMAKE_PROJECT_NAME}.elf>"
+    VERBATIM)
+set_property(TARGET ${CMAKE_PROJECT_NAME}.elf APPEND PROPERTY LINK_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_s31_cache_safe.py")
+
 # 固件描述时间统一为 UTC，与概览页标识一致；保留已有编译缓存启动器。
 # Compile app-description timestamps in UTC to match Overview; preserve any compiler-cache launcher.
 idf_component_get_property(app_desc_lib esp_app_format COMPONENT_LIB)

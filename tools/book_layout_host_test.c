@@ -157,6 +157,34 @@ int ttf_vertical_text_height_px(int px, const char* text, int tracking_px) {
     }
     return total;
 }
+static void observe_test(const char *text, int x, int y, int px, int tracking, bool vertical, const ttf_glyph_observer_t *observer) {
+    if (!observer || !observer->record) return;
+    for (size_t at = 0; text[at];) {
+        size_t n = 1; while (text[at+n] && ((unsigned char)text[at+n]&0xc0)==0x80) ++n;
+        char one[5]={0}; assert(n<=4); memcpy(one,text+at,n);
+        int advance=0;
+        for(size_t j=0;j<n;++j) if(((unsigned char)one[j]&0xc0)!=0x80)
+            advance += test_zero_width&&one[j]=='~'?0:(unsigned char)one[j]>=0x80&&test_cjk_advance?test_cjk_advance:one[j]=='i'?px/2:one[j]=='W'?px+px/2:px;
+        advance += test_slot_advance[test_slot];
+        ttf_glyph_position_t position={at,at+n,0,x,vertical?y:y-px,vertical?px:advance,vertical?advance:px};
+        observer->record(observer->context,&position);
+        if(vertical)y+=advance+tracking;else x+=advance+tracking;
+        at+=n;
+    }
+}
+void ttf_draw_text_px_observed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags align,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){
+    ttf_draw_text_px(fb,x,y,px,text,align,fg,bg);observe_test(text,x,y,px,0,false,o);
+}
+void ttf_draw_text_px_spaced_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){
+    ttf_draw_text_px_spaced(fb,x,y,px,text,tracking,fg,bg);observe_test(text,x,y,px,tracking,false,o);
+}
+void ttf_draw_text_px_fitted_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int width,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){
+    ttf_draw_text_px_fitted(fb,x,y,px,text,tracking,width,fg,bg);observe_test(text,x,y,px,tracking,false,o);
+}
+int ttf_draw_text_px_vertical_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){
+    int result=ttf_draw_text_px_vertical(fb,x,y,px,text,tracking,fg,bg);observe_test(text,x,y,px,tracking,true,o);return result;
+}
+
 static void session_layout_lifecycle(void) {
     const char *html = "<p id='a'>甲乙<a href='#a'>丙丁</a>戊己庚辛壬癸</p>";
     EpdRect rect = {0, 0, 80, 40};
@@ -1064,5 +1092,28 @@ int main(void) {
     book_layout_free();
     book_layout_set_links(NULL, 0);
     html_text_free(&linked);
+    // 选字 map：部分预绘不发布，接管后保留当前页，重复接管不失效。
+    // Selection maps publish only complete prefetch, survive the next candidate and repeated adoption.
+    book_layout_enable_selection(true);book_layout_set_first_line_indent(0);
+    const char *selection_text="甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥";
+    EpdRect selection_rect={20,30,60,40};
+    assert(book_layout_build(selection_text,strlen(selection_text),selection_rect,10));drawn[0]=0;
+    book_layout_draw_page(&fb,0,selection_rect,10);size_t glyph_count=0;
+    const book_layout_glyph_t *glyph_map=book_layout_glyphs(0,&glyph_count);
+    assert(glyph_map&&glyph_count>1&&glyph_map[0].start==0&&glyph_map[0].x==20&&glyph_map[0].y==30);
+    book_layout_glyph_t first_glyph=glyph_map[0];book_layout_draw_cursor_t selection_cursor={0};
+    int pending=book_layout_draw_slice(&fb,1,selection_rect,10,&selection_cursor);
+    assert(pending==0&&book_layout_glyphs(0,&glyph_count)&&!book_layout_glyphs(1,&glyph_count));
+    while(pending==0)pending=book_layout_draw_slice(&fb,1,selection_rect,10,&selection_cursor);
+    assert(pending==1&&!book_layout_glyphs(1,&glyph_count));book_layout_adopt_page(1);
+    glyph_map=book_layout_glyphs(1,&glyph_count);assert(glyph_map&&glyph_map[0].start>first_glyph.start);
+    first_glyph=glyph_map[0];book_layout_adopt_page(1);assert(book_layout_glyphs(1,&glyph_count));
+    selection_cursor=(book_layout_draw_cursor_t){0};assert(book_layout_draw_slice(&fb,2,selection_rect,10,&selection_cursor)==0);
+    glyph_map=book_layout_glyphs(1,&glyph_count);assert(glyph_map&&!memcmp(glyph_map,&first_glyph,sizeof(first_glyph)));
+    book_layout_free();assert(!book_layout_glyphs(1,&glyph_count));
+    test_zero_width=true;char overflow[2050];memset(overflow,'~',2049);overflow[2049]=0;
+    assert(book_layout_build(overflow,2049,(EpdRect){0,0,600,1000},10));drawn[0]=0;
+    book_layout_draw_page(&fb,0,(EpdRect){0,0,600,1000},10);assert(!book_layout_glyphs(0,&glyph_count));
+    book_layout_free();test_zero_width=false;book_layout_enable_selection(false);
     puts("book_layout_host_test: PASS; idle rows/columns equal full rendering, stale cursor rejected and large chapter supported");
 }

@@ -113,6 +113,42 @@ static size_t s_run_count;
 static ttf_run_t s_line_runs[LINE_RUN_MAX];
 static size_t s_line_run_count;
 
+typedef struct {
+    book_layout_glyph_t *glyphs;
+    size_t count, page;
+    uint32_t generation;
+    bool complete, overflow;
+} glyph_map_t;
+static bool s_glyph_enabled;
+void book_layout_enable_selection(bool enabled) { s_glyph_enabled = enabled; }
+static glyph_map_t s_glyph_maps[2];
+static glyph_map_t *s_glyph_out;
+static size_t s_glyph_base;
+
+const book_layout_glyph_t *book_layout_glyphs(size_t page, size_t *count) {
+    const glyph_map_t *map = &s_glyph_maps[0];
+    if (count) *count = 0;
+    if (!map->glyphs || !map->complete || map->overflow || map->page != page ||
+        map->generation != s_generation) return NULL;
+    if (count) *count = map->count;
+    return map->glyphs;
+}
+
+static void record_glyph(void *context, const ttf_glyph_position_t *p) {
+    (void)context;
+    glyph_map_t *map = s_glyph_out;
+    if (!map || !map->glyphs || map->overflow) return;
+    if (map->count >= BOOK_LAYOUT_GLYPH_MAX || p->end < p->start ||
+        s_glyph_base > UINT32_MAX || p->end > UINT32_MAX - s_glyph_base ||
+        p->end - p->start > UINT16_MAX || p->x < 0 || p->y < 0 ||
+        p->x > INT16_MAX || p->y > INT16_MAX || p->width <= 0 || p->height <= 0 ||
+        p->width > INT16_MAX || p->height > INT16_MAX) { map->overflow = true; return; }
+    map->glyphs[map->count++] = (book_layout_glyph_t){
+        .start = (uint32_t)(s_glyph_base + p->start), .length = (uint16_t)(p->end - p->start),
+        .x = p->x, .y = p->y, .width = p->width, .height = p->height};
+}
+static const ttf_glyph_observer_t s_glyph_observer = {record_glyph, NULL};
+
 void book_layout_set_runs(const html_run_t* runs, size_t count) {
     s_runs = (runs != NULL && count > 0) ? runs : NULL;
     s_run_count = s_runs != NULL ? count : 0;
@@ -155,6 +191,14 @@ void book_layout_set_links(const html_link_t* links, size_t count) {
 }
 
 void book_layout_adopt_page(size_t page) {
+    glyph_map_t *next = &s_glyph_maps[1];
+    if (next->complete && next->page == page && next->generation == s_generation) {
+        glyph_map_t old = s_glyph_maps[0];
+        s_glyph_maps[0] = *next;
+        *next = old;
+        next->complete = false;
+    } else if (s_glyph_maps[0].page != page || s_glyph_maps[0].generation != s_generation)
+        s_glyph_maps[0].complete = false;
     // 预绘页直接上屏时把它那张命中表接管过来，下一次预绘才能安全清空另一张。
     // When a prefetched page goes straight to the screen, take over its hit table so the next
     // prefetch can clear the other one safely.
@@ -418,6 +462,8 @@ uint32_t book_layout_generation(void) { return s_generation; }
 
 void book_layout_free(void) {
     ++s_generation;
+    for (unsigned i = 0; i < 2; ++i) { free(s_glyph_maps[i].glyphs); s_glyph_maps[i] = (glyph_map_t){0}; }
+    s_glyph_out = NULL;
     free(s_pages);
     free(s_line);
     free(s_images);
@@ -896,6 +942,8 @@ bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks,
     resolve_image_rect();
     s_line_capacity = len + 1 < 256 ? len + 1 : 256;
     s_line = heap_caps_malloc(s_line_capacity, PSRAM_CAPS);
+    for (unsigned i = 0; s_glyph_enabled && i < 2; ++i)
+        s_glyph_maps[i].glyphs = heap_caps_malloc(BOOK_LAYOUT_GLYPH_MAX * sizeof(book_layout_glyph_t), PSRAM_CAPS);
     size_t off = s_lead_skip;
     if (!s_line) goto fail;
     if (s_vertical) {
@@ -1065,7 +1113,7 @@ static void draw_vertical_column(uint8_t* fb, EpdRect rect, int left, int pitch,
     // Hand the whole column to the font engine: it follows the run table for faces and decides
     // per glyph whether it stands upright, lifts into the corner or turns 90°.
     ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
-    (void)ttf_draw_text_px_vertical(fb, cell, y, px, s_line, s_tracking_px + extra, 0, 15);
+    (void)ttf_draw_text_px_vertical_observed(fb, cell, y, px, s_line, s_tracking_px + extra, 0, 15, &s_glyph_observer);
     // 画完把游标还回去：页面其它文字、界面和状态栏都按系统字体走。
     // Hand the cursor back: every other page, the UI and the status bar use the system face.
     ttf_draw_set_runs(NULL, 0);
@@ -1106,7 +1154,11 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
         uint8_t align;
         if (!take_line(off, rect.height - lead, 0, &next, &paragraph_end, &px, &heading,
                        &run_height, &indent, &align, &margin_before, &margin_after,
-                       &line_start, &line_end)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
+                       &line_start, &line_end)) {
+            if (s_idle_draw) s_idle_draw->failed = true;
+            if (s_glyph_out) s_glyph_out->overflow = true;
+            return;
+        }
         int pitch = line_height_for(px);
         int leading = used ? margin_before : 0;
         if (used + leading + pitch > rect.width) return;
@@ -1116,6 +1168,7 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
             bool final_column = paragraph_end || next >= s_len ||
                 (block && next >= block->offset + block->len);
             int left = rect.x + rect.width - (int)used - pitch;
+            s_glyph_base = line_start;
             draw_vertical_column(fb, rect, left, pitch, lead,
                                  px, indent, align, run_height,
                                  !heading && !align &&
@@ -1134,7 +1187,7 @@ static void draw_vertical_page(uint8_t* fb, size_t page, EpdRect rect) {
     }
 }
 
-void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
+static void draw_page_impl(uint8_t* fb, size_t page, EpdRect rect, int px) {
     if (!fb || page >= s_count || px != s_px || rect.width != s_rect.width ||
         rect.height != s_rect.height || rect.x < 0 || rect.y < 0 ||
         rect.x > INT_MAX - rect.width || rect.y > INT_MAX - rect.height) return;
@@ -1201,7 +1254,11 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
         uint8_t align;
         if (!take_line(off, s_rect.width, right_slack(), &next, &paragraph_end, &line_px, &heading,
                        &line_width, &indent, &align, &margin_before, &margin_after,
-                       &line_start, &line_end)) { if(s_idle_draw)s_idle_draw->failed=true; return; }
+                       &line_start, &line_end)) {
+            if (s_idle_draw) s_idle_draw->failed = true;
+            if (s_glyph_out) s_glyph_out->overflow = true;
+            return;
+        }
         int line_height = line_height_for(line_px);
         // 与分页同一判定：页底只要求字形高度放得下，行盒尾随行距可以悬出正文底。
         // Same test as pagination: only the glyph height must fit at the page bottom; the line
@@ -1246,6 +1303,7 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
             // Drawing follows the runs: width, tracking and justification math are untouched,
             // only the slot each glyph comes from changes.
             ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
+            s_glyph_base = line_start;
             int justify_target = 0;
             if (!heading && !align && (!final_line || line_width > available)) {
                 // 完整正文行对齐到统一右边界；悬挂标点最多使用少量右侧留白。
@@ -1255,12 +1313,12 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 if (hang > slack - 4) hang = slack - 4;
                 int target = line_width > available ? available + hang : available;
                 justify_target = target;
-                ttf_draw_text_px_fitted(fb, x, baseline, line_px, s_line, s_tracking_px,
-                                        target, 0, 15);
+                ttf_draw_text_px_fitted_observed(fb, x, baseline, line_px, s_line, s_tracking_px,
+                                        target, 0, 15, &s_glyph_observer);
             } else if (s_tracking_px && !heading)
-                ttf_draw_text_px_spaced(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15);
+                ttf_draw_text_px_spaced_observed(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15, &s_glyph_observer);
             else
-                ttf_draw_text_px(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15);
+                ttf_draw_text_px_observed(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15, &s_glyph_observer);
             // 画完把游标还回去：页面其它文字、界面和状态栏都按系统字体走。
             // Hand the cursor back: every other page, the UI and the status bar use the system
             // face.
@@ -1281,6 +1339,21 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px) {
     }
 }
 
+void book_layout_draw_page(uint8_t *fb, size_t page, EpdRect rect, int px) {
+    if (!fb || page >= s_count || px != s_px || rect.width != s_rect.width ||
+        rect.height != s_rect.height || rect.x < 0 || rect.y < 0 ||
+        rect.x > INT_MAX - rect.width || rect.y > INT_MAX - rect.height) return;
+    glyph_map_t *map = &s_glyph_maps[s_idle_draw ? 1 : 0];
+    if (!s_idle_draw || !s_idle_draw->started) {
+        map->count = 0; map->page = page; map->generation = s_generation; map->overflow = false;
+    }
+    map->complete = false;
+    s_glyph_out = map;
+    draw_page_impl(fb, page, rect, px);
+    s_glyph_out = NULL;
+    map->complete = !s_idle_draw || (s_idle_draw->complete && !s_idle_draw->failed);
+}
+
 int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layout_draw_cursor_t *cursor) {
     if(!cursor||!fb||s_idle_draw||page>=s_count||px!=s_px||rect.width!=s_rect.width||rect.height!=s_rect.height)return -1;
     if(!cursor->generation){cursor->generation=s_generation;cursor->page=page;}
@@ -1298,6 +1371,7 @@ int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layo
 #if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void book_layout_memory_stats(reader_memory_stats_t *stats) {
     stats->layout = reader_memory_owned(s_pages) + reader_memory_owned(s_line) +
-        reader_memory_owned(s_images) + reader_memory_owned(s_page_img_start);
+        reader_memory_owned(s_images) + reader_memory_owned(s_page_img_start) +
+        reader_memory_owned(s_glyph_maps[0].glyphs) + reader_memory_owned(s_glyph_maps[1].glyphs);
 }
 #endif

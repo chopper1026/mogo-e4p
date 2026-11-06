@@ -490,10 +490,11 @@ class FlashTests(unittest.TestCase):
 
     def run_boot(self, log):
         clock = [100.0]
+        chunks = iter((log,) if isinstance(log, bytes) else log)
 
         def read(count):
             clock[0] += 1
-            return log
+            return next(chunks, b"")
 
         device = fast.Device.__new__(fast.Device)
         device.serial = SimpleNamespace(read=read, reset_input_buffer=lambda: None)
@@ -504,6 +505,17 @@ class FlashTests(unittest.TestCase):
     def test_runtime_boot_confirms_identity_and_exits_after_ready(self):
         log = b"Loaded app from partition at offset 0x10000\nApp version: 1.0.3\nELF file SHA256: abcdef123...\nUI ready on Home\n"
         self.assertTrue(all(self.run_boot(log).values()))
+
+    def test_retained_crash_log_does_not_reject_a_healthy_boot(self):
+        identity = b"Loaded app from partition at offset 0x10000\nApp version: 1.0.3\nELF file SHA256: abcdef123...\nUI ready on Home\n"
+        history = b"E (6098) crash: panic pc=0x2f011aac exc=4 core=1 \r\n"
+        self.assertTrue(all(self.run_boot(identity + history).values()))
+        # 中文：串口可以恰好在关键字中途分包，仍应只排除这条历史记录。
+        # English: A serial chunk may split the keyword; exclude only this historical record.
+        self.assertTrue(all(self.run_boot([identity + history[:20], history[20:]]).values()))
+        for fatal in (b"Guru Meditation Error: panic\n", b"panic\n", b"abort()\n", b"Rebooting...\n"):
+            with self.subTest(fatal=fatal), self.assertRaises(fast.FlashError):
+                self.run_boot([identity + history, fatal])
 
     def test_runtime_recovery_confirms_existing_firmware_without_new_identity(self):
         clock = [100.0]
