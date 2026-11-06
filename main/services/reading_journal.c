@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 chopper1026
  * SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  *
- * 中文：仅当前月阅读记录；不依赖TF卡，不格式化，不改票根或设置备份。
- * English: Current-month reading records, independent of SD, without formatting or changing tickets/settings backups.
+ * 中文：当月阅读明细与跨月打卡摘要；共用正文计时和双快照，不依赖TF卡、不格式化。
+ * English: Monthly reading details and cross-month streaks share body timing and dual snapshots, without SD dependency or formatting.
  */
 #include "reading_journal.h"
 #include "book_store.h"
@@ -52,6 +52,13 @@ static int read_slot(int slot, reading_journal_model_t *out, uint64_t *sequence)
     free(bytes); return ok ? 1 : -1;
 }
 static bool merge_pending(reading_journal_model_t *loaded) {
+    if (s_model.streak.day==loaded->streak.day) {
+        if (s_model.streak.before>loaded->streak.before) loaded->streak.before=s_model.streak.before;
+        for (unsigned i=0;i<READING_STREAK_DAYS;++i)
+            reading_journal_streak_add(loaded,loaded->streak.day-READING_STREAK_DAYS+1+(int)i,
+                                      s_model.streak.milliseconds[i]);
+    }
+    if (s_model.month!=loaded->month) return true;
     for (const reading_journal_record_t *r=s_model.records; r; r=r->next) {
         bool first=true;
         for (unsigned chapter=0; chapter<READING_JOURNAL_CHAPTERS; ++chapter) {
@@ -75,7 +82,7 @@ static bool load_storage(void) {
         // 存储迟到时合并尚未保存的会话，不能用磁盘旧快照覆盖新读数。
         // Merge an unpersisted session after late storage recovery instead of overwriting it with disk state.
         bool changed=reading_journal_sync(loaded,&s_today);
-        if (s_model.records && !merge_pending(loaded)) goto failed;
+        if (!merge_pending(loaded)) goto failed;
         if (s_manual) {
             loaded->scene=s_model.scene; loaded->scene_day=s_model.scene_day; loaded->scene_ready=true;
         }
@@ -118,6 +125,7 @@ static bool poll_at(int64_t wall) {
     s_today=today;
     bool old_error=s_storage_error;
     int64_t now=esp_timer_get_time();
+    if (s_model.streak.day && reading_journal_sync(&s_model,&s_today)) { s_dirty=true; changed=true; s_capacity_error=false; }
     if (!s_loaded && now>=s_retry_us) {
         s_retry_us=now+INT64_C(30000000);
         s_storage_error=!load_storage(); changed=true;
@@ -162,15 +170,17 @@ void app_reading_journal_record(const char *path, const char *title, uint32_t si
     (void)poll_at(now);
     if (!s_today.serial) return;
     uint64_t book=reading_journal_book_id(path,size);
-    // 单次采样最多5秒；午夜的尾段属于昨天，跨月只保留本月部分。
-    // Samples span at most five seconds; split midnight tails and retain only the current-month portion.
+    // 单次采样最多5秒；明细跨月只保留本月，七日摘要保留昨日尾段。
+    // Samples span at most five seconds; details retain this month and streaks keep yesterday's midnight tail.
     if (milliseconds>5000) milliseconds=0;
     int64_t local_ms=(now+8*INT64_C(3600000))%INT64_C(86400000);
     uint32_t current=milliseconds;
     if ((uint64_t)current>(uint64_t)local_ms) {
         uint32_t previous=current-(uint32_t)local_ms; current=(uint32_t)local_ms;
+        reading_journal_streak_add(&s_model,s_today.serial-1,previous);
         if (s_today.day>1 && !reading_journal_add(&s_model,s_today.day-1,book,title,chapter,previous,0)) s_capacity_error=true;
     }
+    reading_journal_streak_add(&s_model,s_today.serial,current);
     if (!reading_journal_add(&s_model,s_today.day,book,title,chapter,current,turns)) s_capacity_error=true;
     s_dirty=true;
 }

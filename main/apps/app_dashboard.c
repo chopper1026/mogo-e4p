@@ -8,8 +8,10 @@
  * User revision: persist proportional Home monochrome separately and reuse gray thumbnail files; ordinary/water reuse gray caches with a memory reserve.
  * 中文：首页使用真实续读与完整缓存书摘；绘图不读卡。
  * English: Home uses real resume data and cached complete sentences; painting never reads media.
- * 冻结（用户2026-11-04修订）：按批准设计新增当月阅读手账，不恢复旧月记录与目标；上下等高区可选最近阅读、天气、手账或留白，天气直角铺满并直接接导航。
- * Frozen (user revision 2026-11-04): add the approved current-month journal, not retired records/goals; equal regions choose reading, weather, journal or empty, retaining edge-to-edge weather.
+ * 冻结（用户2026-11-06修订）：题头改为天数、七本紧贴递增书脊、连续阅读状态；每日满30分钟达标，保留跨月连续摘要，不恢复旧月明细或旧目标组件。
+ * Frozen (user revision 2026-11-06): replace the title with days, seven touching ascending spines and streak status; thirty minutes completes a day, retaining cross-month summaries without old monthly details or goal widgets.
+ * 冻结：上下等高区仍可选最近阅读、天气、手账或留白，天气直角铺满并直接接导航。
+ * Frozen: equal regions still choose reading, weather, journal or empty, with edge-to-edge weather meeting navigation.
  * 用户2026-11-03修订：最近阅读移除设置图标及其点击入口，组件配置保留长按区域或设置页入口。
  * User revision 2026-11-03: remove the Reading settings icon and tap target; retain configuration through a region hold or Settings.
  * 用户修订：缓存原位换位，只用一个条目的栈空间；保留复用速度，避免启动时复制七条占用半个主任务栈。
@@ -20,8 +22,8 @@
  * User revision: locally advance the idle clock by minute without scanning books or repainting the page; retain the fast white background.
  * 用户修订：界面底色与控件统一黑、白和固定灰，续读卡改白底；封面和头像保留原灰阶。
  * User revision: UI surfaces and controls use black, white and one fixed gray; resume cards are white, while covers and avatars retain their tones.
- * 用户修订：首页题头与书架、文件和设置共用左侧起点、顶边及52px名义字号，仍使用当前系统字体。
- * User revision: Home's title matches the shelf/files/settings left edge, top and nominal 52px size in the active system face.
+ * 用户2026-11-06修订：移除“首页”文字，打卡题头沿用左侧起点和批准的固定字号，不随系统字号缩放。
+ * User revision 2026-11-06: remove the Home title; the streak keeps the left anchor and approved fixed sizes independent of system text scale.
  */
 #include <dirent.h>
 #include <stdio.h>
@@ -40,6 +42,7 @@
 #include "ui_weather.h"
 #include "reading_journal.h"
 #include "ui_reading_journal.h"
+#include "ui_reading_streak.h"
 #include "app_reading_journal_mode.h"
 #include "book_cover.h"
 #include "book_cover_jobs.h"
@@ -105,6 +108,8 @@ static char s_cached_books_dir[128];
 static char s_cached_last_path[BOOK_STORE_PATH_MAX];
 static EpdRect s_area;
 static bool s_clock_pending;
+static bool s_streak_pending;
+static reading_streak_view_t s_streak;
 static int64_t s_clock_minute=-2;
 static char s_excerpt[BOOK_EXCERPT_CAP];
 static uint8_t s_avatar[60*60];
@@ -451,7 +456,7 @@ static app_redraw_t redraw_widgets(app_home_widget_t widget) {
     return s_widget_dirty?APP_REDRAW_AREA:APP_REDRAW_NONE;
 }
 static void render_root(uint8_t *fb) {
-    ui_nav_status(fb);ui_text(fb,36,91,52,"首页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_nav_status(fb);ui_reading_streak_draw(fb,&s_streak);
     if(s_avatar_ready)ui_wallpaper_draw_avatar(fb,s_avatar,(EpdRect){588,88,60,60},30);
     else ui_builtin_avatar_draw(fb,588,88,60);
     // 公共导航仅绘制实际底栏，组件直接铺到它的上沿。
@@ -475,6 +480,13 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
         guard_draw_result(ctx->hl,result);if(result==EPD_DRAW_SUCCESS)s_clock_minute=minute;return true;
     }
     s_clock_pending=false;
+    if(redraw==APP_REDRAW_AREA&&s_streak_pending&&s_area.y==ui_reading_streak_area().y) {
+        s_streak_pending=false;
+        EpdRect area=ui_reading_streak_area();ui_fill_rect_fast(area,UI_GRAY_WHITE,ctx->fb);
+        ui_reading_streak_draw(ctx->fb,&s_streak);
+        enum EpdDrawError result=display_refresh_area(ctx->hl,DISPLAY_REFRESH_DETAIL,area,DISPLAY_REFRESH_DEFAULT);
+        guard_draw_result(ctx->hl,result);s_streak_pending=result!=EPD_DRAW_SUCCESS;return true;
+    }
     if(redraw==APP_REDRAW_AREA&&s_widget_dirty) {
         for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)if(s_widget_dirty&(1u<<slot))render_widget(ctx->fb,slot);
     }
@@ -486,12 +498,14 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
     else result=update_display_fast_page(ctx->hl);
     guard_draw_result(ctx->hl,result);
     if(redraw!=APP_REDRAW_AREA&&result==EPD_DRAW_SUCCESS)s_clock_minute=minute;
+    if(redraw!=APP_REDRAW_AREA)s_streak_pending=result!=EPD_DRAW_SUCCESS;
     return true;
 }
 static void refresh_excerpt(void) {book_excerpt_load(featured()->path,s_excerpt);}
 static void on_enter(app_ctx_t *ctx) {
     app_weather_init();app_home_components_init(app_weather_view()->enabled);
-    if(app_home_has_widget(APP_HOME_WIDGET_JOURNAL))(void)app_reading_journal_poll();
+    (void)app_reading_journal_poll();
+    s_streak=reading_journal_streak_view(app_reading_journal_model(),app_reading_journal_today());s_streak_pending=false;
     memset(s_weather_tomorrow,0,sizeof(s_weather_tomorrow));s_widget_dirty=0;
     if(app_home_has_widget(APP_HOME_WIDGET_WEATHER))(void)ui_weather_prepare();
     s_cover_generation=book_cover_jobs_begin();
@@ -524,7 +538,17 @@ static void on_media_lost(app_ctx_t *ctx) {
 static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;s_scan_pending=true;avatar_prepare_state();}
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
-    if(app_home_has_widget(APP_HOME_WIDGET_JOURNAL)&&app_reading_journal_poll())return redraw_widgets(APP_HOME_WIDGET_JOURNAL);
+    bool journal_changed=app_reading_journal_poll();
+    reading_streak_view_t streak=reading_journal_streak_view(app_reading_journal_model(),app_reading_journal_today());
+    if(s_streak.valid!=streak.valid||s_streak.days!=streak.days||
+       memcmp(s_streak.dates,streak.dates,sizeof(streak.dates))||
+       memcmp(s_streak.milliseconds,streak.milliseconds,sizeof(streak.milliseconds))) {s_streak=streak;s_streak_pending=true;}
+    if(journal_changed)(void)redraw_widgets(APP_HOME_WIDGET_JOURNAL);
+    if(s_streak_pending){s_clock_pending=false;s_area=ui_reading_streak_area();return APP_REDRAW_AREA;}
+    if(s_widget_dirty) {
+        for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)if(s_widget_dirty&(1u<<slot))s_area=home_region(slot);
+        return APP_REDRAW_AREA;
+    }
     if(app_weather_poll(app_home_has_widget(APP_HOME_WIDGET_WEATHER))) {
         app_redraw_t weather=redraw_widgets(APP_HOME_WIDGET_WEATHER);
         if(weather!=APP_REDRAW_NONE)return weather;

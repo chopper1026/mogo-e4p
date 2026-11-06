@@ -55,6 +55,7 @@ typedef struct {bool mounted;} board_sd_info_t;
 typedef enum {UI_AVATAR_PENDING, UI_AVATAR_READY, UI_AVATAR_FAILED} ui_avatar_state_t;
 static home_book_t s_current,s_recent[6];
 static bool s_clock_pending,s_press_pending,s_home_force_full_once,s_scan_pending;
+static bool s_streak_pending;
 static bool s_avatar_pending,s_avatar_ready,s_cover_waiting;
 static char s_avatar_path[288],s_excerpt[128];
 static uint8_t s_avatar[3600];
@@ -65,6 +66,10 @@ static int s_cover_next,cover_calls,scan_calls,nav=-1,open_calls,library_calls,w
 static bool library_city;
 #include "home_components.h"
 #include "reading_journal_model.h"
+static reading_streak_view_t s_streak,streak_view;
+reading_streak_view_t reading_journal_streak_view(const reading_journal_model_t *model,const reading_journal_date_t *today){
+    (void)model;(void)today;return streak_view;
+}
 static app_home_widget_t slots[2]={APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY};
 app_home_widget_t app_home_component_at(unsigned slot){assert(slot<2);return slots[slot];}
 bool app_home_has_widget(app_home_widget_t widget){return slots[0]==widget||slots[1]==widget;}
@@ -108,6 +113,8 @@ static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t gray){
     (void)radius;ui_fill_rect_fast(r,gray,fb);
 }
 static void ui_nav_status(uint8_t *fb){pixel(fb,24,18,0);}
+static EpdRect ui_reading_streak_area(void){return(EpdRect){24,62,552,106};}
+static void ui_reading_streak_draw(uint8_t *fb,const reading_streak_view_t *view){pixel(fb,36,117,(uint8_t)view->days);}
 static void ui_nav_draw(uint8_t *fb,int tab){
     assert(tab==0);ui_fill_rect_fast((EpdRect){0,1112,684,104},255,fb);
     ui_fill_rect_fast((EpdRect){0,1112,684,2},144,fb);pixel(fb,24,1164,0);
@@ -330,6 +337,19 @@ int main(void){
     draw_result=EPD_DRAW_SUCCESS;present(&ctx,APP_REDRAW_AREA);assert(s_clock_minute==102);
     touch.touched=true;minute=103;assert(on_tick(&ctx)==APP_REDRAW_NONE);touch.touched=false;
     ctx.consumed=true;assert(on_tick(&ctx)==APP_REDRAW_NONE);ctx.consumed=false;minute=102;
+    memcpy(before,framebuffer,sizeof(before));
+    streak_view.valid=true;streak_view.days=3;streak_view.milliseconds[6]=READING_STREAK_GOAL_MS;
+    assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_streak_pending&&!s_clock_pending);
+    present(&ctx,APP_REDRAW_AREA);isolated(ui_reading_streak_area());assert(!s_streak_pending&&s_streak.days==3);
+    streak_view.days=4;draw_result=EPD_DRAW_FAILED;assert(on_tick(&ctx)==APP_REDRAW_AREA);
+    present(&ctx,APP_REDRAW_AREA);assert(s_streak_pending);
+    draw_result=EPD_DRAW_SUCCESS;assert(on_tick(&ctx)==APP_REDRAW_AREA);present(&ctx,APP_REDRAW_AREA);assert(!s_streak_pending);
+    slots[0]=APP_HOME_WIDGET_JOURNAL;journal_changed=true;streak_view.days=5;
+    assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_streak_pending&&s_widget_dirty==1);
+    present(&ctx,APP_REDRAW_AREA);assert(s_widget_dirty==1&&!s_streak_pending);
+    assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_area.y==168&&s_area.height==472);
+    memcpy(before,framebuffer,sizeof(before));present(&ctx,APP_REDRAW_AREA);isolated(home_region(0));
+    slots[0]=APP_HOME_WIDGET_READING;
     s_cover_next=0;s_current.cover=NULL;wait_cover=true;assert(on_tick(&ctx)==APP_REDRAW_NONE&&s_cover_next==0);
     wait_cover=false;assert(on_tick(&ctx)==APP_REDRAW_AREA&&cover_calls==2&&s_area.y==168&&s_area.height==472);
     memcpy(before,framebuffer,sizeof(before));present(&ctx,APP_REDRAW_AREA);isolated(home_region(0));

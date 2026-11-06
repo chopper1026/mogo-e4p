@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 chopper1026
  * SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  *
- * 中文：仅当前月的逐书逐日记录及可校验快照，章节位图覆盖现有EPUB上限。
- * English: Current-month book/day records and validated snapshots, with chapter bits covering the EPUB limit.
+ * 中文：当月逐书明细与跨月七日打卡摘要；快照兼容旧版，日期回拨不虚构旧月数据。
+ * English: Monthly book details and a cross-month seven-day streak, with legacy snapshots and no invented history on rollback.
  */
 #include "reading_journal_model.h"
 #include "esp_heap_caps.h"
@@ -39,9 +39,71 @@ void reading_journal_clear(reading_journal_model_t *model) {
     model->records = NULL;
     model->count = 0;
 }
+static uint32_t streak_sum(uint32_t a, uint32_t b) {
+    return b >= READING_STREAK_GOAL_MS-a ? READING_STREAK_GOAL_MS : a+b;
+}
+static bool streak_sync(reading_streak_t *streak, int32_t day) {
+    if (streak->day == day) return false;
+    if (!streak->day || day < streak->day || day-streak->day > READING_STREAK_DAYS) {
+        memset(streak,0,sizeof(*streak)); streak->day=day; return true;
+    }
+    while (streak->day < day) {
+        streak->before=streak->milliseconds[0]>=READING_STREAK_GOAL_MS ? streak->before+1 : 0;
+        memmove(streak->milliseconds,streak->milliseconds+1,(READING_STREAK_DAYS-1)*sizeof(uint32_t));
+        streak->milliseconds[READING_STREAK_DAYS-1]=0; ++streak->day;
+    }
+    return true;
+}
+void reading_journal_streak_add(reading_journal_model_t *model, int32_t day, uint32_t milliseconds) {
+    int offset=model->streak.day-day;
+    if (!model->streak.day || offset<0 || offset>=READING_STREAK_DAYS) return;
+    uint32_t *value=&model->streak.milliseconds[READING_STREAK_DAYS-1-offset];
+    *value=streak_sum(*value,milliseconds);
+}
+bool reading_journal_streak_import(reading_journal_model_t *model, const reading_journal_date_t *date) {
+    if (!date || !date->serial || model->month!=(uint32_t)(date->year*100+date->month)) return false;
+    reading_streak_t old=model->streak;
+    (void)streak_sync(&model->streak,date->serial);
+    uint32_t totals[31]={0};
+    for (const reading_journal_record_t *r=model->records; r; r=r->next)
+        totals[r->day-1]=streak_sum(totals[r->day-1],r->milliseconds);
+    for (int day=1;day<=date->day;++day) {
+        int index=READING_STREAK_DAYS-1+day-date->day;
+        if (index>=0 && totals[day-1]>model->streak.milliseconds[index])
+            model->streak.milliseconds[index]=totals[day-1];
+    }
+    unsigned before=0;
+    for (int day=date->day-READING_STREAK_DAYS;day>0 && totals[day-1]>=READING_STREAK_GOAL_MS;--day) ++before;
+    if (before>model->streak.before) model->streak.before=before;
+    return memcmp(&old,&model->streak,sizeof(old))!=0;
+}
+reading_streak_view_t reading_journal_streak_view(const reading_journal_model_t *model, const reading_journal_date_t *date) {
+    reading_streak_view_t view={0};
+    if (!date || !date->serial || model->streak.day!=date->serial) return view;
+    view.valid=true;
+    memcpy(view.milliseconds,model->streak.milliseconds,sizeof(view.milliseconds));
+    for (int i=0;i<READING_STREAK_DAYS;++i) {
+        time_t civil=(time_t)(date->serial-READING_STREAK_DAYS+1+i)*86400;
+        struct tm value={0};
+        if (gmtime_r(&civil,&value)) view.dates[i]=(uint8_t)value.tm_mday;
+    }
+    int i=view.milliseconds[READING_STREAK_DAYS-1]>=READING_STREAK_GOAL_MS ? READING_STREAK_DAYS-1 : READING_STREAK_DAYS-2;
+    for (;i>=0 && view.milliseconds[i]>=READING_STREAK_GOAL_MS;--i) ++view.days;
+    if (i<0) view.days+=model->streak.before;
+    return view;
+}
 bool reading_journal_sync(reading_journal_model_t *model, const reading_journal_date_t *date) {
     if (!date || !date->serial) return false;
     bool changed = false;
+    if (!model->streak.day && model->scene_day && model->month!=(uint32_t)(date->year*100+date->month)) {
+        reading_journal_date_t known;
+        if (model->scene_day<=date->serial &&
+            reading_journal_date((int64_t)model->scene_day*86400000-8*INT64_C(3600000),&known))
+            changed |= reading_journal_streak_import(model,&known);
+    }
+    if (!model->streak.day || date->serial<model->streak.day)
+        changed |= reading_journal_streak_import(model,date);
+    changed |= streak_sync(&model->streak,date->serial);
     uint32_t month = (uint32_t)(date->year*100+date->month);
     if (model->month != month) {
         reading_journal_clear(model); model->month = month; changed = true;
@@ -121,16 +183,18 @@ static size_t bits_length(const reading_journal_record_t *r) {
     size_t n=sizeof(r->visited); while (n && !r->visited[n-1]) --n; return n;
 }
 size_t reading_journal_encode(const reading_journal_model_t *model, uint64_t sequence, uint8_t *out, size_t capacity) {
-    size_t size=32;
+    size_t size=68;
     for (const reading_journal_record_t *r=model->records; r; r=r->next) size += 20+strlen(r->title)+bits_length(r);
     if (!out) return size;
     if (capacity<size || size>READING_JOURNAL_FILE_LIMIT) return 0;
-    memset(out,0,32); memcpy(out,"KJR1",4); put32(out+4,(uint32_t)size);
+    memset(out,0,68); memcpy(out,"KJR2",4); put32(out+4,(uint32_t)size);
     put32(out+8,(uint32_t)sequence); put32(out+12,(uint32_t)(sequence>>32));
     put32(out+16,model->month); put32(out+20,(uint32_t)model->scene_day);
     out[24]=(uint8_t)model->scene; out[25]=model->scene_ready;
     out[26]=(uint8_t)model->count; out[27]=(uint8_t)(model->count>>8);
-    size_t at=32;
+    put32(out+32,(uint32_t)model->streak.day); put32(out+36,model->streak.before);
+    for (unsigned i=0;i<READING_STREAK_DAYS;++i) put32(out+40+4*i,model->streak.milliseconds[i]);
+    size_t at=68;
     for (const reading_journal_record_t *r=model->records; r; r=r->next) {
         size_t title=strlen(r->title), bits=bits_length(r);
         put32(out+at,(uint32_t)r->book); put32(out+at+4,(uint32_t)(r->book>>32));
@@ -143,7 +207,7 @@ size_t reading_journal_encode(const reading_journal_model_t *model, uint64_t seq
     put32(out+28,checksum(out,size)); return size;
 }
 bool reading_journal_decode(reading_journal_model_t *model, uint64_t *sequence, const uint8_t *data, size_t length) {
-    if (!data || length<32 || length>READING_JOURNAL_FILE_LIMIT || memcmp(data,"KJR1",4) ||
+    if (!data || length<32 || length>READING_JOURNAL_FILE_LIMIT || (memcmp(data,"KJR1",4) && memcmp(data,"KJR2",4)) ||
         get32(data+4)!=length || checksum(data,length)!=get32(data+28)) return false;
     reading_journal_model_t candidate = {
         .month=get32(data+16), .scene_day=(int32_t)get32(data+20), .scene=data[24], .scene_ready=data[25]!=0,
@@ -154,6 +218,19 @@ bool reading_journal_decode(reading_journal_model_t *model, uint64_t *sequence, 
         candidate.scene_day<0 || candidate.scene_day>47481) return false;
     reading_journal_record_t **tail=&candidate.records;
     size_t at=32;
+    if (!memcmp(data,"KJR2",4)) {
+        if (length<68) return false;
+        candidate.streak.day=(int32_t)get32(data+32); candidate.streak.before=get32(data+36);
+        if (candidate.streak.day<0 || candidate.streak.day>47481 || candidate.streak.before>27759 ||
+            (candidate.streak.day && candidate.streak.day<19723)) return false;
+        for (unsigned i=0;i<READING_STREAK_DAYS;++i) {
+            candidate.streak.milliseconds[i]=get32(data+40+4*i);
+            if (candidate.streak.milliseconds[i]>READING_STREAK_GOAL_MS ||
+                (!candidate.streak.day && candidate.streak.milliseconds[i])) return false;
+        }
+        if (!candidate.streak.day && candidate.streak.before) return false;
+        at=68;
+    }
     for (unsigned i=0; i<rows; ++i) {
         if (length-at<20) goto failed;
         uint64_t book=get32(data+at)|((uint64_t)get32(data+at+4)<<32);

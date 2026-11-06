@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.6 · 本地测试 / Local testing · 2026-11-06
+
+- 首页题头改为连续天数、七本紧贴递增书脊及今日状态，移除「首页」文字；每天有效阅读满30分钟达标，今日黑色、往日灰色、未达标虚线。打卡摘要跨月保存并兼容旧手账快照；宿主回归与S31构建通过，实屏与真实写盘待验收。/ Replace the Home title with streak days, seven touching ascending spines and today's status; thirty eligible minutes completes a day, shown black today, gray on earlier days and dashed otherwise. Persist streaks across months with legacy-journal compatibility; host tests and S31 build pass, with panel and physical persistence pending.
+
 ## v1.0.6 · 2026-11-06
 
 - 重构书架分类功能。
