@@ -41,6 +41,10 @@
 #define FT6336U_CHIP_ID 0x64
 #define FT6336U_FRAME_LEN 13
 
+#ifndef CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT
+#define CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT 100
+#endif
+
 // 盖板三键在屏外：FT 原始 y≈1600，x≈100/200/300。
 // Cover keys sit outside the panel: raw y≈1600, x≈100/200/300.
 #define FT6336U_VK_RAW_Y 1600
@@ -138,6 +142,59 @@ static esp_err_t load_info(cst836u_handle_t h) {
 #endif
 }
 
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+static esp_err_t ft6336u_apply_threshold(cst836u_handle_t h) {
+#if CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT < 100
+    // 仅调正常模式 0x80；0xA9 属于量产测试，不是三键日常配置。
+    // Tune only normal-mode 0x80; 0xA9 is a production-test register, not a runtime key setting.
+    uint8_t mode = 0, chip_mid = 0, chip_low = 0;
+    if (h->info.id != FT6336U_CHIP_ID ||
+        read_regs(h, 0x00, &mode, 1) != ESP_OK || (mode & 0x70) != 0 ||
+        read_regs(h, 0x9F, &chip_mid, 1) != ESP_OK || chip_mid != 0x26 ||
+        read_regs(h, 0xA0, &chip_low, 1) != ESP_OK || chip_low != 0x02) {
+        ESP_LOGW(TAG, "FT6336U threshold tuning skipped: chip/mode not confirmed");
+        return ESP_OK;
+    }
+
+    uint8_t original = 0;
+    esp_err_t err = read_regs(h, 0x80, &original, 1);
+    if (err != ESP_OK || original == 0) {
+        ESP_LOGW(TAG, "FT6336U threshold tuning skipped: reset threshold unavailable");
+        return ESP_OK;
+    }
+    // 每次紧随硬复位，用模组实际值向上取整，避免唤醒叠加或写零。
+    // Always follow a hardware reset; round the module value up to avoid compounded wakes or zero.
+    const uint8_t tuned = (original * CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT + 99) / 100;
+    if (tuned == original) return ESP_OK;
+
+    uint8_t command[] = {0x80, tuned};
+    err = board_i2c_transmit(h->dev, command, sizeof(command), I2C_TIMEOUT_MS);
+    uint8_t observed = 0;
+    esp_err_t check = read_regs(h, 0x80, &observed, 1);
+    if (err == ESP_OK && check == ESP_OK && observed == tuned) {
+        ESP_LOGI(TAG, "FT6336U threshold 0x80: %u -> %u (%d%%, experimental)",
+                 original, tuned, CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT);
+        return ESP_OK;
+    }
+
+    // I2C 写失败也可能已生效；恢复必须读回确认，不能只看写返回值。
+    // A failed I2C write may take effect; verify rollback by reading, not just its write result.
+    command[1] = original;
+    err = board_i2c_transmit(h->dev, command, sizeof(command), I2C_TIMEOUT_MS);
+    check = read_regs(h, 0x80, &observed, 1);
+    if (check != ESP_OK || observed != original) {
+        ESP_LOGE(TAG, "FT6336U threshold rollback unconfirmed: write=%s read=%s value=%u want=%u",
+                 esp_err_to_name(err), esp_err_to_name(check), observed, original);
+        return check != ESP_OK ? check : ESP_ERR_INVALID_RESPONSE;
+    }
+    ESP_LOGW(TAG, "FT6336U threshold tuning rejected; restored %u", original);
+#else
+    (void)h;
+#endif
+    return ESP_OK;
+}
+#endif
+
 esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_t* config,
                        cst836u_handle_t* handle) {
     if (bus_handle == NULL || config == NULL || handle == NULL) return ESP_ERR_INVALID_ARG;
@@ -185,6 +242,15 @@ esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_
         free(h);
         return err;
     }
+
+#if defined(CONFIG_IDF_TARGET_ESP32S31)
+    err = ft6336u_apply_threshold(h);
+    if (err != ESP_OK) {
+        i2c_master_bus_rm_device(h->dev);
+        free(h);
+        return err;
+    }
+#endif
 
     if (gpio_ok(h->int_gpio)) {
         err = int_as_input(h);
@@ -450,6 +516,11 @@ esp_err_t cst836u_wake(cst836u_handle_t h) {
     if (err != ESP_OK) return err;
     err = load_info(h);
     if (err != ESP_OK) return err;
+    err = ft6336u_apply_threshold(h);
+    if (err != ESP_OK) {
+        h->mode = CST836U_MODE_DEEPSLEEP;
+        return err;
+    }
 #else
     vTaskDelay(pdMS_TO_TICKS(RST_BOOT_MS));
 #endif

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.5 · 本地测试 / Local testing · 2026-11-06
 
+- FT6336U 检测阈值采用模组复位原值的75%，提升弱触摸响应；支持恢复100%原阈值，初始化与唤醒均读回校验、失败恢复。此为通用阈值，不是三键专用参数，不同厚膜、屏幕误触与充电噪声仍需对应样机验证。/ Use 75% of the FT6336U module reset threshold for weaker touches, with 100% available to preserve the original and verified readback/rollback at init/wake. This is a general threshold, not key-specific; different protectors, screen false touches and charger noise still need hardware checks.
+- 修复刷新等阻塞期间盖板左、中、右三键积压回放漏按；保留原按键映射，中键短按/长按按采样时间区分，切页后的新返回请求不再被清除。宿主回归覆盖实时与回放交错。/ Fix lost left/middle/right panel presses buffered during refresh and other blocking work; preserve mappings, distinguish middle taps/holds by sample time and retain fresh Back requests after navigation. Host regressions cover mixed live/replayed input.
 - WiFi 最多保存八个网络并兼容旧配置，附近列表标记已保存，新增已保存列表及连接、改密码、逐个确认遗忘；存满不覆盖。修复翻页箭头缺字，移除底部两行说明，改为每页六行。/ Save eight WiFi profiles with legacy compatibility and saved markers; manage connections, passwords and confirmed individual removal without eviction. Use glyph-independent paging icons and six rows instead of footer hints.
 - 移除书架题头下重复的书籍数量，搜索、选择、管理、导入改为同排等距，点击区域同步调整；底部分页数量与多选布局保留。/ Remove the duplicate shelf header count and evenly space search, select, manage and import in one row with matching hit targets; retain the pager count and selection layout.
 

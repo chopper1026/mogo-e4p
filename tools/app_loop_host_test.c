@@ -466,6 +466,127 @@ static int root_key_taps;
 static bool root_key_tap(app_ctx_t *ctx,int key,app_redraw_t *r){(void)ctx;assert(key==UI_KEY_2);++root_key_taps;*r=APP_REDRAW_NONE;return true;}
 static app_redraw_t root_disappears(app_ctx_t *ctx){(void)ctx;if(step==2)main_source_visible=false;return APP_REDRAW_NONE;}
 static void enable_main_tabs(void) {main_fast=true;first.main_page_visible=main_first;second.main_page_visible=main_second;}
+static void enter_with_buffered_key(app_ctx_t *ctx) {
+    enter(ctx);
+    touch_sampler_test_push(20,80,1500,1);
+    touch_sampler_test_push(30,0,0,0);
+}
+static app_redraw_t buffer_key_release_tick(app_ctx_t *ctx) {
+    (void)ctx;
+    if(step==0) {
+        touch_sampler_test_push(200,240,1500,1);
+        touch_sampler_test_push(250,0,0,0);
+    }
+    return APP_REDRAW_NONE;
+}
+static app_redraw_t single_key_release_tick(app_ctx_t *ctx) {
+    (void)ctx;
+    if(step==0)touch_sampler_test_push(250,0,0,0);
+    return APP_REDRAW_NONE;
+}
+static void test_panel_key_replay(void) {
+    // 同一队列内的按下、保持和抬起都要路由一次，且不能漏给页面手势。
+    // Route buffered presses, holds and releases once, without leaking them to page gestures.
+    for(int k=0;k<3;++k) {
+        for(int ending=0;ending<3;++ending) {
+            reset();first.owns_keys=true;first.on_gesture=gesture;
+            touch_sampler_test_enable(true);
+            touch_sampler_test_push(0,k*160+80,1500,1);
+            if(ending!=1)touch_sampler_test_push(5,k*160+80,1500,1);
+            if(ending!=0)touch_sampler_test_push(10,0,0,0);
+            for(int i=0;i<3;++i)add(0,0,0,0);
+            run();touch_sampler_test_enable(false);
+            assert(keys[k]==1&&!menus&&fulls==1&&!touch_calls);
+            assert(!events[UI_GESTURE_PRESS]&&!events[UI_GESTURE_TAP]&&!events[UI_GESTURE_LONG_PRESS]);
+        }
+        reset();first.owns_keys=true;touch_sampler_test_enable(true);
+        touch_sampler_test_push(0,k*160+80,1500,1);
+        touch_sampler_test_push(5,0,0,0);
+        touch_sampler_test_push(10,k*160+80,1500,1);
+        for(int i=0;i<3;++i)add(0,0,0,0);
+        run();touch_sampler_test_enable(false);assert(keys[k]==2);
+    }
+    // 延后到抬手的中键用采样时间区分短长按，不能把排队耗时计入按住时长。
+    // Deferred middle presses use sample time, not queueing delay, to distinguish taps and holds.
+    const int durations[]={50,499,500,600};
+    for(unsigned i=0;i<sizeof(durations)/sizeof(durations[0]);++i) {
+        reset();first.owns_keys=first.defer_middle_short=true;first.on_key_long=long_key;
+        time_offset=2000000;touch_sampler_test_enable(true);
+        touch_sampler_test_push(100,240,1500,1);
+        touch_sampler_test_push(100+durations[i],0,0,0);
+        add(0,0,0,0);run();touch_sampler_test_enable(false);
+        assert(keys[1]==(durations[i]<500));
+        assert(long_keys==(durations[i]>=500)&&menus==(durations[i]>=500));
+    }
+    // 实时与积压路径交错时仍沿用原采样时间，不能漏掉短按或凭处理延迟变成长按。
+    // Mixed live/buffered paths retain sample time, without losing taps or turning processing delay into a hold.
+    for(int buffered_start=0;buffered_start<2;++buffered_start) {
+        reset();first.owns_keys=first.defer_middle_short=true;first.on_key_long=long_key;
+        first.on_tick=buffered_start?single_key_release_tick:buffer_key_release_tick;
+        time_offset=2000000;touch_sampler_test_enable(true);
+        touch_sampler_test_push(100,240,1500,1);
+        if(buffered_start)touch_sampler_test_push(150,240,1500,1);
+        for(int i=0;i<3;++i)add(0,0,0,0);
+        run();touch_sampler_test_enable(false);assert(keys[1]==1&&!long_keys&&!menus);
+    }
+    reset();first.owns_keys=first.defer_middle_short=true;first.on_key_long=long_key;
+    touch_sampler_test_enable(true);
+    touch_sampler_test_push(100,240,1500,1);
+    touch_sampler_test_push(600,240,1500,1);
+    touch_sampler_test_push(700,240,1500,1);
+    touch_sampler_test_push(800,0,0,0);
+    for(int i=0;i<3;++i)add(0,0,0,0);
+    run();touch_sampler_test_enable(false);assert(!keys[1]&&long_keys==1&&menus==1);
+    // 滑出或多指会取消，重新滑回不能复活长按或抬手短按。
+    // Leaving the key or adding a finger cancels both holds and deferred taps, even after returning.
+    for(int multi=0;multi<2;++multi) {
+        reset();first.owns_keys=first.defer_middle_short=true;first.on_key_long=long_key;
+        touch_sampler_test_enable(true);
+        touch_sampler_test_push(100,240,1500,1);
+        touch_sampler_test_push(200,multi?240:80,1500,multi?2:1);
+        touch_sampler_test_push(700,240,1500,1);
+        touch_sampler_test_push(800,0,0,0);
+        add(0,0,0,0);run();touch_sampler_test_enable(false);
+        assert(!keys[1]&&!long_keys&&!menus);
+    }
+    // 主页面中键仍是抬手短按/按住全刷；左右键只提交一次切页。
+    // Root middle taps still defer and holds refresh fully; side keys request a single page switch.
+    for(int hold=0;hold<2;++hold) {
+        reset();enable_main_tabs();first.owns_keys=true;first.on_main_key=root_key_tap;root_key_taps=0;
+        touch_sampler_test_enable(true);
+        touch_sampler_test_push(100,240,1500,1);
+        touch_sampler_test_push(hold?600:150,0,0,0);
+        add(0,0,0,0);run();touch_sampler_test_enable(false);
+        assert(root_key_taps==!hold&&fulls==1+hold&&!keys[1]);
+    }
+    for(int k=UI_KEY_1;k<=UI_KEY_3;k+=2) {
+        reset();enable_main_tabs();first.owns_keys=true;touch_sampler_test_enable(true);
+        touch_sampler_test_push(0,k*160+80,1500,1);
+        touch_sampler_test_push(5,k*160+80,1500,1);
+        touch_sampler_test_push(10,0,0,0);
+        for(int i=0;i<3;++i)add(0,0,0,0);
+        run();touch_sampler_test_enable(false);assert(enters==2&&!keys[k]);
+    }
+    reset();touch_sampler_test_enable(true);
+    touch_sampler_test_push(0,240,1500,1);touch_sampler_test_push(5,0,0,0);
+    touch_sampler_test_push(10,400,1500,1);touch_sampler_test_push(15,0,0,0);
+    add(0,0,0,0);run();touch_sampler_test_enable(false);
+    assert(!keys[1]&&!keys[2]&&fulls==2&&menus==1);
+    // 新页刷新期间积压的返回键属于新页，不能被上一轮切页清理抹掉。
+    // A Back key buffered while the new page draws belongs to that page, not stale transition cleanup.
+    reset();request_on_tick=true;first.on_tick=origin_tick;home_on_key=true;
+    second=first;second.on_tick=NULL;second.owns_keys=true;second.on_enter=enter_with_buffered_key;
+    touch_sampler_test_enable(true);
+    for(int i=0;i<3;++i)add(0,0,0,0);
+    run();touch_sampler_test_enable(false);assert(keys[0]==1&&enters==3&&exits==2);
+    reset();first.owns_keys=true;touch_sampler_test_enable(true);
+    touch_sampler_test_push(0,300,20,1);touch_sampler_test_push(5,300,110,1);
+    touch_sampler_test_push(10,0,0,0);touch_sampler_test_push(15,240,1500,1);
+    touch_sampler_test_push(20,0,0,0);
+    add(0,0,0,0);run();touch_sampler_test_enable(false);
+    assert(!keys[1]&&quick_draws==1);
+    puts("PASS: panel-key replay preserves taps, holds, cancellations, root/global actions, navigation and modal ownership");
+}
 static app_redraw_t nav_return_tick(app_ctx_t* ctx) {
     if(step==0)ctx->request_app=&second;
     else if(step==1)ctx->request_return=true;
@@ -483,6 +604,7 @@ static app_redraw_t key_sampling_tick(app_ctx_t *ctx) {
 }
 #endif
 int main(void) {
+    test_panel_key_replay();
     // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。
     // Automatic offers retain the body resume point through real navigation; touch and existing requests win.
     reset();start_book=reader_body=reader_resume_ok=reader_resume_fullscreen=true;
