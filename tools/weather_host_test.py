@@ -62,8 +62,8 @@ for name, path, following in (
     body = function(name, ROOT / path)
     assert body.index("app_weather_cancel_join") < body.index(following)
 loop = (ROOT / "main/app/app_loop.c").read_text()
-assert "pico_ota_auto_poll(!dictionary_install_busy() && !app_weather_busy()" in loop
-assert "app_time_service_poll(!dictionary_install_busy() && !app_weather_busy()" in loop
+assert "pico_ota_auto_poll(!app_weather_busy()" in loop
+assert "app_time_service_poll(!app_weather_busy()" in loop
 for page in ("main/apps/app_dashboard.c", "main/apps/app_components.c"):
     assert ".on_before_lock=" in (ROOT / page).read_text()
 print("PASS: weather scheduling and handoff entries for quick WiFi, lock, shutdown and both pages")

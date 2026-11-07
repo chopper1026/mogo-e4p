@@ -16,6 +16,7 @@ UNIT = r'''
 #include <string.h>
 #include <stdlib.h>
 static unsigned painted;
+static char drawn[32768];
 static enum EpdRotation rotation=EPD_ROT_PORTRAIT;
 int epd_width(void) { return 1216; }
 int epd_height(void) { return 684; }
@@ -30,6 +31,8 @@ void ttf_draw_text_px(uint8_t *fb, int x, int y, int px, const char *s, int alig
     assert(x >= 0 && y <= 1216 && px > 0);
     assert(selected==0);
     assert(!*s || reader_selection_utf8(s, strlen(s)));
+    assert(strlen(drawn)+strlen(s)+2<sizeof(drawn));
+    strcat(drawn,s);strcat(drawn,"\n");
     ++painted;
 }
 void ui_fill_rect_fast(EpdRect r, uint8_t gray, uint8_t *fb) {
@@ -56,19 +59,23 @@ int main(void) {
     book_dictionary_result_t r={.status=BOOK_DICTIONARY_OK};
     strcpy(r.reading,"yù\nyú\n更多读音");strcpy(r.variant,"鬱");strcpy(r.example,"这是完整例句。");
     for(unsigned i=0;i<500;++i)strcat(r.definition,"释义");
-    ui_reader_dictionary_t v={.open=true,.top=632};
+    ui_reader_dictionary_t v={.open=true,.can_browse=true,.top=632};
     size_t length=ui_reader_dictionary_content_size(&r),offset=0;unsigned pages=0;
     assert(length>strlen(r.definition));
-    while(offset<length){v.offset=offset;ui_reader_dictionary_draw(fb,&v,&r,"踽踽独行");size_t next=ui_reader_dictionary_page_end(&r,offset);assert(next>offset&&next<=length);offset=next;assert(++pages<128);}
+    while(offset<length){drawn[0]=0;v.offset=offset;ui_reader_dictionary_draw(fb,&v,&r,"踽踽独行");size_t next=ui_reader_dictionary_page_end(&r,offset);assert(next>offset&&next<=length);offset=next;assert(++pages<128);}
     assert(pages>1&&ui_reader_dictionary_action(&v,30,100)==0);
     assert(ui_reader_dictionary_action(&v,570,660)==0);
     assert(ui_reader_dictionary_action(&v,50,1130)==1&&ui_reader_dictionary_action(&v,300,1130)==3&&ui_reader_dictionary_action(&v,550,1130)==2);
-    v.install_available=true;assert(ui_reader_dictionary_action(&v,300,1130)==4);
-    v.installing=true;assert(ui_reader_dictionary_action(&v,300,1130)==-1);
-    strcpy(v.install_message,"正在下载并校验词库…");v.progress=35;ui_reader_dictionary_draw(fb,&v,&r,"青铜");
-    v.install_available=v.installing=false;v.install_message[0]=0;
+    v.can_browse=false;assert(ui_reader_dictionary_action(&v,300,1130)==-1);
+    for(int status=BOOK_DICTIONARY_MISSING;status<=BOOK_DICTIONARY_CORRUPT;++status) {
+        if(status==BOOK_DICTIONARY_NOT_FOUND)continue;
+        r.status=status;drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"青铜");
+        assert(strstr(drawn,"官网说明书")&&strstr(drawn,"mogo.mantake.shop"));
+        assert(strstr(drawn,"dictionaries")&&strstr(drawn,"TF 卡根目录"));
+        assert(!strstr(drawn,"下载安装")&&!strstr(drawn,"上一屏"));
+    }
     r.definition[0]=0;assert(ui_reader_dictionary_content_size(&r)>strlen(r.reading));
-    for(int status=BOOK_DICTIONARY_OK;status<=BOOK_DICTIONARY_BUSY;++status){r.status=status;v.offset=0;ui_reader_dictionary_draw(fb,&v,&r,"𠮷");}
+    for(int status=BOOK_DICTIONARY_OK;status<=BOOK_DICTIONARY_BUSY;++status){drawn[0]=0;r.status=status;v.offset=0;ui_reader_dictionary_draw(fb,&v,&r,"𠮷");}
     ui_reader_dictionary_notice(fb);
     assert(painted&&selected==2);free(original);free(guard);
     puts("PASS: actual view, reversible XOR handles at screen edges, complete reading/definition/example paging and error states");

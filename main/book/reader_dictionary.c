@@ -2,7 +2,6 @@
  * 中文：工作任务不接触字体、画面或阅读位置，主任务接收有界结果。
  * English: The worker never touches fonts, frames or reader position; the UI receives bounded results. */
 #include "reader_dictionary.h"
-#include "dictionary_package.h"
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +20,9 @@ static bool cancelled(void *context) { return atomic_load(&((dictionary_job_t *)
 static void query_task(void *context) {
     dictionary_job_t *job = context;
     char path[192];
-    dictionary_package_path("/sdcard/dictionaries", path, sizeof(path));
-    book_dictionary_lookup(path, job->query, &job->result, cancelled, job);
+    if (book_dictionary_path("/sdcard/dictionaries", path, sizeof(path)))
+        book_dictionary_lookup(path, job->query, &job->result, cancelled, job);
+    else job->result.status = BOOK_DICTIONARY_IO;
     xSemaphoreGive(job->done);
     vTaskDelete(NULL);
 }

@@ -27,7 +27,6 @@ void vTaskDelete(void *handle);
 UNIT = r'''
 #include "freertos/FreeRTOS.h"
 #include "reader_dictionary.h"
-#include "dictionary_package.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -37,7 +36,7 @@ UNIT = r'''
 struct host_sem { pthread_mutex_t lock; pthread_cond_t ready; bool signalled; };
 static atomic_int tasks, semaphores, mode, entered;
 static bool fail_sem, fail_task;
-bool dictionary_package_path(const char *root, char *path, size_t capacity) {
+bool book_dictionary_path(const char *root, char *path, size_t capacity) {
     assert(!strcmp(root, "/sdcard/dictionaries"));
     snprintf(path, capacity, "%s/chinese.mgdict", root); return true;
 }

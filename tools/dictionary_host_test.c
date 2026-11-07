@@ -5,9 +5,28 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 static bool cancel(void *context){unsigned *n=context;return ++*n>2;}
 int main(int argc,char **argv){
     assert(argc>=3);book_dictionary_result_t r;
+    if(!strcmp(argv[1],"paths")) {
+        char path[1024], manual[1024], installed[1024], previous[1024];
+        snprintf(manual,sizeof(manual),"%s/chinese.mgdict",argv[2]);
+        snprintf(installed,sizeof(installed),"%s/installed/chinese.mgdict",argv[2]);
+        snprintf(previous,sizeof(previous),"%s/.previous/chinese.mgdict",argv[2]);
+        assert(book_dictionary_path(argv[2],path,sizeof(path))&&!strcmp(path,manual));
+        char directory[1024];snprintf(directory,sizeof(directory),"%s/.previous",argv[2]);assert(!mkdir(directory,0700));
+        FILE *f=fopen(previous,"wb");assert(f);fclose(f);
+        assert(book_dictionary_path(argv[2],path,sizeof(path))&&!strcmp(path,previous));
+        snprintf(directory,sizeof(directory),"%s/installed",argv[2]);assert(!mkdir(directory,0700));
+        f=fopen(installed,"wb");assert(f);fclose(f);
+        assert(book_dictionary_path(argv[2],path,sizeof(path))&&!strcmp(path,installed));
+        f=fopen(manual,"wb");assert(f);fclose(f);
+        assert(book_dictionary_path(argv[2],path,sizeof(path))&&!strcmp(path,manual));
+        assert(!book_dictionary_path(argv[2],path,2));assert(!book_dictionary_path(NULL,path,sizeof(path)));
+        puts("PASS: manual file precedence, both legacy fallbacks, missing file and bounded path");return 0;
+    }
     if(!strcmp(argv[1],"bad")) {assert(book_dictionary_lookup(argv[2],"踽",&r,NULL,NULL)!=BOOK_DICTIONARY_OK);return 0;}
     if(!strcmp(argv[1],"feedback")){
         const char *keys[]={"青铜","青銅","破解","踽","翩跹","蹉跎","伛偻","觊觎"};

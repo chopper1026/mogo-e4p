@@ -8,11 +8,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include <sys/stat.h>
 
 static uint32_t u32(const unsigned char *p) { return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24; }
 static unsigned u16(const unsigned char *p) { return p[0] | (unsigned)p[1]<<8; }
 static bool read_at(FILE *f, uint32_t off, void *p, size_t n) { return !fseek(f, (long)off, SEEK_SET) && fread(p, 1, n, f) == n; }
 static bool range(uint32_t off, uint32_t n, uint32_t end) { return off <= end && n <= end - off; }
+bool book_dictionary_path(const char *root, char *path, size_t capacity) {
+    if (!root || !path || !capacity) return false;
+    const char *names[] = {"chinese.mgdict", "installed/chinese.mgdict", ".previous/chinese.mgdict"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        int length = snprintf(path, capacity, "%s/%s", root, names[i]);
+        if (length < 0 || (size_t)length >= capacity) { path[0] = 0; return false; }
+        struct stat info;
+        if (!stat(path, &info)) { if (S_ISREG(info.st_mode)) return true; }
+        else if (errno != ENOENT && errno != ENOTDIR) return true;
+    }
+    int length = snprintf(path, capacity, "%s/%s", root, names[0]);
+    return length >= 0 && (size_t)length < capacity;
+}
 book_dictionary_status_t book_dictionary_lookup(const char *path, const char *query,
     book_dictionary_result_t *r, book_dictionary_cancel_fn cancelled, void *context) {
     if (!r) return BOOK_DICTIONARY_CORRUPT;
