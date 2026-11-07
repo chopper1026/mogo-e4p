@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.6 · 本地测试 / Local testing · 2026-11-07
+
+- 最近阅读书摘改为每向前推进4个正文页尝试更新，仅选已显示的完整短句，过滤最近4条重复句；无新句保留原句，重开或重绘不换句，兼容旧缓存并随进度保存。宿主回归与S31构建通过，实屏与真实TF写入待验收。/ Try a new Home excerpt every four forward body pages, using only displayed complete sentences and excluding the last four selections; retain the old sentence without a candidate, keep reopen/redraw stable, read legacy caches and save with progress. Host tests and S31 build pass; panel and physical card writes remain pending.
+
 ## v1.0.6 · 本地测试 / Local testing · 2026-11-06
 
 - 未安装或损坏词库时可从官网下载，校验后自动安装到 TF 卡并继续查询，显示进度、错误与取消；保留手工安装，安装期间暂缓自动锁屏，并容忍卡健康检查的短暂忙状态。真机本地下载、TF校验及查词通过；正式HTTPS与断电待验证。/ Download missing or damaged dictionaries from the official site, verify and install to the card, then resume lookup; show progress/errors/cancellation and retain manual installation, deferring automatic locking and tolerating transient card probes. Device-local download, card hashes and lookups pass; production HTTPS and power-loss behavior remain unverified.

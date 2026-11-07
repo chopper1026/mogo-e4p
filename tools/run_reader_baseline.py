@@ -17,6 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "excerpt": [sys.executable, "tools/book_excerpt_host_test.py"],
     "dictionary": ["bash", "tools/run_dictionary_host_tests.sh"],
     "flash_fast": [sys.executable, "tools/flash_fast_host_test.py"],
     "weather": [sys.executable, "tools/weather_host_test.py"],
