@@ -153,7 +153,6 @@
  */
 #include "../book/reader_selection.h"
 #include "../book/reader_dictionary.h"
-#include "../services/dictionary_install.h"
 #include "../ui/ui_reader_dictionary.h"
 #include "../diagnostics/reader_perf.h"
 #include "../diagnostics/reader_memory.h"
@@ -6789,7 +6788,6 @@ static app_redraw_t key_settings_scroll_gesture(app_ctx_t *ctx, const ui_gesture
 }
 
 static void dictionary_cancel(void) {
-    dictionary_install_cancel();
     reader_dictionary_cancel();
     reader_selection_cancel(&s_dictionary_selection);
     s_dictionary_view = (ui_reader_dictionary_t){0};
@@ -6811,8 +6809,7 @@ static void dictionary_query(const char *query) {
     char saved[129]; copy_text(saved, sizeof(saved), query);
     memset(&s_dictionary_result, 0, sizeof(s_dictionary_result));
     copy_text(s_dictionary_result.query, sizeof(s_dictionary_result.query), saved);
-    s_dictionary_view.installing = s_dictionary_view.install_available = false;
-    s_dictionary_view.install_message[0] = 0;
+    s_dictionary_view.can_browse = false;
     s_dictionary_view.loading = reader_dictionary_start(saved);
     if (!s_dictionary_view.loading) s_dictionary_result.status = BOOK_DICTIONARY_BUSY;
     s_dictionary_view.open = true; s_dictionary_view.offset = 0;
@@ -6858,7 +6855,7 @@ static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t 
             bool first = false;
             if (!dictionary_handle(g, count, ev->x0, ev->y0, &first)) return APP_REDRAW_NONE;
             if (first) { size_t at = s_dictionary_selection.anchor; s_dictionary_selection.anchor = s_dictionary_selection.focus; s_dictionary_selection.focus = at; }
-            dictionary_install_cancel(); reader_dictionary_cancel(); s_dictionary_view.open = false;
+            reader_dictionary_cancel(); s_dictionary_view.open = false;
             s_dictionary_selection.dragging = true;
             // 当前接触只能区域绘制；先重绘原页，再恢复选区。/ Active contacts use area output; restore the base page and then its selection.
             render(ctx, ctx->fb); s_area = (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT};
@@ -6899,15 +6896,6 @@ static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t 
     if (ev->type == UI_GESTURE_TAP && s_dictionary_view.open) {
         int action = ui_reader_dictionary_action(&s_dictionary_view, ev->x0, ev->y0);
         if (action == 0) return dictionary_dismiss();
-        if (action == 4 && s_dictionary_view.install_available && !s_dictionary_view.loading) {
-            reader_dictionary_cancel();
-            s_dictionary_view.installing = dictionary_install_start();
-            s_dictionary_view.progress = 0;
-            copy_text(s_dictionary_view.install_message, sizeof(s_dictionary_view.install_message),
-                s_dictionary_view.installing ? "正在连接 WiFi 并获取词库…" : "暂时无法安装，请退出 USB 或稍后重试");
-            s_dictionary_feedback_ms = ctx->now_ms;
-            return APP_REDRAW_PAGE;
-        }
         if (action == 1 && s_dictionary_history_count) s_dictionary_view.offset = s_dictionary_history[--s_dictionary_history_count];
         else if (action == 2) {
             size_t next = ui_reader_dictionary_page_end(&s_dictionary_result, s_dictionary_view.offset);
@@ -6940,29 +6928,11 @@ static app_redraw_t dictionary_tick(app_ctx_t *ctx) {
         s_dictionary_selection.generation != book_layout_generation() ||
         s_dictionary_selection.page != s_reader_session.position.page || usb_storage_active() ||
         strcmp(s_font_path, ttf_font_path())) return dictionary_dismiss();
-    if (s_dictionary_view.installing) {
-        dictionary_install_status_t status; dictionary_install_get_status(&status);
-        if (!status.busy) {
-            dictionary_install_cancel();
-            s_dictionary_view.installing = false;
-            if (status.installed) dictionary_query(s_dictionary_result.query);
-            else copy_text(s_dictionary_view.install_message, sizeof(s_dictionary_view.install_message), status.message);
-            return APP_REDRAW_PAGE;
-        }
-        unsigned progress = status.total ? (unsigned)((uint64_t)status.received * 100 / status.total) : 0;
-        if ((!ctx->touch || !ctx->touch->touched) && ctx->now_ms - s_dictionary_feedback_ms >= 1000 &&
-            (progress != s_dictionary_view.progress || strcmp(status.message, s_dictionary_view.install_message))) {
-            s_dictionary_view.progress = progress;
-            copy_text(s_dictionary_view.install_message, sizeof(s_dictionary_view.install_message), status.message);
-            s_dictionary_feedback_ms = ctx->now_ms;
-            return APP_REDRAW_PAGE;
-        }
-    }
     if (s_dictionary_view.loading && (!ctx->touch || !ctx->touch->touched) &&
         reader_dictionary_poll(&s_dictionary_result)) {
         s_dictionary_view.loading = false;
-        s_dictionary_view.install_available = s_dictionary_result.status == BOOK_DICTIONARY_MISSING ||
-            s_dictionary_result.status == BOOK_DICTIONARY_CORRUPT || s_dictionary_result.status == BOOK_DICTIONARY_UNSUPPORTED;
+        s_dictionary_view.can_browse = s_dictionary_result.status == BOOK_DICTIONARY_OK ||
+            s_dictionary_result.status == BOOK_DICTIONARY_NOT_FOUND;
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;

@@ -187,8 +187,6 @@ idf_component_register(
         "book/reader_selection.c"
         "book/book_dictionary.c"
         "book/reader_dictionary.c"
-        "book/dictionary_package.c"
-        "services/dictionary_install.c"
         "ui/ui_reader_dictionary.c"
         "book/book_layout.c"
         "book/gbk.c"

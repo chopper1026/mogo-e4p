@@ -22,6 +22,7 @@ with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
     same=work/'same.mgdict';builder.write_package(db,same);assert package.read_bytes()==same.read_bytes()
     binary=ROOT/'build/dictionary-tests/dictionary'
     subprocess.run([str(binary),'fixture',str(package)],check=True)
+    subprocess.run([str(binary),'paths',str(work)],check=True)
     original=package.read_bytes();cases=[]
     for n in (0,7,32,63,len(original)-1):cases.append(original[:n])
     for offset,value in ((8,999),(12,0xffffffff),(16,0xffffffff),(20,0),(24,0),(28,0),(32,0xffffffff),(36,900)):

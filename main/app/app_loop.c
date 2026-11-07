@@ -40,7 +40,6 @@
 
 #include "../diagnostics/reader_perf.h"
 #include "app_loop.h"
-#include "dictionary_install.h"
 #include "app_lifecycle.h"
 #include "platform/s31_input.h"
 #include "app_input.h"
@@ -750,7 +749,7 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", wifi_transfer_service_poll());
-            pico_ota_auto_poll(!dictionary_install_busy() && !app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+            pico_ota_auto_poll(!app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !ble_pt_connected() &&
                 current != &app_transfer && !power_dialog_open && !menu_open &&
                 (current != &app_device_settings || app_navigation_main_page_ready(&ctx, current)) &&
@@ -760,7 +759,7 @@ void app_loop_run(const app_loop_config_t* config) {
             // Background sync is a system service like app_media_poll or the font retry, with its
             // guards inside time_service; idle gating stays upstream: no touch, no recent input,
             // pages holding the PMU, USB or an online update.
-            app_time_service_poll(!dictionary_install_busy() && !app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+            app_time_service_poll(!app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !pico_online_busy() && !ble_pt_connected());
         }
         bool selected_from_menu = false;
@@ -1093,7 +1092,7 @@ void app_loop_run(const app_loop_config_t* config) {
         wifi_transfer_status_t transfer;
         wifi_transfer_get_status(&transfer);
         const bool wifi_busy = transfer.state != WIFI_TRANSFER_STOPPED ||
-            pico_online_busy() || dictionary_install_busy();
+            pico_online_busy();
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
         TD_TIME("ble_poll", ble_pt_poll());
         if (app_quick_layer_is_open() || quick_input_owned) {

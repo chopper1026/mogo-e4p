@@ -38,6 +38,13 @@ static const char *TAG="test";
 static int s_view,s_presented_view,s_reader_panel,s_pressed_control,s_reader_slider;
 static bool s_shelf_page_pending,s_shelf_feedback_pending,s_reader_cleanup,s_reader_entry_full,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm;
 static bool s_reader_fullscreen,s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
+static bool s_excerpt_forward;
+static char s_reader_notice[64];
+static int64_t s_dictionary_notice_until;
+// 书摘由专用回归验证；此处只保留真实呈现和翻页调用的状态边界。
+// Dedicated excerpt tests cover selection; retain its state boundary for actual present/turn calls here.
+static void reader_excerpt_presented(bool body_ok,bool body_updated){(void)body_ok;(void)body_updated;s_excerpt_forward=false;}
+static void reader_excerpt_reposition(void){s_excerpt_forward=false;}
 static bool s_shelf_key_paint_pending;
 static app_redraw_t shelf_key_paint(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_NONE;}
 static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
