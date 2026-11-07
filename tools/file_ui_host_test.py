@@ -26,7 +26,7 @@ def unit():
     code = code.replace("static unsigned app_settings_system_font_size(void){return 120;}",
                         "static unsigned font_percent=120;\nstatic unsigned app_settings_system_font_size(void){return font_percent;}")
     code += "\n#undef ui_text_fixed_vc\n"
-    for name in ("ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_draw_control_frame",
+    for name in ("ui_draw_control_frame",
                  "ui_text_effective_px", "ui_text", "ui_text_vc", "ui_rect_hit"):
         code += host.function(name, KIT) + "\n"
     code += r'''

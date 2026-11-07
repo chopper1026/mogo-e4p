@@ -15,13 +15,13 @@ Intended for handheld / e-paper devices: 2-point report, IRQ poll, and deep slee
 Metalio E-INK4 Plus / ESP32-S31 实际使用 FT6336U（I2C `0x38`），沿用本组件 API；下方 CST836U 芯片说明是旧硬件参考。当前板级总线参数以根 README 和 `board_i2c` 为准。
 Metalio E-INK4 Plus / ESP32-S31 uses an FT6336U at I2C `0x38` behind this component API. The CST836U description below is legacy hardware reference; use the root README and `board_i2c` for current bus settings.
 
-`idf.py --preview menuconfig` 的 **Touch diagnostics** 提供 `CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT`。本仓库产品配置 `sdkconfig.defaults` 选择 `75`；Kconfig 通用默认值仍为 `100`。75%已验证寄存器读回与启动，但钢化膜样机改善不明显、底部三键仍难触发。保留该配置用于对照，不能据此声称问题已解决。
-**Touch diagnostics** exposes `CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT`. Product defaults select `75`; the generic Kconfig default remains `100`. Register readback and boot were checked at 75%, but tempered-glass testing found little improvement and difficult cover-key activation. Keep the setting for comparison, without claiming the problem is solved.
+`idf.py --preview menuconfig` 的 **Touch diagnostics** 提供 `CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT`。自1.0.7起，产品配置 `sdkconfig.defaults` 开启下述V04升级并选择 `100`，保留模组原阈值；Kconfig通用默认值仍为 `100`。此前75%已验证寄存器读回与启动，但钢化膜样机改善不明显，保留用于对照。
+**Touch diagnostics** exposes `CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT`. Since 1.0.7, product defaults enable the V04 updater below and select `100` to preserve module thresholds; the generic Kconfig default remains `100`. The previous 75% setting passed register readback and boot but showed little tempered-glass improvement; retain it for comparisons.
 
 | 值 / Value | 行为 / Behavior |
 | --- | --- |
-| `100`（恢复原值 / original） | 保留模组原值，不增加阈值、模式或型号细分寄存器访问。/ Preserve the module default without extra threshold, mode or chip-variant register access. |
-| `75`（产品默认 / product default） | 正常模式检测阈值降至复位实际值的 75%，向上取整。/ Reduce the normal-mode detection threshold to 75% of its actual reset value, rounded up. |
+| `100`（产品默认 / product default） | 保留模组原值，不增加阈值、模式或型号细分寄存器访问。/ Preserve the module default without extra threshold, mode or chip-variant register access. |
+| `75`（对照 / comparison） | 正常模式检测阈值降至复位实际值的 75%，向上取整。/ Reduce the normal-mode detection threshold to 75% of its actual reset value, rounded up. |
 | `50` | 降至复位实际值的 50%，向上取整；需要更严格检查误触。/ Reduce it to 50%, rounded up; check false touches more carefully. |
 
 允许范围 `50..100`。降低 `0x80 / ID_G_THGROUP` 是增强弱触摸响应的候选办法，但这是芯片通用阈值，不保证独立作用于盖板三键。回读成功仅证明寄存器接受了数值，不证明本模组三键灵敏度提高。不要把比例理解为成功率或可支持的膜厚。
@@ -41,8 +41,8 @@ For additional hardware comparisons, start at `100`, then reduce one step at a t
 
 ## S31 / FT6336U V04 开机升级
 
-`CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT` 默认关闭，仅用于 LT0470GF0430M_V1.1、684×1216、FT6336U 模组。开启后才编译升级器并嵌入 [V04原厂镜像](firmware/README.md)。它向独立触控芯片写入持久固件；回退 ESP 应用或关闭此选项不会回退触控固件，100%也只是保留当前触控固件的复位阈值。
-`CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT` defaults off and is limited to the named module. Enabling it builds the updater and embeds the linked vendor V04 image. This persistently updates the separate controller; reverting the ESP app or disabling the option does not revert the controller. A 100% threshold preserves the currently installed controller firmware's reset value.
+`CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT` 的Kconfig通用默认关闭，1.0.7产品配置明确开启，仅用于 LT0470GF0430M_V1.1、684×1216、FT6336U 模组。开启后才编译升级器并嵌入 [V04原厂镜像](firmware/README.md)。它向独立触控芯片写入持久固件；回退 ESP 应用或关闭此选项不会回退触控固件，100%也只是保留当前触控固件的复位阈值。
+The generic Kconfig default for `CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT` is off; product defaults explicitly enable it in 1.0.7 for the named module. Enabling it builds the updater and embeds the linked vendor V04 image. This persistently updates the separate controller; reverting the ESP app or disabling the option does not revert the controller. A 100% threshold preserves the currently installed controller firmware's reset value.
 
 升级在 `cst836u_init()` 硬复位之后、普通模式配置和触摸采样之前执行，整段持有共享I2C递归锁。先校验完整镜像，再读取应用ID `64/26/02` 与版本。已为V04跳过，已识别的更高版本保留，明确的其他芯片拒绝写入。应用失效时允许原厂的Boot识别回退；仅Boot ID `79/1C`通过后擦除。芯片ID不能代替模组型号确认。
 The updater runs after the init hardware reset and before normal configuration/sampling, holding the shared recursive I2C lock throughout. It validates the image, reads application IDs `64/26/02` and version, skips V04, retains identified newer versions and rejects identified other chips. Invalid applications use the vendor boot fallback; erasure requires boot ID `79/1C`. Controller IDs do not identify the panel module.
@@ -68,8 +68,8 @@ Preparation only registers the build and opens no serial port. Flashing requires
 V04+100%配置已在一台设备完成真实升级、版本读回和首页启动，用户确认钢化膜下底部三键“效果很好”。这是单机主观反馈；尚未完成每键50次统计、多机、误触、重复冷启动/唤醒和断电恢复验证。
 The V04/100% configuration completed a physical upgrade, version readback and Home boot on one device; the user reported good bottom-key response with tempered glass. This is subjective single-device feedback, without per-key 50-trial statistics, multi-device, false-touch, repeated cold-boot/wake or power-loss validation.
 
-软件故障注入入口为 `python3 tools/run_reader_baseline.py touch_upgrade metalio_drivers`：编译真实升级协议、传输适配及驱动，验证镜像、版本门控、型号拒绝、Boot回退、包范围、失败重试、总线释放及唤醒不升级。生产默认关闭路径继续由原驱动回归覆盖。
-The stated test entry compiles the real protocol, transport and driver to exercise image/version/identity guards, boot recovery, packet bounds, retries, lock release and no wake upgrades. Existing driver regressions cover the default-disabled path.
+软件故障注入入口为 `python3 tools/run_reader_baseline.py touch_upgrade metalio_drivers`：编译真实升级协议、传输适配及驱动，验证镜像、版本门控、型号拒绝、Boot回退、包范围、失败重试、总线释放及唤醒不升级。原驱动回归同时覆盖关闭升级的配置路径。
+The stated test entry compiles the real protocol, transport and driver to exercise image/version/identity guards, boot recovery, packet bounds, retries, lock release and no wake upgrades. Existing driver regressions also cover the updater-disabled configuration.
 
 ## 能力 / Features
 

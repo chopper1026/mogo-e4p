@@ -3,6 +3,15 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.7 · 2026-11-07
+
+- 新增离线字典功能，阅读中长按选中正文文字可触发。
+- 新增首页顶部连续阅读打卡。
+- 页脚进度条增加显示/隐藏设置项。
+- 优化最近阅读书摘随章节变化。
+- 优化触摸响应，正式启用原厂V04触控升级并保留100%模组阈值。
+- 修复实体键前光开关与快捷栏前光状态不一致的问题。
+
 ## v1.0.6 · 本地测试 / Local testing · 2026-11-07
 
 - 接入原厂FT6336U V04触控固件的可选开机升级，默认关闭；本地对照开启升级并恢复100%模组阈值，避免叠加原75%调校。已有V04或更高版本跳过，失败最多重试一次，唤醒不重复升级。真机升级与启动通过，用户确认钢化膜下三键效果很好；量化成功率、多机与断电恢复待验。/ Add an optional, default-off vendor FT6336U V04 boot updater. Local comparisons enable it with 100% module thresholds; retain current/newer firmware, retry once on failure and never upgrade on wake. Device upgrade and boot passed, and the user reports good tempered-glass key response; quantitative, multi-device and power-loss checks remain pending.

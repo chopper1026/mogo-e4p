@@ -44,7 +44,8 @@ jobs:
           #!/usr/bin/python3
           import os, sys
           args = ['-Wl,--gc-sections' if arg == '-Wl,-dead_strip' else arg for arg in sys.argv[1:]]
-          os.execv('/usr/bin/clang', ['clang', '-D_DEFAULT_SOURCE', '-ffunction-sections', '-fdata-sections'] + args)
+          compiler = '/usr/bin/clang++' if '-x' in args and args[args.index('-x') + 1] == 'c++' else '/usr/bin/clang'
+          os.execv(compiler, [compiler, '-D_DEFAULT_SOURCE', '-ffunction-sections', '-fdata-sections'] + args)
           PY
           chmod +x build/host-compiler/cc
           cp build/host-compiler/cc build/host-compiler/gcc

@@ -92,6 +92,10 @@ enum { DISPLAY_REFRESH_DEFAULT, DISPLAY_REFRESH_FEEDBACK, DISPLAY_REFRESH_DETAIL
 static EpdRect s_area;
 static int s_mode,s_du_count;
 static bool s_input_settle,s_reader_tools_toggle,s_shelf_key_paint_pending;
+static bool s_dictionary_feedback_pending;
+static app_redraw_t dictionary_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,bool *handled){
+    (void)ctx;(void)ev;*handled=false;return APP_REDRAW_NONE;
+}
 static bool s_shelf_key_mode;
 static int s_shelf_key_pressed;
 static unsigned input_refreshes;

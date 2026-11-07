@@ -27,9 +27,10 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_API_ENCODING_UTF_8=y
 
-# 面板轻触使用模组复位阈值的75%；100%可恢复原阈值，不写触摸固件。
-# Use 75% of the panel's reset threshold; 100% restores it without touch-firmware writes.
-CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT=75
+# 1.0.7采用原厂V04触控升级，保留模组复位阈值，不叠加旧75%调校。
+# Release 1.0.7 uses vendor V04 updates and module thresholds without the former 75% tuning.
+CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT=y
+CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT=100
 
 # 传书热点；优先把网络缓冲放PSRAM，避免占用显示所需内部内存。
 # Transfer AP prefers PSRAM network buffers, preserving internal display memory.
