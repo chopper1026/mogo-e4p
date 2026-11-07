@@ -12,6 +12,22 @@ endmenu
 # Touch threshold and tap-drop diagnostics; enable diagnostic logging only for investigations.
 menu "Touch diagnostics"
 
+    config TOUCH_FT6336U_UPGRADE_ON_BOOT
+        bool "Upgrade the LT0470GF0430M_V1.1 FT6336U controller to V04 on boot"
+        depends on IDF_TARGET_ESP32S31
+        default n
+        help
+            仅用于 Metalio E-INK4 Plus 的 LT0470GF0430M_V1.1、684x1216
+            FT6336U 模组。初始化时独占总线，向独立触控芯片写入供应商V04。
+            已为V04或更高版本时跳过；唤醒不刷写。失败最多完整重试一次。
+            这是持久触控固件升级，回退ESP应用不会回退触控芯片；保持供电。
+            首次对照使用THRESHOLD_PERCENT=100，避免叠加旧75%调校。
+            Only for the named 684x1216 panel on Metalio E-INK4 Plus.
+            Exclusively updates the separate touch controller during init.
+            V04 and newer are retained; wake never updates. Retry at most once.
+            Keep power connected. Reverting the ESP app does not revert the
+            controller. Use a 100% threshold for the initial V04 comparison.
+
     config TOUCH_FT6336U_THRESHOLD_PERCENT
         int "Experimental FT6336U touch threshold (% of module reset value)"
         depends on IDF_TARGET_ESP32S31
@@ -24,7 +40,8 @@ menu "Touch diagnostics"
             这是整颗触摸芯片的实验调校，不保证单独作用于盖板三键；
             产品配置采用75%，100%可恢复原阈值。不同膜厚、屏幕误触
             及充电噪声仍需在对应样机验证。
-            不进入工厂/校准/升级模式，不写 0xA9 量产测试阈值。
+            本阈值选项不进入工厂/校准/升级模式，不写 0xA9 量产测试阈值；
+            独立的UPGRADE_ON_BOOT开关才控制持久固件升级。
             100 preserves the module default without extra register access.
             75/50 scales normal-mode register 0x80 to 75%/50% of its reset
             value, rounded up and never zero. Apply after init/wake resets,
@@ -32,8 +49,9 @@ menu "Touch diagnostics"
             experimental chip-wide setting, not a proven cover-key-only
             control. Product defaults select 75%; use 100% to restore the
             original. Validate each glass, screen false touches and charger
-            noise on hardware. No factory, calibration,
-            upgrade or production-test threshold (0xA9) writes.
+            noise on hardware. This threshold option performs no factory,
+            calibration, upgrade or production-test threshold (0xA9) writes;
+            UPGRADE_ON_BOOT independently controls persistent firmware updates.
 
     config TOUCH_DIAG
         bool "Enable touch tap-drop diagnostics logging"

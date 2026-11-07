@@ -24,6 +24,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#if defined(CONFIG_IDF_TARGET_ESP32S31) && CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT
+#include "ft6336u_upgrade.h"
+#endif
 
 #define CST836U_REG_TOUCH_DATA 0x00
 #define CST836U_REG_INFO 0xA6
@@ -225,6 +228,11 @@ esp_err_t cst836u_init(i2c_master_bus_handle_t bus_handle, const cst836u_config_
 
 #if defined(CONFIG_IDF_TARGET_ESP32S31)
     err = cst836u_reset(h);
+#if CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT
+    // 仅创建时、采样消费者启动前升级；唤醒路径只复位和恢复普通配置。
+    // Upgrade only during creation before sampling starts; wake only restores normal configuration.
+    if (err == ESP_OK) err = ft6336u_upgrade_on_boot(h->dev);
+#endif
     if (err == ESP_OK) {
         const uint8_t command[] = {FT6336U_REG_INT_MODE, 0};
         err = board_i2c_transmit(h->dev, command, sizeof(command), I2C_TIMEOUT_MS);

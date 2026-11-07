@@ -1,0 +1,6 @@
+# 本地V04对照：只启用触控升级，阈值保留V04模组原值；放在产品defaults之后。
+# Local V04 comparison: enable the updater and retain module thresholds; load after product defaults.
+CONFIG_TOUCH_FT6336U_UPGRADE_ON_BOOT=y
+CONFIG_TOUCH_FT6336U_THRESHOLD_PERCENT=100
+# CONFIG_TOUCH_DIAG is not set
+# CONFIG_TOUCH_DIAG_BEEP is not set

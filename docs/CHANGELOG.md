@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.6 · 本地测试 / Local testing · 2026-11-07
 
+- 接入原厂FT6336U V04触控固件的可选开机升级，默认关闭；本地对照开启升级并恢复100%模组阈值，避免叠加原75%调校。已有V04或更高版本跳过，失败最多重试一次，唤醒不重复升级。真机升级与启动通过，用户确认钢化膜下三键效果很好；量化成功率、多机与断电恢复待验。/ Add an optional, default-off vendor FT6336U V04 boot updater. Local comparisons enable it with 100% module thresholds; retain current/newer firmware, retry once on failure and never upgrade on wake. Device upgrade and boot passed, and the user reports good tempered-glass key response; quantitative, multi-device and power-loss checks remain pending.
 - 阅读设置「页眉页脚」新增进度条显示／隐藏，默认显示并记住选择，全屏底部进度线同步；普通页脚进度条由12px减为6px。隐藏后正文回收进度预留带，显隐及恢复默认按当前文字位置重排，保留页脚文字位置与用户边距。/ Add remembered progress visibility under reader header/footer settings, shown by default and shared with the full-screen line; halve the regular bar from 12px to 6px. Hiding reclaims its band for body text; toggles and defaults reflow around the current text position while preserving footer text placement and user margins.
 - 最近阅读书摘改为每向前推进4个正文页尝试更新，仅选已显示的完整短句，过滤最近4条重复句；无新句保留原句，重开或重绘不换句，兼容旧缓存并随进度保存。宿主回归与S31构建通过，实屏与真实TF写入待验收。/ Try a new Home excerpt every four forward body pages, using only displayed complete sentences and excluding the last four selections; retain the old sentence without a candidate, keep reopen/redraw stable, read legacy caches and save with progress. Host tests and S31 build pass; panel and physical card writes remain pending.
 
