@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.8 · 本地测试 / Local testing · 2026-11-08
+
+- 阅读票根新增「透明背景 / 封面背景」选择，默认保留透明；选择随重启与设置备份保存，切换后锁屏缓存自动失效，两种背景共用票面、书摘和统计。/ Add transparent/cover ticket backgrounds, defaulting to transparent, persisted across restart and settings backup with cache invalidation and shared paper, excerpts and statistics.
+
 ## v1.0.8 · 2026-11-08
 
 - 新增关闭书内样式的设置项，在阅读设置中可以关闭书内样式统一排版。

@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
+ * 用户新增：阅读票根提供透明或封面背景，独立记忆选择并在保存失败时保留原值。
+ * User addition: tickets offer transparent/cover backgrounds with independent persistence and failed-save retention.
  * 中文：分组设置页；网络短时对时后 PMU 持续走时，开机恢复系统时钟。
  * English: Grouped settings; temporary WiFi sync seeds the PMU, whose RTC restores time at boot.
  * 用户修订：设置列表滑动仅差分刷新内容，滑动过程中不周期插入黑白清屏。
@@ -114,7 +116,8 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_POWER_LOG,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT,
+               SETTINGS_TICKET_BACKGROUND } settings_page_t;
 static settings_page_t s_page;
 // 快捷栏长按蓝牙圆键的待定子页；on_enter 消费一次后回到主列表。
 // Pending sub-page from the quick bar's Bluetooth hold; on_enter consumes it once and returns to the main list.
@@ -1207,11 +1210,30 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_TICKET_BACKGROUND) {
+        back_header(fb, "阅读票根背景");
+        section(fb, 248, "选择票根背景");
+        const char *labels[] = {"透明背景", "封面背景"};
+        const char *details[] = {"保留锁屏前页面，叠加票根", "最近书籍封面铺满背景"};
+        for (int i = 0; i < 2; ++i) {
+            EpdRect box = {36, 300 + i * 154, 612, 132};
+            bool active = app_settings_ticket_background() == (app_ticket_background_t)i;
+            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            ui_text_box(fb, (EpdRect){64, box.y + 14, 520, 58}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64, box.y + 82, 520, 40}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
+        }
+        if (s_notice[0]) ui_text(fb, 54, 660, 23, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
     if (s_page == SETTINGS_LOCK_STYLE) {
         back_header(fb, "锁屏样式");
         section(fb, 248, "选择电源键锁屏后的画面");
         const char *labels[] = {"壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封"};
-        const char *details[] = {"使用 TF 卡中的 JPG / PNG 图片", "书封、进度和阅读记录", "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白"};
+        const char *details[] = {"使用 TF 卡中的 JPG / PNG 图片",
+            app_settings_ticket_background() == APP_TICKET_BACKGROUND_COVER ? "封面背景 · 点按选择背景" : "透明背景 · 点按选择背景",
+            "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白"};
         const uint8_t values[] = {1, 0, 2, 3};
         for (int i = 0; i < 4; ++i) {
             EpdRect box = {36, 300 + i * 154, 612, 132};
@@ -2320,6 +2342,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_TICKET_BACKGROUND && y < 190) {
+        s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE;
+    }
     if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_AUTO_LOCK) {
@@ -2417,6 +2442,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         app_settings_set_system_contrast((uint8_t)(100 + index * 10));
         return APP_REDRAW_PAGE;
     }
+    if (s_page == SETTINGS_TICKET_BACKGROUND) {
+        for (int i = 0; i < 2; ++i) {
+            if (!ui_rect_hit((EpdRect){36, 300 + i * 154, 612, 132}, ev->x0, y)) continue;
+            bool saved = app_settings_set_ticket_background((app_ticket_background_t)i);
+            snprintf(s_notice, sizeof(s_notice), "%s", saved ? "" : "保存失败，请重试");
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_page == SETTINGS_LOCK_STYLE) {
         if (y >= 300 && y < 432) {
             s_bookmark_picker=false;wallpaper_scan();
@@ -2425,6 +2459,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         if (y >= 454 && y < 586) {
             app_settings_set_lock_style(0);
+            s_notice[0] = 0;
+            s_page = SETTINGS_TICKET_BACKGROUND;
             return APP_REDRAW_PAGE;
         }
         if (y >= 608 && y < 740) {
@@ -2733,6 +2769,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_WALLPAPER) { s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_TICKET_BACKGROUND) { s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_READING_BG_PREVIEW) { s_reading_bg_confirm = false; s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_READING_BG) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_AVATAR) { s_page = SETTINGS_PROFILE; return APP_REDRAW_PAGE; }

@@ -16,5 +16,5 @@ esp_err_t book_ticket_record(uint32_t seconds, uint32_t turns);
 bool book_ticket_recent_days(uint32_t seconds[30]);
 /// 当前月每日真实阅读秒数，兼容旧30日记录；无有效日期返回 false。/ Current-month measured seconds with legacy 30-day migration; false without a valid date.
 bool book_ticket_month_days(int year, int month, uint32_t seconds[31]);
-/// 在当前画面上叠加票根，保留票根外的背景；无最近阅读记录时返回 false。/ Overlay the ticket on the current frame, preserving its surroundings; false without reading history.
+/// 按背景偏好叠加票根或先铺书籍封面；无最近阅读记录时返回 false。/ Paint a ticket over the current frame or a full-screen book cover as selected; false without reading history.
 bool book_ticket_draw(uint8_t *fb, bool reader_background);

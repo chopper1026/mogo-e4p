@@ -24,7 +24,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 
 | 数据 / Data | 所有者与兼容要求 / Ownership And Compatibility |
 | --- | --- |
-| 系统与阅读偏好 / System and reader settings | `main/settings` 持有 NVS 与备份协议；原键、备份文件名及旧格式兼容独立于源码目录。/ Settings owns NVS/backup contracts; keys, filenames and compatibility do not follow source moves. |
+| 系统与阅读偏好 / System and reader settings | `main/settings` 持有 NVS 与备份协议；原键、备份文件名及旧格式兼容独立于源码目录。票根背景使用独立 `ticket_bg` 键，v37 备份追加校验尾块，旧备份回落透明；锁屏图缓存身份包含背景选项。/ Settings owns NVS/backup contracts; keys, filenames and compatibility do not follow source moves. Ticket backgrounds use `ticket_bg` and a checked v37 tail, defaulting legacy backups to transparent; lock-art identity includes this choice. |
 | WiFi 凭据 / WiFi credentials | `wifi_transfer` 在 `rp_wifi/profiles` 的版本化 blob 保存最多八组，缺少新键时兼容旧 `credentials`；最近选择的网络为默认，公开快照不含密码。现有 TF 备份只导出默认网络；单网络恢复保留其他项，空记录清空全部。/ A versioned blob holds eight profiles with legacy fallback only when the new key is absent. The latest selection is preferred and public snapshots exclude passwords. Existing TF backups export only that network; restoring one retains others, while an empty record clears all. |
 | 首页布局与天气 / Home and weather | `read_pico/home_regions` 一次保存上下布局并纳入 v33 备份；`kiiko_weather` 独立保存城市、偏好和有期限的缓存，不纳入设置/书籍备份。/ Atomic Home layout participates in v33 backup; standalone weather state/cache does not. |
 | 阅读手账与打卡 / Journal and streak | UI任务服务将当月逐书明细、跨月七日时长/此前连续天数和共享插画写入内置卷双快照；KJR2兼容读取KJR1，非格式化挂载、不依赖TF卡；不纳入设置/书籍备份，未知历史不补造。/ The UI-thread service owns internal dual snapshots of monthly rows, cross-month seven-day totals/preceding run and scenes; KJR2 reads KJR1 without formatting or SD dependency. Excluded from backups, with no invented history. |

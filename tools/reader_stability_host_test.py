@@ -1,4 +1,4 @@
-"""Native-resolution reading backgrounds, bounded ticket layout and transparent ticket surroundings.
+"""Native-resolution reading backgrounds, bounded ticket layout and selectable ticket backgrounds.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -160,6 +160,9 @@ ticket_art=r'''
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {uint32_t day;uint64_t total_seconds,today_seconds;uint32_t total_turns,today_turns;} ticket_stats_t;
 typedef struct {uint32_t chapter,pct;} book_progress_t;
+enum {APP_TICKET_BACKGROUND_TRANSPARENT,APP_TICKET_BACKGROUND_COVER};
+static unsigned ticket_background;
+static unsigned app_settings_ticket_background(void){return ticket_background;}
 static bool history=true,cover_ok=true,alloc_ok=true;
 static unsigned rotation,cover_loads,text_draws;
 static size_t live;
@@ -193,12 +196,12 @@ static uint32_t local_day(void){return 0;}
 '''
 ticket_path=ROOT/'main/book/book_ticket.c'
 ticket_art+=function('ui_image_dither_gray',ROOT/'main/ui/ui_image_dither.c')+'\n'
-for name in ('text_fit','cover_load','notch_depth','ticket_paper_draw','ticket_shadow_draw','cover_draw','ticket_stat','ticket_heading','book_ticket_draw'):
+for name in ('text_fit','cover_load','cover_background_draw','notch_depth','ticket_paper_draw','ticket_shadow_draw','cover_draw','ticket_stat','ticket_heading','book_ticket_draw'):
  ticket_art+=function(name,ticket_path)+'\n'
 ticket_art+=r'''
 int main(void){
  uint8_t frame[BYTES],original[BYTES];
- for(rotation=0;rotation<2;++rotation)for(unsigned mode=0;mode<3;++mode)for(unsigned shade=0;shade<16;++shade){
+ for(ticket_background=0;ticket_background<2;++ticket_background)for(rotation=0;rotation<2;++rotation)for(unsigned mode=0;mode<3;++mode)for(unsigned shade=0;shade<16;++shade){
   cover_ok=mode==0;alloc_ok=mode!=2;history=true;
   for(size_t at=0;at<BYTES;++at)frame[at]=original[at]=(uint8_t)(at*37+shade*17);
   unsigned before=cover_loads;text_draws=0;
@@ -211,15 +214,17 @@ int main(void){
    int sx=(x-5-80)%64;if(sx<0)sx+=64;if(sx>32)sx-=64;int shadow_cut=abs(sx)>18?0:18-sx*sx/18;
    bool paper=x>=48&&x<636&&y>=58+cut&&y<1158-cut;
    bool shadow=x>=53&&x<641&&y>=66+shadow_cut&&y<1166-shadow_cut;
-   if(!paper&&!shadow)assert(pixel(frame,x,y)==pixel(original,x,y));
+   if(!paper&&!shadow)assert(pixel(frame,x,y)==(ticket_background==APP_TICKET_BACKGROUND_COVER?(mode==0?0:187):pixel(original,x,y)));
   }
   assert(pixel(frame,100,350)==255&&pixel(frame,48,200)==0);
   assert(pixel(frame,638,600)==136);
   assert(pixel(frame,300,500)==(mode==0?0:238));
  }
- history=false;memcpy(frame,original,BYTES);unsigned before=cover_loads;
- assert(!book_ticket_draw(frame,false)&&!memcmp(frame,original,BYTES)&&cover_loads==before&&!live);
- puts("PASS: real ticket preserves every surrounding pixel and scallop over 16 patterned backgrounds in both portrait packings; paper, inset cover, shadow, text, cache failure/OOM and no-history fallback");
+ for(ticket_background=0;ticket_background<2;++ticket_background){
+  history=false;memcpy(frame,original,BYTES);unsigned before=cover_loads;
+  assert(!book_ticket_draw(frame,false)&&!memcmp(frame,original,BYTES)&&cover_loads==before&&!live);
+ }
+ puts("PASS: real ticket selects transparent surroundings or full-cover pixels over 16 patterned backgrounds in both portrait packings; paper, inset cover, shadow, text, cache failure/OOM and no-history fallback");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:

@@ -122,6 +122,13 @@ void app_settings_set_system_contrast(uint8_t percent);
 /// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3).
 uint8_t app_settings_lock_style(void);
 void app_settings_set_lock_style(uint8_t style);
+/// 阅读票根背景独立记忆，默认透明；仅在持久化成功后更新。/ Remember ticket backgrounds independently; default transparent and publish only after persistence.
+typedef enum {
+    APP_TICKET_BACKGROUND_TRANSPARENT = 0,
+    APP_TICKET_BACKGROUND_COVER = 1,
+} app_ticket_background_t;
+app_ticket_background_t app_settings_ticket_background(void);
+bool app_settings_set_ticket_background(app_ticket_background_t background);
 const char* app_settings_bookmark_path(void);
 void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);

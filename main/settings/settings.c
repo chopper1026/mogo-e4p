@@ -16,6 +16,8 @@
  * User revision: backup v28 appends the touch-vibration switch and intensity; older backups fall back to on and weak.
  * 用户修订：备份v33追加首页上下组件；旧备份不改变当前组件布局。
  * User revision: backup v33 appends Home regions; legacy backups preserve the current layout.
+ * 用户新增：阅读票根背景独立持久化，备份v37追加校验尾块，旧设置与备份保持透明背景。
+ * User addition: independently persist ticket backgrounds with a checked v37 backup tail, defaulting legacy settings/backups to transparent.
  * NVS load/store. A failed open keeps the deep-sleep default; the
  * partition is not erased.
  */
@@ -82,6 +84,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_SYS_SIZE "sys_size"
 #define NVS_KEY_SYS_CONTRAST "sys_contrast"
 #define NVS_KEY_LOCK_STYLE "lock_ui"
+#define NVS_KEY_TICKET_BACKGROUND "ticket_bg"
 #define NVS_KEY_WALLPAPER "wallpaper"
 #define NVS_KEY_BOOKMARK "lock_png"
 #define NVS_KEY_WAKE "lwake"
@@ -176,6 +179,7 @@ static char s_system_font[FONT_PATH_MAX];
 static uint8_t s_system_size = 120;
 static uint8_t s_system_contrast = 100;
 static uint8_t s_lock_style;
+static app_ticket_background_t s_ticket_background = APP_TICKET_BACKGROUND_TRANSPARENT;
 static char s_wallpaper[288];
 static char s_bookmark[288];
 static uint8_t s_last_wake;
@@ -403,6 +407,10 @@ void app_settings_init(void) {
     uint8_t lock_style = 0;
     if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 3)
         s_lock_style = lock_style;
+    uint8_t ticket_background = APP_TICKET_BACKGROUND_TRANSPARENT;
+    s_ticket_background = nvs_get_u8(h, NVS_KEY_TICKET_BACKGROUND, &ticket_background) == ESP_OK &&
+                          ticket_background <= APP_TICKET_BACKGROUND_COVER
+        ? (app_ticket_background_t)ticket_background : APP_TICKET_BACKGROUND_TRANSPARENT;
     size_t wallpaper_len = sizeof(s_wallpaper);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER, s_wallpaper, &wallpaper_len) != ESP_OK ||
         strncmp(s_wallpaper, "/sdcard/", 8)) s_wallpaper[0] = 0;
@@ -808,6 +816,20 @@ void app_settings_set_lock_style(uint8_t style) {
     if (style > 3 || style == s_lock_style) return;
     s_lock_style = style;
     nvs_put_u8(NVS_KEY_LOCK_STYLE, style);
+}
+app_ticket_background_t app_settings_ticket_background(void) { return s_ticket_background; }
+bool app_settings_set_ticket_background(app_ticket_background_t background) {
+    if (background != APP_TICKET_BACKGROUND_TRANSPARENT && background != APP_TICKET_BACKGROUND_COVER)
+        return false;
+    if (background == s_ticket_background) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_TICKET_BACKGROUND, (uint8_t)background);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err != ESP_OK) return false;
+    s_ticket_background = background;
+    return true;
 }
 const char* app_settings_bookmark_path(void) { return s_bookmark; }
 void app_settings_set_bookmark_path(const char *path) {
@@ -1518,6 +1540,8 @@ static bool backup_home_regions_valid(const settings_backup_home_regions_t *regi
 typedef struct { uint8_t on, checksum[4]; } settings_backup_progress_bar_t;
 // v36 复用布尔尾块格式，含义独立于进度条。/ V36 reuses the boolean tail layout independently of progress visibility.
 typedef settings_backup_progress_bar_t settings_backup_touch_t;
+// v37 追加票根背景，0透明、1封面；旧备份回落透明。/ V37 appends ticket backgrounds (0 transparent, 1 cover); older backups restore transparent.
+typedef settings_backup_progress_bar_t settings_backup_ticket_background_t;
 static uint32_t backup_progress_bar_checksum(const settings_backup_progress_bar_t *bar) {
     return (2166136261u ^ bar->on) * 16777619u;
 }
@@ -1642,10 +1666,10 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     unsigned char c = backup->magic[7];
     // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐；Z 追加 v35 书内样式。
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
-    // a 追加 v36 阅读禁触，不改变既有 v35 书内样式块。/ a appends v36 reader touch lock after the existing v35 book-style block.
+    // a 追加 v36 阅读禁触；b 追加 v37 票根背景。/ a appends v36 reader touch lock; b appends v37 ticket backgrounds.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1741,7 +1765,8 @@ esp_err_t app_settings_backup_save(void) {
     // v33：追加首页上下组件，不改变既有尾块顺序。/ V33 appends Home regions without reordering previous blocks.
     // v34：追加页脚和全屏进度条显隐。/ V34 appends footer/full-screen progress visibility.
     // v36：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V36 adds touch lock; a missing recovery binding restores touch.
-    memcpy(backup.magic, "PICOSETa", sizeof(backup.magic));
+    // v37：追加票根背景选择。/ V37 appends the ticket background choice.
+    memcpy(backup.magic, "PICOSETb", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1915,6 +1940,10 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t touch_hash = backup_progress_bar_checksum(&touch_lock);
     for (unsigned i = 0; i < 4; ++i) touch_lock.checksum[i] = (uint8_t)(touch_hash >> (8 * i));
     if (ok) ok = fwrite(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock);
+    settings_backup_ticket_background_t ticket_background = {.on = (uint8_t)s_ticket_background};
+    uint32_t ticket_hash = backup_progress_bar_checksum(&ticket_background);
+    for (unsigned i = 0; i < 4; ++i) ticket_background.checksum[i] = (uint8_t)(ticket_hash >> (8 * i));
+    if (ok) ok = fwrite(&ticket_background, 1, sizeof(ticket_background), file) == sizeof(ticket_background);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -2017,6 +2046,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_progress_bar_t progress_bar = {.on = 1};
     settings_backup_book_styles_t book_styles = {.on = 1};
     settings_backup_touch_t touch_lock = {.on = 0};
+    settings_backup_ticket_background_t ticket_background = {.on = APP_TICKET_BACKGROUND_TRANSPARENT};
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
@@ -2123,6 +2153,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 34) ok = fread(&progress_bar, 1, sizeof(progress_bar), file) == sizeof(progress_bar) && backup_progress_bar_valid(&progress_bar);
     if (ok && version >= 35) ok = fread(&book_styles, 1, sizeof(book_styles), file) == sizeof(book_styles) && backup_book_styles_valid(&book_styles);
     if (ok && version >= 36) ok = fread(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock) && backup_progress_bar_valid(&touch_lock);
+    if (ok && version >= 37) ok = fread(&ticket_background, 1, sizeof(ticket_background), file) == sizeof(ticket_background) && backup_progress_bar_valid(&ticket_background);
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -2216,6 +2247,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_STYLES, book_styles.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TICKET_BACKGROUND, ticket_background.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TOUCH_HAPTIC, haptic.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
 
@@ -2319,6 +2351,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_system_size = f[BK_SYS_SIZE];
     s_system_contrast = f[BK_SYS_CONTRAST];
     s_lock_style = f[BK_LOCK];
+    s_ticket_background = (app_ticket_background_t)ticket_background.on;
     s_book_px = f[BK_BOOK_PX];
 
     s_reader_full_pages = f[BK_FULL_PAGES];

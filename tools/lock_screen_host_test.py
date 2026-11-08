@@ -55,6 +55,9 @@ static const int xs[3]={158,342,526},ys[4]={544,703,862,1021},E0470_WAVEFORM=0,E
 #define UI_BUILTIN_IMAGE_LOCK 0
 static uint8_t framebuffer[FRAME_BYTES];
 static uint8_t selected_style;
+enum {APP_TICKET_BACKGROUND_TRANSPARENT,APP_TICKET_BACKGROUND_COVER};
+static unsigned ticket_background;
+static unsigned app_settings_ticket_background(void){return ticket_background;}
 static const char *wallpaper="";
 uint8_t app_settings_lock_style(void){return selected_style;}
 const char *app_settings_wallpaper_path(void){return wallpaper;}
@@ -163,6 +166,13 @@ int main(void){
  memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f));
  for(unsigned at=0;at<FRAME_BYTES;++at)assert(f[at]==0xee);
  lock_screen_save(framebuffer);assert(lock_screen_restore(f));
+ for(unsigned background=0;background<2;++background){
+  selected_style=0;ticket_background=background;lock_screen_save(framebuffer);assert(lock_screen_restore(f));
+  ticket_background=1-background;memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f));
+  for(unsigned at=0;at<FRAME_BYTES;++at)assert(f[at]==0xee);
+  ticket_background=background;assert(lock_screen_restore(f));
+ }
+ ticket_background=0;
  selected_style=1;assert(!lock_screen_restore(f));
  wallpaper=LOCK_SCREEN_CACHE_PARENT "/a.jpg";lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  wallpaper=LOCK_SCREEN_CACHE_PARENT "/b.jpg";memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);
