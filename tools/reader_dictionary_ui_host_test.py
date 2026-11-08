@@ -9,6 +9,8 @@ from home_cover_cache_host_test import function
 ROOT=Path(__file__).resolve().parents[1];BOOK=ROOT/'main/apps/app_book.c'
 unit=r'''
 #include <assert.h>
+#define READER_WIDTH 684
+#define READER_HEIGHT 1216
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

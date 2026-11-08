@@ -29,6 +29,7 @@
 - [docs/development/guides/MOBI.md](guides/MOBI.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_DICTIONARY.md](guides/READER_DICTIONARY.md)
+- [docs/development/guides/READER_ORIENTATION.md](guides/READER_ORIENTATION.md)
 - [docs/development/guides/READER_PERFORMANCE.md](guides/READER_PERFORMANCE.md)
 - [docs/development/guides/READING_JOURNAL.md](guides/READING_JOURNAL.md)
 - [docs/development/guides/WEATHER.md](guides/WEATHER.md)

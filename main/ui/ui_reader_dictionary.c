@@ -18,7 +18,8 @@ EpdRect ui_reader_dictionary_selection(uint8_t *fb, const reader_selection_t *s,
     const book_layout_glyph_t *g, size_t count) {
     uint32_t first, last;
     if (!fb || !reader_selection_range(s, g, count, &first, &last)) return (EpdRect){0};
-    EpdRect box = {UI_LOCK_WIDTH, UI_LOCK_HEIGHT, 0, 0}; int right = 0, bottom = 0;
+    const int width = epd_rotated_display_width(), height = epd_rotated_display_height();
+    EpdRect box = {width, height, 0, 0}; int right = 0, bottom = 0;
     size_t first_glyph = count, last_glyph = count;
     for (size_t i = 0; i < count; ++i) if (g[i].start >= first && g[i].start < last) {
         if (first_glyph == count) first_glyph = i;
@@ -39,19 +40,19 @@ EpdRect ui_reader_dictionary_selection(uint8_t *fb, const reader_selection_t *s,
     }
     if (box.x < 0) box.x = 0;
     if (box.y < 0) box.y = 0;
-    if (right > UI_LOCK_WIDTH) right = UI_LOCK_WIDTH;
-    if (bottom > UI_LOCK_HEIGHT) bottom = UI_LOCK_HEIGHT;
+    if (right > width) right = width;
+    if (bottom > height) bottom = height;
     for (int y = box.y; y < bottom; ++y) {
-        unsigned char covered[UI_LOCK_WIDTH] = {0};
+        unsigned char covered[1216] = {0};
         for (size_t i = 0; i < count; ++i) if (g[i].start >= first && g[i].start < last &&
             y >= g[i].y && y < g[i].y + g[i].height) {
             int from = g[i].x, to = from + g[i].width;
             if (from < 0) from = 0;
-            if (to > UI_LOCK_WIDTH) to = UI_LOCK_WIDTH;
+            if (to > width) to = width;
             if (to > from) memset(covered + from, 1, (size_t)(to - from));
         }
         for (int i = 0; i < 2; ++i) for (int x = handle_x[i] - 7; x <= handle_x[i] + 7; ++x)
-            if (x >= 0 && x < UI_LOCK_WIDTH &&
+            if (x >= 0 && x < width &&
                 (x - handle_x[i]) * (x - handle_x[i]) + (y - handle_y[i]) * (y - handle_y[i]) <= 49)
                 covered[x] = 1;
         for (int x = box.x; x < right;) {

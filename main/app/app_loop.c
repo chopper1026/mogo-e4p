@@ -272,6 +272,7 @@ static void menu_feedback(app_ctx_t* ctx, const app_desc_t* current,
 
 // 菜单页不是 app，单独画。/ The menu is not an app; present it here.
 static void present_menu(app_ctx_t* ctx, const app_desc_t* current, int leaf, menu_feedback_t* feedback) {
+    if (current->on_system_overlay) current->on_system_overlay(ctx);
     s_presented_main = NULL;
     feedback->updates = 0;
     if (display_take_white_exit()) {
@@ -618,6 +619,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     // still holds a stale press frame (measured toolbar chain).
                     s_last_frame = f;
                     app_input_frame_to_touch(&f, &touch);
+                    app_input_rotate_touch(&touch);
                     app_input_ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
                     // 快捷层与电源弹窗都按帧回放：只在排空后喂最后一帧会丢掉按下沿，
@@ -737,6 +739,7 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 #endif
         if (!replayed) {
+            app_input_rotate_touch(&touch);
             app_input_ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
                                frame_ms, &last_input_ms, &pressed, &released);
             // 单指按下沿给一记短震；回放帧不重复，多点、读错与读卡模式不震。
@@ -1000,6 +1003,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         ctx.released = false;
                         app_present(&ctx, current, APP_REDRAW_PAGE);
                     } else {
+                        const bool underlay_changed = current->on_system_overlay && current->on_system_overlay(&ctx);
                         power_dialog_open = true;
                         ui_power_dialog_reset(&power_dialog, touch.touched);
                         ctx.request_app = NULL;
@@ -1007,7 +1011,10 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         ui_text_set_system_scale(true);
                         ui_power_dialog_draw(ctx.fb, &power_dialog);
-                        enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_LAYOUT, ui_power_dialog_rect(), DISPLAY_REFRESH_DEFAULT);
+                        const EpdRect dialog_area = underlay_changed
+                            ? (EpdRect){0, 0, epd_rotated_display_width(), epd_rotated_display_height()}
+                            : ui_power_dialog_rect();
+                        enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_LAYOUT, dialog_area, DISPLAY_REFRESH_DEFAULT);
                         guard_draw_result(ctx.hl, result);
                         if (result != EPD_DRAW_SUCCESS) {
                             power_dialog_open = false;
@@ -1120,7 +1127,7 @@ void app_loop_run(const app_loop_config_t* config) {
             !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
             (app_quick_layer_is_open() || app_navigation_main_page_ready(&ctx, current)) &&
             ui_nav_status_power_changed()) {
-            EpdRect area = {0, 0, UI_LOCK_WIDTH, 76};
+            EpdRect area = {0, 0, epd_rotated_display_width(), 76};
             if (app_quick_layer_is_open()) ui_quick_menu_draw_status(ctx.fb);
             else {
                 ui_fill_rect_fast(area, 0xff, ctx.fb);

@@ -20,6 +20,8 @@ static char drawn[32768];
 static enum EpdRotation rotation=EPD_ROT_PORTRAIT;
 int epd_width(void) { return 1216; }
 int epd_height(void) { return 684; }
+int epd_rotated_display_width(void) { return rotation & 1 ? 684 : 1216; }
+int epd_rotated_display_height(void) { return rotation & 1 ? 1216 : 684; }
 enum EpdRotation epd_get_rotation(void) { return rotation; }
 static int selected=2;
 int ttf_font_select(int slot) { int previous=selected;selected=slot;return previous; }
@@ -55,6 +57,16 @@ int main(void) {
         physical=ui_rotate_rect_to_fb((EpdRect){400,400,1,1});at=(size_t)physical.y*608+physical.x/2;assert(fb[at]==original[at]);
         ui_reader_dictionary_selection(fb,&s,glyphs,2);assert(!memcmp(fb,original,bytes));
     }
+    // 横屏选区触及右下边缘，XOR仍可逆且不跨帧缓冲守卫。
+    // Landscape selections touch the bottom-right edge while XOR remains reversible and inside framebuffer guards.
+    glyphs[1]=(book_layout_glyph_t){3,3,1184,638,32,46};
+    for(unsigned pass=0;pass<2;++pass){
+        rotation=pass?EPD_ROT_INVERTED_LANDSCAPE:EPD_ROT_LANDSCAPE;
+        EpdRect area=ui_reader_dictionary_selection(fb,&s,glyphs,2);
+        assert(area.x==0&&area.y==0&&area.width==1216&&area.height==684&&memcmp(fb,original,bytes));
+        ui_reader_dictionary_selection(fb,&s,glyphs,2);assert(!memcmp(fb,original,bytes));
+    }
+    rotation=EPD_ROT_PORTRAIT;
     for(unsigned i=0;i<16;++i)assert(guard[i]==0xa5&&guard[bytes+16+i]==0xa5);
     book_dictionary_result_t r={.status=BOOK_DICTIONARY_OK};
     strcpy(r.reading,"yù\nyú\n更多读音");strcpy(r.variant,"鬱");strcpy(r.example,"这是完整例句。");
