@@ -64,6 +64,7 @@ static bool app_settings_reader_hide_images(void) { ++setting_reads; return (fla
 static bool app_settings_book_vertical(void) { ++setting_reads; return (flags & 16) != 0; }
 #ifndef LEGACY
 static bool app_settings_book_styles(void) { ++setting_reads; return (flags & 64) != 0; }
+static bool app_settings_reader_touch_disabled(void) { ++setting_reads; return (flags & 128) != 0; }
 #endif
 static void draw_sheet(uint8_t *fb, int top, const char *title) {
     assert(fb == framebuffer);
@@ -89,8 +90,8 @@ int main(void) {
     const int setting_count=7;
     const unsigned flag_count=32;
 #else
-    const int setting_count=9;
-    const unsigned flag_count=128;
+    const int setting_count=10;
+    const unsigned flag_count=256;
 #endif
     for (unsigned si = 0; si < sizeof(scales) / sizeof(*scales); ++si) {
         scale = scales[si];
@@ -118,7 +119,7 @@ int main(void) {
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, false);
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, true);
 #ifndef LEGACY
-    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false};
+    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false, true};
     const ui_reader_settings_values_t before = values;
     unsigned reads_before = setting_reads;
     recording = false;

@@ -8,6 +8,7 @@
 #include "app_input.h"
 #include "touch_diag.h"
 #include "display_orientation.h"
+#include "ui_menu.h"
 #include <string.h>
 
 #if CONFIG_TOUCH_DIAG
@@ -54,6 +55,26 @@ static void debounce_touch(
         }
     }
     memcpy(latest->raw, raw->raw, sizeof(raw->raw));
+}
+
+bool app_input_filter_screen_touch(app_input_touch_filter_t *filter, app_touch_t *touch,
+                                  esp_err_t err, bool disabled) {
+    if (err != ESP_OK) {
+        filter->blocked = filter->contact;
+        return filter->blocked;
+    }
+    if (!touch->touched) {
+        *filter = (app_input_touch_filter_t){.disabled = disabled};
+        return false;
+    }
+    if ((filter->contact && filter->disabled != disabled) ||
+        (disabled && (touch->count != 1 || ui_key_hit_test(touch->x, touch->y) < 0)))
+        filter->blocked = true;
+    filter->contact = true;
+    filter->disabled = disabled;
+    if (!filter->blocked) return false;
+    memset(touch, 0, sizeof(*touch));
+    return true;
 }
 
 void app_input_frame_to_touch(const touch_frame_t* f, app_touch_t* t) {

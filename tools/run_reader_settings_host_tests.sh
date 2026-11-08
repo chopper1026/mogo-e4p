@@ -5,5 +5,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 tools/reader_settings_view_host_test.py
 python3 tools/reader_ui_scale_host_test.py
+python3 tools/reader_notice_ui_host_test.py
 python3 tools/reading_settings_host_test.py
 python3 tools/ui_font_coverage_host_test.py

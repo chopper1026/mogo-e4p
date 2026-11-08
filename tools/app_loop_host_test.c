@@ -33,8 +33,10 @@ static app_redraw_t transfer_return_tick(app_ctx_t*);
 static app_redraw_t auto_update_return_tick(app_ctx_t*);
 static bool auto_update_pending, auto_update_return;
 static unsigned auto_update_offers, auto_update_acks;
+static bool screen_disabled;
+static bool screen_policy(app_ctx_t *);
 
-const app_desc_t app_book = {.title="book",.render=render,.on_enter=enter,.on_exit=leave};
+const app_desc_t app_book = {.title="book",.render=render,.on_enter=enter,.on_exit=leave,.screen_touch_disabled=screen_policy};
 const app_desc_t app_transfer = {.title="transfer",.on_tick=transfer_return_tick};
 const app_desc_t app_device_settings = {.title="settings",.on_tick=auto_update_return_tick};
 // 快捷栏长按直达设置页只记录请求；页面本身的进入由 app_navigation_switch_to 计数。
@@ -410,6 +412,7 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    screen_disabled=false;
     key_sampling=key_sampler_started=false;key_sampler_starts=key_sampler_enables=0;
 #ifdef POWER_KEY_SAMPLER_USB_TEST
     power_key_test_usb_active=false;
@@ -613,8 +616,59 @@ static app_redraw_t key_sampling_tick(app_ctx_t *ctx) {
     return APP_REDRAW_NONE;
 }
 #endif
+static bool screen_policy(app_ctx_t *ctx) {(void)ctx;return screen_disabled;}
+static app_redraw_t restore_screen_key(app_ctx_t *ctx, int k) {
+    (void)ctx;
+    ++keys[k];
+    screen_disabled = false;
+    return APP_REDRAW_PAGE;
+}
+static void add_filtered_sample(bool replay, int x, int y, int count) {
+    if (replay) touch_sampler_test_push((uint32_t)(sample_count * 100), x, y, count);
+    add(x, y, count, ESP_OK);
+}
+static void test_screen_touch_lock(void) {
+    for (unsigned replay = 0; replay < 2; ++replay) {
+        reset();first.owns_keys=true;first.on_gesture=gesture;first.screen_touch_disabled=screen_policy;
+        screen_disabled=true;touch_sampler_test_enable(replay);
+        add_filtered_sample(replay, 50, 20, 1);
+        add_filtered_sample(replay, 50, 180, 1);
+        add_filtered_sample(replay, 0, 0, 0);
+        add_filtered_sample(replay, 342, 1160, 1);
+        add_filtered_sample(replay, 342, 980, 1);
+        add_filtered_sample(replay, 0, 0, 0);
+        add_filtered_sample(replay, 80, 900, 1);
+        add_filtered_sample(replay, 80, 1500, 1);
+        add_filtered_sample(replay, 0, 0, 0);
+        for (int k = 0; k < 3; ++k) {
+            add_filtered_sample(replay, k * 160 + 80, 1500, 1);
+            add_filtered_sample(replay, 0, 0, 0);
+        }
+        run();touch_sampler_test_enable(false);
+        assert(keys[0]==1&&keys[1]==1&&keys[2]==1&&haptic_pulses==(replay?0:3));
+        assert(!events[UI_GESTURE_PRESS]&&!events[UI_GESTURE_TAP]&&!events[UI_GESTURE_MOVE]&&!quick_draws&&!touch_calls);
+        reset();first.owns_keys=true;first.on_gesture=gesture;first.screen_touch_disabled=screen_policy;
+        first.on_key=restore_screen_key;screen_disabled=true;touch_sampler_test_enable(replay);
+        add_filtered_sample(replay, 80, 1500, 1);
+        add_filtered_sample(replay, 80, 1500, 1);
+        add_filtered_sample(replay, 200, 800, 1);
+        add_filtered_sample(replay, 0, 0, 0);
+        add_filtered_sample(replay, 200, 800, 1);
+        add_filtered_sample(replay, 0, 0, 0);
+        run();touch_sampler_test_enable(false);
+        assert(!screen_disabled&&keys[0]==1&&events[UI_GESTURE_PRESS]==1&&events[UI_GESTURE_TAP]==1);
+    }
+    reset();start_book=screen_disabled=true;reader_body=false;power_trigger_step=1;time_step=3000000;
+    add(0,0,0,0);add(0,0,0,0);run();
+    assert(idle_locks==1&&!power_open_draws&&!shutdowns);
+    reset();start_book=screen_disabled=reader_body=true;lock_due=true;time_step=3000000;
+    add(0,0,0,0);add(0,0,0,0);run();
+    assert(idle_locks==1&&!power_open_draws);
+    puts("PASS: live/replayed reader touch lock blocks screen/quick gestures and screen-to-key drags, retains three keys, quarantines unlock contact");
+}
 int main(void) {
     test_panel_key_replay();
+    test_screen_touch_lock();
     // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。
     // Automatic offers retain the body resume point through real navigation; touch and existing requests win.
     reset();start_book=reader_body=reader_resume_ok=reader_resume_fullscreen=true;

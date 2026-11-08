@@ -35,6 +35,7 @@ typedef struct {
     bool tools_toggle; ///< 本帧切换工具栏 / Tools toggle in this frame
     bool closing_tools_to_text; ///< 工具栏收起回到纯文字 / Closing tools onto text
     bool closing_panel_to_text; ///< 面板收起回到纯文字 / Closing a panel onto text
+    bool closing_notice; ///< 提示收起后整屏归一 / Normalize the whole screen after dismissing a notice
     bool feedback; ///< 书架按压局部反馈 / Shelf press feedback
     bool fullscreen; ///< 阅读全屏偏好 / Reader full-screen state
     bool turn_pending; ///< 普通文字翻页 / Ordinary text turn

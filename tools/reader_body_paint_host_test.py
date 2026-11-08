@@ -68,6 +68,8 @@ static int reader_footer_height(void);
 static EpdRect body_rect(void){return (EpdRect){36,body_y,612,1192-reader_footer_height()-body_y};}
 static bool app_settings_reader_statusbar(void){return statusbar_on;}
 static bool app_settings_book_vertical(void){return false;}
+static unsigned app_settings_system_font_size(void){return 120;}
+static void ui_reader_notice_draw(uint8_t *fb,const char *message,unsigned scale){(void)fb;(void)message;(void)scale;}
 static void ui_text_set_system_scale(bool on){(void)on;}
 static void ui_nav_status(uint8_t *fb){(void)fb;++chrome_calls;}
 static void draw_reader_header(uint8_t *fb){(void)fb;++chrome_calls;}
@@ -98,6 +100,7 @@ static uint8_t ui_control_gray(uint8_t gray){return gray;}
 static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t gray){(void)fb;(void)y;(void)x;(void)w;(void)gray;++chrome_calls;}
 static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *v,const char *face,int align){(void)fb;(void)x;(void)y;(void)px;(void)v;(void)face;(void)align;++chrome_calls;}
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *v,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)v;(void)align;(void)inv;++chrome_calls;}
+static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *v,int align,bool inv){ui_text_vc(fb,box.x,box.y,px,v,align,inv);}
 static size_t book_layout_page_count(void){return 47;}
 static int ui_text_title_fit(char *out,int preferred,int width,const char *source){(void)out;(void)preferred;(void)width;(void)source;return preferred;}
 static int ui_content_width(void){return UI_LOCK_WIDTH;}

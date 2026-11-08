@@ -8,6 +8,7 @@ import tempfile
 from run_reader_baseline import toolchain
 
 ROOT = Path(__file__).resolve().parents[1]
+(ROOT / "build/book-tests").mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="settings-backup-") as directory:
     folder = Path(directory)
     env, _ = toolchain(folder)

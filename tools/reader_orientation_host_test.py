@@ -4,6 +4,7 @@ English: Host regressions for four-way gravity, touch, real pagination and orien
 """
 from pathlib import Path
 import subprocess
+import re
 import tempfile
 from home_cover_cache_host_test import function
 from run_reader_baseline import toolchain
@@ -25,8 +26,16 @@ enum EpdRotation epd_get_rotation(void){return rotation;}
 void epd_set_rotation(enum EpdRotation value){rotation=value;}
 #define APP_TOUCH_MAX_POINTS 2
 typedef struct {bool active;uint16_t x,y;} point_t;
-typedef struct {bool touched;uint16_t x,y;point_t points[2];uint8_t raw[16];} app_touch_t;
+typedef struct {bool touched;uint8_t count;uint16_t x,y;point_t points[2];uint8_t raw[16];} app_touch_t;
+typedef int esp_err_t;
+#define ESP_OK 0
 '''
+policy += re.search(r'typedef struct \{[^{}]*\} app_input_touch_filter_t;',
+                    (ROOT / "main/app/app_input.h").read_text(), re.S).group(0) + "\n"
+policy += "\n".join(re.findall(r'^#define UI_KEY[^\n]*',
+                               (ROOT / "main/ui/ui_menu.h").read_text(), re.M)) + "\n"
+policy += function("ui_key_hit_test", ROOT / "main/ui/ui_menu.c") + "\n"
+policy += function("app_input_filter_screen_touch", ROOT / "main/app/app_input.c") + "\n"
 policy += function("app_input_rotate_touch", ROOT / "main/app/app_input.c")
 policy += r'''
 static void physical(int x,int y,int *px,int *py){
@@ -45,6 +54,10 @@ int main(void){
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
    uint16_t xx=x,yy=y;display_orientation_touch(&xx,&yy);int px,py;physical(xx,yy,&px,&py);
    assert(px==y&&py==683-x);
+   app_input_touch_filter_t filter={0};
+   app_touch_t blocked={.touched=true,.count=1,.x=x,.y=y};
+   assert(app_input_filter_screen_touch(&filter,&blocked,ESP_OK,true));
+   app_input_rotate_touch(&blocked);assert(!blocked.touched&&!blocked.count);
   }
   app_touch_t touch={.touched=true,.x=15,.y=34,.points={{true,15,34},{true,650,1100}}};
   memset(touch.raw,0xa6,sizeof(touch.raw));uint16_t x=650,y=1100;display_orientation_touch(&x,&y);
@@ -54,6 +67,12 @@ int main(void){
   touch=(app_touch_t){.touched=true,.x=240,.y=1500,.points={{true,240,1500},{false,12,13}}};
   app_input_rotate_touch(&touch);assert(touch.x==240&&touch.y==1500&&touch.points[0].y==1500);
   assert(touch.points[1].x==12&&touch.points[1].y==13);
+  for(int key=0;key<UI_KEY_COUNT;++key){
+   app_input_touch_filter_t filter={0};
+   touch=(app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=1500};
+   assert(!app_input_filter_screen_touch(&filter,&touch,ESP_OK,true));
+   app_input_rotate_touch(&touch);assert(touch.touched&&touch.x==key*UI_KEY_PITCH+80&&touch.y==1500);
+  }
  }
  reader_orientation_t state={0};display_orientation_t next=DISPLAY_ORIENTATION_PORTRAIT;
  assert(!stable(&state,-1000,0,0,1000,&next));

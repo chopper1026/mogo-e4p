@@ -19,8 +19,8 @@ Screen orientation is independent of horizontal/vertical typesetting. Tap region
 
 ## 所有权与恢复 / Ownership And Recovery
 
-`display_orientation` 只封装 EPD 方向编号和竖屏触点转换，不读传感器、不决定页面行为。正常竖屏对应 `EPD_ROT_INVERTED_PORTRAIT`；UI 任务在触点摄取前转换屏内坐标，采样队列保留原始竖屏帧，屏外键与诊断字节不转换。
-`display_orientation` wraps EPD numbering and native portrait-contact conversion without sensor reads or page policy. Normal portrait is `EPD_ROT_INVERTED_PORTRAIT`. The UI task converts on-panel contacts before ingestion, while queues retain native portrait frames and cover keys/raw diagnostic bytes remain untouched.
+`display_orientation` 只封装 EPD 方向编号和竖屏触点转换，不读传感器、不决定页面行为。正常竖屏对应 `EPD_ROT_INVERTED_PORTRAIT`；UI 任务在触点摄取前转换屏内坐标，采样队列保留原始竖屏帧，屏外键与诊断字节不转换。阅读禁触先按原始坐标过滤，再转换保留的触点，确保四向屏幕输入仍被屏蔽且三枚屏外键仍可恢复触摸。
+`display_orientation` wraps EPD numbering and native portrait-contact conversion without sensor reads or page policy. Normal portrait is `EPD_ROT_INVERTED_PORTRAIT`. The UI task converts on-panel contacts before ingestion, while queues retain native portrait frames and cover keys/raw diagnostic bytes remain untouched. Reader touch lock filters native contacts before rotation, retaining screen blocking and recovery through the three cover keys in every orientation.
 
 `reader_orientation` 仅判断稳定方向。页面与晃动翻页共用25Hz加速度计配置、50ms轮询及现有供电交还；使用 `board_accel_read` 已转换的设备轴，不新增后台任务。主轴至少650mg、比另一平面轴大200mg，合加速度在0.7–1.3g内且Z轴不超过800mg；样本间隔不得超过200ms，任一轴跳变超过160mg重新计时。候选换向期间不触发晃动翻页，已有晃动方向按当前屏轴转换。
 `reader_orientation` only detects stable direction. The page shares the existing 25Hz configuration, 50ms polling and sensor handoff with shake turns, using device axes from `board_accel_read` without another task. A dominant axis must exceed 650mg and the other in-plane axis by 200mg, with magnitude 0.7–1.3g and Z at most 800mg. Gaps above 200ms or per-axis jumps above 160mg restart stability. Candidate turns suppress shake paging; shake directions map to the current screen axes.

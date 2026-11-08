@@ -36,6 +36,8 @@
  * User click feedback: locally enlarge navigation/round backs on press and restore on release. Retain one small control only; navigation, full refresh and lock discard it without replaying old frames.
  * 用户修订：确认主动锁屏后，拼贴样式先给局部圆锁反馈，再保存/等待阅读预渲染；自动休眠和直接关机/重启不加此反馈。
  * User revision: acknowledge accepted manual collage locks before saves/reader joins; omit the badge for automatic sleep and direct shutdown/restart.
+ * 用户2026-11-08修订：阅读关闭触摸时只保留底部三键；直读与回放在手势、快捷层及电源弹窗前统一过滤。
+ * User revision 2026-11-08: reader touch lock retains only the panel keys; filter live and replayed frames before gestures, quick layer and power dialog.
  */
 
 #include "../diagnostics/reader_perf.h"
@@ -461,7 +463,8 @@ static void up_key_global_tick(app_ctx_t* ctx, const app_desc_t* current) {
     static int64_t s_poll_ms;
     static bool s_down;
     static int64_t s_down_ms;
-    if (current == &app_book && app_book_reader_body_visible()) {
+    if (current == &app_book && (app_book_reader_body_visible() ||
+        (current->screen_touch_disabled && current->screen_touch_disabled(ctx)))) {
         s_down = false;
         return;
     }
@@ -566,6 +569,7 @@ void app_loop_run(const app_loop_config_t* config) {
     // 上一轮是否切过页/换过屏；只有这种残留导航才丢弃，普通刷新阻塞期间的点击必须放行。
     // Whether the previous iteration changed screens; only such stale navigation is dropped.
     bool just_transitioned = false;
+    app_input_touch_filter_t touch_filter = {0};
     while (true) {
         // 先清旧切页请求，再摄取新帧；新页绘制期间积压的按键不能被清掉。
         // Clear stale transition requests before ingesting new frames, not keys buffered while the new page drew.
@@ -619,6 +623,11 @@ void app_loop_run(const app_loop_config_t* config) {
                     // still holds a stale press frame (measured toolbar chain).
                     s_last_frame = f;
                     app_input_frame_to_touch(&f, &touch);
+                    if (app_input_filter_screen_touch(&touch_filter, &touch, ESP_OK,
+                        current->screen_touch_disabled && current->screen_touch_disabled(&ctx))) {
+                        key_hold.key = -1;
+                        app_input_cancel_gesture(&ctx, current, &gesture);
+                    }
                     app_input_rotate_touch(&touch);
                     app_input_ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
@@ -739,6 +748,11 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 #endif
         if (!replayed) {
+            if (app_input_filter_screen_touch(&touch_filter, &touch, err,
+                current->screen_touch_disabled && current->screen_touch_disabled(&ctx))) {
+                key_hold.key = -1;
+                app_input_cancel_gesture(&ctx, current, &gesture);
+            }
             app_input_rotate_touch(&touch);
             app_input_ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
                                frame_ms, &last_input_ms, &pressed, &released);
@@ -987,7 +1001,8 @@ void app_loop_run(const app_loop_config_t* config) {
                     menu_pressed = UI_MENU_HIT_NONE;
                     extern const app_desc_t app_book;
                     bool reader_power_lock = !menu_open && current == &app_book &&
-                        app_book_reader_body_visible() && app_settings_reader_power_turn();
+                        ((app_book_reader_body_visible() && app_settings_reader_power_turn()) ||
+                         (current->screen_touch_disabled && current->screen_touch_disabled(&ctx)));
                     if (reader_power_lock) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();

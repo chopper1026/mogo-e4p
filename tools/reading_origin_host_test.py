@@ -74,6 +74,7 @@ static app_redraw_t turn_page(app_ctx_t *ctx,int d){(void)ctx;(void)d;return APP
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static void invalidate_prep(void){}
+static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
 static bool s_fl_on;
 static int s_fl_applies;
 static bool frontlight_ready(void){return true;}

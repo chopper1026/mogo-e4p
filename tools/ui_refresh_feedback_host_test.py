@@ -86,6 +86,7 @@ static void display_present_end(bool held){assert(held);}
 static app_redraw_t dictionary_dismiss(void);
 static int s_presented_panel;
 static bool s_dictionary_presented,s_dictionary_feedback_pending;
+static bool s_reader_notice_presented;
 static struct {bool active;} s_dictionary_selection;
 static struct {bool open;int top;} s_dictionary_view;
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;s_dictionary_view.open=false;return APP_REDRAW_PAGE;}
@@ -180,6 +181,7 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const int *wave,
 static enum EpdDrawError update_display_area_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(AREA,mode,area);}
 static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(LOCAL_FULL,mode,area);}
 static enum EpdDrawError update_display_with(void *hl,const int *wave,enum EpdDrawMode mode){(void)hl;(void)wave;return record(WHOLE,mode,(EpdRect){0});}
+static void display_request_full_refresh(void){}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;return record(FULL,MODE_GC16,(EpdRect){0});}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return record(FAST,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_mode_diff(void *hl,enum EpdDrawMode mode){(void)hl;return record(READER,mode,(EpdRect){0});}
@@ -428,6 +430,21 @@ int main(void){
  s_dictionary_view.open=s_dictionary_selection.active=true;present(&ctx,APP_REDRAW_PAGE);
  s_dictionary_view.open=s_dictionary_selection.active=false;test_types[0][0]=1;
  trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_dictionary_presented&&trace_route[0]!=LOCAL_FULL);
+ // 提示到期后只归一一次，失败保留重试标记；后续普通绘制不再归一。
+ // A dismissed notice normalizes once, retaining retries after errors and leaving later paints ordinary.
+ test_types[0][0]=0;s_reader_panel=s_presented_panel=READER_PANEL_NONE;
+ for(int gray=0;gray<2;++gray)for(int image=0;image<2;++image)for(int panel=0;panel<2;++panel)for(int pending=0;pending<2;++pending){
+  test_hold_gray=gray;test_types[0][0]=image;s_reader_panel=s_presented_panel=panel?READER_PANEL_TOOLS:READER_PANEL_NONE;
+  strcpy(s_reader_notice,"notice");trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(s_reader_notice_presented);
+  s_reader_notice[0]=0;s_reader_image_refresh_pending=pending;test_push_error=EPD_DRAW_ERROR;trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+  assert(s_reader_notice_presented&&trace_count==1&&trace_route[0]==LOCAL_FULL);
+  test_push_error=0;trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+  assert(!s_reader_notice_presented&&trace_count==1&&trace_route[0]==LOCAL_FULL);
+  assert(trace_wave[0]==(gray||image?normalize_gray_wave:normalize_wave));
+  assert(trace_area[0].x==0&&trace_area[0].y==0&&trace_area[0].width==684&&trace_area[0].height==1216);
+  trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(trace_route[0]!=LOCAL_FULL);
+ }
+ puts("PASS: notice dismissal normalizes the complete screen once, protects image/background gray, retries display failures and does not repeat");
  puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 36 bidirectional chapter transitions with GL16 footer/progress, failed image/display/load guards and actual cleanup/water turns");
 }
 '''

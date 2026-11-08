@@ -221,8 +221,8 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
 /// 取消接触但保留已打开的层；正在拖动的滑杆保留当前值，由主循环决定是否落盘。
 /// Cancel a contact while retaining an already open layer; a dragged slider keeps its value and the loop decides persistence.
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu);
-/// 只覆盖顶部，保留下层其他像素；阅读时保留第二排，前光展开时在圆键下方画滑杆。
-/// Cover only the top, leaving other pixels intact; retain row two while reading and draw expanded sliders below the keys.
+/// 只覆盖顶部，保留下层其他像素；阅读时保留第二排，前光滑杆按横竖屏排版。
+/// Cover only the top, leaving other pixels intact; retain row two while reading and lay out expanded sliders for the screen orientation.
 void ui_quick_menu_draw(uint8_t *fb, const ui_quick_menu_t *menu, bool wifi, bool bluetooth);
 /// 当前按住的圆键，取消/滑出/释放或按住卡片时为-1。/ The held key, or -1 after cancellation, movement, release or a card press.
 int ui_quick_menu_pressed(const ui_quick_menu_t *menu);

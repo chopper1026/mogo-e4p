@@ -36,6 +36,9 @@ def function(name, path=source):
     return text[start:at]
 
 unit = r'''
+#define READER_WIDTH 684
+#define READER_HEIGHT 1216
+#define READER_BAR_TOP 1096
 typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GESTURE_SWIPE_D, UI_GESTURE_TAP, UI_GESTURE_CANCEL } ui_gesture_type_t;
 #include <assert.h>
 #include <stdbool.h>
@@ -381,6 +384,10 @@ static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
+static bool test_book_styles=true,test_layout_book_styles=true;
+static bool app_settings_book_styles(void){return test_book_styles;}
+static bool app_settings_set_book_styles(bool enabled){test_book_styles=enabled;return true;}
+static void book_layout_set_book_styles(bool enabled){test_layout_book_styles=enabled;}
 static bool test_book_vertical;
 static bool app_settings_book_vertical(void){return test_book_vertical;}
 static void app_settings_set_book_vertical(bool on){test_book_vertical=on;}
@@ -460,6 +467,8 @@ input_header='\n'.join(line for line in input_header.splitlines() if not line.st
 unit+=enum+'\n'+input_header+r'''
 static app_reader_key_action_t test_keys[3]={APP_READER_KEY_PREV,APP_READER_KEY_TOOLS,APP_READER_KEY_NEXT};
 static app_reader_key_action_t test_hold_action=APP_READER_KEY_REFRESH;
+static unsigned touch_toggles;
+static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;++touch_toggles;return APP_REDRAW_PAGE;}
 static app_reader_key_action_t test_double_action=APP_READER_KEY_NONE;
 static app_reader_key_action_t app_settings_reader_hold_action(void){return test_hold_action;}
 static app_reader_key_action_t app_settings_reader_double_action(void){return test_double_action;}
@@ -490,6 +499,7 @@ static book_collection_t s_collection;
 static bool shelf_collection_sync(bool complete){(void)complete;return true;}
 static bool legacy_category_recover(void){return true;}
 """
+unit += "static bool reader_orientation_portrait(void){return false;}\nstatic bool reader_orientation_sync(void){return false;}\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 unit += f'\n#include "{source.parents[1] / "book/reader_reflow.h"}"\n'
@@ -1003,6 +1013,17 @@ int main(void) {
     s_reader_return_home=false;
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
+    // 触摸开关沿真实三键短按、长按和双击入口分发，恢复逻辑由专项回归覆盖。
+    // Route touch toggles through real short/hold/double callbacks; dedicated tests cover recovery.
+    s_reader_panel=READER_PANEL_NONE;test_double_action=APP_READER_KEY_NONE;
+    for(int key=UI_KEY_1;key<=UI_KEY_3;++key){
+        test_keys[key-UI_KEY_1]=APP_READER_KEY_TOUCH;
+        assert(on_key(&ctx,key)==APP_REDRAW_PAGE);
+    }
+    test_hold_action=APP_READER_KEY_TOUCH;assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE);
+    test_double_action=APP_READER_KEY_TOUCH;test_keys[1]=APP_READER_KEY_NONE;ctx.now_ms=10000;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);ctx.now_ms+=100;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&touch_toggles==5);
     free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
