@@ -21,11 +21,13 @@ typedef struct {bool consumed,user_activity;int64_t now_ms;} app_ctx_t;
 typedef enum {UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_TAP,UI_GESTURE_CANCEL,UI_GESTURE_PRESS,UI_GESTURE_MOVE} ui_gesture_type_t;
 typedef struct {ui_gesture_type_t type;unsigned x0,y0,x,y;} ui_gesture_event_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
-enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_BACKGROUND_PREVIEW};
+enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_TITLE_STYLE,READER_PANEL_BACKGROUND_PREVIEW};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider=3,s_pressed_control=2;
 static bool s_reader_tools_toggle;
+static int s_title_style_scroll;
+static bool s_title_style_drag;
 static char *s_text="text";
 static bool s_clear_confirm,s_scan_pending;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
@@ -45,11 +47,19 @@ static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s"
 static int64_t esp_timer_get_time(void){return 1000000;}
 '''
 unit+='static unsigned font_scale=100;\nstatic unsigned app_settings_system_font_size(void){return font_scale;}\n'
-unit+=function('reader_ui_extra',book)+'\n'+function('reader_font_card',book)+'\n'
-for name in ['s_font_card','s_weight_card','s_bookfont_card','s_layout_card','s_rule_card','s_antialias_card']:
+unit+=function('reader_sheet_back_rect',book)+'\n'+function('reader_ui_extra',book)+'\n'+function('reader_font_card',book)+'\n'
+for name in ['s_font_card','s_weight_card','s_title_style_card','s_layout_card','s_bookfont_card','s_rule_card','s_antialias_card']:
+ unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
+for name in ('TITLE_STYLE_SHEET_TOP',):
  unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_tools_swipe',book)+'\n'+function('reader_swipe_direction',book)+'\n'
 action=function('reader_panel_action',book)
+a=action.index('        if (ui_rect_hit(s_title_style_card, x, y)) {')
+b=action.index('        if (ui_rect_hit(s_antialias_card, x, y)) {',a)
+unit+='static app_redraw_t tap_title(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
+a=action.index('        if (y < TITLE_STYLE_SHEET_TOP || ui_rect_hit(reader_sheet_back_rect(TITLE_STYLE_SHEET_TOP), x, y)) {')
+b=action.index('        // 槽位坐标',a)
+unit+='static app_redraw_t title_back(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 a=action.index('        if (ui_rect_hit(s_antialias_card, x, y)) {')
 b=action.index('        if (ui_rect_hit(layout, x, y)) {',a)
 unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
@@ -79,14 +89,36 @@ int main(void){
  reset(&ctx);s_scan_pending=true;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_view=SHELF;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_text=NULL;assert(!reader_tools_swipe(&ctx,&e));
- const EpdRect cards[]={s_font_card,s_weight_card,s_bookfont_card,s_layout_card,s_rule_card,s_antialias_card};
- for(unsigned i=0;i<6;++i){EpdRect r=cards[i];assert(r.x>=36&&r.y>=580&&r.x+r.width<=648&&r.y+r.height<1141);
+ const EpdRect cards[]={s_font_card,s_weight_card,s_title_style_card,s_layout_card,s_bookfont_card,s_rule_card,s_antialias_card};
+ for(unsigned i=0;i<7;++i){EpdRect r=cards[i];assert(r.x>=36&&r.y>=580&&r.x+r.width<=648&&r.y+r.height<=1200);
   for(unsigned j=0;j<i;++j){EpdRect q=cards[j];assert(r.x+r.width<=q.x||q.x+q.width<=r.x||r.y+r.height<=q.y||q.y+q.height<=r.y);}}
- assert(aa&&raster_aa);assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked);
- save_fail=true;assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked&&s_reader_notice_until==2800);
- save_fail=false;assert(tap_aa(400,1090)==APP_REDRAW_PAGE&&aa&&raster_aa&&!locked);
- assert(tap_aa(341,1090)==APP_REDRAW_NONE&&tap_aa(650,1090)==APP_REDRAW_NONE);
- puts("PASS: AA row hit bounds/save failures/cache invalidation, six nonoverlapping paired controls, bottom120px tools priority for either turn mode, already-open/modal/input cancellation and physical-key boundary");
+ for(font_scale=100;font_scale<=200;font_scale+=10){
+  EpdRect title=s_title_style_card;
+  for(int corner=0;corner<4;++corner){
+   s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_slider=3;s_title_style_scroll=214;s_title_style_drag=true;
+   assert(tap_title(title.x+((corner&1)?title.width-1:0),title.y+((corner&2)?title.height-1:0))==APP_REDRAW_PAGE);
+   assert(s_reader_panel==READER_PANEL_TITLE_STYLE&&s_reader_slider==-1&&!s_title_style_scroll&&!s_title_style_drag);
+  }
+  const int gaps[][2]={{35,title.y},{648,title.y},{36,title.y-1},{36,title.y+title.height}};
+  for(unsigned i=0;i<sizeof(gaps)/sizeof(gaps[0]);++i){
+   s_reader_panel=READER_PANEL_FONT_SETTINGS;
+   assert(tap_title(gaps[i][0],gaps[i][1])==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
+  }
+ }
+ font_scale=100;
+ const int returns[][2]={{64,TITLE_STYLE_SHEET_TOP+57},{32,TITLE_STYLE_SHEET_TOP+25},{95,TITLE_STYLE_SHEET_TOP+88},{342,TITLE_STYLE_SHEET_TOP-1}};
+ for(unsigned i=0;i<sizeof(returns)/sizeof(returns[0]);++i){
+  s_reader_panel=READER_PANEL_TITLE_STYLE;
+  assert(title_back(returns[i][0],returns[i][1])==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
+ }
+ s_reader_panel=READER_PANEL_TITLE_STYLE;
+ assert(title_back(342,TITLE_STYLE_SHEET_TOP+100)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_TITLE_STYLE);
+ assert(title_back(342,1170)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_TITLE_STYLE);
+ assert(aa&&raster_aa);assert(tap_aa(400,1150)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked);
+ save_fail=true;assert(tap_aa(400,1150)==APP_REDRAW_PAGE&&!aa&&!raster_aa&&!locked&&s_reader_notice_until==2800);
+ save_fail=false;assert(tap_aa(400,1150)==APP_REDRAW_PAGE&&aa&&raster_aa&&!locked);
+ assert(tap_aa(35,1150)==APP_REDRAW_NONE&&tap_aa(650,1150)==APP_REDRAW_NONE);
+ puts("PASS: AA row/save/cache behavior, seven full-width controls, direct heading entry/reset/return at 100–200%, bottom120px tools priority, modal/input cancellation and physical-key boundary");
 }
 '''
 assert 'if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;' in function('gesture_event',book)

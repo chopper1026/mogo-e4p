@@ -44,11 +44,11 @@ static int app_settings_book_indent_adjust(void){return saved;}
 static int app_settings_book_indent(void){return 2;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static void ui_text_set_system_scale(bool on){(void)on;}
-static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.y==970&&r.height==66&&r.x+r.width<=638);++draws;}
+static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.y==1064&&r.height==96&&r.x+r.width<=638);++draws;}
 static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)r;(void)radius;(void)color;}
-static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *s,int align,bool invert){(void)fb;(void)px;(void)s;(void)align;(void)invert;assert(r.y+r.height<1132);}
+static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *s,int align,bool invert){(void)fb;(void)px;(void)s;(void)align;(void)invert;assert(r.y+r.height<=1200);}
 static const int E0470_FOLLOW_WAVEFORM=1;
-static int update_display_area_diff_with(void *hl,const int *wave,int mode,EpdRect r){(void)hl;assert(wave==&E0470_FOLLOW_WAVEFORM&&mode==MODE_DU&&r.y==970&&r.height==66);++pushes;return 0;}
+static int update_display_area_diff_with(void *hl,const int *wave,int mode,EpdRect r){(void)hl;assert(wave==&E0470_FOLLOW_WAVEFORM&&mode==MODE_DU&&r.y==1064&&r.height==96);++pushes;return 0;}
 static void guard_draw_result(void *hl,int result){(void)hl;assert(result==0);}
 static app_redraw_t apply_reader_indent(app_ctx_t *ctx,int em,int value){(void)ctx;assert(em>=0&&em<=3&&value>=-100&&value<=100);if(value==saved)return APP_REDRAW_NONE;saved=value;++reflows;return APP_REDRAW_PAGE;}
 static EpdRect reader_slider_rect(int n){(void)n;return(EpdRect){0};}
@@ -59,13 +59,9 @@ static int app_settings_book_paragraph_spacing(void){return 0;}
 static int slider_index(EpdRect r,int x,int n){(void)r;(void)x;(void)n;return 0;}
 #define READER_LAYOUT_SHEET_TOP 420
 #define TITLE_STYLE_SHEET_TOP 405
-#define TITLE_STYLE_FOOTER_TOP 1150
 #define TITLE_STYLE_VIEW_TOP 501
-#define TITLE_STYLE_VIEW_BOTTOM 1143
+#define TITLE_STYLE_VIEW_BOTTOM 1191
 #define APP_BOOK_TITLE_STYLE_COUNT 4
-static int s_title_style_scroll,s_title_style_drag;
-static EpdRect indent_choice_rect(int i){return(EpdRect){214+i*108,890,100,64};}
-static EpdRect title_style_entry_rect(void){return(EpdRect){36,1052,612,66};}
 static EpdRect heading_size_rect(int i){return(EpdRect){214+i*108,76,100,64};}
 static EpdRect title_style_card_rect(int i){return(EpdRect){36,501+i*214,612,206};}
 static int title_style_value,title_size_value=48;
@@ -83,7 +79,7 @@ header=(root/'main/ui/ui_gesture.h').read_text()
 unit+=header[header.index('typedef enum {'):header.index('/// 清除状态')]
 for name in ('ui_gesture_reset','emit','ui_gesture_feed_options','ui_gesture_feed'):
     unit+=function(name,root/'main/ui/ui_gesture.c')+'\n'
-for name in ('indent_adjust_rect','reader_layout_back_rect','indent_adjust_hit','reader_indent_hold_cancel','draw_indent_adjustments','reader_indent_feedback','reader_indent_present','reader_indent_finish','reader_indent_gesture','reader_indent_hold_tick'):
+for name in ('reader_sheet_back_rect','indent_choice_rect','indent_adjust_rect','indent_adjust_hit','reader_indent_hold_cancel','draw_indent_adjustments','reader_indent_feedback','reader_indent_present','reader_indent_finish','reader_indent_gesture','reader_indent_hold_tick'):
     unit+=function(name,book)+'\n'
 action=function('reader_panel_action',book)
 a=action.index('    if (s_reader_panel == READER_PANEL_LAYOUT_SETTINGS) {')
@@ -114,42 +110,42 @@ static app_redraw_t feed(int64_t at,int x,int y,int contacts,bool press,bool rel
  return redraw;
 }
 int main(void){
- reset(0);EpdRect back=reader_layout_back_rect();
+ reset(0);EpdRect back=reader_sheet_back_rect(READER_LAYOUT_SHEET_TOP);
  for(int i=0;i<3;++i){EpdRect r=indent_adjust_rect(i);for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)assert(indent_adjust_hit(x,y)==i);}
- for(int y=960;y<1216;++y)for(int x=0;x<684;++x){
+ for(int y=1048;y<1216;++y)for(int x=0;x<684;++x){
   s_reader_panel=READER_PANEL_LAYOUT_SETTINGS;saved=0;reflows=0;
   layout_tap(&ctx,x,y);
   assert((s_reader_panel==READER_PANEL_FONT_SETTINGS)==ui_rect_hit(back,x,y));
   if(indent_adjust_hit(x,y)>=0)assert(!ui_rect_hit(back,x,y));
  }
  // 下沿容错及空白不返回；真实短按仅提交一次。/ Lower-edge tolerance and inert gaps; real taps commit once.
- reset(0);feed(0,580,1040,1,true,false,false);assert(saved==0&&reflows==0);
- feed(100,580,1041,0,false,true,false);assert(saved==1&&reflows==1&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
- reset(0);feed(0,580,1049,1,true,false,false);feed(100,580,1049,0,false,true,false);assert(saved==0&&reflows==0&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
- reset(0);feed(0,580,1160,1,true,false,false);feed(100,580,1160,0,false,true,false);assert(s_reader_panel==READER_PANEL_FONT_SETTINGS);
+ reset(0);feed(0,580,1164,1,true,false,false);assert(saved==0&&reflows==0);
+ feed(100,580,1165,0,false,true,false);assert(saved==1&&reflows==1&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
+ reset(0);feed(0,580,1173,1,true,false,false);feed(100,580,1173,0,false,true,false);assert(saved==0&&reflows==0&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
+ reset(0);feed(0,64,READER_LAYOUT_SHEET_TOP+57,1,true,false,false);feed(100,64,READER_LAYOUT_SHEET_TOP+57,0,false,true,false);assert(s_reader_panel==READER_PANEL_FONT_SETTINGS);
  // 长按识别后的抬手是CANCEL；不能丢提交或再补一次短按。/ Release after LONG_PRESS is CANCEL, with one commit and no extra tap.
- reset(0);feed(0,580,1006,1,true,false,false);feed(499,580,1006,1,false,false,false);assert(s_indent_hold.value==0);
- feed(500,580,1006,1,false,false,false);assert(s_indent_hold.value==1&&saved==0&&reflows==0);
- feed(619,580,1006,1,false,false,false);assert(s_indent_hold.value==1);
- feed(620,580,1006,1,false,false,false);feed(740,580,1006,1,false,false,false);assert(s_indent_hold.value==3&&reflows==0);
- feed(780,580,1006,0,false,true,false);assert(saved==3&&reflows==1&&!s_indent_hold.active);
- feed(2000,580,1006,0,false,false,false);assert(saved==3&&reflows==1);
- reset(0);feed(0,250,1006,1,true,false,false);feed(500,250,1006,1,false,false,false);feed(5000,250,1006,1,false,false,false);
- assert(s_indent_hold.value==-2&&saved==0);feed(5010,250,1006,0,false,true,false);assert(saved==-2&&reflows==1);
- for(int value=-100;value<=100;value+=200){int x=value<0?250:580;reset(value);feed(0,x,1006,1,true,false,false);for(int t=500;t<2000;t+=120)feed(t,x,1006,1,false,false,false);feed(2100,x,1006,0,false,true,false);assert(saved==value&&reflows==0);}
- reset(18);feed(0,400,1006,1,true,false,false);feed(100,400,1006,0,false,true,false);assert(saved==0&&reflows==1);
+ reset(0);feed(0,580,1112,1,true,false,false);feed(499,580,1112,1,false,false,false);assert(s_indent_hold.value==0);
+ feed(500,580,1112,1,false,false,false);assert(s_indent_hold.value==1&&saved==0&&reflows==0);
+ feed(619,580,1112,1,false,false,false);assert(s_indent_hold.value==1);
+ feed(620,580,1112,1,false,false,false);feed(740,580,1112,1,false,false,false);assert(s_indent_hold.value==3&&reflows==0);
+ feed(780,580,1112,0,false,true,false);assert(saved==3&&reflows==1&&!s_indent_hold.active);
+ feed(2000,580,1112,0,false,false,false);assert(saved==3&&reflows==1);
+ reset(0);feed(0,250,1112,1,true,false,false);feed(500,250,1112,1,false,false,false);feed(5000,250,1112,1,false,false,false);
+ assert(s_indent_hold.value==-2&&saved==0);feed(5010,250,1112,0,false,true,false);assert(saved==-2&&reflows==1);
+ for(int value=-100;value<=100;value+=200){int x=value<0?250:580;reset(value);feed(0,x,1112,1,true,false,false);for(int t=500;t<2000;t+=120)feed(t,x,1112,1,false,false,false);feed(2100,x,1112,0,false,true,false);assert(saved==value&&reflows==0);}
+ reset(18);feed(0,400,1112,1,true,false,false);feed(100,400,1112,0,false,true,false);assert(saved==0&&reflows==1);
  // 滑到返回键也不能转交同一触摸；多指/读错/时间倒退/页面切换均丢弃未提交预览。
  // A slide onto Back never transfers the touch; multitouch/errors/time regression/navigation discard the uncommitted preview.
- reset(0);feed(0,580,1006,1,true,false,false);feed(500,580,1006,1,false,false,false);feed(620,580,1150,1,false,false,false);feed(700,580,1150,0,false,true,false);assert(saved==0&&reflows==0&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
- reset(0);feed(0,580,1006,1,true,false,false);feed(500,580,1006,1,false,false,false);feed(620,580,1006,2,false,false,false);assert(!s_indent_hold.active&&saved==0&&reflows==0);
- reset(0);feed(0,580,1006,1,true,false,false);feed(500,580,1006,1,false,false,false);ctx.touch=NULL;ctx.now_ms=620;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_AREA&&s_indent_hold.cancelled&&saved==0);ctx.touch=&touch;
- reset(0);feed(1000,580,1006,1,true,false,false);feed(1500,580,1006,1,false,false,false);feed(1200,580,1006,1,false,false,false);assert(saved==0&&reflows==0&&!s_indent_hold.active);
- reset(0);feed(0,580,1006,1,true,false,false);feed(500,580,1006,1,false,false,false);feed(620,580,1006,1,false,false,true);assert(saved==0&&reflows==0&&!s_indent_hold.active);
- reset(0);feed(0,580,1006,1,true,false,false);s_reader_panel=READER_PANEL_FONT_SETTINGS;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_NONE&&!s_indent_hold.active&&saved==0);
- reset(0);feed(0,580,1006,1,true,false,false);ctx.request_app=&ctx;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_NONE&&!s_indent_hold.active);
+ reset(0);feed(0,580,1112,1,true,false,false);feed(500,580,1112,1,false,false,false);feed(620,64,READER_LAYOUT_SHEET_TOP+57,1,false,false,false);feed(700,64,READER_LAYOUT_SHEET_TOP+57,0,false,true,false);assert(saved==0&&reflows==0&&s_reader_panel==READER_PANEL_LAYOUT_SETTINGS);
+ reset(0);feed(0,580,1112,1,true,false,false);feed(500,580,1112,1,false,false,false);feed(620,580,1112,2,false,false,false);assert(!s_indent_hold.active&&saved==0&&reflows==0);
+ reset(0);feed(0,580,1112,1,true,false,false);feed(500,580,1112,1,false,false,false);ctx.touch=NULL;ctx.now_ms=620;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_AREA&&s_indent_hold.cancelled&&saved==0);ctx.touch=&touch;
+ reset(0);feed(1000,580,1112,1,true,false,false);feed(1500,580,1112,1,false,false,false);feed(1200,580,1112,1,false,false,false);assert(saved==0&&reflows==0&&!s_indent_hold.active);
+ reset(0);feed(0,580,1112,1,true,false,false);feed(500,580,1112,1,false,false,false);feed(620,580,1112,1,false,false,true);assert(saved==0&&reflows==0&&!s_indent_hold.active);
+ reset(0);feed(0,580,1112,1,true,false,false);s_reader_panel=READER_PANEL_FONT_SETTINGS;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_NONE&&!s_indent_hold.active&&saved==0);
+ reset(0);feed(0,580,1112,1,true,false,false);ctx.request_app=&ctx;assert(reader_indent_hold_tick(&ctx)==APP_REDRAW_NONE&&!s_indent_hold.active);
  reset(0);reader_indent_feedback(&ctx);assert(!reader_indent_present(&ctx,APP_REDRAW_PAGE)&&pushes==0&&!s_indent_feedback_pending);
  reader_indent_feedback(&ctx);assert(reader_indent_present(&ctx,APP_REDRAW_AREA)&&pushes==1);assert(!reader_indent_present(&ctx,APP_REDRAW_AREA)&&pushes==1);
- puts("PASS: real gesture hold/release, 124k footer hits, 1px repeat/clamp, one reflow on release, inert gaps, Back isolation, interruption cancellation and one-shot local FOLLOW DU");
+ puts("PASS: real gesture hold/release, lower-sheet hits, 1px repeat/clamp, one reflow on release, inert gaps, Back isolation, interruption cancellation and one-shot local FOLLOW DU");
 }
 '''
 for name in ('on_enter','book_on_exit','book_on_media_lost','on_key','on_key_long','before_lock','set_reader_view'):

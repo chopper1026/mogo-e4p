@@ -8,6 +8,9 @@ python3 tools/reader_spacing_host_test.py
 python3 tools/reader_tap_dismiss_host_test.py
 python3 tools/settings_entry_clock_host_test.py
 python3 tools/reader_controls_host_test.py
+python3 tools/key_settings_order_host_test.py
+python3 tools/reader_title_style_scroll_host_test.py
+python3 tools/reader_toolbar_host_test.py
 python3 tools/reader_touch_lock_host_test.py
 python3 tools/reading_settings_host_test.py
 python3 tools/reader_indent_hold_host_test.py

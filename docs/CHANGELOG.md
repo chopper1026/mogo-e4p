@@ -3,6 +3,12 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.8 · 本地测试 / Local testing · 2026-11-08
+
+- 阅读底栏调整为目录、书签、排版、设置、更多五项；统计、书签列表及全屏切换归入更多。字体与排版采用整行列表，标题样式提至字重下方，可直接打开预览；阅读设置按操作、页面、刷新分组，适配100%至200%界面字号。/ Use five reader tools with statistics, saved bookmarks and full screen under More; full-width typography rows include a direct heading-style preview below Weight, with Input/Page/Refresh settings at 100–200% UI size.
+
+- 阅读设置及二级面板移除底部继续阅读、完成和返回长按钮，保留左上返回；设置行、标题预览与行距控件利用空出的高度，按键控制四行同时可见，页眉页脚列表首屏可见七行。/ Remove reader-sheet footer navigation buttons and keep top-left Back; reclaim height for controls and heading previews, show all four key rows and seven chrome-setting rows.
+
 ## v1.0.8 · 2026-11-08
 
 - 新增关闭书内样式的设置项，在阅读设置中可以关闭书内样式统一排版。

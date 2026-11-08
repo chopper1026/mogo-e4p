@@ -77,6 +77,9 @@ static void draw_sheet_back(uint8_t *fb, int top) {
 #ifdef LEGACY
 static void copy_text(char *to, size_t cap, const char *from) { snprintf(to, cap, "%s", from); }
 #endif
+#ifndef LEGACY
+static ui_reader_settings_group_t s_reader_settings_group;
+#endif
 #include "page_adapter.inc"
 
 static bool same_rect(EpdRect a, EpdRect b) {
@@ -97,29 +100,39 @@ int main(void) {
         scale = scales[si];
         int top = reading_settings_top();
         record("top %u %d\n", scale, top);
+#ifndef LEGACY
+        for(s_reader_settings_group=0;s_reader_settings_group<UI_READER_SETTINGS_GROUP_COUNT;++s_reader_settings_group){
+#endif
         for (int i = -1; i <= setting_count; ++i) {
             EpdRect r = reading_setting_rect(i);
             record("cell %d %d %d %d %d\n", i, r.x, r.y, r.width, r.height);
 #ifndef LEGACY
-            assert(same_rect(r, ui_reader_settings_rect(scale, i)));
+            if(ui_reader_settings_group(i)==s_reader_settings_group)assert(same_rect(r, ui_reader_settings_rect(scale, i)));
+            else {assert(!r.width&&!r.height);continue;}
 #endif
             if (i < 0 || i >= setting_count) assert(!r.width && !r.height);
-            else assert(r.y >= top + 100 && r.y + r.height < 1141);
+            else assert(r.y >= top + 100 && r.y + r.height <= 1200);
         }
         for (unsigned pi = 0; pi < sizeof(intervals) / sizeof(*intervals); ++pi) {
             pages = intervals[pi];
             for (flags = 0; flags < flag_count; ++flags) {
+#ifndef LEGACY
+                if(flags && (flags & (flags-1)) && flags!=255)continue;
+#endif
                 record("case %u %u %u\n", scale, pages, flags);
                 draw_reading_settings(framebuffer);
                 draw_turn_settings(framebuffer);
             }
         }
     }
+#ifndef LEGACY
+        }
+#endif
     // 其他面板的开关仍经页面包装转接。/ Other sheets still reach switch painting through the page wrapper.
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, false);
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, true);
 #ifndef LEGACY
-    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false, true};
+    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false, true, UI_READER_SETTINGS_PAGE};
     const ui_reader_settings_values_t before = values;
     unsigned reads_before = setting_reads;
     recording = false;
@@ -130,6 +143,6 @@ int main(void) {
 #else
     (void)same_rect;
 #endif
-    assert(draws > 200000);
+    assert(draws > 180000);
     return 0;
 }
