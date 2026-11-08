@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.7 · 本地测试 / Local testing · 2026-11-08
 
+- 解锁恢复（含定时关机后续读）和阅读返回主页／书架统一使用完整48相GC16整屏清理，保留日常翻页与主页切页策略；本机刷入后用户确认残影明显改善。/ Use complete 48-phase whole-screen GC16 for unlock/resume and reader-to-main/shelf returns, retaining ordinary turns and main-page transitions; the user confirmed visibly reduced ghosting after a local device flash.
 - 阅读票根锁屏改为透明背景，票根外围保留锁屏前页面，不再铺满书籍封面；票内封面、文字与统计保留，冷启动缺少缓存时使用白底。/ Overlay the reading ticket on the current page instead of a full-screen book cover; keep its inset cover, text and statistics, with a white base when cold-boot art is unavailable.
 
 ## v1.0.7 · 2026-11-07
