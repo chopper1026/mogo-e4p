@@ -115,7 +115,7 @@ static bool reader_reflow_build(void){
 }
 '''
 unit += re.search(r'^#define KEY_SETTINGS_TOP .*', page, re.M)[0] + '\n'
-for name in ('chrome_row_rect', 'chrome_pick_card'):
+for name in ('reader_sheet_back_rect', 'chrome_row_rect', 'chrome_pick_card'):
     unit += function(name, book) + '\n'
 if 'static bool chrome_row_visible(' in page:
     unit += function('chrome_row_visible', book) + '\n'
@@ -148,17 +148,17 @@ int main(void){
   data.clock="";data.date="";check_layout(&data);data.clock="12:34";data.date="11-01 周日";
  }
  app_ctx_t ctx={0};
- assert(CHROME_ROW_VISIBLE==6&&CHROME_ROW_HEIGHT>=80);
+ assert(CHROME_ROW_VISIBLE==7&&CHROME_ROW_HEIGHT>=80);
  assert(CHROME_ROW_TOP>=KEY_SETTINGS_TOP+92&&CHROME_ROW_TOP<=KEY_SETTINGS_TOP+108);
- assert(CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT<=1090);
+ assert(CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT<=1174);
  for(int row=0;row<CHROME_ROW_COUNT;++row)
-  assert(chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT)==(row<6));
+  assert(chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT)==(row<7));
  for(s_chrome_scroll=0;s_chrome_scroll<=CHROME_ROW_MAX_SCROLL;s_chrome_scroll+=CHROME_ROW_PITCH){
   drawn_rows=0;
   for(int row=0;row<CHROME_ROW_COUNT;++row)draw_chrome_row(NULL,row);
-  assert(drawn_rows==6);
+  assert(drawn_rows==7);
   s_reader_panel=READER_PANEL_CHROME_SETTINGS;unsigned before=saves;
-  assert(action(&ctx,300,1112)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_CHROME_SETTINGS&&saves==before);
+  assert(action(&ctx,300,1193)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_CHROME_SETTINGS&&saves==before);
   assert(action(&ctx,300,CHROME_ROW_TOP-1)==APP_REDRAW_NONE);
   assert(action(&ctx,300,CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT)==APP_REDRAW_NONE);
   assert(action(&ctx,300,CHROME_ROW_TOP+CHROME_ROW_HEIGHT)==APP_REDRAW_NONE);
@@ -191,7 +191,7 @@ int main(void){
  assert(action(&ctx,36,chrome_row_rect(CHROME_ROW_COUNT-1).y)==APP_REDRAW_PAGE&&progress_bar);
  for(s_chrome_pick_scroll=0;s_chrome_pick_scroll<=CHROME_PICK_MAX_SCROLL;s_chrome_pick_scroll+=CHROME_PICK_PITCH){
   s_reader_panel=READER_PANEL_CHROME_PICKER;unsigned before=saves;
-  assert(action(&ctx,300,1112)==APP_REDRAW_NONE&&saves==before);
+  assert(action(&ctx,300,1186)==APP_REDRAW_NONE&&saves==before);
   for(int row=0;row<READER_CHROME_ITEM_ROWS;++row){
    EpdRect card=chrome_pick_card(row);
    if(card.y<CHROME_PICK_TOP||card.y+card.height>CHROME_PICK_TOP+CHROME_PICK_VIEW_HEIGHT)continue;

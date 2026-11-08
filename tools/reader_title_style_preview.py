@@ -263,7 +263,7 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     unit += geometry_slices()
     # 面板与题头同序：说明行、卡片矩形、样式名都先定义，再用到面板绘制里。
     # Same order as the heading: note line, card rectangles and style names come before the panel.
-    for n in ('reader_panel_text_vc', 'draw_sheet', 'draw_sheet_back', 'title_style_slot_y',
+    for n in ('reader_panel_text_vc', 'draw_sheet', 'reader_sheet_back_rect', 'draw_sheet_back', 'title_style_slot_y',
               'title_style_card_rect', 'title_style_window_rect', 'reader_title_style_name',
               'title_style_note', 'title_style_preview_label', 'title_style_preview_title',
               'heading_size_rect', 'draw_heading_size_row', 'draw_title_style_picker'):

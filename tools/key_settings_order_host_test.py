@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # 中文：验证按键控制示意图按机身实体顺序摆位（中、左、右），四行列表同高、
-# 上键单击位于音量键翻页上方，且列表多出的一行靠整行滚动才可见。
+# 上键单击位于音量键翻页上方，移除底部完成按钮后四行同时可见。
 # English: Verify the key sheet follows the physical key order (middle, left, right), every list
-# row shares one height, the up-key row sits above the volume switch, and the extra row only
-# becomes visible through whole-row scrolling.
+# row shares one height, the up-key row sits above the volume switch, and all four fit without Done.
 from pathlib import Path
 import subprocess
 import tempfile
@@ -112,17 +111,17 @@ int main(void) {
     // 左格是中键圆圈，中格是左键，右格是右键；卡片文字跟着逻辑键走。
     // The left slot is the middle-key circle, the middle slot the left key, the right the right key.
     assert(s_reader_key_slots[0] == 1 && s_reader_key_slots[1] == 0 && s_reader_key_slots[2] == 2);
-    assert(KEY_ROW_COUNT == 4 && KEY_ROW_VISIBLE == 3);
+    assert(KEY_ROW_COUNT == 4 && KEY_ROW_VISIBLE == 4);
     // 四行同高：中键双击与中键长按等高，上键单击排在音量键翻页上方。
     // All four rows share one height: the double press matches the hold, and the up key comes
     // before the volume switch.
     assert(KEY_ROW_HEIGHT == 96);
     assert(reader_key_row_rect(1).y == reader_key_row_rect(0).y + KEY_ROW_PITCH);
     assert(reader_key_row_rect(2).y + KEY_ROW_HEIGHT <= reader_key_row_rect(3).y);
-    // 列表视口不压到底部「完成」按钮。
-    // The list viewport stays clear of the footer button.
-    assert(KEY_ROW_TOP + KEY_ROW_VIEW_HEIGHT < 1141);
-    assert(KEY_ROW_MAX_SCROLL == KEY_ROW_PITCH);
+    // 释放的底部高度足以显示四行，不再滚动。
+    // The reclaimed footer fits all four rows without scrolling.
+    assert(KEY_ROW_TOP + KEY_ROW_VIEW_HEIGHT <= 1200);
+    assert(KEY_ROW_MAX_SCROLL == 0);
 
     draw_key_settings(s_fb);
     assert(!strcmp(s_labels[0], "中键") && !strcmp(s_labels[1], "左键") && !strcmp(s_labels[2], "右键"));
@@ -130,23 +129,23 @@ int main(void) {
     assert(!strcmp(s_actions[0], "阅读工具栏"));
     assert(!strcmp(s_actions[1], "上一页"));
     assert(!strcmp(s_actions[2], "下一页"));
-    // 首屏把中键长按、中键双击、上键单击三行排满，音量键翻页要滚动才出现。
-    // The first screen holds hold, double press and up key; the volume row needs a scroll.
+    // 首屏同时显示三种动作与音量键开关。
+    // The first screen shows all three actions and the volume switch.
     assert(!strcmp(s_row_names[0], "中键长按") && !strcmp(s_row_values[0], "返回主页"));
     assert(!strcmp(s_row_names[1], "中键双击") && !strcmp(s_row_values[1], "不操作"));
     assert(!strcmp(s_row_names[2], "上键单击") && !strcmp(s_row_values[2], "不操作"));
-    assert(s_row_names[3][0] == 0 && s_switch_x == -1);
+    assert(!strcmp(s_row_names[3], "音量键翻页") && s_switch_x == 556);
 
-    // 滚到最后一行：上键单击被滚出视口，音量键翻页带开关出现。
-    // Scrolled to the last row: the up key leaves the viewport and the volume switch appears.
+    // 滚动边界为零，所有行仍完整可见。
+    // The scroll boundary is zero and all rows remain whole.
     clear_rows();
     s_key_scroll = KEY_ROW_MAX_SCROLL;
     draw_key_settings(s_fb);
-    assert(s_row_names[0][0] == 0);
+    assert(!strcmp(s_row_names[0], "中键长按"));
     assert(!strcmp(s_row_names[1], "中键双击") && !strcmp(s_row_names[2], "上键单击"));
     assert(!strcmp(s_row_names[3], "音量键翻页") && !strcmp(s_row_values[3], "开启"));
     assert(s_switch_x == 556 && s_switch_on == 1);
-    puts("PASS: key sheet keeps the physical middle/left/right order, aligns all four rows, and scrolls the volume switch into view");
+    puts("PASS: key sheet keeps physical middle/left/right order and shows all four aligned rows without a footer button or scrolling");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:

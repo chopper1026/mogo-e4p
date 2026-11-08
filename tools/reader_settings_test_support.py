@@ -18,4 +18,5 @@ def implementation():
 
 def geometry():
     return declarations() + '\n' + '\n'.join(function(name, VIEW) for name in (
-        'settings_extra', 'ui_reader_settings_top', 'ui_reader_settings_rect')) + '\n'
+        'settings_extra', 'ui_reader_settings_top', 'ui_reader_settings_group',
+        'ui_reader_settings_tab_rect', 'ui_reader_settings_rect')) + '\n'

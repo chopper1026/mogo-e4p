@@ -184,7 +184,7 @@ int main(void){
  assert(feed(300,800,false,false,100)==APP_REDRAW_NONE&&s_title_style_scroll==0);
 
  puts("PASS: two-thirds heading-style sheet keeps every card whole at all three landings, moves one "
-      "or two slots per gesture with a latch, clamps at both ends and pushes only the 642 px viewport");
+      "or two slots per gesture with a latch, clamps at both ends and pushes only the 690 px viewport");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='mogo-title-style-scroll-') as directory:
