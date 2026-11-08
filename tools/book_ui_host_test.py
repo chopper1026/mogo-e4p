@@ -381,6 +381,10 @@ static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
+static bool test_book_styles=true,test_layout_book_styles=true;
+static bool app_settings_book_styles(void){return test_book_styles;}
+static bool app_settings_set_book_styles(bool enabled){test_book_styles=enabled;return true;}
+static void book_layout_set_book_styles(bool enabled){test_layout_book_styles=enabled;}
 static bool test_book_vertical;
 static bool app_settings_book_vertical(void){return test_book_vertical;}
 static void app_settings_set_book_vertical(bool on){test_book_vertical=on;}
