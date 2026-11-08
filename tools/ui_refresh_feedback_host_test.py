@@ -178,6 +178,7 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const int *wave,
 static enum EpdDrawError update_display_area_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(AREA,mode,area);}
 static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(LOCAL_FULL,mode,area);}
 static enum EpdDrawError update_display_with(void *hl,const int *wave,enum EpdDrawMode mode){(void)hl;(void)wave;return record(WHOLE,mode,(EpdRect){0});}
+static void display_request_full_refresh(void){}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;return record(FULL,MODE_GC16,(EpdRect){0});}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return record(FAST,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_mode_diff(void *hl,enum EpdDrawMode mode){(void)hl;return record(READER,mode,(EpdRect){0});}
