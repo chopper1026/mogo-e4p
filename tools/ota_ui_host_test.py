@@ -60,6 +60,7 @@ static unsigned erased_completed,paint_calls;
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_LIGHT 192
 #define UI_LOCK_WIDTH 684
+#define READER_WIDTH UI_LOCK_WIDTH
 #define UI_STATUS_TIME_PX 28
 #define EPD_DRAW_ALIGN_LEFT 0
 #define EPD_DRAW_ALIGN_RIGHT 1

@@ -3,6 +3,14 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.8 · 2026-11-08
+
+- 新增关闭书内样式的设置项，在阅读设置中可以关闭书内样式统一排版。
+- 新增阅读页横屏设置，在顶部下拉快捷栏开启。
+- 调整锁屏样式：阅读票根背景改为透明样式，底部显示最近阅读书摘。
+- 新增阅读设置中关闭触摸设置项。
+- 优化退出阅读和锁屏解锁时的残影。
+
 ## v1.0.7 · 本地测试 / Local testing · 2026-11-08
 
 - 阅读票根底部改用与最近阅读同源的书摘，长句自动适配票面宽度，无可用书摘时留空。/ Replace the ticket footer with the recent book's Home excerpt, fitting long sentences within the paper and leaving it blank without an excerpt.

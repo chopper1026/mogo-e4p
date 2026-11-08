@@ -47,6 +47,7 @@ HARNESS = r'''
 #include "book_layout.h"
 #include "book_progress.h"
 #include "book_font_size.h"
+#include "reader_orientation.h"
 #define CONFIG_READER_PERF 0
 #define CONFIG_READER_MEMORY 0
 #define TAG "test"
@@ -56,6 +57,7 @@ HARNESS = r'''
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 #define MALLOC_CAP_INTERNAL 4
+#define UI_LOCK_WIDTH 684
 typedef struct {unsigned now_ms;} app_ctx_t;
 typedef struct {bool present,mounted;} board_sd_info_t;
 typedef struct {bool network_ready;} wifi_transfer_status_t;
@@ -68,6 +70,14 @@ typedef struct {int unused;} reader_dims_ctx_t;
 enum {SHELF,READING,READER_PANEL_NONE=0};
 static pending_progress_t *s_pending;
 static reader_session_t s_reader_session;
+static reader_orientation_t s_orientation;
+static int64_t s_orientation_retry_ms;
+static display_orientation_t display_orientation = DISPLAY_ORIENTATION_PORTRAIT;
+static unsigned image_bleed_width;
+static const char *background_path = "";
+void display_orientation_set(display_orientation_t value){display_orientation=value;}
+void book_layout_set_image_bleed_width(int width){assert(width>=0);image_bleed_width=(unsigned)width;}
+static const char *app_settings_book_background_path(void){return background_path;}
 static char s_message[256],s_latest_path[BOOK_STORE_PATH_MAX],s_reader_notice[128];
 static char s_chapter_heading_title[128],s_chapter_heading_label[32];
 static bool s_reader_return_home,s_reader_fullscreen,s_requested_fullscreen,s_book_fonts_applied;
@@ -235,7 +245,16 @@ int main(void){
         assert(source_closes==1&&s_view==SHELF);report("chapter-error");free_book();free_book();assert(source_closes==1);
     }
     for(int cycle=0;cycle<100;++cycle){reset();hide_images=true;assert(open_book_impl(&ctx,a));assert(!s_reader_image_refresh_pending);free_book();free_book();assert(!s_text&&!watch_count&&!reader_session_has_source(&s_reader_session));}
-    reset();prefetch_borrowed=false;puts("PASS: open ordering, preflight, both reservations, source failures, pending priority, size/chapter/offset recovery, font size, failed load/skip and 100 repeated exits");
+    for(int background=0;background<2;++background){
+        reset();assert(open_book_impl(&ctx,a));background_path=background?"/sdcard/paper.png":"";
+        display_orientation=DISPLAY_ORIENTATION_RIGHT;
+        s_orientation=(reader_orientation_t){.automatic=true,.locked=DISPLAY_ORIENTATION_RIGHT,.candidate=2,.since_ms=500};
+        s_orientation_retry_ms=900;free_book();
+        assert(display_orientation==DISPLAY_ORIENTATION_PORTRAIT&&!s_orientation.automatic);
+        assert(s_orientation.locked==DISPLAY_ORIENTATION_PORTRAIT&&!s_orientation.candidate&&!s_orientation.since_ms&&!s_orientation_retry_ms);
+        assert(image_bleed_width==(background?0u:UI_LOCK_WIDTH));
+    }
+    reset();prefetch_borrowed=false;puts("PASS: open ordering, preflight, both reservations, source failures, pending priority, size/chapter/offset recovery, font size, failed load/skip, orientation reset and 100 repeated exits");
 }
 '''
 
