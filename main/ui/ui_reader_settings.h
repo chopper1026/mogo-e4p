@@ -18,12 +18,13 @@ typedef struct {
     bool statusbar; ///< 显示状态栏 / Visible status bar
     bool hide_images; ///< 跳过书内插图 / Skip inline images
     bool vertical_text; ///< 竖排正文 / Vertical body text
+    bool book_styles; ///< 保留书内样式 / Keep in-book styles
     bool touch_disabled; ///< 关闭阅读屏幕触摸 / Reader screen touch disabled
 } ui_reader_settings_values_t;
 
 /// 阅读设置顶部；与页面命中共用，字号限制为100至200。/ Shared sheet top for drawing and hit testing, clamped to 100–200 percent.
 int ui_reader_settings_top(unsigned system_font_size);
-/// 九个设置格；最后一格整行，无效索引返回空矩形。/ Nine setting cells, the last full-width; invalid indices return an empty rectangle.
+/// 十个设置格，共五行双列；无效索引返回空矩形。/ Ten setting cells in five paired rows; invalid indices return an empty rectangle.
 EpdRect ui_reader_settings_rect(unsigned system_font_size, int index);
 /// 只画开关，不修改状态，供字体和按键面板复用。/ Paint a switch without state changes, shared by font and key sheets.
 void ui_reader_settings_switch(uint8_t *fb, EpdRect track, bool on);

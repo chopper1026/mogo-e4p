@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：锁屏票根从持久进度与真实阅读计数生成；没有可靠时钟时不编造今日数据。
- * 票面上下以裁纸缺口绘制，最近阅读的 EPUB 封面作为灰阶背景。
+ * 票面上下以裁纸缺口绘制，票根外保留锁屏前画面，封面仅绘在票内。
  * English: Build the ticket from persisted progress and measured reading data; omit daily data without a valid clock.
- * Scalloped paper edges sit over a grayscale wallpaper made from the latest EPUB cover.
+ * Scalloped paper edges overlay the current frame; the book cover appears only inside the ticket.
  * 用户修订：锁屏入口统一系统字体，截短测量须与实际界面字体及字号一致。
  * User revision: lock entry selects the system face; truncation must measure the actual UI face and size.
  */
@@ -165,28 +165,6 @@ static uint8_t *cover_load(const char *path, const char *title, const char *auth
     }
     return gray;
 }
-static void cover_background_draw(uint8_t *fb, const uint8_t *gray) {
-    if (!gray) {
-        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, 0xb0, fb);
-        return;
-    }
-    int crop_x = 0, crop_y = 0, crop_w = BOOK_COVER_W, crop_h = BOOK_COVER_H;
-    if ((int64_t)BOOK_COVER_W * UI_LOCK_HEIGHT > (int64_t)BOOK_COVER_H * UI_LOCK_WIDTH) {
-        crop_w = BOOK_COVER_H * UI_LOCK_WIDTH / UI_LOCK_HEIGHT;
-        crop_x = (BOOK_COVER_W - crop_w) / 2;
-    } else {
-        crop_h = BOOK_COVER_W * UI_LOCK_HEIGHT / UI_LOCK_WIDTH;
-        crop_y = (BOOK_COVER_H - crop_h) / 2;
-    }
-    for (int y = 0; y < UI_LOCK_HEIGHT; ++y) {
-        const int sy = crop_y + y * crop_h / UI_LOCK_HEIGHT;
-        for (int x = 0; x < UI_LOCK_WIDTH; ++x) {
-            const int sx = crop_x + x * crop_w / UI_LOCK_WIDTH;
-            const uint8_t tone = ui_contrast_gray(gray[sy * BOOK_COVER_W + sx]);
-            epd_draw_pixel(x, y, ui_image_dither_gray(tone, x, y), fb);
-        }
-    }
-}
 static int notch_depth(int x) {
     const int radius = 18, first = 80, step = 64;
     int dx = (x - first) % step;
@@ -281,7 +259,6 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     ticket_stats_t stats; stats_load(&stats);
     uint32_t day = local_day();
     uint8_t *gray = cover_load(path, title, author);
-    cover_background_draw(fb, gray);
     ticket_shadow_draw(fb);
     ticket_paper_draw(fb);
     ui_text(fb, 82, 98, 28, "mogo  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);

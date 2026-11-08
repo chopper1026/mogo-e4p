@@ -125,6 +125,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
 #define NVS_KEY_BOOK_PARA "bk_para"
+#define NVS_KEY_BOOK_STYLES "bk_styles"
 // 旧单一边距键只作左右边距的升级回退与降级回写；新配置按四向各存一键。
 // The old single-margin key only backs the left/right upgrade fallback and downgrade writes;
 // the new configuration stores one key per side.
@@ -246,6 +247,7 @@ static bool s_book_fonts = true;
 // Vertical setting defaults off: only readers who want it turn it on, and horizontal type is
 // untouched.
 static bool s_book_vertical;
+static bool s_book_styles = true;
 // 题头样式默认「静页余白」：与历史渲染一致，升级后画面不变。
 // The heading style defaults to plain, the historical rendering, so upgrading changes nothing.
 static uint8_t s_book_title_style = APP_BOOK_TITLE_STYLE_DEFAULT;
@@ -506,6 +508,9 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_SHELF_RECENT, &recent_sort) == ESP_OK) s_shelf_recent_sort = recent_sort == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_FONTS, &book_fonts) == ESP_OK) s_book_fonts = book_fonts == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_VERTICAL, &book_vertical) == ESP_OK) s_book_vertical = book_vertical == 1;
+    uint8_t book_styles = 1;
+    nvs_get_u8(h, NVS_KEY_BOOK_STYLES, &book_styles);
+    s_book_styles = book_styles != 0;
     uint8_t title_style = APP_BOOK_TITLE_STYLE_DEFAULT;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TITLE_STYLE, &title_style) == ESP_OK &&
         title_style < APP_BOOK_TITLE_STYLE_COUNT) s_book_title_style = title_style;
@@ -1308,6 +1313,18 @@ uint8_t app_settings_book_paragraph_level(uint8_t percent) {
     }
     return best;
 }
+bool app_settings_book_styles(void) { return s_book_styles; }
+bool app_settings_set_book_styles(bool enabled) {
+    if (enabled == s_book_styles) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_BOOK_STYLES, enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) s_book_styles = enabled;
+    return err == ESP_OK;
+}
+
 uint8_t app_settings_book_paragraph_spacing(void) { return s_book_para; }
 void app_settings_set_book_paragraph_spacing(uint8_t percent) {
     if (app_settings_book_paragraph_value(app_settings_book_paragraph_level(percent)) != percent) return;
@@ -1499,7 +1516,7 @@ static bool backup_home_regions_valid(const settings_backup_home_regions_t *regi
 }
 // v34 追加进度条显隐；旧备份默认显示。/ V34 appends progress visibility; old backups show it.
 typedef struct { uint8_t on, checksum[4]; } settings_backup_progress_bar_t;
-// v35 复用布尔尾块格式，含义独立于进度条。/ V35 reuses the boolean tail layout independently of progress visibility.
+// v36 复用布尔尾块格式，含义独立于进度条。/ V36 reuses the boolean tail layout independently of progress visibility.
 typedef settings_backup_progress_bar_t settings_backup_touch_t;
 static uint32_t backup_progress_bar_checksum(const settings_backup_progress_bar_t *bar) {
     return (2166136261u ^ bar->on) * 16777619u;
@@ -1508,6 +1525,16 @@ static bool backup_progress_bar_valid(const settings_backup_progress_bar_t *bar)
     uint32_t stored = 0;
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)bar->checksum[i] << (8 * i);
     return bar->on <= 1 && stored == backup_progress_bar_checksum(bar);
+}
+// v35 追加书内样式开关；旧备份保留书内样式。/ V35 appends book-style control; older backups retain book styles.
+typedef struct { uint8_t on, checksum[4]; } settings_backup_book_styles_t;
+static uint32_t backup_book_styles_checksum(const settings_backup_book_styles_t *styles) {
+    return (2166136261u ^ styles->on) * 16777619u;
+}
+static bool backup_book_styles_valid(const settings_backup_book_styles_t *styles) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)styles->checksum[i] << (8 * i);
+    return styles->on <= 1 && stored == backup_book_styles_checksum(styles);
 }
 static uint32_t backup_chrome_checksum(const settings_backup_chrome_t *chrome) {
     uint32_t hash = 2166136261u;
@@ -1613,11 +1640,12 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条；Z 追加 v35 阅读禁触。
-    // W appends v32 bar heights; X adds v33 Home regions; Y adds v34 progress; Z adds v35 reader touch lock.
+    // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐；Z 追加 v35 书内样式。
+    // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
+    // a 追加 v36 阅读禁触，不改变既有 v35 书内样式块。/ a appends v36 reader touch lock after the existing v35 book-style block.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1712,8 +1740,8 @@ esp_err_t app_settings_backup_save(void) {
     // v32：在 v31 尾部追加页眉页脚高度。/ V32 appends header/footer heights to v31.
     // v33：追加首页上下组件，不改变既有尾块顺序。/ V33 appends Home regions without reordering previous blocks.
     // v34：追加页脚和全屏进度条显隐。/ V34 appends footer/full-screen progress visibility.
-    // v35：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V35 adds touch lock; a missing recovery binding restores touch.
-    memcpy(backup.magic, "PICOSETZ", sizeof(backup.magic));
+    // v36：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V36 adds touch lock; a missing recovery binding restores touch.
+    memcpy(backup.magic, "PICOSETa", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1879,6 +1907,10 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t progress_hash = backup_progress_bar_checksum(&progress_bar);
     for (unsigned i = 0; i < 4; ++i) progress_bar.checksum[i] = (uint8_t)(progress_hash >> (8 * i));
     if (ok) ok = fwrite(&progress_bar, 1, sizeof(progress_bar), file) == sizeof(progress_bar);
+    settings_backup_book_styles_t book_styles = {.on = s_book_styles ? 1 : 0};
+    uint32_t styles_hash = backup_book_styles_checksum(&book_styles);
+    for (unsigned i = 0; i < 4; ++i) book_styles.checksum[i] = (uint8_t)(styles_hash >> (8 * i));
+    if (ok) ok = fwrite(&book_styles, 1, sizeof(book_styles), file) == sizeof(book_styles);
     settings_backup_touch_t touch_lock = {.on = s_reader_touch_disabled ? 1 : 0};
     uint32_t touch_hash = backup_progress_bar_checksum(&touch_lock);
     for (unsigned i = 0; i < 4; ++i) touch_lock.checksum[i] = (uint8_t)(touch_hash >> (8 * i));
@@ -1983,6 +2015,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_shake_t shake = {.on = 0};
     settings_backup_home_regions_t regions = {0};
     settings_backup_progress_bar_t progress_bar = {.on = 1};
+    settings_backup_book_styles_t book_styles = {.on = 1};
     settings_backup_touch_t touch_lock = {.on = 0};
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
@@ -2088,7 +2121,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 32) ok = fread(&heights, 1, sizeof(heights), file) == sizeof(heights) && backup_chrome_heights_valid(&heights);
     if (ok && version >= 33) ok = fread(&regions, 1, sizeof(regions), file) == sizeof(regions) && backup_home_regions_valid(&regions);
     if (ok && version >= 34) ok = fread(&progress_bar, 1, sizeof(progress_bar), file) == sizeof(progress_bar) && backup_progress_bar_valid(&progress_bar);
-    if (ok && version >= 35) ok = fread(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock) && backup_progress_bar_valid(&touch_lock);
+    if (ok && version >= 35) ok = fread(&book_styles, 1, sizeof(book_styles), file) == sizeof(book_styles) && backup_book_styles_valid(&book_styles);
+    if (ok && version >= 36) ok = fread(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock) && backup_progress_bar_valid(&touch_lock);
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -2181,6 +2215,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_STYLES, book_styles.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TOUCH_HAPTIC, haptic.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
 
@@ -2264,6 +2299,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_shutdown_style = shutdown_mode;
     s_book_fonts = book_fonts.on != 0;
     s_book_vertical = book_vertical.on != 0;
+    s_book_styles = book_styles.on != 0;
     s_touch_haptics = haptic.on != 0;
     s_haptic_intensity = haptic.level;
     haptics_set_enabled(s_touch_haptics);

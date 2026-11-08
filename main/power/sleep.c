@@ -698,16 +698,17 @@ void enter_lock_and_sleep(
     // 主动拼贴在白底圆锁上准备最终画面；其他入口仍保留旧页面，只改RAM。
     // Prepare manual collages behind the white lock badge; other entries keep their prior page while drawing RAM.
     uint8_t lock_style = app_settings_lock_style();
-    // 透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
-    // Keep the current page beneath the PNG; no white reset, reader reflow or old reader snapshot.
-    if (lock_style != 3) epd_hl_set_all_white(hl);
+    // 票根和透明书封保留当前页面作为底图，不清白、不重排阅读页，也不读取旧阅读快照。
+    // Keep the current page beneath the ticket or PNG; no white reset, reader reflow or old reader snapshot.
     bool ticket = lock_style == 0;
+    bool overlay = ticket || lock_style == 3;
+    if (!overlay) epd_hl_set_all_white(hl);
     bool system_lock = ticket || lock_style == 2 || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
     if (system_lock) app_font_begin_lock(&lock_font);
     const int64_t lock_t_font = esp_timer_get_time();
-    // 阅读票根独占锁屏画布：始终先画最近书籍封面，再叠票根；自定义壁纸只属于壁纸模式。
-    // Ticket mode owns the lock canvas: book cover first, ticket on top. Custom wallpaper is wallpaper-only.
+    // 票根只叠加主体，票内保留最近书籍封面；自定义壁纸只属于壁纸模式。
+    // Overlay only the ticket with its inset book cover; custom wallpaper is wallpaper-only.
     bool lock_drawn = ticket
         ? book_ticket_draw(framebuffer, reader_background)
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
@@ -718,11 +719,11 @@ void enter_lock_and_sleep(
     }
     const int64_t lock_t_art = esp_timer_get_time();
     int64_t lock_t_clear = lock_t_art, lock_t_panel = lock_t_art;
-    // 透明书封的画布就是"当前页面+叠加图"，与面板真实状态一致，可以直接差分整屏GC16；
+    // 票根和透明书封的画布就是"当前页面+叠加图"，与面板真实状态一致，可以直接差分整屏GC16；
     // 其他样式把画布刷成了白底，必须先 epd_clear 让面板变白，from-white 的LUT才成立。
-    // The transparent cover's canvas is the current page plus the overlay, matching the real panel, so a
+    // The ticket/transparent cover canvas is the current page plus the overlay, matching the real panel, so a
     // differential full GC16 is valid; other styles reset the canvas to white and need the clear first.
-    bool keep_page = lock_style == 3 && lock_drawn;
+    bool keep_page = overlay && lock_drawn;
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (feedback_visible) result = update_display_full(hl);
     if (!feedback_visible || result != EPD_DRAW_SUCCESS) {
@@ -815,7 +816,8 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     if (!lock_screen_restore(fb)) {
         // 冷启动丢失锁屏缓存时没有当前页面，用干净底图并继续密码校验。
         // A cold start with no retained art has no current page; use a clean base and keep authentication.
-        if (app_settings_lock_style() == 3) memset(fb,255,(size_t)epd_width()*epd_height()/2);
+        if (app_settings_lock_style() == 0 || app_settings_lock_style() == 3)
+            memset(fb,255,(size_t)epd_width()*epd_height()/2);
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
             app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);

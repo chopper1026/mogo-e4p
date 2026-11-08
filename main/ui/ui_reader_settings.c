@@ -16,17 +16,16 @@ static int settings_extra(unsigned scale, int maximum) {
 }
 
 int ui_reader_settings_top(unsigned system_font_size) {
-    return 472 - settings_extra(system_font_size, 260);
+    return 476 - settings_extra(system_font_size, 260);
 }
 
 EpdRect ui_reader_settings_rect(unsigned system_font_size, int index) {
     int extra=settings_extra(system_font_size,56), footer=settings_extra(system_font_size,36);
-    if (index < 0 || index >= 9) return (EpdRect){0, 0, 0, 0};
-    if (index == 8) return (EpdRect){36, 1018 - footer, 612, 98 + footer};
+    if (index < 0 || index >= 10) return (EpdRect){0, 0, 0, 0};
     int row=index/2;
-    // 原八项仍排四行双列，下方整行留给关闭触摸，全部位于完成键上方。
-    // Keep the original eight cells in four paired rows, then a full-width touch lock above Done.
-    return (EpdRect){36+(index%2)*314,594+row*104-(4-row)*extra-footer,298,98+extra};
+    // 十项共五行双列，书内样式与关闭触摸分别占据最后一行。
+    // Ten cells use five paired rows, with book styles and touch lock sharing the last row.
+    return (EpdRect){36+(index%2)*314,598+row*104-(4-row)*extra-footer,298,98+extra};
 }
 
 void ui_reader_settings_switch(uint8_t *fb, EpdRect track, bool on) {
@@ -57,7 +56,7 @@ static void draw_reading_toggle(uint8_t *fb, unsigned scale, int index, const ch
         // 标题与说明分两行，说明为右侧开关留出独立空间。
         // Keep title/detail on separate lines and reserve independent space for the switch.
         ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-16},21,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-(index==8?120:40),row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
+        ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2,row.width-120,row.height/2-10},17,detail,EPD_DRAW_ALIGN_LEFT,false);
         ui_reader_settings_switch(fb,(EpdRect){row.x+row.width-90,row.y+3*row.height/4-19,69,39},on);
     } else {
         ui_text_box(fb,(EpdRect){row.x+21,row.y+6,row.width-42,row.height/2-12},23,title,EPD_DRAW_ALIGN_LEFT,false);
@@ -85,7 +84,8 @@ void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *val
     draw_reading_toggle(fb, values->system_font_size, 5, "关闭书内图片", "跳过正文插图，保留原书文件", values->hide_images);
     draw_reading_toggle(fb, values->system_font_size, 6, "竖排（从右到左）", NULL, values->vertical_text);
     draw_reading_card(fb, values->system_font_size, 7, "页眉页脚", "自定义内容", false);
-    draw_reading_toggle(fb, values->system_font_size, 8, "关闭触摸", "请先在按键控制绑定触摸开关", values->touch_disabled);
+    draw_reading_toggle(fb, values->system_font_size, 8, "书内样式", "关闭后使用统一排版", values->book_styles);
+    draw_reading_toggle(fb, values->system_font_size, 9, "关闭触摸", "先绑定触摸开关", values->touch_disabled);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     draw_centered_label(fb, 342, 1170, 26, "完成", true);
 }

@@ -34,6 +34,8 @@
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
+    // 透明票根不复用旧版整屏封面缓存。/ Transparent tickets must not restore the old full-cover artwork.
+    if(app_settings_lock_style()==0)return UINT64_C(0x5449434b45543032);
     if(app_settings_lock_style()!=1 && app_settings_lock_style()!=3)return 0;
     const char *path=app_settings_lock_style()==3?app_settings_bookmark_path():app_settings_wallpaper_path();
     uint64_t key=UINT64_C(14695981039346656037);

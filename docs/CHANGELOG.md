@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.7 · 本地测试 / Local testing · 2026-11-08
 
+- 阅读票根锁屏改为透明背景，票根外围保留锁屏前页面，不再铺满书籍封面；票内封面、文字与统计保留，冷启动缺少缓存时使用白底。/ Overlay the reading ticket on the current page instead of a full-screen book cover; keep its inset cover, text and statistics, with a white base when cold-boot art is unavailable.
+- 阅读设置新增默认开启的「书内样式」。关闭后忽略书内字体、对齐与段落边距，跳过多余空白行，横竖排均使用阅读设置；保留标题、插图、链接与原文位置。切换失败恢复原模式，开关随重启和备份保存，兼容旧备份。宿主回归及 S31 构建通过，实屏待验收。/ Add default-on book styles to reading settings. Turning them off uses reader typography in both directions, ignoring embedded faces, alignment, block margins and blank lines while retaining headings, images, links and source positions. Roll back failed changes, persist the choice and read older backups. Host regressions and S31 build pass; panel acceptance is pending.
 - 阅读设置新增「关闭触摸」，正文及阅读弹层屏蔽屏幕输入，保留底部三键和实体键；须先在按键控制绑定「触摸开关」，关闭触摸期间不能移除最后一个恢复绑定。离开阅读后触摸正常，选择随重启及备份保存；旧备份或缺失绑定时恢复触摸。/ Add reader touch lock with working panel/physical keys, a required touch-toggle binding and protection of the last recovery binding. Touch works outside reading; persist the choice across reboot/backup and restore touch for legacy backups or missing bindings.
 - 阅读提示改用白底黑框大字卡片，状态与说明分行显示；触摸开关提示停留2秒，并适配界面字号；提示收起时整屏归一一次，统一墨色并保护插图和背景灰阶。/ Use white reader notices with black frames, large headings and separate instructions; touch feedback lasts two seconds and follows UI size. Normalize the whole screen once on dismissal for even ink while preserving illustration/background grays.
 
