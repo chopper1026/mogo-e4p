@@ -233,6 +233,21 @@ int main(void) {
     }
     r = reset(); r.refresh = READER_PRESENT_PAGE; r.image_page = true;
     reader_present_output(&hl, &r); expect(0, WHOLE_DIFF, &image, MODE_DU, none);
+    // 提示收起一次驱动整屏，窗口/全屏/插图和背景都不追加页脚、状态或水波纹。
+    // Notice dismissal drives the whole screen once without extra chrome/ripple across windowed/fullscreen/image/background frames.
+    for (int area = 0; area < 2; ++area) for (int full = 0; full < 2; ++full)
+    for (int gray = 0; gray < 2; ++gray) for (int picture = 0; picture < 2; ++picture)
+    for (int image_pending = 0; image_pending < 2; ++image_pending) {
+        r = reset(); r.refresh = area ? READER_PRESENT_AREA : READER_PRESENT_PAGE;
+        r.closing_notice = true; r.hold_gray = gray; r.image_page = picture; r.fullscreen = full;
+        r.image_gray_refresh = image_pending;
+        r.tools_toggle = r.water_turn_pending = r.status_pending = r.footer_pending = true;
+        out = reader_present_output(&hl, &r);
+        assert(out.error == EPD_DRAW_SUCCESS && count == 1 && tick == 13579 && !out.tools_band);
+        expect(0, FULL_AREA, gray || picture ? &normalize_gray : &normalize, MODE_GL16, r.screen_area);
+        count = outputs = 0; errors[0] = EPD_DRAW_OTHER_ERROR;
+        assert(reader_present_output(&hl, &r).error == EPD_DRAW_OTHER_ERROR && count == 1);
+    }
     r = reset(); r.refresh = READER_PRESENT_PAGE;
     reader_present_output(&hl, &r); expect(0, WHOLE_DIFF, &page, MODE_DU, none);
     r.reading = false; count = outputs = 0;

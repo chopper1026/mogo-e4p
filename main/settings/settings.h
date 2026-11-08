@@ -171,6 +171,12 @@ void app_settings_set_reader_volume_turn(bool on);
 /// Shake the reader body horizontally to turn: left goes back, right forward; off by default.
 bool app_settings_reader_shake_turn(void);
 void app_settings_set_reader_shake_turn(bool on);
+/// 阅读页关闭屏幕触摸，保留底部三键；默认关闭，开启须已有触摸开关快捷键。
+/// Disable reader screen touch while retaining the panel keys; off by default and requires a touch-toggle binding.
+bool app_settings_reader_touch_disabled(void);
+bool app_settings_reader_touch_toggle_bound(void);
+/// 保存失败或缺少恢复快捷键时返回 false，保持原值。/ Keep the old value on persistence failure or a missing recovery binding.
+bool app_settings_set_reader_touch_disabled(bool on);
 /// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
 bool app_settings_reader_statusbar(void);
 void app_settings_set_reader_statusbar(bool on);
@@ -233,11 +239,13 @@ typedef enum {
     /// value never turns into the frontlight toggle.
     APP_READER_KEY_LEGACY_BACK,
     APP_READER_KEY_FRONTLIGHT, ///< 开关前光 / Toggle the frontlight
+    APP_READER_KEY_TOUCH, ///< 开关阅读触摸 / Toggle reader screen touch
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.
 app_reader_key_action_t app_settings_reader_key_action(unsigned key);
-/// 仅验证按键与动作范围，不强制工具栏映射；3代表中键长按，4代表中键双击，5代表上键单击。/ Validate key/action ranges without requiring a toolbar mapping; 3 is the middle hold, 4 the middle double press and 5 the up key.
+/// 验证范围，关闭触摸期间不得移除最后一个恢复绑定；3为中键长按，4为中键双击，5为上键单击。
+/// Validate ranges and retain the last recovery binding while touch is disabled; 3 is hold, 4 double press, 5 up key.
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action);
 /// 返回是否成功保存；失败不改变映射。/ Return successful persistence, leaving the mapping unchanged on failure.
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action);

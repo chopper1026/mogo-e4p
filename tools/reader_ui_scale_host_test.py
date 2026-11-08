@@ -49,6 +49,7 @@ static unsigned glyphs;
 static EpdRect last_box;
 static int s_reader_slider=-1,s_reader_preview_px=32,s_px=32;
 static unsigned app_settings_system_font_size(void){return scale;}
+static bool app_settings_reader_touch_disabled(void){return false;}
 static int ui_text_effective_px(int px){return scaling?(px+2)*scale/100:px+2;}
 static bool ttf_font_is_builtin(void){return face==0;}
 static bool ui_font_has_text(const char *text){(void)text;return true;}
@@ -139,7 +140,7 @@ int main(void){uint8_t fb[1]={0};
    draw_font_settings(fb);assert(!antialias&&selected_slot==2);draw_reading_settings(fb);
    for(int i=0;i<6;++i){EpdRect a=reader_font_card(i);assert(a.y>=reader_font_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_card(j)));}
    EpdRect slider=reader_slider_rect(0);assert(slider.y>reader_font_top()+100&&slider.y+slider.height<reader_font_card(0).y);
-   for(int i=0;i<7;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}
+   for(int i=0;i<9;++i){EpdRect a=reading_setting_rect(i);assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reading_setting_rect(j)));}
    for(int i=0;i<9;++i){EpdRect a=reader_font_pick_rect(i);assert(a.y>reader_font_picker_top()+120&&a.y+a.height<1141);for(int j=0;j<i;++j)assert(!overlap(a,reader_font_pick_rect(j)));}
    for(int edit=0;edit<2;++edit){s_bookmark_edit=edit;assert(bookmark_rows()>=3);for(int row=0;row<bookmark_rows();++row){EpdRect a=bookmark_row_rect(row);assert(a.y+a.height<=560+(edit?520:600));if(row)assert(!overlap(a,bookmark_row_rect(row-1)));}}
  }

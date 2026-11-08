@@ -112,6 +112,7 @@ idf_component_register(
         "ui/ui_reading_streak.c"
         "ui/ui_reader_heading.c"
         "ui/ui_reader_settings.c"
+        "ui/ui_reader_notice.c"
         "ui/ui_builtin_image.c"
         "ui/ui_text_edit.c"
         "ui/ui_text_input.c"

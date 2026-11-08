@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.7 · 本地测试 / Local testing · 2026-11-08
+
+- 阅读设置新增「关闭触摸」，正文及阅读弹层屏蔽屏幕输入，保留底部三键和实体键；须先在按键控制绑定「触摸开关」，关闭触摸期间不能移除最后一个恢复绑定。离开阅读后触摸正常，选择随重启及备份保存；旧备份或缺失绑定时恢复触摸。/ Add reader touch lock with working panel/physical keys, a required touch-toggle binding and protection of the last recovery binding. Touch works outside reading; persist the choice across reboot/backup and restore touch for legacy backups or missing bindings.
+- 阅读提示改用白底黑框大字卡片，状态与说明分行显示；触摸开关提示停留2秒，并适配界面字号；提示收起时整屏归一一次，统一墨色并保护插图和背景灰阶。/ Use white reader notices with black frames, large headings and separate instructions; touch feedback lasts two seconds and follows UI size. Normalize the whole screen once on dismissal for even ink while preserving illustration/background grays.
+
 ## v1.0.7 · 2026-11-07
 
 - 新增离线字典功能，阅读中长按选中正文文字可触发。

@@ -24,7 +24,13 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
     // unchanged pixels that dilation brings along are not pushed through a white-black trip
     // that draws a thin outline.
     const unsigned frame_flags = request->image_page ? DISPLAY_REFRESH_IMAGE : DISPLAY_REFRESH_DEFAULT;
-    if (request->image_gray_refresh && request->refresh == READER_PRESENT_AREA && !request->cleanup && request->prior_reader) {
+    if (request->closing_notice && request->reader_body && request->refresh != READER_PRESENT_FULL && !request->cleanup) {
+        // 提示覆盖与未覆盖区域的驱动历史不同；收起只做一次整屏归一，插图和背景保留灰阶。
+        // Covered and uncovered regions have different drive histories; normalize once on dismissal while holding illustration/background grays.
+        err = display_refresh_area(hl, DISPLAY_REFRESH_RESTORE, request->screen_area,
+            request->hold_gray || request->image_page ? DISPLAY_REFRESH_HOLD_GRAY : DISPLAY_REFRESH_DEFAULT);
+    }
+    else if (request->image_gray_refresh && request->refresh == READER_PRESENT_AREA && !request->cleanup && request->prior_reader) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
         err = request->water_effect
@@ -99,7 +105,7 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
     // 正文成功后再更新页脚、进度和顶部；任一步失败都保留错误并停止后续输出。
     // Update footer, progress and status after a successful body; preserve errors and stop subsequent output on failure.
     if (err == EPD_DRAW_SUCCESS && request->refresh == READER_PRESENT_AREA &&
-        request->reader_body && request->prior_reader && !request->cleanup && !request->feedback) {
+        request->reader_body && request->prior_reader && !request->cleanup && !request->feedback && !request->closing_notice) {
         if (request->footer_pending) {
             // 恢复旧页脚：普通翻页走短 DU，换章与插图帧走默认 GL16 清理。
             // Restore the legacy footer: short DU for ordinary turns, default GL16 for chapters and illustration frames.

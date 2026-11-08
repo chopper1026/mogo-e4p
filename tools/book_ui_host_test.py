@@ -460,6 +460,8 @@ input_header='\n'.join(line for line in input_header.splitlines() if not line.st
 unit+=enum+'\n'+input_header+r'''
 static app_reader_key_action_t test_keys[3]={APP_READER_KEY_PREV,APP_READER_KEY_TOOLS,APP_READER_KEY_NEXT};
 static app_reader_key_action_t test_hold_action=APP_READER_KEY_REFRESH;
+static unsigned touch_toggles;
+static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;++touch_toggles;return APP_REDRAW_PAGE;}
 static app_reader_key_action_t test_double_action=APP_READER_KEY_NONE;
 static app_reader_key_action_t app_settings_reader_hold_action(void){return test_hold_action;}
 static app_reader_key_action_t app_settings_reader_double_action(void){return test_double_action;}
@@ -1003,6 +1005,17 @@ int main(void) {
     s_reader_return_home=false;
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
+    // 触摸开关沿真实三键短按、长按和双击入口分发，恢复逻辑由专项回归覆盖。
+    // Route touch toggles through real short/hold/double callbacks; dedicated tests cover recovery.
+    s_reader_panel=READER_PANEL_NONE;test_double_action=APP_READER_KEY_NONE;
+    for(int key=UI_KEY_1;key<=UI_KEY_3;++key){
+        test_keys[key-UI_KEY_1]=APP_READER_KEY_TOUCH;
+        assert(on_key(&ctx,key)==APP_REDRAW_PAGE);
+    }
+    test_hold_action=APP_READER_KEY_TOUCH;assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE);
+    test_double_action=APP_READER_KEY_TOUCH;test_keys[1]=APP_READER_KEY_NONE;ctx.now_ms=10000;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);ctx.now_ms+=100;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&touch_toggles==5);
     free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);

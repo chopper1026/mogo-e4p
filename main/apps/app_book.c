@@ -7,6 +7,10 @@
  *
  * 用户修订：阅读设置采用已确认的半屏双列排版；自动全刷与翻页效果点按轮换，保留按键控制二级页。
  * User revision: use the approved compact two-column reading sheet; tap cycles refresh/effect and key controls retain their secondary page.
+ * 用户2026-11-08修订：阅读设置新增关闭触摸，须先绑定触摸开关；正文与阅读弹层屏蔽屏幕，保留底部三键和实体键，离开阅读恢复。
+ * User revision 2026-11-08: reader touch lock requires a touch-toggle binding; suppress screen input in the body and reader sheets, retain panel/physical keys, and restore touch outside reading.
+ * 用户同日修订：提示改用白底黑框大字卡片，分行说明恢复方法；触摸提示显示2秒，收起时整屏归一一次，解决停留过长与墨色不匀。
+ * Same-day user revision: use a large white/black card with separate recovery instructions; show touch feedback for two seconds and normalize once on dismissal to fix long waits and uneven ink.
  * 用户 2026-11-06 修订：正文长按仅用于临时选字查词，留白不再打开目录，避免同一手势冲突；目录保留工具栏入口。
  * User revision 2026-11-06: body holds select dictionary text; blank holds no longer open the TOC, avoiding a gesture conflict; the toolbar retains the TOC.
  * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
@@ -231,6 +235,7 @@
 #include "ui_kit.h"
 #include "ui_reader_heading.h"
 #include "ui_reader_settings.h"
+#include "ui_reader_notice.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
 #include "ui_image_dither.h"
@@ -313,6 +318,9 @@ static int s_presented_panel;
 // 字典独立于设置面板，保留成功显示状态，直到收起后的整页归一成功。
 // The dictionary is separate from settings; retain its displayed state until closing normalization succeeds.
 static bool s_dictionary_presented;
+// 提示真正显示后才登记；收起归一成功后清除，刷新失败时保留重试。
+// Track a successfully shown notice until dismissal normalization succeeds; retain it after output errors.
+static bool s_reader_notice_presented;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
 static bool s_requested_fullscreen = true;
@@ -512,7 +520,7 @@ static int s_reader_preview_px, s_reader_preview_margin[MARGIN_COUNT], s_reader_
 static int s_reader_preview_tracking;
 static uint32_t s_recent_days[30];
 static bool s_recent_days_valid;
-static char s_reader_notice[64];
+static char s_reader_notice[128];
 static int64_t s_reader_notice_until;
 static int s_bookmark_page;
 static bool s_bookmark_edit, s_bookmark_delete_confirm, s_bookmark_delete_error;
@@ -2331,6 +2339,7 @@ static void draw_reading_settings(uint8_t* fb) {
         .statusbar = app_settings_reader_statusbar(),
         .hide_images = app_settings_reader_hide_images(),
         .vertical_text = app_settings_book_vertical(),
+        .touch_disabled = app_settings_reader_touch_disabled(),
     };
     ui_reader_settings_draw(fb, &values);
 }
@@ -2353,6 +2362,7 @@ static const char *reader_key_label(app_reader_key_action_t action) {
         // 旧测试固件存过的 7 是已撤销动作，按不操作显示。/ Stored 7 is the withdrawn action and reads as no-op.
         [APP_READER_KEY_LEGACY_BACK] = "不操作",
         [APP_READER_KEY_FRONTLIGHT] = "前光开关",
+        [APP_READER_KEY_TOUCH] = "触摸开关",
     };
     return labels[action >= 0 && action < APP_READER_KEY_COUNT ? action : APP_READER_KEY_NONE];
 }
@@ -2441,17 +2451,14 @@ static void draw_key_settings(uint8_t *fb) {
 static const app_reader_key_action_t s_reader_key_order[] = {
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
     APP_READER_KEY_FULLSCREEN, APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
-    APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_NONE,
+    APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_TOUCH, APP_READER_KEY_NONE,
 };
 #define READER_KEY_ACTION_ROWS ((int)(sizeof(s_reader_key_order) / sizeof(s_reader_key_order[0])))
 #define KEY_ACTION_TOP 390
-#define KEY_ACTION_PITCH 86
-#define KEY_ACTION_HEIGHT 78
-// 动作列表卡片：绘制与命中共用同一条矩形。八行时行距收到 86，底部提示行仍留在
-// 「返回」按钮上方；此前绘制按 88 排、命中按 94，越靠下越容易点错。
-// Action-list cards share one rectangle; eight rows tighten the pitch to 86 so the hint line
-// still clears the Back button. Painting once used 88 while hit testing used 94, so lower rows
-// fired on a different action than the one shown.
+#define KEY_ACTION_PITCH 78
+#define KEY_ACTION_HEIGHT 70
+// 九个动作共用绘制和命中矩形，提示与返回键仍有独立空间。
+// Nine actions share paint/hit rectangles, leaving separate hint and Back space.
 static EpdRect reader_key_action_card(int index) {
     return (EpdRect){36, KEY_ACTION_TOP + index * KEY_ACTION_PITCH, 612, KEY_ACTION_HEIGHT};
 }
@@ -2470,9 +2477,9 @@ static void draw_key_picker(uint8_t *fb) {
         EpdRect card = reader_key_action_card(i);
         ui_fill_round_rect(fb, card, 20, current == action ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
-        reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_key_label(action), EPD_DRAW_ALIGN_LEFT, false);
-        epd_draw_circle(608, card.y + 39, 11, UI_GRAY_BLACK, fb);
-        if (current == action) epd_fill_circle(608, card.y + 39, 6, UI_GRAY_BLACK, fb);
+        reader_panel_text_vc(fb, 58, card.y + card.height / 2, 27, reader_key_label(action), EPD_DRAW_ALIGN_LEFT, false);
+        epd_draw_circle(608, card.y + card.height / 2, 11, UI_GRAY_BLACK, fb);
+        if (current == action) epd_fill_circle(608, card.y + card.height / 2, 6, UI_GRAY_BLACK, fb);
     }
     reader_panel_text_vc(fb, 342, 1112, 20, s_reader_key_error[0] ? s_reader_key_error : "从底部上滑可随时打开阅读工具栏", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
@@ -3536,11 +3543,6 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         const int text_top = track.y + 27 - (s_reader_progress_bar ? 0 : READER_FOOTER_PROGRESS_SPACE);
         reader_chrome_draw_footer_row(fb, &data, text_top, 28, track.x, track.x + track.width);
     }
-    if (s_reader_notice[0]) {
-        EpdRect notice = {218, 160, 248, 48};
-        ui_fill_round_rect(fb, notice, 24, 0xd0);
-        ui_text_vc(fb, 342, 184, 19, s_reader_notice, EPD_DRAW_ALIGN_CENTER, false);
-    }
     draw_reader_panel(fb);
     if (s_dictionary_notice_until) ui_reader_dictionary_notice(fb);
     if (s_dictionary_selection.active) {
@@ -3548,6 +3550,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
         ui_reader_dictionary_selection(fb, &s_dictionary_selection, glyphs, count);
         ui_reader_dictionary_draw(fb, &s_dictionary_view, &s_dictionary_result, s_dictionary_result.query[0] ? s_dictionary_result.query : s_dictionary_selection.query);
     }
+    ui_reader_notice_draw(fb, s_reader_notice, app_settings_system_font_size());
 }
 static void draw_reader(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);ui_clear_page(fb);
@@ -3877,6 +3880,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             s_reader_panel == READER_PANEL_NONE && reader_text_body(),
         .closing_panel_to_text = (s_presented_panel != READER_PANEL_NONE || s_dictionary_presented) &&
             s_reader_panel == READER_PANEL_NONE && !s_dictionary_view.open && reader_text_body(),
+        .closing_notice = s_reader_notice_presented && !s_reader_notice[0],
         .feedback = s_view == SHELF && s_shelf_feedback_pending,
         .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
         .water_turn_pending = s_water_turn_pending,
@@ -3949,6 +3953,9 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_presented_panel = (int)s_reader_panel;
     if (err == EPD_DRAW_SUCCESS && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL))
         s_dictionary_presented = s_view == READING && s_dictionary_view.open;
+    if (err == EPD_DRAW_SUCCESS && (!tools_band || s_view != READING) &&
+        (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL || output_request.closing_notice))
+        s_reader_notice_presented = s_view == READING && s_reader_notice[0];
     s_reader_footer_pending = false;
     s_reader_footer_strong = false;
     s_water_turn_pending = false;
@@ -5522,6 +5529,33 @@ static app_redraw_t reader_slider_commit(app_ctx_t* ctx) {
     return apply_reader_layout(ctx, px, s_reader_preview_margin, line, (uint8_t)para);
 }
 
+static app_redraw_t reader_notice_tick(app_ctx_t *ctx) {
+    if (!s_reader_notice[0] || ctx->now_ms < s_reader_notice_until) return APP_REDRAW_NONE;
+    s_reader_notice[0] = 0;
+    return s_view == READING ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
+}
+
+static app_redraw_t reader_toggle_touch(app_ctx_t *ctx) {
+    bool on = !app_settings_reader_touch_disabled();
+    if (on && !app_settings_reader_touch_toggle_bound()) {
+        copy_text(s_reader_notice, sizeof(s_reader_notice), "先设置恢复按键\n进入阅读设置的「按键控制」\n为按键绑定「触摸开关」");
+    } else if (!app_settings_set_reader_touch_disabled(on)) {
+        copy_text(s_reader_notice, sizeof(s_reader_notice), "设置未保存\n请稍后重试\n当前触摸状态保持不变");
+    } else {
+        reader_indent_hold_cancel();
+        dictionary_cancel();
+        middle_pending_clear();
+        s_reader_panel = READER_PANEL_NONE;
+        s_reader_slider = -1;
+        s_pressed_control = -1;
+        copy_text(s_reader_notice, sizeof(s_reader_notice), on ? "触摸已关闭\n底部三键与实体键仍可用\n按触摸开关快捷键恢复" : "触摸已开启\n可以触摸翻页和操作");
+    }
+    s_reader_notice_until = ctx->now_ms + 2000;
+    ctx->user_activity = true;
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+
 static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t y) {
     if (y < reading_settings_top() || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y)) {
         s_reader_panel = READER_PANEL_NONE;
@@ -5545,6 +5579,8 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
         s_chrome_scroll = 0;
         s_chrome_drag = false;
         s_chrome_error[0] = 0;
+    } else if (ui_rect_hit(reading_setting_rect(8), x, y)) {
+        return reader_toggle_touch(ctx);
     } else {
         for (int i = 0; i < 3; ++i)
             if (ui_rect_hit(reading_setting_rect(4 + i), x, y)) return apply_reader_option(ctx, i);
@@ -5680,7 +5716,9 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                     : s_reader_key_pick == 5 ? app_settings_set_reader_up_action(action)
                     : app_settings_set_reader_key_action(s_reader_key_pick, action);
                 if (!saved) {
-                    copy_text(s_reader_key_error, sizeof(s_reader_key_error), "保存失败，请重试");
+                    copy_text(s_reader_key_error, sizeof(s_reader_key_error),
+                        !app_settings_reader_key_action_allowed(s_reader_key_pick, action)
+                            ? "请保留至少一个触摸开关快捷键" : "保存失败，请重试");
                     return APP_REDRAW_PAGE;
                 }
                 s_reader_panel = READER_PANEL_KEY_SETTINGS;
@@ -7179,6 +7217,7 @@ static void toggle_reader_tools_panel(void) {
     if (pure) s_reader_tools_toggle = true;
 }
 static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
+    if (action == APP_READER_KEY_TOUCH) return reader_toggle_touch(ctx);
     if (s_dictionary_selection.active) return dictionary_dismiss();
     switch (action) {
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:
@@ -7337,6 +7376,10 @@ static bool menu_handle_enabled(app_ctx_t* ctx) {
     // All book views use product navigation; the legacy menu must never steal the right pager.
     return false;
 }
+static bool screen_touch_disabled(app_ctx_t *ctx) {
+    (void)ctx;
+    return s_view == READING && app_settings_reader_touch_disabled();
+}
 // 只有阅读背景正文需要保护图片灰阶；书架、搜索、输入等视图让快捷栏收起走完整归一。
 // Only a background reading body needs picture grays protected; the shelf, search and input
 // views let the quick-layer close run the full normalization pass.
@@ -7394,14 +7437,15 @@ static int book_remote_direction(void) {
     }
     return direction;
 }
-// 音量键翻页：侧键低电平为按下，只取按下沿，一次按一下翻一页；面板或书架不响应。
+// 音量键翻页只取按下沿，一次按下翻一页；关闭触摸时阅读弹层仍响应，书架不响应。
 // Volume-key turns: the side keys read low when pressed; only the press edge counts, one turn per
-// press, and panels or the shelf stay inert.
+// press; locked reader panels retain turns while the shelf stays inert.
 #define READER_VOLUME_POLL_MS 30
 static app_redraw_t reader_volume_tick(app_ctx_t* ctx) {
     static int64_t s_poll_ms;
     static uint8_t s_last_keys = 0xff;
-    if (!app_settings_reader_volume_turn() || (!app_book_reader_body_visible() && !s_dictionary_selection.active)) {
+    bool locked_reader = s_view == READING && app_settings_reader_touch_disabled();
+    if (!app_settings_reader_volume_turn() || (!locked_reader && !app_book_reader_body_visible() && !s_dictionary_selection.active)) {
         s_last_keys = 0xff;
         return APP_REDRAW_NONE;
     }
@@ -7428,7 +7472,8 @@ static app_redraw_t reader_up_key_tick(app_ctx_t* ctx) {
     static bool s_down;
     static int64_t s_down_ms;
     app_reader_key_action_t action = app_settings_reader_up_action();
-    if (action == APP_READER_KEY_NONE || (!app_book_reader_body_visible() && !s_dictionary_selection.active)) {
+    bool panel_keys = s_view == READING && (action == APP_READER_KEY_TOUCH || app_settings_reader_touch_disabled());
+    if (action == APP_READER_KEY_NONE || (!panel_keys && !app_book_reader_body_visible() && !s_dictionary_selection.active)) {
         s_down = false;
         return APP_REDRAW_NONE;
     }
@@ -7571,17 +7616,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (up_key != APP_REDRAW_NONE) return up_key;
     app_redraw_t shake = reader_shake_tick(ctx);
     if (shake != APP_REDRAW_NONE) return shake;
-    if (s_reader_notice[0] && ctx->now_ms >= s_reader_notice_until) {
-        s_reader_notice[0] = 0;
-        if (s_view == READING) {
-            // 区域刷新不会自动重绘帧缓冲；先移除提示，再只更新提示所在区域。
-            // Area refreshes do not rerender the framebuffer; erase the toast before updating its region.
-            render(ctx, ctx->fb);
-            s_area = (EpdRect){208, 150, 268, 68};
-            s_mode = MODE_GL16;
-            return APP_REDRAW_AREA;
-        }
-    }
+    app_redraw_t notice = reader_notice_tick(ctx);
+    if (notice != APP_REDRAW_NONE) return notice;
     if (s_save_failed && ctx->now_ms - s_save_retry_ms >= 15000) {
         s_save_retry_ms = ctx->now_ms;
         bool failed = s_save_failed;
@@ -7688,6 +7724,7 @@ const app_desc_t app_book = {
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
     .gesture_long_drag = dictionary_long_drag,
+    .screen_touch_disabled = screen_touch_disabled,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,
     .on_power_short = on_power_short,
     .on_tick = on_tick, .area_hint = area_hint,

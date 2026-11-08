@@ -97,6 +97,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_VOLUME_TURN "rd_volume"
 #define NVS_KEY_SHAKE_TURN "rd_shake"
+#define NVS_KEY_TOUCH_DISABLED "rd_no_touch"
 // 状态栏显隐新键；rd_immersive 是旧「全屏沉浸」位，仅作老固件升级迁移与降级回写。/ New
 // status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
 #define NVS_KEY_STATUS "rd_status"
@@ -194,6 +195,7 @@ static uint8_t s_book_margin_t, s_book_margin_b;
 static bool s_reader_power_turn;
 static bool s_reader_volume_turn;
 static bool s_reader_shake_turn;
+static bool s_reader_touch_disabled;
 static bool s_reader_statusbar = true;
 // 打开图书的全屏偏好：默认全屏（沿用历史行为），用户切换后记忆。/ Full-screen preference when
 // opening a book: full screen by default (historical behavior), remembered once toggled.
@@ -453,10 +455,10 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
         uint8_t value;
-        // 短按仍不接受「不操作」；前光开关是有效动作，单独放行。
-        // Short presses still reject "no action"; the frontlight toggle is valid and passes on its own.
+        // 短按仍不接受「不操作」；前光及触摸开关是有效动作，单独放行。
+        // Short presses still reject "no action"; frontlight and touch toggles are valid exceptions.
         if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK &&
-            (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT))
+            (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT || value == APP_READER_KEY_TOUCH))
             s_reader_keys[i] = value;
     }
     uint8_t hold_action = APP_READER_KEY_HOME;
@@ -471,6 +473,9 @@ void app_settings_init(void) {
     s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK &&
             up_action < APP_READER_KEY_COUNT && up_action != APP_READER_KEY_LEGACY_BACK
         ? up_action : APP_READER_KEY_NONE;
+    uint8_t touch_disabled = 0;
+    s_reader_touch_disabled = nvs_get_u8(h, NVS_KEY_TOUCH_DISABLED, &touch_disabled) == ESP_OK &&
+        touch_disabled == 1 && app_settings_reader_touch_toggle_bound();
     // 槽位内容逐格校验；缺键或越界都保留默认布局，无需迁移标记。
     // Validate slots one by one; missing or out-of-range keys keep the default layout, no migration marker.
     for (unsigned i = 0; i < 6; ++i) {
@@ -962,6 +967,26 @@ void app_settings_set_reader_shake_turn(bool on) {
     nvs_put_u8(NVS_KEY_SHAKE_TURN, on ? 1 : 0);
 }
 bool app_settings_reader_statusbar(void) { return s_reader_statusbar; }
+bool app_settings_reader_touch_disabled(void) { return s_reader_touch_disabled; }
+static bool reader_touch_binding(const uint8_t keys[3], uint8_t hold, uint8_t double_action, uint8_t up) {
+    return keys[0] == APP_READER_KEY_TOUCH || keys[1] == APP_READER_KEY_TOUCH ||
+        keys[2] == APP_READER_KEY_TOUCH || hold == APP_READER_KEY_TOUCH ||
+        double_action == APP_READER_KEY_TOUCH || up == APP_READER_KEY_TOUCH;
+}
+bool app_settings_reader_touch_toggle_bound(void) {
+    return reader_touch_binding(s_reader_keys, s_reader_hold_action, s_reader_double_action, s_reader_up_action);
+}
+bool app_settings_set_reader_touch_disabled(bool on) {
+    if (on && !app_settings_reader_touch_toggle_bound()) return false;
+    if (s_reader_touch_disabled == on) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_TOUCH_DISABLED, on ? 1 : 0);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) s_reader_touch_disabled = on;
+    return err == ESP_OK;
+}
 void app_settings_set_reader_statusbar(bool on) {
     if (s_reader_statusbar == on) return;
     s_reader_statusbar = on;
@@ -1013,7 +1038,13 @@ app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
 }
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action) {
-    return key < 6 && action >= 0 && action < APP_READER_KEY_COUNT;
+    if (key >= 6 || action < 0 || action >= APP_READER_KEY_COUNT) return false;
+    if (!s_reader_touch_disabled) return true;
+    uint8_t keys[3];
+    memcpy(keys, s_reader_keys, sizeof(keys));
+    if (key < 3) keys[key] = action;
+    return reader_touch_binding(keys, key == 3 ? action : s_reader_hold_action,
+        key == 4 ? action : s_reader_double_action, key == 5 ? action : s_reader_up_action);
 }
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action) {
     if (key >= 3 || !app_settings_reader_key_action_allowed(key, action)) return false;
@@ -1068,6 +1099,9 @@ void app_settings_set_reader_key_preset(unsigned preset) {
         {APP_READER_KEY_HOME, APP_READER_KEY_FULLSCREEN, APP_READER_KEY_TOOLS}
     };
     if (preset < 1 || preset > 2) return;
+    if (s_reader_touch_disabled && !reader_touch_binding(values[preset - 1],
+        preset == 1 ? APP_READER_KEY_HOME : APP_READER_KEY_REFRESH,
+        s_reader_double_action, s_reader_up_action)) return;
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return;
@@ -1465,6 +1499,8 @@ static bool backup_home_regions_valid(const settings_backup_home_regions_t *regi
 }
 // v34 追加进度条显隐；旧备份默认显示。/ V34 appends progress visibility; old backups show it.
 typedef struct { uint8_t on, checksum[4]; } settings_backup_progress_bar_t;
+// v35 复用布尔尾块格式，含义独立于进度条。/ V35 reuses the boolean tail layout independently of progress visibility.
+typedef settings_backup_progress_bar_t settings_backup_touch_t;
 static uint32_t backup_progress_bar_checksum(const settings_backup_progress_bar_t *bar) {
     return (2166136261u ^ bar->on) * 16777619u;
 }
@@ -1577,11 +1613,11 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐。
-    // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility.
+    // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条；Z 追加 v35 阅读禁触。
+    // W appends v32 bar heights; X adds v33 Home regions; Y adds v34 progress; Z adds v35 reader touch lock.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1676,7 +1712,8 @@ esp_err_t app_settings_backup_save(void) {
     // v32：在 v31 尾部追加页眉页脚高度。/ V32 appends header/footer heights to v31.
     // v33：追加首页上下组件，不改变既有尾块顺序。/ V33 appends Home regions without reordering previous blocks.
     // v34：追加页脚和全屏进度条显隐。/ V34 appends footer/full-screen progress visibility.
-    memcpy(backup.magic, "PICOSETY", sizeof(backup.magic));
+    // v35：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V35 adds touch lock; a missing recovery binding restores touch.
+    memcpy(backup.magic, "PICOSETZ", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1842,6 +1879,10 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t progress_hash = backup_progress_bar_checksum(&progress_bar);
     for (unsigned i = 0; i < 4; ++i) progress_bar.checksum[i] = (uint8_t)(progress_hash >> (8 * i));
     if (ok) ok = fwrite(&progress_bar, 1, sizeof(progress_bar), file) == sizeof(progress_bar);
+    settings_backup_touch_t touch_lock = {.on = s_reader_touch_disabled ? 1 : 0};
+    uint32_t touch_hash = backup_progress_bar_checksum(&touch_lock);
+    for (unsigned i = 0; i < 4; ++i) touch_lock.checksum[i] = (uint8_t)(touch_hash >> (8 * i));
+    if (ok) ok = fwrite(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1942,6 +1983,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_shake_t shake = {.on = 0};
     settings_backup_home_regions_t regions = {0};
     settings_backup_progress_bar_t progress_bar = {.on = 1};
+    settings_backup_touch_t touch_lock = {.on = 0};
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
@@ -2046,6 +2088,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 32) ok = fread(&heights, 1, sizeof(heights), file) == sizeof(heights) && backup_chrome_heights_valid(&heights);
     if (ok && version >= 33) ok = fread(&regions, 1, sizeof(regions), file) == sizeof(regions) && backup_home_regions_valid(&regions);
     if (ok && version >= 34) ok = fread(&progress_bar, 1, sizeof(progress_bar), file) == sizeof(progress_bar) && backup_progress_bar_valid(&progress_bar);
+    if (ok && version >= 35) ok = fread(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock) && backup_progress_bar_valid(&touch_lock);
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -2111,6 +2154,9 @@ esp_err_t app_settings_backup_restore(void) {
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return err; }
+    bool touch_disabled = touch_lock.on && reader_touch_binding(keys.actions, hold.action,
+        double_action.action, up_action.action);
+    err = nvs_set_u8(h, NVS_KEY_TOUCH_DISABLED, touch_disabled ? 1 : 0);
 #define BACKUP_SET_U8(key, index) do { if (err == ESP_OK) err = nvs_set_u8(h, key, backup.flags[index]); } while (0)
 #define BACKUP_SET_STR(key, value) do { if (err == ESP_OK) err = nvs_set_str(h, key, value); } while (0)
     for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = nvs_set_u8(h, s_reader_key_names[i], keys.actions[i]);
@@ -2244,6 +2290,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_volume_turn = volume.on != 0;
     s_reader_shake_turn = shake.on != 0;
+    s_reader_touch_disabled = touch_disabled;
     s_reader_up_action = up_action.action;
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_reader_open_fullscreen = open_full.open_full == 1;

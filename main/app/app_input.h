@@ -16,6 +16,16 @@
 typedef void (*app_input_present_t)(app_ctx_t *ctx, const app_desc_t *app,
                                     ui_gesture_t *gesture, app_redraw_t redraw);
 
+typedef struct {
+    bool contact; ///< 原始接触尚未抬起 / Raw contact has not lifted
+    bool blocked; ///< 本次接触隔离至抬起 / Quarantine this contact until lift
+    bool disabled; ///< 上帧屏幕禁触状态 / Previous screen-touch policy
+} app_input_touch_filter_t;
+/// 每个原始帧摄取前调用，屏幕起手、越出三键及策略切换均隔离至抬起；返回 true 时取消按住与手势。
+/// Filter every raw frame before ingestion; quarantine screen starts, key-strip exits and policy changes until lift.
+/// A true return requires cancelling key holds and gestures.
+bool app_input_filter_screen_touch(app_input_touch_filter_t *filter, app_touch_t *touch,
+                                    esp_err_t err, bool disabled);
 /// 重建采样帧的坐标、触点数和按下状态；不回放多点载荷或原始寄存器。
 /// Rebuild frame coordinates, contact count and contact state without replaying multipoint payloads or raw registers.
 void app_input_frame_to_touch(const touch_frame_t *frame, app_touch_t *touch);

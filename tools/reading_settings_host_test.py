@@ -30,6 +30,8 @@ static unsigned app_settings_reader_turn_effect(void){return effect;}
 static void app_settings_set_reader_turn_effect(unsigned n){effect=n;}
 static app_redraw_t apply_reader_option(app_ctx_t *ctx,int i){(void)ctx;assert(i>=0&&i<3);++toggles[i];return APP_REDRAW_PAGE;}
 static void invalidate_prep(void){++invalidates;}
+static unsigned touch_toggles;
+static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;++touch_toggles;return APP_REDRAW_PAGE;}
 '''
 source = ROOT/'main/apps/app_book.c'
 unit+=geometry()
@@ -39,12 +41,14 @@ for name in ('reading_settings_top', 'reading_setting_rect', 'reading_settings_a
 unit += r'''
 int main(void){
     app_ctx_t ctx={2,3,1234};
-    // 八个控件共用命中矩形且不重叠。/ Eight controls share nonoverlapping hit rectangles.
-    for(int i=0;i<8;++i){
+    // 九个控件共用命中矩形且不重叠。/ Nine controls share nonoverlapping hit rectangles.
+    for(int i=0;i<9;++i){
         EpdRect a=reading_setting_rect(i);assert(a.x>=36&&a.x+a.width<=648&&a.y>=reading_settings_top()+100&&a.y+a.height<1141);
-        for(int j=i+1;j<8;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
+        for(int j=i+1;j<9;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
     }
     EpdRect mode=reading_setting_rect(2),keys=reading_setting_rect(3);
+    EpdRect touch=reading_setting_rect(8);
+    assert(touch.width==612&&reading_settings_action(&ctx,touch.x+1,touch.y+1)==APP_REDRAW_PAGE&&touch_toggles==1);
     assert(keys.x==mode.x+314&&keys.y==mode.y);
     const unsigned expected[]={15,30,0,5,10};
     EpdRect interval=reading_setting_rect(0),ripple=reading_setting_rect(1);
@@ -67,7 +71,7 @@ int main(void){
     reading_settings_action(&ctx,342,1170);assert(s_reader_panel==READER_PANEL_NONE);
     s_reader_panel=READER_PANEL_REFRESH_SETTINGS;
     reading_settings_action(&ctx,342,reading_settings_top()-1);assert(s_reader_panel==READER_PANEL_NONE);
-    for(scale=100;scale<=200;++scale)for(int i=0;i<8;++i){
+    for(scale=100;scale<=200;++scale)for(int i=0;i<9;++i){
         EpdRect a=reading_setting_rect(i);
         assert(a.y>=reading_settings_top()+100&&a.y+a.height<1141);
         for(int j=0;j<i;++j){EpdRect b=reading_setting_rect(j);assert(a.x+a.width<=b.x||b.x+b.width<=a.x||a.y+a.height<=b.y||b.y+b.height<=a.y);}
@@ -85,7 +89,7 @@ int main(void){
         assert(reading_settings_action(&ctx,a.x,a.y+a.height)==APP_REDRAW_NONE);
         assert(invalidates==previous&&s_reader_panel==READER_PANEL_REFRESH_SETTINGS);
     }
-    puts("PASS: 100-200% eight-setting geometry, cycles, secondary pages, Done and inert gaps");
+    puts("PASS: 100-200% nine-setting geometry, touch entry, cycles, secondary pages, Done and inert gaps");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:

@@ -146,6 +146,9 @@ struct app_desc_s {
     bool (*present)(app_ctx_t* ctx, app_redraw_t redraw);
     /// 可选：启用本次接触的长按拖动释放事件。/ Enable long-drag release events for a new contact.
     bool (*gesture_long_drag)(app_ctx_t* ctx);
+    /// 可选：屏蔽屏幕触摸，底部三键继续分发；主循环在摄取每帧前查询。
+    /// Optional: suppress screen touch while retaining panel keys; queried before ingesting each frame.
+    bool (*screen_touch_disabled)(app_ctx_t* ctx);
     /// 设置后独占触摸派发，替代 on_touch。/ Exclusive gesture dispatch replaces on_touch.
     app_redraw_t (*on_gesture)(app_ctx_t* ctx, const ui_gesture_event_t* event);
     app_redraw_t (*on_touch)(app_ctx_t* ctx, const app_touch_t* touch);

@@ -1,6 +1,7 @@
 // 中文：验证同步输入边界、真实手势事件与取消时的导航保护。
 // English: Check synchronous input boundaries, real gesture events and navigation protection during cancellation.
 #include "app_input.h"
+#include "ui_menu.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -17,6 +18,55 @@ static app_redraw_t answer;
 static bool redirect_cancel, reactivate_present;
 static const app_desc_t destination = {0}, unwanted = {0};
 static uint64_t trace = UINT64_C(1469598103934665603);
+
+int ui_key_hit_test(uint16_t x, uint16_t y) {
+    return y >= UI_KEY_AREA_TOP && x < UI_KEY_PITCH * UI_KEY_COUNT ? x / UI_KEY_PITCH : -1;
+}
+
+static void touch_filter_cases(void) {
+    app_input_touch_filter_t f = {0};
+    app_touch_t t;
+    // 全屏任一点、多点都被屏蔽，连底边上滑和屏幕滑入三键也不能变成按键。
+    // Block every screen point and multitouch, including bottom swipes and drags into the key strip.
+    for (unsigned x = 0; x < 684; x += 13) for (unsigned y = 0; y < UI_KEY_AREA_TOP; y += 17) {
+        f = (app_input_touch_filter_t){0};
+        t = (app_touch_t){.touched=true,.count=1,.x=x,.y=y};
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched && !t.count);
+        t = (app_touch_t){.touched=true,.count=1,.x=80,.y=UI_KEY_AREA_TOP};
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
+        t = (app_touch_t){0};
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true));
+        t = (app_touch_t){.touched=true,.count=1,.x=80,.y=UI_KEY_AREA_TOP};
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true) && t.touched);
+    }
+    for (unsigned key = 0; key < 3; ++key) {
+        f = (app_input_touch_filter_t){0};
+        t = (app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=UI_KEY_AREA_TOP};
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true) && t.touched);
+        t.y = 900;
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
+        t = (app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=UI_KEY_AREA_TOP};
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true));
+    }
+    // 开关切换和读错期间的旧接触保持隔离，必须抬手才恢复。
+    // Quarantine contacts across policy changes and read failures until they lift.
+    f = (app_input_touch_filter_t){0};
+    t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false) && t.touched);
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
+    t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false));
+    t = (app_touch_t){0};
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false));
+    t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false) && t.touched);
+    assert(app_input_filter_screen_touch(&f, &t, ESP_ERR_INVALID_STATE, false));
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false));
+    t = (app_touch_t){0};
+    app_input_filter_screen_touch(&f, &t, ESP_OK, true);
+    t = (app_touch_t){.touched=true,.count=2,.x=80,.y=UI_KEY_AREA_TOP};
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
+}
 
 static void record(uint64_t value) {
     trace = (trace ^ value) * UINT64_C(1099511628211);
@@ -209,6 +259,7 @@ static void event_trace(void) {
 }
 
 int main(void) {
+    touch_filter_cases();
     snapshots(); gestures(); ownership_and_cancel(); event_trace();
 #if CONFIG_TOUCH_DIAG
     app_input_diag_counts_t counts = app_input_diag_counts();

@@ -21,8 +21,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v34 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v34; legacy fixtures drop them all. */
+/* v15..v35 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v35; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,7 +30,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -161,15 +161,29 @@ esp_err_t nvs_commit(nvs_handle_t h) { assert(flash_depth); (void)h; ++commit_co
 // Model the new layout's commit boundary without changing existing settings stubs.
 static int durable_regions = -1, pending_regions = -1;
 static int durable_progress = -1, pending_progress = -1;
-static bool regions_write_fails, progress_write_fails;
+static int durable_touch = -1, pending_touch = -1;
+static int durable_up = -1, pending_up = -1;
+static bool regions_write_fails, progress_write_fails, touch_write_fails;
 esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     assert(!strcmp(ns, "read_pico"));
     pending_regions = -1;
     pending_progress = -1;
+    pending_touch = -1;
+    pending_up = -1;
     return nvs_open(ns, mode, h);
 }
-void backup_nvs_close(nvs_handle_t h) { pending_regions = pending_progress = -1; nvs_close(h); }
+void backup_nvs_close(nvs_handle_t h) { pending_regions = pending_progress = pending_touch = pending_up = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_UP_ACTION)) {
+        if (durable_up < 0) return ESP_ERR_NVS_NOT_FOUND;
+        *value = (uint8_t)durable_up;
+        return ESP_OK;
+    }
+    if (!strcmp(key, NVS_KEY_TOUCH_DISABLED)) {
+        if (durable_touch < 0) return ESP_ERR_NVS_NOT_FOUND;
+        *value = (uint8_t)durable_touch;
+        return ESP_OK;
+    }
     if (!strcmp(key, NVS_KEY_READER_PROGRESS)) {
         if (durable_progress < 0) return ESP_ERR_NVS_NOT_FOUND;
         *value = (uint8_t)durable_progress;
@@ -181,6 +195,15 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key, NVS_KEY_UP_ACTION)) {
+        pending_up = value;
+        return ESP_OK;
+    }
+    if (!strcmp(key, NVS_KEY_TOUCH_DISABLED)) {
+        if (touch_write_fails) return ESP_FAIL;
+        pending_touch = value;
+        return ESP_OK;
+    }
     if (!strcmp(key, NVS_KEY_READER_PROGRESS)) {
         if (progress_write_fails) return ESP_FAIL;
         pending_progress = value;
@@ -195,6 +218,8 @@ esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
     if (err == ESP_OK && pending_regions >= 0) durable_regions = pending_regions;
     if (err == ESP_OK && pending_progress >= 0) durable_progress = pending_progress;
+    if (err == ESP_OK && pending_touch >= 0) durable_touch = pending_touch;
+    if (err == ESP_OK && pending_up >= 0) durable_up = pending_up;
     return err;
 }
 
@@ -211,7 +236,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -266,7 +291,7 @@ static void test_reader_progress_bar(void) {
     assert(app_settings_set_reader_progress_bar(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t)), SEEK_END) == 0);
     long progress_at = ftell(file);
     settings_backup_progress_bar_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -358,7 +383,7 @@ static void test_home_regions_backup(void) {
     app_home_components_apply(0x11);
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "rb");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t)), SEEK_END) == 0);
     long regions_at = ftell(file);
     settings_backup_home_regions_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -477,6 +502,94 @@ static void test_device_name_branding(void) {
     loaded_device_name = NULL;
     app_settings_init();
     assert(!strcmp(app_settings_device_name(), "mogo"));
+}
+
+static bool set_touch_binding(unsigned slot, app_reader_key_action_t action) {
+    if (slot < 3) return app_settings_set_reader_key_action(slot, action);
+    if (slot == 3) return app_settings_set_reader_hold_action(action);
+    if (slot == 4) return app_settings_set_reader_double_action(action);
+    return app_settings_set_reader_up_action(action);
+}
+
+static void test_reader_touch_lock(void) {
+    assert(app_settings_set_reader_touch_disabled(false));
+    app_settings_set_reader_key_preset(1);
+    assert(app_settings_set_reader_double_action(APP_READER_KEY_NONE));
+    assert(app_settings_set_reader_up_action(APP_READER_KEY_NONE));
+    int commits = commit_count;
+    assert(!app_settings_reader_touch_toggle_bound());
+    assert(!app_settings_set_reader_touch_disabled(true) && commit_count == commits);
+    for (unsigned slot = 0; slot < 6; ++slot) {
+        assert(set_touch_binding(slot, APP_READER_KEY_TOUCH));
+        assert(app_settings_reader_touch_toggle_bound());
+        for (unsigned failure = 0; failure < 3; ++failure) {
+            touch_write_fails = failure == 0;
+            commit_fails = failure == 1;
+            flash_failure = failure == 2;
+            assert(!app_settings_set_reader_touch_disabled(true) && !app_settings_reader_touch_disabled());
+            assert(!flash_depth);
+        }
+        touch_write_fails = commit_fails = flash_failure = false;
+        assert(app_settings_set_reader_touch_disabled(true) && durable_touch == 1);
+        commits = commit_count;
+        assert(!set_touch_binding(slot, APP_READER_KEY_NEXT) && commit_count == commits);
+        app_settings_set_reader_key_preset(2);
+        assert(app_settings_reader_touch_toggle_bound());
+        unsigned alternate = (slot + 1) % 6;
+        assert(set_touch_binding(alternate, APP_READER_KEY_TOUCH));
+        assert(set_touch_binding(slot, APP_READER_KEY_NEXT));
+        assert(!set_touch_binding(alternate, APP_READER_KEY_NEXT));
+        assert(app_settings_set_reader_touch_disabled(false) && durable_touch == 0);
+        assert(set_touch_binding(alternate, APP_READER_KEY_NEXT));
+        app_settings_set_reader_key_preset(1);
+        assert(app_settings_set_reader_double_action(APP_READER_KEY_NONE));
+        assert(app_settings_set_reader_up_action(APP_READER_KEY_NONE));
+    }
+    // 每个可绑定位置均跨重启和备份保留；坏配置缺少恢复绑定时自动恢复触摸。
+    // Every binding survives restart/backup; malformed preferences without a recovery binding restore touch.
+    for (unsigned slot = 0; slot < 6; ++slot) {
+        assert(set_touch_binding(slot, APP_READER_KEY_TOUCH));
+        assert(app_settings_set_reader_touch_disabled(true));
+        // 清空运行时映射，模拟断电后只从NVS恢复，不能依靠上次RAM值。
+        // Reset runtime mappings so cold-boot recovery depends on NVS rather than retained RAM.
+        s_reader_keys[0]=APP_READER_KEY_PREV;s_reader_keys[1]=APP_READER_KEY_TOOLS;s_reader_keys[2]=APP_READER_KEY_NEXT;
+        s_reader_hold_action=APP_READER_KEY_HOME;s_reader_double_action=s_reader_up_action=APP_READER_KEY_NONE;
+        app_settings_init();
+        assert(app_settings_reader_touch_disabled() && app_settings_reader_touch_toggle_bound());
+        assert(app_settings_backup_save() == ESP_OK);
+        assert(app_settings_set_reader_touch_disabled(false));
+        assert(set_touch_binding(slot, APP_READER_KEY_NONE));
+        assert(app_settings_backup_restore() == ESP_OK && app_settings_reader_touch_disabled());
+        assert(app_settings_set_reader_touch_disabled(false));
+        assert(set_touch_binding(slot, APP_READER_KEY_NONE));
+    }
+    durable_touch = 1;
+    app_settings_init();
+    assert(!app_settings_reader_touch_disabled());
+    assert(app_settings_backup_save() == ESP_OK);
+    FILE *file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t)), SEEK_END) == 0);
+    long at = ftell(file);
+    settings_backup_touch_t unsafe = {.on = 1};
+    uint32_t hash = backup_progress_bar_checksum(&unsafe);
+    for (unsigned i = 0; i < 4; ++i) unsafe.checksum[i] = (uint8_t)(hash >> (8 * i));
+    assert(fwrite(&unsafe, 1, sizeof(unsafe), file) == sizeof(unsafe) && fclose(file) == 0);
+    assert(app_settings_backup_restore() == ESP_OK && !app_settings_reader_touch_disabled() && durable_touch == 0);
+    for (unsigned cut = 0; cut < sizeof(unsafe); ++cut) {
+        assert(app_settings_backup_save() == ESP_OK);
+        file = fopen(BACKUP_FILE, "r+b");
+        assert(file && ftruncate(fileno(file), at + cut) == 0 && fclose(file) == 0);
+        commits = commit_count;
+        assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits);
+    }
+    assert(app_settings_backup_save() == ESP_OK);
+    file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, at, SEEK_SET) == 0);
+    unsafe.checksum[0] ^= 1;
+    assert(fwrite(&unsafe, 1, sizeof(unsafe), file) == sizeof(unsafe) && fclose(file) == 0);
+    commits = commit_count;
+    assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits);
+    puts("PASS: touch lock requires recovery on all six bindings; last binding/presets, NVS failures, reboot, backup and corrupt/orphaned states");
 }
 
 int main(void) {
@@ -882,7 +995,7 @@ int main(void) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -954,7 +1067,7 @@ int main(void) {
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1370,7 +1483,7 @@ int main(void) {
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                               sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -1403,7 +1516,7 @@ int main(void) {
     for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t)),SEEK_END)==0);
     long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
     assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
     assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
@@ -1431,7 +1544,7 @@ int main(void) {
     assert(app_settings_set_reader_chrome_heights(96,73));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t)),SEEK_END)==0);
     long height_at=ftell(saved);settings_backup_chrome_heights_t valid_height;
     assert(fread(&valid_height,1,sizeof(valid_height),saved)==sizeof(valid_height)&&fclose(saved)==0);
     for(unsigned fault=0;fault<3;++fault){
@@ -1523,7 +1636,7 @@ int main(void) {
     assert(!backup_shutdown_style_valid(&bad_shutdown));
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
     const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
-        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t));
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_touch_t));
     assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
     assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
     int commits_before_bad_shutdown=commit_count;
@@ -1534,6 +1647,7 @@ int main(void) {
     test_reader_progress_bar();
     test_home_regions_backup();
     test_device_name_branding();
+    test_reader_touch_lock();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;
 }

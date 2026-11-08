@@ -14,11 +14,11 @@ from home_cover_cache_host_test import function
 ROOT = Path(__file__).resolve().parents[1]
 # 334e224的3136组状态：两面板的文字、坐标、颜色、图标及绘制顺序，另含无效矩形与开关。
 # 3136 states from 334e224: text, geometry, colors, icons and call order for both sheets, plus invalid rectangles and switches.
-# 八项设置与晃动开关两态的绘制基准。/ Drawing baseline for eight settings and both shake toggle states.
+# 九项设置、禁触与晃动开关的绘制基准。/ Drawing baseline for nine settings including touch lock and shake.
 LEGACY_EXPECTED = 'e7505b2b4d4f68496928912eb860e0f127fe3b926351886d3f3bbb6a3e116625'
 LEGACY_LAYOUT_EXPECTED = '29a5b99acf14978497595b0cea28facb3187a8c73994ada200c3f811204304cf'
-EXPECTED = '30497fb09bdcad1855480d7ba18ccbc371cbe674f897c7ff5ad1f19dba17a9a5'
-LAYOUT_EXPECTED = '7e890b9d96711da49522f6d48b929b767ad65bca0a6ef3343620e1d7555b5085'
+EXPECTED = 'c86b1be803b099e8838d3ac6de4d4cc9a874a8b7f2914ba7f6727205c07965f1'
+LAYOUT_EXPECTED = 'd08c395a7ce6ef48c05c6e900f6912eccbdaeed757d15103fbb3639ae0415b1f'
 
 
 def main():
