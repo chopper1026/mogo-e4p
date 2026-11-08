@@ -1,4 +1,4 @@
-"""Native-resolution packed reading backgrounds and bounded ticket layout.
+"""Native-resolution reading backgrounds, bounded ticket layout and transparent ticket surroundings.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -136,8 +136,91 @@ int main(void){uint8_t fb[1];char line[128];
   min_y=802;max_y=856;ticket_stat(fb,min_y,54,34,"已读 100%  ·  第 4294967295 章");
  }assert(draws);puts("PASS: UINT64 durations/UINT32 turns and chapters remain within ticket at 100-200% UI and varying font widths");}
 '''
+ticket_art=r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#define BOOK_COVER_W 176
+#define BOOK_COVER_H 240
+#define UI_LOCK_WIDTH 684
+#define UI_LOCK_HEIGHT 1216
+#define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
+#define UI_GRAY_LIGHT 224
+#define EPD_DRAW_ALIGN_LEFT 0
+#define EPD_DRAW_ALIGN_CENTER 1
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+#define BYTES (684u*1216u/2u)
+typedef struct {int x,y,width,height;} EpdRect;
+typedef struct {uint32_t day;uint64_t total_seconds,today_seconds;uint32_t total_turns,today_turns;} ticket_stats_t;
+typedef struct {uint32_t chapter,pct;} book_progress_t;
+static bool history=true,cover_ok=true,alloc_ok=true;
+static unsigned rotation,cover_loads,text_draws;
+static size_t live;
+static size_t offset(int x,int y){assert(x>=0&&x<684&&y>=0&&y<1216);return rotation?(size_t)(683-x)*1216+y:(size_t)y*684+x;}
+static uint8_t pixel(const uint8_t *fb,int x,int y){size_t at=offset(x,y);return ((fb[at/2]>>((at&1)*4))&15)*17;}
+static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){size_t at=offset(x,y);unsigned shift=(at&1)*4;fb[at/2]=(fb[at/2]&~(15u<<shift))|((gray>>4)<<shift);}
+static void ui_fill_rect_fast(EpdRect box,uint8_t gray,uint8_t *fb){for(int y=box.y;y<box.y+box.height;++y)for(int x=box.x;x<box.x+box.width;++x)epd_draw_pixel(x,y,gray,fb);}
+static void ui_draw_round_rect(uint8_t *fb,EpdRect box,int radius,uint8_t gray){assert(!radius);for(int x=box.x;x<box.x+box.width;++x){epd_draw_pixel(x,box.y,gray,fb);epd_draw_pixel(x,box.y+box.height-1,gray,fb);}for(int y=box.y;y<box.y+box.height;++y){epd_draw_pixel(box.x,y,gray,fb);epd_draw_pixel(box.x+box.width-1,y,gray,fb);}}
+static void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t gray){ui_fill_rect_fast((EpdRect){x,y,width,1},gray,fb);}
+static int ui_text_effective_px(int px){return px;}
+static int ui_text_fixed_width_px(int px,const char *text){return (int)strlen(text)*px/3;}
+static int ui_text_title_fit(const char *text,int px,int width,const char *face){(void)text;(void)width;(void)face;return px;}
+static void ui_text(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){(void)fb;(void)x;(void)y;(void)px;(void)align;(void)inverse;assert(text&&*text);++text_draws;}
+static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){ui_text(fb,x,y,px,text,align,inverse);}
+static void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){ui_text(fb,x,y,px,text,align,inverse);}
+static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *face,int align){(void)face;ui_text(fb,x,y,px,text,align,false);}
+static void *heap_caps_malloc(size_t n,unsigned caps){assert(caps==3&&n==BOOK_COVER_W*BOOK_COVER_H);if(!alloc_ok)return NULL;void *p=malloc(n);assert(p);live+=n;return p;}
+static void release(void *p){if(p){assert(live==BOOK_COVER_W*BOOK_COVER_H);live=0;free(p);}}
+#define free(p) release(p)
+static bool book_cover_load_gray(const char *path,const char *title,const char *author,uint8_t *gray,bool decode,bool *pending){assert(*path&&*title&&*author&&!decode&&!pending);++cover_loads;if(!cover_ok)return false;memset(gray,0,BOOK_COVER_W*BOOK_COVER_H);return true;}
+static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
+static bool book_progress_last_path(char *path,size_t size){snprintf(path,size,"/missing.epub");return history;}
+static bool book_progress_load(const char *path,uint32_t size,book_progress_t *out){(void)path;(void)size;*out=(book_progress_t){.chapter=4,.pct=42};return true;}
+static bool book_title_from_path(const char *path,char *title,size_t size){(void)path;snprintf(title,size,"Test title");return true;}
+static bool book_metadata_supported(const char *path){(void)path;return true;}
+static bool book_metadata_cached(const char *path,char *title,size_t title_size,char *author,size_t author_size){(void)path;snprintf(title,title_size,"Title");snprintf(author,author_size,"Author");return true;}
+static void stats_load(ticket_stats_t *stats){*stats=(ticket_stats_t){0};}
+static uint32_t local_day(void){return 0;}
+'''
+ticket_path=ROOT/'main/book/book_ticket.c'
+ticket_art+=function('ui_image_dither_gray',ROOT/'main/ui/ui_image_dither.c')+'\n'
+for name in ('text_fit','cover_load','notch_depth','ticket_paper_draw','ticket_shadow_draw','cover_draw','ticket_stat','ticket_heading','book_ticket_draw'):
+ ticket_art+=function(name,ticket_path)+'\n'
+ticket_art+=r'''
+int main(void){
+ uint8_t frame[BYTES],original[BYTES];
+ for(rotation=0;rotation<2;++rotation)for(unsigned mode=0;mode<3;++mode)for(unsigned shade=0;shade<16;++shade){
+  cover_ok=mode==0;alloc_ok=mode!=2;history=true;
+  for(size_t at=0;at<BYTES;++at)frame[at]=original[at]=(uint8_t)(at*37+shade*17);
+  unsigned before=cover_loads;text_draws=0;
+  assert(book_ticket_draw(frame,shade&1)&&!live&&text_draws>=6);
+  assert(cover_loads-before==(alloc_ok?1u:0u));
+  // 票根和偏移阴影以外逐像素不变，含上下裁纸缺口；检查产品倒置竖屏打包。
+  // Every pixel outside the paper and offset shadow stays intact, including scallops and inverted portrait packing.
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
+   int dx=(x-80)%64;if(dx<0)dx+=64;if(dx>32)dx-=64;int cut=abs(dx)>18?0:18-dx*dx/18;
+   int sx=(x-5-80)%64;if(sx<0)sx+=64;if(sx>32)sx-=64;int shadow_cut=abs(sx)>18?0:18-sx*sx/18;
+   bool paper=x>=48&&x<636&&y>=58+cut&&y<1158-cut;
+   bool shadow=x>=53&&x<641&&y>=66+shadow_cut&&y<1166-shadow_cut;
+   if(!paper&&!shadow)assert(pixel(frame,x,y)==pixel(original,x,y));
+  }
+  assert(pixel(frame,100,350)==255&&pixel(frame,48,200)==0);
+  assert(pixel(frame,638,600)==136);
+  assert(pixel(frame,300,500)==(mode==0?0:238));
+ }
+ history=false;memcpy(frame,original,BYTES);unsigned before=cover_loads;
+ assert(!book_ticket_draw(frame,false)&&!memcmp(frame,original,BYTES)&&cover_loads==before&&!live);
+ puts("PASS: real ticket preserves every surrounding pixel and scallop over 16 patterned backgrounds in both portrait packings; paper, inset cover, shadow, text, cache failure/OOM and no-history fallback");
+}
+'''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:
- for name,code in [('background',unit),('ticket',ticket)]:
+ for name,code in [('background',unit),('ticket',ticket),('ticket_art',ticket_art)]:
   c=Path(directory)/(name+'.c');exe=Path(directory)/name;c.write_text(code)
   subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-sign-compare','-fsanitize=address,undefined',str(c),'-o',str(exe)],check=True)
   subprocess.run([str(exe)],check=True)

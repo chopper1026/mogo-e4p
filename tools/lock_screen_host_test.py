@@ -153,6 +153,16 @@ int main(void){
  }
  selected_style=2;lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  selected_style=0;memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);
+ // 旧票根缓存的身份为零，升级后重画透明票根，不读取旧封面像素。
+ // Legacy tickets have a zero art identity; redraw the transparent ticket without reading the old cover pixels.
+ lock_screen_save(framebuffer);assert(lock_screen_restore(f));
+ FILE *opaque=fopen(LOCK_ART_PATH,"r+b");assert(opaque);art_header_t opaque_header;
+ assert(fread(&opaque_header,1,sizeof(opaque_header),opaque)==sizeof(opaque_header));
+ opaque_header.wallpaper=0;rewind(opaque);
+ assert(fwrite(&opaque_header,1,sizeof(opaque_header),opaque)==sizeof(opaque_header)&&fclose(opaque)==0);
+ memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f));
+ for(unsigned at=0;at<FRAME_BYTES;++at)assert(f[at]==0xee);
+ lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  selected_style=1;assert(!lock_screen_restore(f));
  wallpaper=LOCK_SCREEN_CACHE_PARENT "/a.jpg";lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  wallpaper=LOCK_SCREEN_CACHE_PARENT "/b.jpg";memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);

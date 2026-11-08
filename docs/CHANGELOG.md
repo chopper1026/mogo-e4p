@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.7 · 本地测试 / Local testing · 2026-11-08
+
+- 阅读票根锁屏改为透明背景，票根外围保留锁屏前页面，不再铺满书籍封面；票内封面、文字与统计保留，冷启动缺少缓存时使用白底。/ Overlay the reading ticket on the current page instead of a full-screen book cover; keep its inset cover, text and statistics, with a white base when cold-boot art is unavailable.
+
 ## v1.0.7 · 2026-11-07
 
 - 新增离线字典功能，阅读中长按选中正文文字可触发。
