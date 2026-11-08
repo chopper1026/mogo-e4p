@@ -146,6 +146,7 @@ ticket_art=r'''
 #include <sys/stat.h>
 #define BOOK_COVER_W 176
 #define BOOK_COVER_H 240
+#define BOOK_EXCERPT_CAP 240
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
@@ -175,12 +176,14 @@ static void ui_text(uint8_t *fb,int x,int y,int px,const char *text,int align,bo
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){ui_text(fb,x,y,px,text,align,inverse);}
 static void ui_text_fixed(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){ui_text(fb,x,y,px,text,align,inverse);}
 static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *face,int align){(void)face;ui_text(fb,x,y,px,text,align,false);}
+static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,int align,bool inverse){assert(box.x==82&&box.y>1050&&box.x+box.width<=602&&box.y+box.height<1140);ui_text(fb,box.x,box.y,px,text,align,inverse);}
 static void *heap_caps_malloc(size_t n,unsigned caps){assert(caps==3&&n==BOOK_COVER_W*BOOK_COVER_H);if(!alloc_ok)return NULL;void *p=malloc(n);assert(p);live+=n;return p;}
 static void release(void *p){if(p){assert(live==BOOK_COVER_W*BOOK_COVER_H);live=0;free(p);}}
 #define free(p) release(p)
 static bool book_cover_load_gray(const char *path,const char *title,const char *author,uint8_t *gray,bool decode,bool *pending){assert(*path&&*title&&*author&&!decode&&!pending);++cover_loads;if(!cover_ok)return false;memset(gray,0,BOOK_COVER_W*BOOK_COVER_H);return true;}
 static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 static bool book_progress_last_path(char *path,size_t size){snprintf(path,size,"/missing.epub");return history;}
+static bool book_excerpt_load(const char *path,char out[BOOK_EXCERPT_CAP]){assert(!strcmp(path,"/missing.epub"));snprintf(out,BOOK_EXCERPT_CAP,"A sentence from the recent book.");return true;}
 static bool book_progress_load(const char *path,uint32_t size,book_progress_t *out){(void)path;(void)size;*out=(book_progress_t){.chapter=4,.pct=42};return true;}
 static bool book_title_from_path(const char *path,char *title,size_t size){(void)path;snprintf(title,size,"Test title");return true;}
 static bool book_metadata_supported(const char *path){(void)path;return true;}

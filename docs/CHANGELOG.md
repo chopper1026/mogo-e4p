@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.7 · 本地测试 / Local testing · 2026-11-08
 
+- 阅读票根底部改用与最近阅读同源的书摘，长句自动适配票面宽度，无可用书摘时留空。/ Replace the ticket footer with the recent book's Home excerpt, fitting long sentences within the paper and leaving it blank without an excerpt.
 - 移除普通书架题头下的「＋ 添加图书」「新增N本 · 归类」及底部归类结果栏，保持书架、分页与导航布局；取消分类会话撤回，添加图书仍可从「管理分类」进入。/ Remove the add-books shortcut, new-book classification prompt and result band from ordinary shelves, keeping shelf, pager and navigation geometry; remove session undo and retain add-books in category management.
 - 阅读顶部快捷栏第二排新增环形箭头锁头图标：点按开启重力四向旋转，再点锁定当前方向；正文按原文字位置重排，退出阅读恢复正常竖屏。平放、触摸和弹层期间暂停换向；目录、设置与锁屏保持竖屏；横屏快捷栏使用左侧按钮、右侧双滑杆的紧凑两行布局。/ Add a circular-arrow lock icon in the second reader quick-layer row: tap for gravity-based four-way rotation and tap again to lock. Reflow around the text position and restore normal portrait on exit; suspend while flat, touching or covered by overlays, with TOC, settings and lock screens in portrait. Landscape quick controls use compact left-side keys and two right-side sliders.
 - 解锁恢复（含定时关机后续读）和阅读返回主页／书架统一使用完整48相GC16整屏清理，保留日常翻页与主页切页策略；本机刷入后用户确认残影明显改善。/ Use complete 48-phase whole-screen GC16 for unlock/resume and reader-to-main/shelf returns, retaining ordinary turns and main-page transitions; the user confirmed visibly reduced ghosting after a local device flash.

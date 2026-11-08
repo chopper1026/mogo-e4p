@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "book_cover.h"
+#include "book_excerpt.h"
 #include "book_metadata.h"
 #include "book_progress.h"
 #include "book_title.h"
@@ -286,6 +287,11 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
              (unsigned long long)((stats.total_seconds / 60) % 60), (unsigned)stats.total_turns);
     ticket_stat(fb, 969, 74, 28, line);
     ui_hairline(fb, 1050, 82, 520, UI_GRAY_BLACK);
-    ui_text(fb, 82, 1080, 26, "在每一页里，留下时间的凭证", EPD_DRAW_ALIGN_LEFT, false);
+    char excerpt[BOOK_EXCERPT_CAP];
+    if (book_excerpt_load(path, excerpt)) {
+        char quote[BOOK_EXCERPT_CAP + 8];
+        snprintf(quote, sizeof(quote), "“%s”", excerpt);
+        ui_text_box(fb, (EpdRect){82, 1068, 520, 58}, 26, quote, EPD_DRAW_ALIGN_LEFT, false);
+    }
     return true;
 }
