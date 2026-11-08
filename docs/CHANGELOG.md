@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.8 · 本地测试 / Local testing · 2026-11-08
 
+- 前光 PWM 输出上限由 20% 降至 10%，减轻亮度过高；滑杆仍为 1–100%，沿用已保存档位，实际输出约减半。/ Lower the frontlight PWM ceiling from 20% to 10% to reduce excessive brightness; retain the 1–100% slider and saved levels, with approximately half the output.
 - 阅读票根新增「透明背景 / 封面背景」选择，默认保留透明；选择随重启与设置备份保存，切换后锁屏缓存自动失效，两种背景共用票面、书摘和统计。/ Add transparent/cover ticket backgrounds, defaulting to transparent, persisted across restart and settings backup with cache invalidation and shared paper, excerpts and statistics.
 - 阅读底栏调整为目录、书签、排版、设置、更多五项；统计、书签列表及全屏切换归入更多。字体与排版采用整行列表，标题样式提至字重下方，可直接打开预览；阅读设置按操作、页面、刷新分组，适配100%至200%界面字号。/ Use five reader tools with statistics, saved bookmarks and full screen under More; full-width typography rows include a direct heading-style preview below Weight, with Input/Page/Refresh settings at 100–200% UI size.
 
