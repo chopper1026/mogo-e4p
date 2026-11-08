@@ -84,14 +84,17 @@ int main(void) {
     assert(strcmp(book_collection_find(&s, id)->name, "科幻") == 0);
     assert(book_collection_assignment(&s, books[0].path) == id && book_collection_assignment(&s, books[1].path) == id);
     assert(book_collection_assignment(&s, books[2].path) == id);
-    assert(book_collection_can_undo(&s));
     generation = s.generation;
     assert(book_collection_assign(&s, books, 3, true, id, &changed) == ESP_OK && !changed && s.generation == generation);
     assert(book_collection_rename(&s, id, "科幻小说") == ESP_OK);
     assert(book_collection_order(&s, id, -1) == ESP_OK && book_collection_at(&s, 0)->id == id);
     assert(book_collection_remove(&s, id) == ESP_OK && !book_collection_assignment(&s, books[0].path));
-    assert(book_collection_undo(&s) == ESP_OK && book_collection_assignment(&s, books[0].path) == id);
-    assert(book_collection_at(&s, 0)->id == id && !book_collection_can_undo(&s));
+    uint32_t removed_id = id;
+    book_collection_close(&s); assert(book_collection_open(&s, prefix) == ESP_OK);
+    assert(!book_collection_find(&s, removed_id) && book_collection_count(&s) == 1);
+    for (int i = 0; i < 3; ++i) assert(!book_collection_assignment(&s, books[i].path));
+    assert(book_collection_create(&s, "科幻小说", books, 3, true, &id, &changed) == ESP_OK && changed == 3 && id > removed_id);
+    assert(book_collection_order(&s, id, -1) == ESP_OK && book_collection_at(&s, 0)->id == id);
     book_collection_close(&s); assert(book_collection_open(&s, prefix) == ESP_OK);
     assert(book_collection_assignment(&s, books[0].path) == id);
     // 任一副本短暂读错都阻断写入，不回退旧数据再覆盖新副本。/ Transient errors on either copy block writes instead of rolling back and overwriting newer data.
@@ -120,11 +123,15 @@ int main(void) {
     allocation_fail = -1;
     assert(!strcmp(book_collection_find(&s, id)->name, "科幻小说"));
     for (int fail = 0; fail < 7; ++fail) {
+        generation = s.generation;
         allocation_fail = fail;
         esp_err_t result = book_collection_assign(&s, books, 4, true, 0, &changed);
         allocation_fail = -1;
-        if (result == ESP_OK) assert(book_collection_undo(&s) == ESP_OK);
-        else assert(!changed);
+        if (result == ESP_OK) {
+            assert(changed == 3 && s.generation == generation + 1);
+            for (int i = 0; i < 4; ++i) assert(!book_collection_assignment(&s, books[i].path));
+            assert(book_collection_assign(&s, books, 3, true, id, &changed) == ESP_OK && changed == 3);
+        } else assert(!changed && s.generation == generation);
         assert(book_collection_assignment(&s, books[0].path) == id && books[0].selected);
     }
     FILE *backup = tmpfile(); assert(backup); assert(book_collection_export(&s, backup) == ESP_OK); rewind(backup);
@@ -178,5 +185,5 @@ int main(void) {
     assert(!unlink(books[0].path) && !rmdir(folder) && !rmdir(root));
     for (int slot = 0; slot < 2; ++slot) { char path[320]; snprintf(path, sizeof(path), "%s.%d", prefix, slot); unlink(path); snprintf(path, sizeof(path), "%s.%d", second, slot); unlink(path); snprintf(path, sizeof(path), "%s.%d", migration_prefix, slot); unlink(path); }
     assert(!rmdir(directory));
-    puts("logical collections: PASS (migration, stable IDs, same filenames, internal books, persistence, no file mutations, batch rollback, undo, card isolation, corrupt copies, UTF-8 and allocation/write failures)");
+    puts("logical collections: PASS (migration, stable IDs, same filenames, internal books, persistent removal, no file mutations, failed-batch rollback, card isolation, corrupt copies, UTF-8 and allocation/write failures)");
 }

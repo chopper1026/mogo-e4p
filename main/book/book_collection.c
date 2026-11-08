@@ -219,9 +219,7 @@ esp_err_t book_collection_open(book_collection_t *s,const char *prefix) {
     if(errors[0]==ESP_ERR_NOT_FOUND && errors[1]==ESP_ERR_NOT_FOUND){s->data=clone(NULL);s->ready=s->data!=NULL;return s->ready?ESP_OK:ESP_ERR_NO_MEM;}
     s->blocked=true;return errors[0]==ESP_ERR_NO_MEM || errors[1]==ESP_ERR_NO_MEM?ESP_ERR_NO_MEM:ESP_ERR_INVALID_RESPONSE;
 }
-void book_collection_drop_undo(book_collection_t *s){if(s){release(s->undo);s->undo=NULL;}}
-void book_collection_close(book_collection_t *s){if(!s)return;release(s->data);release(s->undo);memset(s,0,sizeof(*s));s->slot=-1;}
-bool book_collection_can_undo(const book_collection_t *s){return s && s->undo && s->ready && !s->blocked;}
+void book_collection_close(book_collection_t *s){if(!s)return;release(s->data);memset(s,0,sizeof(*s));s->slot=-1;}
 bool book_collection_migrated(const book_collection_t *s){return s && s->data && s->data->migrated;}
 int book_collection_count(const book_collection_t *s){return s && s->data?s->data->count:0;}
 const book_collection_category_t *book_collection_at(const book_collection_t *s,int i){return s && s->data && i>=0 && i<s->data->count?&s->data->categories[i]:NULL;}
@@ -233,7 +231,7 @@ uint32_t book_collection_legacy_id(const book_collection_t *s,const char *name){
 }
 uint32_t book_collection_assignment(const book_collection_t *s,const char *path){int i=s?record_index(s->data,path):-1;return i>=0?s->data->books[i].category:0;}
 
-static esp_err_t commit(book_collection_t *s,book_collection_data_t *next,bool undo) {
+static esp_err_t commit(book_collection_t *s,book_collection_data_t *next) {
     if(!s->ready || s->blocked || s->generation==UINT32_MAX){release(next);return ESP_ERR_INVALID_STATE;}
     size_t size=0;uint8_t *bytes=encode(next,s->generation+1,&size);
     if(!bytes){release(next);return ESP_ERR_NO_MEM;}
@@ -253,8 +251,7 @@ static esp_err_t commit(book_collection_t *s,book_collection_data_t *next,bool u
         if(unlink(path)!=0 && errno!=ENOENT)s->blocked=true;
         release(next);return err;
     }
-    book_collection_drop_undo(s);
-    if(undo)s->undo=s->data;else release(s->data);
+    release(s->data);
     s->data=next;s->slot=slot;++s->generation;s->recovered=false;return ESP_OK;
 }
 void book_collection_apply(const book_collection_t *s,book_shelf_entry_t *books,int count){
@@ -320,7 +317,7 @@ esp_err_t book_collection_sync(book_collection_t *s,const char *root,const char 
         if(err==ESP_OK)err=set_record(next,books[i].path,id);
     }
     if(err!=ESP_OK){release(next);return err;}next->migrated=true;
-    err=commit(s,next,false);if(err==ESP_OK)book_collection_apply(s,books,count);return err;
+    err=commit(s,next);if(err==ESP_OK)book_collection_apply(s,books,count);return err;
 }
 static esp_err_t assign_to(book_collection_data_t *d,const book_shelf_entry_t *books,int count,bool selected,uint32_t id,unsigned *changed){
     *changed=0;if(count<0 || (count && !books) || (id && category_index(d,id)<0))return ESP_ERR_INVALID_ARG;
@@ -336,14 +333,14 @@ esp_err_t book_collection_create(book_collection_t *s,const char *name,const boo
     book_collection_data_t *next=clone(s->data);if(!next)return ESP_ERR_NO_MEM;uint32_t created=0;
     esp_err_t err=add_category(next,name,&created,false);
     unsigned done=0;if(err==ESP_OK)err=assign_to(next,books,count,selected,created,&done);
-    if(err!=ESP_OK){release(next);return err;}err=commit(s,next,true);if(err==ESP_OK){*id=created;*changed=done;}return err;
+    if(err!=ESP_OK){release(next);return err;}err=commit(s,next);if(err==ESP_OK){*id=created;*changed=done;}return err;
 }
 esp_err_t book_collection_assign(book_collection_t *s,const book_shelf_entry_t *books,int count,bool selected,uint32_t target,unsigned *changed){
     if(!s || !s->ready || s->blocked || !changed)return ESP_ERR_INVALID_STATE;
     *changed=0;
     book_collection_data_t *next=clone(s->data);if(!next)return ESP_ERR_NO_MEM;unsigned done=0;
     esp_err_t err=assign_to(next,books,count,selected,target,&done);
-    if(err!=ESP_OK || !done){release(next);return err;}err=commit(s,next,true);if(err==ESP_OK)*changed=done;return err;
+    if(err!=ESP_OK || !done){release(next);return err;}err=commit(s,next);if(err==ESP_OK)*changed=done;return err;
 }
 esp_err_t book_collection_unclassify(book_collection_t *s, const book_shelf_entry_t *books,
                                      int count, uint32_t source, unsigned *changed) {
@@ -362,7 +359,7 @@ esp_err_t book_collection_unclassify(book_collection_t *s, const book_shelf_entr
         }
     }
     if (!done) { release(next); return ESP_OK; }
-    esp_err_t err = commit(s, next, true);
+    esp_err_t err = commit(s, next);
     if (err == ESP_OK) *changed = done;
     return err;
 }
@@ -372,7 +369,7 @@ esp_err_t book_collection_rename(book_collection_t *s,uint32_t id,const char *na
     if(!strcmp(s->data->categories[index].name,clean))return ESP_OK;
     for(int i=0;i<s->data->count;++i)if(!strcmp(s->data->categories[i].name,clean))return ESP_ERR_INVALID_STATE;
     book_collection_data_t *next=clone(s->data);if(!next)return ESP_ERR_NO_MEM;
-    memcpy(next->categories[index].name,clean,strlen(clean)+1);return commit(s,next,true);
+    memcpy(next->categories[index].name,clean,strlen(clean)+1);return commit(s,next);
 }
 esp_err_t book_collection_remove(book_collection_t *s,uint32_t id){
     if(!s || !s->ready || s->blocked)return ESP_ERR_INVALID_STATE;
@@ -380,7 +377,7 @@ esp_err_t book_collection_remove(book_collection_t *s,uint32_t id){
     book_collection_data_t *next=clone(s->data);if(!next)return ESP_ERR_NO_MEM;
     memmove(next->categories+index,next->categories+index+1,(size_t)(next->count-index-1)*sizeof(*next->categories));--next->count;
     for(size_t i=0;i<next->used;++i)if(next->books[i].category==id)next->books[i].category=0;
-    return commit(s,next,true);
+    return commit(s,next);
 }
 esp_err_t book_collection_order(book_collection_t *s,uint32_t id,int direction){
     if(!s || !s->ready || s->blocked)return ESP_ERR_INVALID_STATE;
@@ -389,13 +386,7 @@ esp_err_t book_collection_order(book_collection_t *s,uint32_t id,int direction){
     if(other<0 || other>=s->data->count)return ESP_OK;
     book_collection_data_t *next=clone(s->data);if(!next)return ESP_ERR_NO_MEM;
     book_collection_category_t item=next->categories[index];next->categories[index]=next->categories[other];next->categories[other]=item;
-    return commit(s,next,true);
-}
-esp_err_t book_collection_undo(book_collection_t *s){
-    if(!book_collection_can_undo(s))return ESP_ERR_INVALID_STATE;
-    book_collection_data_t *next=clone(s->undo);if(!next)return ESP_ERR_NO_MEM;
-    if(next->next_id<s->data->next_id)next->next_id=s->data->next_id;
-    return commit(s,next,false);
+    return commit(s,next);
 }
 esp_err_t book_collection_export(const book_collection_t *s,FILE *file){
     if(!s || !s->ready || !file || s->blocked)return ESP_ERR_INVALID_STATE;
@@ -405,5 +396,5 @@ esp_err_t book_collection_export(const book_collection_t *s,FILE *file){
 esp_err_t book_collection_import(book_collection_t *s,FILE *file){
     if(!s || !file || !s->ready || s->blocked)return ESP_ERR_INVALID_STATE;
     book_collection_data_t *next=NULL;uint32_t generation=0;esp_err_t err=read_image(file,&next,&generation);
-    return err==ESP_OK?commit(s,next,true):err;
+    return err==ESP_OK?commit(s,next):err;
 }

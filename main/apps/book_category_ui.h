@@ -10,12 +10,12 @@ typedef enum { CATEGORY_LIST, CATEGORY_ACTIONS, CATEGORY_EDIT, CATEGORY_CONFIRM,
                CATEGORY_SELECTED_ACTIONS } book_category_screen_t;
 typedef enum { CATEGORY_IDLE, CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_MOVE, CATEGORY_REMOVE,
                CATEGORY_RECOVER, CATEGORY_OPEN, CATEGORY_ADD, CATEGORY_UP, CATEGORY_DOWN,
-               CATEGORY_SEARCH, CATEGORY_UNDO, CATEGORY_UNCLASSIFY } book_category_command_t;
+               CATEGORY_SEARCH, CATEGORY_UNCLASSIFY } book_category_command_t;
 typedef void (*book_category_cover_fn)(uint8_t *fb, int row, int index, EpdRect rect);
 typedef struct {
     book_category_screen_t screen, edit_parent;
     book_category_command_t command;
-    bool picker, renaming, blocked, review, selecting_only, can_undo;
+    bool picker, renaming, blocked, review, selecting_only;
     int page, book_page, count, book_info;
     uint32_t source, destination, filter;
     char draft[BOOK_COLLECTION_NAME_BYTES], notice[128], query[65];

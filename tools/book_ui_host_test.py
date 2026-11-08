@@ -243,7 +243,7 @@ static char s_manage_message[128];
 typedef enum {SHELF,SETTINGS,READING,TOC,MANAGE,BULK,IMPORT,SEARCH,EDIT,CATEGORIES} book_view_t;
 static book_view_t s_view,s_search_parent;
 static bool s_shelf_selecting;
-static char s_category_result[128],s_cache_library[40]="builtin";
+static char s_cache_library[40]="builtin";
 static struct {char query[65];bool review;int page;} s_category_ui;
 static unsigned test_category_entries;
 static void category_begin(app_ctx_t *ctx,bool picker,bool bulk){(void)ctx;(void)bulk;assert(picker);++test_category_entries;s_view=CATEGORIES;}

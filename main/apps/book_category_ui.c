@@ -267,7 +267,6 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
     if (!ui->picker && ui->screen == CATEGORY_LIST && book_shelf_categories_available(c) == 2)
         text(fb, (EpdRect){36, 420, 612, 100}, 28, "暂无分类", true);
     pager(fb, ui->page, pages(ui, c), 982);
-    if (ui->can_undo && ui->screen == CATEGORY_LIST && !ui->picker) button(fb, (EpdRect){180, 1056, 324, 64}, "撤销上次操作");
 }
 ui_keyboard_update_t book_category_ui_input_paint(book_category_ui_t *ui, uint8_t *fb) {
     (void)ui; return ui_keyboard_update(fb, 560, field(), 30, false, NULL, true);
@@ -379,7 +378,6 @@ int book_category_ui_gesture(book_category_ui_t *ui, const book_shelf_categories
     int direction=ev->type==UI_GESTURE_SWIPE_U?1:ev->type==UI_GESTURE_SWIPE_D?-1:0;
     if (ev->type == UI_GESTURE_TAP) {
         if (ev->y0 < 145 && ev->x0 > 568 && ui->screen != CATEGORY_FILTER) { book_category_ui_edit(ui,c,false); return 1; }
-        if (ui->can_undo && ui->screen==CATEGORY_LIST && !ui->picker && ui_rect_hit((EpdRect){180,1056,324,64},ev->x0,ev->y0)) { ui->command=CATEGORY_UNDO;return 1; }
         if (ev->y0 >= 982 && ev->y0 < 1040) direction=ev->x0<180?-1:ev->x0>504?1:0;
         for(int row=0;row<book_category_ui_rows(false);++row)if(ui_rect_hit(row_rect(row),ev->x0,ev->y0)) {
             int index=at(ui,c,ui->page*book_category_ui_rows(false)+row);if(index<0)return 0;

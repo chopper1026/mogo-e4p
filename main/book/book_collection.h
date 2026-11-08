@@ -18,7 +18,7 @@ typedef struct {
 } book_collection_category_t;
 typedef struct book_collection_data book_collection_data_t;
 typedef struct {
-    book_collection_data_t *data, *undo;
+    book_collection_data_t *data;
     char prefix[BOOK_STORE_PATH_MAX];
     uint32_t generation;
     int slot;
@@ -28,8 +28,6 @@ typedef struct {
 /// 调用方先挂载介质；坏索引不自动清空，允许从另一副本恢复。/ Mount storage first; never clear a corrupt index automatically, and recover from the other copy when possible.
 esp_err_t book_collection_open(book_collection_t *state, const char *prefix);
 void book_collection_close(book_collection_t *state);
-void book_collection_drop_undo(book_collection_t *state);
-bool book_collection_can_undo(const book_collection_t *state);
 bool book_collection_migrated(const book_collection_t *state);
 int book_collection_count(const book_collection_t *state);
 const book_collection_category_t *book_collection_at(const book_collection_t *state, int ordinal);
@@ -55,7 +53,6 @@ esp_err_t book_collection_unclassify(book_collection_t *state, const book_shelf_
 esp_err_t book_collection_rename(book_collection_t *state, uint32_t id, const char *name);
 esp_err_t book_collection_remove(book_collection_t *state, uint32_t id);
 esp_err_t book_collection_order(book_collection_t *state, uint32_t id, int direction);
-esp_err_t book_collection_undo(book_collection_t *state);
 /// 将已提交归属同步到借用书目，纯内存操作。/ Apply committed assignments to a borrowed catalog, in memory only.
 void book_collection_apply(const book_collection_t *state, book_shelf_entry_t *books, int count);
 /// 独立的有校验流，用于版本化备份。/ Independent checked stream for versioned backups.
