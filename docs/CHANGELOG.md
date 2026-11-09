@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.8 · 本地测试 / Local testing · 2026-11-09
+
+- 修复 WiFi 传书上传期间目录标签、图标及文字按钮出现灰色方块背景；保留上传禁用保护和主操作按钮的禁用提示。/ Keep folder tabs, icon buttons and text buttons free of gray blocks during WiFi uploads, retaining upload locking and the primary button's disabled appearance.
+- 传输区改为完整批次队列，显示当前文件、本批序号、字节进度和上传速率；上传中可滚动、展开、定位当前项及搜索排序本页文件，手机优先显示队列，进度更新不打断列表滚动。/ Show full upload batches with the current file, batch position, byte progress and speed; keep queue scrolling, expansion, current-file location and local search/sort usable during uploads, prioritize the queue on phones and preserve scroll position on progress updates.
+
 ## v1.0.8 · 本地测试 / Local testing · 2026-11-08
 
 - 前光 PWM 输出上限由 20% 降至 10%，减轻亮度过高；滑杆仍为 1–100%，沿用已保存档位，实际输出约减半。/ Lower the frontlight PWM ceiling from 20% to 10% to reduce excessive brightness; retain the 1–100% slider and saved levels, with approximately half the output.
