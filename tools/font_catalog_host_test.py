@@ -70,7 +70,7 @@ static int app_settings_system_font_size(void){return scale;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static int select_reading_font_item(app_ctx_t *ctx,const ttf_font_item_t *item){(void)ctx;selected=item;return APP_REDRAW_PAGE;}
 '''
-for name in ("reader_font_picker_top", "reader_font_pick_rect"):
+for name in ("reader_sheet_back_rect", "reader_font_picker_top", "reader_font_pick_rect"):
     unit += function(name, book) + "\n"
 choose = re.search(r"    if \(s_reader_panel == READER_PANEL_FONT_PICKER\) \{[\s\S]*?\n    \}", book)[0]
 unit += "static int reader_choose(int x,int y){app_ctx_t *ctx=NULL;" + choose + "return APP_REDRAW_NONE;}\n"
@@ -98,6 +98,12 @@ int main(int argc,char **argv){
   EpdRect r=reader_font_pick_rect(i%BOOK_FONT_PAGE);
   assert(reader_choose(r.x+r.width/2,r.y+r.height/2)==APP_REDRAW_PAGE);
   assert(selected==ttf_font_item(i));
+ }
+ for(scale=100;scale<=200;scale+=10){
+  s_reader_panel=READER_PANEL_FONT_PICKER;selected=NULL;
+  EpdRect back=reader_sheet_back_rect(reader_font_picker_top());
+  assert(reader_choose(back.x+back.width/2,back.y+back.height/2)==APP_REDRAW_PAGE);
+  assert(s_reader_panel==READER_PANEL_FONT_SETTINGS&&!selected);
  }
  assert(ttf_font_scan()==513);
  k_font_dirs[0]=argv[3];configured_dir=argv[4];

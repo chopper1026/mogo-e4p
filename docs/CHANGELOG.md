@@ -3,6 +3,14 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.9 · 2026-11-10
+
+- 锁屏样式-阅读票据增加透明背景和封面背景两种可选项。
+- 优化阅读页底部工具栏排版。
+- 降低前光亮度调节范围。
+- 新增日历锁屏样式，可选万年历/老黄历两种。
+- 新增九宫格自定义翻页。
+
 ## v1.0.8 · 本地测试 / Local testing · 2026-11-10
 
 - 翻页模式移除底部提示，新增九宫格自定义：半透明正文分区可逐格选择八种动作，保存后启用，取消保留原配置；映射随重启及v39设置备份保留。/ Remove the tap-mode footer hint and add nine custom body zones with eight actions, a translucent editor, explicit Save/Cancel and reboot/v39 backup persistence.
