@@ -36,6 +36,8 @@ def unit():
     code += "\n" + settings_header[begin:end] + "\n"
     code += source[source.index("typedef enum { SETTINGS_MAIN"):source.index("} settings_page_t;") + len("} settings_page_t;")]
     code += r'''
+typedef enum {APP_CALENDAR_ALMANAC, APP_CALENDAR_MONTH} app_calendar_style_t;
+static app_calendar_style_t app_settings_calendar_style(void){return APP_CALENDAR_ALMANAC;}
 static settings_page_t s_page;
 static app_ticket_background_t selected_background;
 static uint8_t selected_style;
@@ -71,7 +73,7 @@ int main(int argc,char **argv){
     uint8_t *fb=malloc(684*1216/2);assert(fb);char path[1024];
     for(font_percent=100;font_percent<=200;font_percent+=10){
         selected_style=2;s_page=SETTINGS_LOCK_STYLE;selected_background=APP_TICKET_BACKGROUND_COVER;
-        assert(tap(300,520)==APP_REDRAW_PAGE&&s_page==SETTINGS_TICKET_BACKGROUND&&selected_style==0);
+        assert(tap(300,486)==APP_REDRAW_PAGE&&s_page==SETTINGS_TICKET_BACKGROUND&&selected_style==0);
         assert(selected_background==APP_TICKET_BACKGROUND_COVER&&!scans&&!s_collage_prepare_pending);
         for(unsigned choice=0;choice<2;++choice){
             EpdRect box={36,300+(int)choice*154,612,132};
@@ -94,10 +96,10 @@ int main(int argc,char **argv){
             snprintf(path,sizeof(path),"%s/ticket-background-%u-%u.raw",argv[1],choice,font_percent);save(path,fb);
             s_page=SETTINGS_LOCK_STYLE;paint(fb);
             snprintf(path,sizeof(path),"%s/lock-style-%u-%u.raw",argv[1],choice,font_percent);save(path,fb);
-            assert(tap(300,520)==APP_REDRAW_PAGE&&selected_background==(app_ticket_background_t)choice);
+            assert(tap(300,486)==APP_REDRAW_PAGE&&selected_background==(app_ticket_background_t)choice);
         }
         assert(back()==APP_REDRAW_PAGE&&s_page==SETTINGS_LOCK_STYLE);
-        assert(tap(300,520)==APP_REDRAW_PAGE&&tap(60,110)==APP_REDRAW_PAGE&&s_page==SETTINGS_LOCK_STYLE);
+        assert(tap(300,486)==APP_REDRAW_PAGE&&tap(60,110)==APP_REDRAW_PAGE&&s_page==SETTINGS_LOCK_STYLE);
     }
     free(fb);ttf_font_unload();
     puts("PASS: native 100..200% ticket background choices, selection marks, tap edges/gaps, parent returns and failed-save retry");

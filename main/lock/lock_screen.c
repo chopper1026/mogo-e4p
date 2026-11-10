@@ -7,6 +7,7 @@
 #include "lock_screen.h"
 #include "platform/s31_input.h"
 #include "lock_pin.h"
+#include "lock_calendar.h"
 #include "settings.h"
 #include "ui_pinpad.h"
 #include "ui_kit.h"
@@ -34,6 +35,7 @@
 typedef struct {uint32_t magic,rotation,style,checksum;uint64_t wallpaper;} art_header_t;
 static uint32_t checksum(const uint8_t *bytes){uint32_t h=2166136261u;for(unsigned i=0;i<FRAME_BYTES;++i)h=(h^bytes[i])*16777619u;return h;}
 static uint64_t wallpaper_key(void){
+    if(app_settings_lock_style()==4)return lock_calendar_key();
     // 背景选择参与缓存身份，切换后不能复用另一种背景。/ Include the ticket background in the cache identity.
     if(app_settings_lock_style()==0)return app_settings_ticket_background()==APP_TICKET_BACKGROUND_COVER
         ?UINT64_C(0x5449434b45543033):UINT64_C(0x5449434b45543032);
@@ -63,7 +65,7 @@ bool lock_screen_save(const uint8_t *frame){
     (void)mkdir(LOCK_SCREEN_CACHE_PARENT,0775);(void)mkdir(LOCK_SCREEN_CACHE_PARENT "/locks",0775);
     FILE *f=fopen(LOCK_ART_PATH ".tmp","wb");if(!f)return false;
     art_header_t h={.magic=ART_MAGIC,.rotation=(uint32_t)epd_get_rotation(),
-        .style=app_settings_lock_style(),.checksum=checksum(frame),.wallpaper=wallpaper_key()};
+        .style=app_settings_lock_style(),.checksum=checksum(frame),.wallpaper=app_settings_lock_style()==4?lock_calendar_frame_key():wallpaper_key()};
     bool ok=fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(frame,1,FRAME_BYTES,f)==FRAME_BYTES&&fflush(f)==0;
     if(fclose(f))ok=false;
     // FatFs 的 rename 遇到同名目标返回 FR_EXIST，不会覆盖：先删旧图再改名，否则换样式后缓存永远不更新。

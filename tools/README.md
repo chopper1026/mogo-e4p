@@ -52,3 +52,8 @@ Run commands from the repository root and keep outputs in ignored build director
 
 新增宿主回归应接入统一入口；公共测试替身按所属领域放入 *_stubs。重命名或迁移脚本时同步 CI、调用方和文档，避免复制一份旧实现维持兼容。
 Register new host regressions in the shared runner and group doubles under the matching *_stubs directory. Update CI, callers and docs when moving scripts instead of duplicating old implementations.
+
+## 日历锁屏 / Calendar locks
+
+`calendar_host_test.py` 穷举2000–2099年全部日期并核对固定源；`calendar_ui_host_test.py --output build/calendar-lock/native` 导出两款实际4bpp画面并验证六行月份、闰月、字形、边界、时区及跨日缓存身份；`calendar_settings_ui_host_test.py` 检查100–200%字号、选择与保存失败。三个入口已纳入 `run_reader_baseline.py`。离线重生成命令和许可见 [CALENDAR](../docs/development/guides/CALENDAR.md)。
+The three calendar suites cover exhaustive dates, native raster/layout/clock/cache behavior and scaled settings interactions, and join the baseline runner. See the calendar contract for offline regeneration and licensing.

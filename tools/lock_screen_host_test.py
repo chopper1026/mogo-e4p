@@ -57,6 +57,9 @@ static uint8_t framebuffer[FRAME_BYTES];
 static uint8_t selected_style;
 enum {APP_TICKET_BACKGROUND_TRANSPARENT,APP_TICKET_BACKGROUND_COVER};
 static unsigned ticket_background;
+static uint64_t calendar_key=0x43414c0100000000;
+static uint64_t lock_calendar_key(void){return calendar_key;}
+static uint64_t lock_calendar_frame_key(void){return calendar_key;}
 static unsigned app_settings_ticket_background(void){return ticket_background;}
 static const char *wallpaper="";
 uint8_t app_settings_lock_style(void){return selected_style;}
@@ -150,10 +153,14 @@ int main(void){
  // User-selected unreadable storage returns immediately without a spurious four-digit prompt.
  start();correct();valid_storage=false;lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(!verified&&!entries&&!waits&&!pushes);valid_storage=true; uint8_t *f=malloc(FRAME_BYTES);assert(lock_screen_restore(f));
  // 旧拼贴缓存不能跨样式进入票根或壁纸。/ Collage art must not cross into ticket or wallpaper mode.
- for(unsigned saved=0;saved<4;++saved){
+ for(unsigned saved=0;saved<5;++saved){
   selected_style=saved;lock_screen_save(framebuffer);
-  for(unsigned current=0;current<4;++current){selected_style=current;memset(f,0xee,FRAME_BYTES);assert(lock_screen_restore(f)==(current==saved));if(current!=saved)assert(f[0]==0xee);}
+  for(unsigned current=0;current<5;++current){selected_style=current;memset(f,0xee,FRAME_BYTES);assert(lock_screen_restore(f)==(current==saved));if(current!=saved)assert(f[0]==0xee);}
  }
+ selected_style=4;lock_screen_save(framebuffer);assert(lock_screen_restore(f));
+ ++calendar_key;memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);
+ ++calendar_key;assert(!lock_screen_restore(f));
+ lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  selected_style=2;lock_screen_save(framebuffer);assert(lock_screen_restore(f));
  selected_style=0;memset(f,0xee,FRAME_BYTES);assert(!lock_screen_restore(f)&&f[0]==0xee);
  // 旧票根缓存的身份为零，升级后重画透明票根，不读取旧封面像素。

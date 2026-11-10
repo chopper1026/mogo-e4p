@@ -81,6 +81,8 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         ROOT / "licenses/GPL-3.0.txt": "GPL-3.0.txt",
         ROOT / "components/book_search/LICENSE.pypinyin": "PYPINYIN-MIT.txt",
         ROOT / "main/assets/OFL-Noto.txt": "OFL-Noto.txt",
+        ROOT / "tools/vendor/libre-bodoni/OFL.txt": "OFL-Libre-Bodoni.txt",
+        ROOT / "tools/vendor/lunar-javascript/LICENSE": "LUNAR-JAVASCRIPT-MIT.txt",
         ROOT / "licenses/CrossMux-MIT.txt": "CROSSMUX-MIT.txt",
         ROOT / "licenses/AnimateIcons-MIT.txt": "AnimateIcons-MIT.txt",
         ROOT / "licenses/FreeInk-SDK-MIT.txt": "FREEINK-SDK-MIT.txt",

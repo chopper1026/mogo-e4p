@@ -119,7 +119,7 @@ void app_settings_set_system_font_size(uint8_t percent);
 uint8_t app_settings_system_contrast(void);
 void app_settings_set_system_contrast(uint8_t percent);
 /// 锁屏样式和壁纸路径。/ Lock style and wallpaper image path.
-/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3).
+/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封、4日历。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3), calendar (4).
 uint8_t app_settings_lock_style(void);
 void app_settings_set_lock_style(uint8_t style);
 /// 阅读票根背景独立记忆，默认透明；仅在持久化成功后更新。/ Remember ticket backgrounds independently; default transparent and publish only after persistence.
@@ -129,6 +129,13 @@ typedef enum {
 } app_ticket_background_t;
 app_ticket_background_t app_settings_ticket_background(void);
 bool app_settings_set_ticket_background(app_ticket_background_t background);
+/// 日历子样式独立记忆；选择时与主样式原子保存。/ Remember the calendar variant; atomically persist it with the active style.
+typedef enum {
+    APP_CALENDAR_ALMANAC = 0,
+    APP_CALENDAR_MONTH = 1,
+} app_calendar_style_t;
+app_calendar_style_t app_settings_calendar_style(void);
+bool app_settings_set_calendar_style(app_calendar_style_t style);
 const char* app_settings_bookmark_path(void);
 void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);

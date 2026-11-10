@@ -117,7 +117,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT,
-               SETTINGS_TICKET_BACKGROUND } settings_page_t;
+               SETTINGS_TICKET_BACKGROUND, SETTINGS_CALENDAR } settings_page_t;
 static settings_page_t s_page;
 // 快捷栏长按蓝牙圆键的待定子页；on_enter 消费一次后回到主列表。
 // Pending sub-page from the quick bar's Bluetooth hold; on_enter consumes it once and returns to the main list.
@@ -1227,21 +1227,40 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_CALENDAR) {
+        back_header(fb, "日历");
+        section(fb, 248, "选择日历锁屏样式");
+        const char *labels[] = {"老黄历", "万年历"};
+        const char *details[] = {"大日期 · 农历干支 · 每日宜忌", "整月公农历对照 · 节气 · 宜忌"};
+        for (int i = 0; i < 2; ++i) {
+            EpdRect box = {36, 300 + i * 154, 612, 132};
+            bool active = app_settings_lock_style() == 4 && app_settings_calendar_style() == (app_calendar_style_t)i;
+            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            ui_text_box(fb, (EpdRect){64, box.y + 14, 520, 58}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64, box.y + 82, 520, 40}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
+        }
+        ui_text_box(fb, (EpdRect){54, 638, 576, 66}, 23, "按锁屏时日期生成 · 请先校准时间", EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text_box(fb, (EpdRect){54, 724, 576, 66}, 23, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
     if (s_page == SETTINGS_LOCK_STYLE) {
         back_header(fb, "锁屏样式");
         section(fb, 248, "选择电源键锁屏后的画面");
-        const char *labels[] = {"壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封"};
+        const char *labels[] = {"壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封", "日历"};
         const char *details[] = {"使用 TF 卡中的 JPG / PNG 图片",
             app_settings_ticket_background() == APP_TICKET_BACKGROUND_COVER ? "封面背景 · 点按选择背景" : "透明背景 · 点按选择背景",
-            "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白"};
-        const uint8_t values[] = {1, 0, 2, 3};
-        for (int i = 0; i < 4; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
+            "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白",
+            app_settings_calendar_style() == APP_CALENDAR_MONTH ? "万年历 · 点按选择样式" : "老黄历 · 点按选择样式"};
+        const uint8_t values[] = {1, 0, 2, 3, 4};
+        for (int i = 0; i < 5; ++i) {
+            EpdRect box = {36, 300 + i * 130, 612, 112};
             bool active = app_settings_lock_style() == values[i];
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 64, box.y + 23, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
+            ui_text_box(fb, (EpdRect){64, box.y + 6, 520, 50}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64, box.y + 64, 520, 38}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (active) epd_fill_circle(609, box.y + 56, 8, UI_GRAY_BLACK, fb);
         }
         ui_text(fb,54,966,21,"透明书封放入 pictures · 推荐 684 × 1216",EPD_DRAW_ALIGN_LEFT,false);
         if (app_settings_wallpaper_path()[0])
@@ -1701,7 +1720,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     snprintf(background_value,sizeof(background_value),"%s",
         background_path[0]?(background_base?background_base+1:background_path):"无");
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
-        app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
+        app_settings_lock_style()==4?"日历":app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value,""};
     const int personal_icons[]={4,5,16,10,18,19,21};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
@@ -2342,6 +2361,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_CALENDAR && y < 190) {
+        s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE;
+    }
     if (s_page == SETTINGS_TICKET_BACKGROUND && y < 190) {
         s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE;
     }
@@ -2451,30 +2473,24 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_CALENDAR) {
+        for (int i = 0; i < 2; ++i) if (ui_rect_hit((EpdRect){36, 300 + i * 154, 612, 132}, ev->x0, y)) {
+            snprintf(s_notice, sizeof(s_notice), "%s", app_settings_set_calendar_style((app_calendar_style_t)i) ? "已设为日历锁屏" : "保存失败，请重试");
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     if (s_page == SETTINGS_LOCK_STYLE) {
-        if (y >= 300 && y < 432) {
-            s_bookmark_picker=false;wallpaper_scan();
-            s_page = SETTINGS_WALLPAPER;
+        for (int i = 0; i < 5; ++i) if (ui_rect_hit((EpdRect){36, 300 + i * 130, 612, 112}, ev->x0, y)) {
+            if (i == 0) { s_bookmark_picker = false; wallpaper_scan(); s_page = SETTINGS_WALLPAPER; }
+            else if (i == 1) { app_settings_set_lock_style(0); s_notice[0] = 0; s_page = SETTINGS_TICKET_BACKGROUND; }
+            else if (i == 2) { app_settings_set_lock_style(2); s_collage_prepare_pending = true; }
+            else if (i == 3) { s_bookmark_picker = true; wallpaper_scan(); s_page = SETTINGS_WALLPAPER; }
+            else { s_notice[0] = 0; s_page = SETTINGS_CALENDAR; }
             return APP_REDRAW_PAGE;
         }
-        if (y >= 454 && y < 586) {
-            app_settings_set_lock_style(0);
-            s_notice[0] = 0;
-            s_page = SETTINGS_TICKET_BACKGROUND;
-            return APP_REDRAW_PAGE;
-        }
-        if (y >= 608 && y < 740) {
-            app_settings_set_lock_style(2);
-            s_collage_prepare_pending = true;
-            return APP_REDRAW_PAGE;
-        }
-        if(y>=762 && y<894){
-            s_bookmark_picker=true;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
-            return APP_REDRAW_PAGE;
-        }
-        if (y >= 1010 && app_settings_wallpaper_path()[0]) {
-            s_bookmark_picker=false;wallpaper_scan();
-            s_page = SETTINGS_WALLPAPER;
+        if (ui_rect_hit((EpdRect){36, 1010, 612, 80}, ev->x0, y) && app_settings_wallpaper_path()[0]) {
+            s_bookmark_picker=false;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -2769,6 +2785,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_WALLPAPER) { s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_CALENDAR) { s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_TICKET_BACKGROUND) { s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_READING_BG_PREVIEW) { s_reading_bg_confirm = false; s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_READING_BG) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }

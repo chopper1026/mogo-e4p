@@ -30,6 +30,8 @@ remain in the source. This project is not an official MindReset release.
 | [CrossMux](https://github.com/0x1abin/crossmux) BLE report mapping and text-turn adaptations | MIT | [CrossMux notice](licenses/CrossMux-MIT.txt) |
 | FreeInk SDK text-turn waveform assembly, commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT | [FreeInk SDK notice](licenses/FreeInk-SDK-MIT.txt) |
 | Embedded Noto Sans SC Medium font subset and compressed common-Han bitmaps | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
+| lunar-javascript 1.7.7 — offline lunar/almanac tables | MIT | [Source and notice](tools/vendor/lunar-javascript/LICENSE), [generation](tools/generate_calendar_data.cjs) |
+| Libre Bodoni 2.005 — serif digit subset and generated lock-screen bitmaps | SIL OFL-1.1 | [Font license](tools/vendor/libre-bodoni/OFL.txt), [subset provenance](tools/vendor/README.md) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
 
@@ -53,7 +55,7 @@ retaining its mindreset Apache-2.0 file notice and the complete FreeInk/CrossMux
 MIT notices linked above. Only ordinary text turns select it; vendor LUTs,
 scan timing and other screens are unchanged. Panel validation remains required.
 
-The firmware bundles only the embedded Noto Sans SC subset and common-Han bitmap supplement; users may supply
+The firmware bundles the embedded Noto Sans SC subset, common-Han bitmap supplement and Libre Bodoni numeral bitmaps; users may supply
 their own fonts on a TF card. The repository and flashing site do not provide
 additional font packages.
 

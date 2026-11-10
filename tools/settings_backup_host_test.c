@@ -21,8 +21,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v37 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v37; legacy fixtures drop them all. */
+/* v15..v38 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v38; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,7 +30,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -166,6 +166,8 @@ static bool styles_write_fails;
 static int durable_touch = -1, pending_touch = -1;
 static int durable_ticket = -1, pending_ticket = -1;
 static bool ticket_write_fails;
+static int durable_face = -1, pending_face = -1;
+static bool face_write_fails, face_open_fails;
 static int durable_up = -1, pending_up = -1;
 static bool regions_write_fails, progress_write_fails, touch_write_fails;
 esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
@@ -175,11 +177,14 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     pending_styles = -1;
     pending_touch = -1;
     pending_ticket = -1;
+    pending_face = -1;
+    if (mode == NVS_READWRITE && face_open_fails) return ESP_FAIL;
     pending_up = -1;
     return nvs_open(ns, mode, h);
 }
-void backup_nvs_close(nvs_handle_t h) { pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = -1; nvs_close(h); }
+void backup_nvs_close(nvs_handle_t h) { pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (durable_face < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_face; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_TICKET_BACKGROUND)) {
         if (durable_ticket < 0) return ESP_ERR_NVS_NOT_FOUND;
         *value = (uint8_t)durable_ticket;
@@ -211,6 +216,7 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (face_write_fails) return ESP_FAIL; pending_face = value; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_TICKET_BACKGROUND)) {
         if (ticket_write_fails) return ESP_FAIL;
         pending_ticket = value;
@@ -242,6 +248,7 @@ esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_face >= 0) durable_face = pending_face;
     if (err == ESP_OK && pending_regions >= 0) durable_regions = pending_regions;
     if (err == ESP_OK && pending_progress >= 0) durable_progress = pending_progress;
     if (err == ESP_OK && pending_styles >= 0) durable_styles = pending_styles;
@@ -264,7 +271,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -319,7 +326,7 @@ static void test_reader_progress_bar(void) {
     assert(app_settings_set_reader_progress_bar(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END) == 0);
     long progress_at = ftell(file);
     settings_backup_progress_bar_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -410,7 +417,7 @@ static void test_book_styles(void) {
     assert(app_settings_set_book_styles(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END) == 0);
     long styles_at = ftell(file);
     settings_backup_book_styles_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && !fclose(file));
@@ -500,7 +507,7 @@ static void test_home_regions_backup(void) {
     app_home_components_apply(0x11);
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "rb");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END) == 0);
     long regions_at = ftell(file);
     settings_backup_home_regions_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -685,7 +692,7 @@ static void test_reader_touch_lock(void) {
     assert(!app_settings_reader_touch_disabled());
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_touch_t unsafe = {.on = 1};
     uint32_t hash = backup_progress_bar_checksum(&unsafe);
@@ -723,7 +730,7 @@ static void test_reader_touch_lock(void) {
         assert(app_settings_backup_save() == ESP_OK);
         file = fopen(BACKUP_FILE, "r+b");
         settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 37);
+        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 38);
         assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
         memcpy(header.magic, "PICOSETZ", 8); backup_seal(&header);
@@ -735,7 +742,7 @@ static void test_reader_touch_lock(void) {
         assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
         assert(fwrite(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile));
-        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)), SEEK_END));
+        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END));
         long history_at = ftell(file);
         assert(fwrite("RPHIST1", 1, 8, file) == 8 && !fflush(file));
         assert(!ftruncate(fileno(file), history_at + 8) && !fclose(file));
@@ -789,7 +796,7 @@ static void test_ticket_background(void) {
     assert(app_settings_set_ticket_background(APP_TICKET_BACKGROUND_COVER));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_ticket_background_t original;
     assert(fread(&original, 1, sizeof(original), file) == sizeof(original) && fclose(file) == 0);
@@ -823,7 +830,7 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
     settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 37);
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 38);
     assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
     assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
     memcpy(header.magic, "PICOSETa", 8); backup_seal(&header);
@@ -841,6 +848,75 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_restore() == ESP_OK && !app_settings_book_styles() && !app_settings_reader_touch_disabled());
     assert(app_settings_ticket_background() == APP_TICKET_BACKGROUND_TRANSPARENT && durable_ticket == 0);
     puts("PASS: ticket backgrounds survive style switches, reboot and v37 backup; invalid values, write/commit/flash faults, corrupt/truncated tails and v36 migration");
+}
+
+// 日历双字段须跨重启与备份保持一致，失败不发布半个选择。
+// The two calendar fields stay coherent across reboot/backup and are not published on failure.
+static void test_calendar_style(void) {
+    durable_face = -1;
+    app_settings_set_lock_style(1);
+    app_settings_init();
+    assert(app_settings_calendar_style() == APP_CALENDAR_ALMANAC);
+    unsigned commits = commit_count;
+    assert(!app_settings_set_calendar_style((app_calendar_style_t)-1));
+    assert(!app_settings_set_calendar_style((app_calendar_style_t)2));
+    assert((unsigned)commit_count == commits);
+    for (unsigned fault = 0; fault < 4; ++fault) {
+        face_write_fails = fault == 0; face_open_fails = fault == 1;
+        commit_fails = fault == 2; flash_failure = fault == 3;
+        assert(!app_settings_set_calendar_style(APP_CALENDAR_MONTH));
+        assert(app_settings_lock_style() == 1 && app_settings_calendar_style() == APP_CALENDAR_ALMANAC);
+        assert(durable_face == 2 && !flash_depth);
+    }
+    face_write_fails = face_open_fails = commit_fails = flash_failure = false;
+    for (unsigned choice=0; choice<2; ++choice) {
+        assert(app_settings_set_calendar_style((app_calendar_style_t)choice));
+        assert(app_settings_lock_style() == 4 && app_settings_calendar_style() == (app_calendar_style_t)choice);
+        s_lock_style=0;s_calendar_style=(app_calendar_style_t)(1-choice);app_settings_init();
+        assert(app_settings_lock_style() == 4 && app_settings_calendar_style() == (app_calendar_style_t)choice);
+        commits=commit_count;
+        assert(app_settings_set_calendar_style((app_calendar_style_t)choice) && (unsigned)commit_count==commits);
+        assert(app_settings_backup_save() == ESP_OK);
+        assert(app_settings_set_calendar_style((app_calendar_style_t)(1-choice)));
+        commit_fails=true;assert(app_settings_backup_restore()!=ESP_OK);commit_fails=false;
+        assert(app_settings_lock_style()==4 && app_settings_calendar_style()==(app_calendar_style_t)(1-choice));
+        assert(app_settings_backup_restore() == ESP_OK);
+        assert(app_settings_lock_style()==4 && app_settings_calendar_style()==(app_calendar_style_t)choice);
+        for (unsigned style=0;style<4;++style) {app_settings_set_lock_style(style);app_settings_init();assert(app_settings_lock_style()==style&&app_settings_calendar_style()==(app_calendar_style_t)choice);}
+    }
+    durable_face=255;app_settings_init();assert(app_settings_calendar_style()==APP_CALENDAR_ALMANAC);
+    assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
+    for(unsigned corruption=0;corruption<3;++corruption){
+        assert(app_settings_backup_save()==ESP_OK);
+        FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)),SEEK_END));
+        long at=ftell(f);settings_backup_calendar_t v;assert(fread(&v,1,sizeof(v),f)==sizeof(v));
+        if(corruption==0)v.checksum[0]^=1;
+        else {v.on=corruption==1?2:255;uint32_t hash=backup_progress_bar_checksum(&v);for(unsigned i=0;i<4;++i)v.checksum[i]=(uint8_t)(hash>>(8*i));}
+        assert(!fseek(f,at,SEEK_SET)&&fwrite(&v,1,sizeof(v),f)==sizeof(v)&&!fclose(f));
+        commits=commit_count;assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&(unsigned)commit_count==commits);
+        assert(app_settings_lock_style()==4&&app_settings_calendar_style()==APP_CALENDAR_MONTH);
+    }
+    for(unsigned cut=0;cut<sizeof(settings_backup_calendar_t);++cut){
+        assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)),SEEK_END));
+        assert(!ftruncate(fileno(f),ftell(f)+cut)&&!fclose(f));commits=commit_count;
+        assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&(unsigned)commit_count==commits);
+    }
+    // v37保留票根设置，但没有日历子样式；恢复默认老黄历，不强行启用日历。
+    // V37 keeps ticket settings without a calendar variant; default to almanac without activating calendar mode.
+    app_settings_set_lock_style(2);assert(app_settings_set_ticket_background(APP_TICKET_BACKGROUND_COVER));
+    assert(app_settings_backup_save()==ESP_OK);
+    FILE *f=fopen(BACKUP_FILE,"r+b");assert(f);settings_backup_v1_t h;uint8_t ext[7];settings_backup_profile_t profile;
+    assert(fread(&h,1,sizeof(h),f)==sizeof(h)&&fread(ext,1,sizeof(ext),f)==sizeof(ext)&&fread(&profile,1,sizeof(profile),f)==sizeof(profile));
+    memcpy(h.magic,"PICOSETb",8);backup_seal(&h);
+    uint32_t hash=backup_shutdown_checksum(&h,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
+    hash=backup_profile_checksum(&h,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
+    rewind(f);assert(fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(ext,1,sizeof(ext),f)==sizeof(ext)&&fwrite(&profile,1,sizeof(profile),f)==sizeof(profile));
+    assert(!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)),SEEK_END));long at=ftell(f);
+    assert(fwrite("RPHIST1",1,8,f)==8&&!fflush(f)&&!ftruncate(fileno(f),at+8)&&!fclose(f));
+    assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
+    esp_err_t result=app_settings_backup_restore();
+    assert(result==ESP_OK&&app_settings_lock_style()==2&&app_settings_calendar_style()==APP_CALENDAR_ALMANAC&&app_settings_ticket_background()==APP_TICKET_BACKGROUND_COVER);
+    puts("PASS: calendar atomic style/variant persistence, reboot/style switches, v38 backup, v37 migration, invalid/corrupt/truncated tails and write/commit/flash failures");
 }
 
 int main(void) {
@@ -1246,7 +1322,7 @@ int main(void) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -1318,7 +1394,7 @@ int main(void) {
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1734,7 +1810,7 @@ int main(void) {
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                               sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -1767,7 +1843,7 @@ int main(void) {
     for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)),SEEK_END)==0);
     long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
     assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
     assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
@@ -1795,7 +1871,7 @@ int main(void) {
     assert(app_settings_set_reader_chrome_heights(96,73));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t)),SEEK_END)==0);
     long height_at=ftell(saved);settings_backup_chrome_heights_t valid_height;
     assert(fread(&valid_height,1,sizeof(valid_height),saved)==sizeof(valid_height)&&fclose(saved)==0);
     for(unsigned fault=0;fault<3;++fault){
@@ -1887,7 +1963,7 @@ int main(void) {
     assert(!backup_shutdown_style_valid(&bad_shutdown));
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
     const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
-        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t));
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t));
     assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
     assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
     int commits_before_bad_shutdown=commit_count;
@@ -1901,6 +1977,7 @@ int main(void) {
     test_device_name_branding();
     test_reader_touch_lock();
     test_ticket_background();
+    test_calendar_style();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;
 }

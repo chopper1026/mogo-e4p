@@ -22,7 +22,11 @@ def main():
         for lo in range(0xa1,0xff):
             try:wanted.add(ord(bytes([hi,lo]).decode('gb2312')))
             except UnicodeDecodeError:pass
-    chars=sorted(wanted-covered)
+    # 黄历词条「安碓磑」含GB2312以外的字。/ The almanac mill-installation term needs a non-GB2312 glyph.
+    wanted.add(ord("磑"))
+    # 保留补充库已有的重复字形。/ Retain legacy duplicate glyph coverage.
+    legacy=set(map(ord,"省考庄眉锋抗尘锯冰阴暴冻霾浓雪扬晴雷雹齿"))
+    chars=sorted((wanted-covered)|legacy)
     helper=work/'glyph.c';helper.write_text('''#include <stdint.h>
 #include <string.h>
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -53,6 +57,6 @@ int render(uint32_t cp,uint8_t *out){
     data=struct.pack('<4sIII',b'PIF1',len(chars),BASE,BLOCK)
     data+=struct.pack('<'+'H'*len(chars),*chars)+struct.pack('<'+'I'*len(offsets),*offsets)+blocks
     out=ROOT/'main/assets/ui-hanzi.bin';out.write_bytes(data)
-    print(f'UI black font: {len(chars)} additional GB2312 characters, {len(data)} bytes, at most {BLOCK*RECORD} bytes decoded per block')
+    print(f'UI black font: {len(chars)} supplemental Han characters, {len(data)} bytes, at most {BLOCK*RECORD} bytes decoded per block')
 
 if __name__=='__main__':main()

@@ -17,6 +17,11 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "calendar": [sys.executable, "tools/calendar_host_test.py"],
+    "calendar_ui": [sys.executable, "tools/calendar_ui_host_test.py"],
+    "calendar_settings_ui": [sys.executable, "tools/calendar_settings_ui_host_test.py"],
+    "lock_style": [sys.executable, "tools/lock_style_host_test.py"],
+    "ticket_settings_ui": [sys.executable, "tools/ticket_background_ui_host_test.py"],
     "excerpt": [sys.executable, "tools/book_excerpt_host_test.py"],
     "dictionary": ["bash", "tools/run_dictionary_host_tests.sh"],
     "flash_fast": [sys.executable, "tools/flash_fast_host_test.py"],

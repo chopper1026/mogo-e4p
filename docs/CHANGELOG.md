@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.8 · 本地测试 / Local testing · 2026-11-10
+
+- 锁屏样式新增「日历」，可选老黄历或万年历；离线显示公农历、干支、宜忌和节气，适配六行月份；选择随重启及v38设置备份保存，未校时显示校准提示，按重新锁屏时的日期更新。/ Add almanac/month-calendar lock faces with offline solar/lunar dates, stems/branches, folk lists and terms, including six-row months; persist choices in v38 backups, prompt for an invalid clock and update on relock.
+- 日历锁屏加入回纹、云纹及山水水波线刻，纹饰使用纯黑加粗描边改善实屏偏淡，按月份行数铺开日历，减少空白。/ Add pure-black, thicker key-fret, cloud, landscape and wave ornaments for stronger panel contrast, and fill each month grid according to its row count.
+
 ## v1.0.8 · 本地测试 / Local testing · 2026-11-09
 
 - 修复 WiFi 传书上传期间目录标签、图标及文字按钮出现灰色方块背景；保留上传禁用保护和主操作按钮的禁用提示。/ Keep folder tabs, icon buttons and text buttons free of gray blocks during WiFi uploads, retaining upload locking and the primary button's disabled appearance.

@@ -36,6 +36,7 @@
 #include "boot_state.h"
 #include "lock_pin.h"
 #include "lock_screen.h"
+#include "lock_calendar.h"
 #include "board_sd.h"
 
 #include <stdio.h>
@@ -703,7 +704,7 @@ void enter_lock_and_sleep(
     bool ticket = lock_style == 0;
     bool overlay = (ticket && app_settings_ticket_background() == APP_TICKET_BACKGROUND_TRANSPARENT) || lock_style == 3;
     if (!overlay) epd_hl_set_all_white(hl);
-    bool system_lock = ticket || lock_style == 2 || lock_pin_enabled();
+    bool system_lock = ticket || lock_style == 2 || lock_style == 4 || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
     if (system_lock) app_font_begin_lock(&lock_font);
     const int64_t lock_t_font = esp_timer_get_time();
@@ -712,7 +713,8 @@ void enter_lock_and_sleep(
     bool lock_drawn = ticket
         ? book_ticket_draw(framebuffer, reader_background)
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
-          lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) : draw_wallpaper(framebuffer);
+          lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) :
+          lock_style == 4 ? lock_calendar_draw(framebuffer) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
         epd_hl_set_all_white(hl);
         (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOCK);
@@ -820,7 +822,8 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             memset(fb,255,(size_t)epd_width()*epd_height()/2);
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
-            app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) : draw_wallpaper(fb);
+            app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) :
+            app_settings_lock_style() == 4 ? lock_calendar_draw(fb) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); (void)ui_builtin_image_draw(fb, UI_BUILTIN_IMAGE_LOCK); }
     }
     lock_screen_authenticate(hl, touch, acc, true);
