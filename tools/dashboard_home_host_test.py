@@ -327,7 +327,11 @@ int main(void){
     ev.x0=400;ev.y0=1150;on_gesture(&ctx,&ev);assert(nav==2);
     minute=s_clock_minute=100;s_cover_next=1;
     assert(on_tick(&ctx)==APP_REDRAW_NONE&&!draws&&!pages&&!fulls&&!scan_calls&&!cover_calls);
-    render(&ctx,ctx.fb);assert(framebuffer[(HOME_REGION_TOP+38)*684+632]==255);memcpy(before,framebuffer,sizeof(before));
+    render(&ctx,ctx.fb);
+    int old_library=library_calls;
+    ui_gesture_event_t header={UI_GESTURE_TAP,632,HOME_REGION_TOP+38,632,HOME_REGION_TOP+38};
+    assert(on_gesture(&ctx,&header)==APP_REDRAW_NONE&&library_calls==old_library);
+    memcpy(before,framebuffer,sizeof(before));
     minute=101;assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_clock_pending);
     assert(present(&ctx,APP_REDRAW_AREA));isolated((EpdRect){24,18,156,44});
     assert(draws==1&&!pages&&!fulls&&clock_paints==1&&last_intent==DISPLAY_REFRESH_DETAIL);
