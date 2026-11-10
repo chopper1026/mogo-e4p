@@ -23,6 +23,8 @@ typedef struct {
 } book_shelf_scan_t;
 
 struct book_shelf_retry;
+/// 路径匹配才视为移出书架；首页组件与书架共用隐藏规则。/ Hide only exact path matches; shared by Home components and the shelf.
+bool book_shelf_hidden_read(nvs_handle_t handle, const char *path);
 /// 保留原PSRAM增长策略；失败保持数组和容量不变。/ Keep the original PSRAM growth policy; failure preserves array and capacity.
 bool book_shelf_catalog_reserve(const book_shelf_catalog_t *catalog);
 /// 使用有界PSRAM目录栈；停止或失败前关闭本次打开的所有目录。

@@ -198,3 +198,5 @@ void app_lock_ignore_for(int64_t ms);
 
 /// Yield a long main-page load when another bottom tab is pressed. No display or lifecycle calls.
 bool app_poll_main_navigation(app_ctx_t *ctx);
+/// 首页等其他主页的慢加载指定当前标签，保留接触锁存。/ Other main-page loads supply their current tab, retaining contact latching.
+bool app_poll_main_navigation_from(app_ctx_t *ctx, unsigned current_tab);

@@ -236,17 +236,8 @@ int main(int argc,char **argv){
     return code
 
 
-def run(output):
-    output.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, str(ROOT / "tools/generate_reading_scenes.py"), "--check"], check=True)
-    with tempfile.TemporaryDirectory(prefix="journal-ui-") as directory:
-        work = Path(directory)
-        host.write_shims(work)
-        with (work / "esp_heap_caps.h").open("a") as header:
-            header.write("\nvoid *heap_caps_realloc(void *,size_t,int);\n")
-        (work / "epdiy.h").write_text((work / "epdiy.h").read_text().replace(
-            "EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT", "EPD_DRAW_ALIGN_LEFT=2, EPD_DRAW_ALIGN_CENTER=8, EPD_DRAW_ALIGN_RIGHT=4"))
-        (work / "miniz.h").write_text('''#pragma once
+def write_native_assets(work):
+    (work / "miniz.h").write_text('''#pragma once
 #include <stddef.h>
 #include <zlib.h>
 typedef struct {int state;} tinfl_decompressor;
@@ -257,10 +248,23 @@ typedef int tinfl_status;
 #define tinfl_init(s) ((s)->state=0)
 static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned char *in,size_t *n,unsigned char *base,unsigned char *out,size_t *m,int flags){(void)s;(void)base;(void)flags;uLongf size=*m;int result=uncompress(out,&size,in,*n);*m=size;return result==Z_OK?0:-1;}
 ''')
-        payload = (ROOT / "main/assets/ui-hanzi.bin").read_bytes()
-        with (work / "assets.c").open("a") as assets:
-            assets.write('const uint8_t hanzi[] asm("_binary_ui_hanzi_bin_start")={' + ",".join(map(str, payload)) + '};\n')
-            assets.write(f'asm(".globl _binary_ui_hanzi_bin_end\\n.set _binary_ui_hanzi_bin_end, _binary_ui_hanzi_bin_start + {len(payload)}");\n')
+    payload = (ROOT / "main/assets/ui-hanzi.bin").read_bytes()
+    with (work / "assets.c").open("a") as assets:
+        assets.write('const uint8_t hanzi[] asm("_binary_ui_hanzi_bin_start")={' + ",".join(map(str, payload)) + '};\n')
+        assets.write(f'asm(".globl _binary_ui_hanzi_bin_end\\n.set _binary_ui_hanzi_bin_end, _binary_ui_hanzi_bin_start + {len(payload)}");\n')
+
+
+def run(output):
+    output.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, str(ROOT / "tools/generate_reading_scenes.py"), "--check"], check=True)
+    with tempfile.TemporaryDirectory(prefix="journal-ui-") as directory:
+        work = Path(directory)
+        host.write_shims(work)
+        with (work / "esp_heap_caps.h").open("a") as header:
+            header.write("\nvoid *heap_caps_realloc(void *,size_t,int);\n")
+        (work / "epdiy.h").write_text((work / "epdiy.h").read_text().replace(
+            "EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT", "EPD_DRAW_ALIGN_LEFT=2, EPD_DRAW_ALIGN_CENTER=8, EPD_DRAW_ALIGN_RIGHT=4"))
+        write_native_assets(work)
         (work / "test.c").write_text(unit())
         env, compiler = toolchain(work)
         flags = compiler + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-Wno-unused-function", "-Wno-deprecated-declarations", "-fsanitize=address,undefined", "-g"]

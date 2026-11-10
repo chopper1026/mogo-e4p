@@ -30,6 +30,7 @@ typedef enum {
     DISPLAY_REFRESH_OVERLAY,
     DISPLAY_REFRESH_RESTORE,
     DISPLAY_REFRESH_CAPSULE,
+    DISPLAY_REFRESH_CLEANUP, ///< 区域内全像素清残影。/ Full-pixel cleanup within the requested area.
     DISPLAY_REFRESH_COUNT
 } display_refresh_intent_t;
 

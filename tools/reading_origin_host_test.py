@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function
 from run_reader_baseline import toolchain
+from home_library_test_support import doubles, ui_doubles
 root=Path(__file__).resolve().parents[1]
 home=root/'main/apps/app_dashboard.c';book=root/'main/apps/app_book.c'
 unit=r'''
@@ -56,7 +57,11 @@ static bool app_reading_journal_next_scene(void){return true;}
 static void app_reading_journal_open(app_ctx_t *ctx){(void)ctx;}
 '''
 unit+='\n'.join(function(n,root/'main/ui/ui_weather.c') for n in ['valid_region','refresh_button','ui_weather_hit'])
-unit+='\n'.join(function(n,home) for n in ['home_region','continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','redraw_widgets','hit','control','on_gesture'])
+unit += doubles()
+unit += r'''
+static ui_mini_hit_t ui_mini_library_hit(EpdRect r,const home_library_view_t *v,int x,int y){(void)r;(void)v;(void)x;(void)y;return(ui_mini_hit_t){0};}
+'''
+unit+='\n'.join(function(n,home) for n in ['mini_cancel','home_region','continue_card_rect','continue_card_hit_rect','continue_card_pressed','control_feedback_area','redraw_widgets','mini_select','hit','control','on_gesture'])
 settings=(root/'main/settings/settings.h').read_text();a=settings.index('typedef enum {\n    APP_READER_KEY_PREV');b=settings.index('} app_reader_key_action_t;',a)+len('} app_reader_key_action_t;');unit+=settings[a:b]
 unit+=r'''
 enum {READER_PANEL_NONE,READER_PANEL_TOOLS};
@@ -75,6 +80,8 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return AP
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static void invalidate_prep(void){}
 static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
+static struct {bool active;} s_dictionary_selection;
+static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static bool s_fl_on;
 static int s_fl_applies;
 static bool frontlight_ready(void){return true;}
@@ -147,5 +154,5 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
 with tempfile.TemporaryDirectory(prefix='kiiko-reading-origin-',dir='/private/tmp') as folder:
  c=Path(folder)/'test.c';binary=Path(folder)/'test';c.write_text(unit)
  env,compiler=toolchain(Path(folder))
- subprocess.run(compiler+['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-Imain/settings','-Imain/services','-g',str(c),'-o',str(binary)],cwd=root,env=env,check=True)
+ subprocess.run(compiler+['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-fsanitize=address,undefined','-Imain/settings','-Imain/services','-Imain/book','-g',str(c),'-o',str(binary)],cwd=root,env=env,check=True)
  subprocess.run([str(binary)],env=env,check=True)

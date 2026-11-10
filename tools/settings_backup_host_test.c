@@ -521,7 +521,7 @@ static void test_home_regions_backup(void) {
         app_home_components_init(false);
         assert(app_home_components_value() == value);
     }
-    assert(valid_count == 13);
+    assert(valid_count == 42);
 
     app_home_components_apply(0x11);
     assert(app_settings_backup_save() == ESP_OK);

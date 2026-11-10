@@ -27,6 +27,7 @@
 - [docs/development/FEATURES.md](FEATURES.md)
 - [docs/development/INDEX.md](INDEX.md)
 - [docs/development/guides/CALENDAR.md](guides/CALENDAR.md)
+- [docs/development/guides/MINI_LIBRARY.md](guides/MINI_LIBRARY.md)
 - [docs/development/guides/MOBI.md](guides/MOBI.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_DICTIONARY.md](guides/READER_DICTIONARY.md)

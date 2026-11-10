@@ -1810,11 +1810,7 @@ static void shelf_hidden_key(const char *path, char key[11]) {
     snprintf(key, 11, "h_%08lx", (unsigned long)hash);
 }
 static bool shelf_hidden_read_handle(nvs_handle_t h, const char *path) {
-    char stored[BOOK_STORE_PATH_MAX];
-    char key[11];
-    shelf_hidden_key(path, key);
-    size_t len = sizeof(stored);
-    return nvs_get_str(h, key, stored, &len) == ESP_OK && strcmp(stored, path) == 0;
+    return book_shelf_hidden_read(h, path);
 }
 static bool shelf_hidden_load(const char *path) {
     nvs_handle_t h;
@@ -1842,7 +1838,7 @@ static bool shelf_hidden_save(const char *path, bool hidden) {
     }
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
-    if(err==ESP_OK)book_lock_collage_invalidate();
+    if(err==ESP_OK){book_lock_collage_invalidate();book_store_notify_changed();}
     return err == ESP_OK;
 }
 static bool bookmark_read_handle(nvs_handle_t h, reader_bookmarks_t* marks) {
@@ -6245,6 +6241,7 @@ static app_redraw_t editor_save(app_ctx_t* ctx) {
         copy_text(s_editor_notice, sizeof(s_editor_notice), "保存失败，请检查书名或存储");
         return APP_REDRAW_PAGE;
     }
+    book_store_notify_changed();
     for (int i = 0; i < s_count; ++i)
         if (!strcmp(s_shelf[i].path, s_managed.path)) copy_text(s_shelf[i].name, sizeof(s_shelf[i].name), s_editor_title);
     free(s_editor_cover); s_editor_cover = NULL;

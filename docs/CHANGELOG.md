@@ -6,6 +6,11 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## v1.0.9 · 本地测试 / Local testing · 2026-11-10
 
 - 修复纯 WPA-PSK 网络在设备配网页被误标为不支持的问题，恢复选网、输入密码与连接入口；真实路由器连接待验收。/ Allow WPA-PSK networks in device provisioning so users can select them, enter a password and start connecting; router acceptance remains pending.
+- 首页新增「迷你书库」扇页书匣，展示最多五本书，支持随机／最近阅读、点封面或编号及左右划动选书、打开原书和合拢换批；模式随设置备份保存，静置无循环动画。实屏交互待验收。/ Add a five-book Home fan deck with random/recent modes, cover/index/swipe selection, original-book opening and close/redeal motion; back up the mode and keep idle frames still. Device interaction awaits acceptance.
+- 迷你书库封面在切页和阅读返回时保留缓存，进度更新与最近阅读重排复用有效封面；动画结束后对组件区域做GC16清理，处理旧文字和选中标记残影。修复后的实屏效果待验收。/ Retain valid covers across page/reader returns and recency updates; clean the widget with GC16 after motion to erase old labels/indicators. Optical acceptance remains pending.
+- 迷你书库移除划动提示及阅读按钮，书名加宽，作者/进度行加宽并下移，「换一批」增加刷新图标；点当前封面打开图书。/ Remove the swipe hint and reading button, widen the title and author/progress rows, and add a refresh icon to redeal; open books by tapping the selected cover.
+- 迷你书库选书使用3个等距位置帧，新选择即时切换，成功推屏后才推进；最终GC16清理保留。实屏交互待验收。/ Use three equally spaced selection positions, retarget immediately and advance only after successful presentation; retain final GC16 cleanup. Panel interaction awaits acceptance.
+
 - 老黄历改为无月历的单日版式，宜忌以圆印分列、按字宽换行，短列表配梅枝；新增财神、喜神、福神方位，以切角双线框、大字方位与黑底题签排布三神及吉凶神煞，保留值神、建除、冲煞及节气。/ Redesign the almanac as a single-day sheet with paired activity seals, word wrapping and plum branches for short lists; add wealth/joy/fortune directions and spirit lists using chamfered double frames, large directions and black plaques, retaining guardian, officer, clash and solar terms.
 - 首页最近阅读改为书刊式排版，加入错层纸页、大号阅读进度和引文装饰，保留原比例封面、续读及长按配置。/ Restyle recent reading with offset pages, larger progress and quotation accents, retaining proportional covers, resume and hold-to-configure interactions.
 

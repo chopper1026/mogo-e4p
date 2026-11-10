@@ -48,7 +48,9 @@ static unsigned s_widget_dirty;
 static int s_streak;
 typedef struct {bool enabled;} weather_t;
 static weather_t weather;
-enum {APP_HOME_WIDGET_WEATHER};
+enum {APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_MINI_LIBRARY};
+static void mini_cancel(void){}
+static void home_library_enter(void){}
 static void app_weather_init(void){}
 static void app_home_components_init(bool on){(void)on;}
 static weather_t *app_weather_view(void){return &weather;}
@@ -66,7 +68,7 @@ static unsigned book_store_revision(void){return 7;}
 static const char *app_settings_books_dir(void){return "/sdcard/books";}
 static bool app_settings_home_full_refresh(void){return false;}
 static bool book_progress_last_path(char *out,size_t cap){snprintf(out,cap,"%s",latest);return latest[0]!=0;}
-static unsigned book_cover_jobs_begin(void){return 1;}
+static void home_cover_generation_begin(void){s_cover_generation=1;}
 // 进度序号随每次进入推进，模拟离开期间发生过的进度写入。
 // The progress serial advances per entry, modeling progress writes while the page was away.
 static uint32_t progress_serial;
