@@ -46,6 +46,7 @@ bool display_refresh_resolve(display_refresh_intent_t intent, unsigned flags,
         case DISPLAY_REFRESH_READER_IMAGE:
             plan->waveform=DISPLAY_WAVE_FULL; plan->mode=MODE_GC16; plan->coverage=DISPLAY_COVERAGE_AUTO; break;
         case DISPLAY_REFRESH_READER_CLEANUP:
+        case DISPLAY_REFRESH_CLEANUP:
             plan->waveform=DISPLAY_WAVE_FULL; plan->mode=MODE_GC16; plan->coverage=DISPLAY_COVERAGE_FULL; break;
         case DISPLAY_REFRESH_RESTORE:
             plan->waveform=flags & DISPLAY_REFRESH_HOLD_GRAY ? DISPLAY_WAVE_NORMALIZE_GRAY : DISPLAY_WAVE_NORMALIZE;

@@ -68,6 +68,8 @@ static int test_stat(const char *path,struct stat *st){int id=-1;assert(sscanf(p
 '''+types+'\nstatic int s_cover_next;\n'
     unit+=r"""
 static unsigned s_cover_generation;static bool s_cover_waiting;
+static void home_library_cover_mode_changed(void){}
+static void home_library_cover_generation(unsigned g){(void)g;}
 static book_cover_job_t job_requests[9];
 unsigned book_cover_jobs_begin(void){return 1;}
 bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *q){assert(generation==1&&slot<9);job_requests[slot]=*q;return true;}
@@ -89,7 +91,7 @@ ready:
 """
     unit += function('ui_contrast_gray', ROOT/'main/ui/ui_kit.c')+'\n'
     unit += function('book_cover_crop', ROOT/'main/image/image_decode.c')+'\n'
-    for name in ('book_at','clear_cover_cache','app_home_cover_mode_changed','restore_cover_cache','load_cover'):
+    for name in ('home_cover_generation_begin','book_at','clear_cover_cache','app_home_cover_mode_changed','restore_cover_cache','load_cover'):
         unit += function(name, home)+'\n'
     unit += r'''
 static void book(int slot,int id){home_book_t *b=book_at(slot);memset(b,0,sizeof(*b));if(id<0)return;snprintf(b->path,sizeof(b->path),"/book%d.epub",id);snprintf(b->title,sizeof(b->title),"title%d",id);strcpy(b->author,"author");}

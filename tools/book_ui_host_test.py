@@ -506,6 +506,7 @@ unit += f'\n#include "{source.parents[1] / "book/reader_reflow.h"}"\n'
 unit += "static const reader_reflow_t *reader_reflow_context(void);\n"
 from book_shelf_test_code import shelf_hooks, service_hooks, service_unhooks, shelf_checks
 unit += shelf_hooks
+unit += "\nbool book_shelf_hidden_read(nvs_handle_t, const char *);\n"
 for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
@@ -523,7 +524,7 @@ import re
 unit += re.search(r"#define BOOK_SCAN_DEPTH_LIMIT [^\n]+\ntypedef struct \{[^{}]+\} shelf_scan_frame_t;", scan_source.read_text()).group(0) + "\n"
 unit += "#define copy_text shelf_service_copy_text\n#define clean_filename shelf_service_clean_filename\n"
 unit += re.search(r"typedef struct \{[^{}]+\} shelf_backfill_t;", scan_source.read_text()).group(0) + "\n"
-for name in ("copy_text", "clean_filename", "book_shelf_catalog_reserve", "book_shelf_scan_dir", "shelf_backfill_visit",
+for name in ("book_shelf_hidden_read", "copy_text", "clean_filename", "book_shelf_catalog_reserve", "book_shelf_scan_dir", "shelf_backfill_visit",
              "book_shelf_scan_backfill", "book_shelf_scan_retries"):
     unit += function(name, scan_source) + "\n"
 unit += "#undef copy_text\n#undef clean_filename\n"
@@ -851,9 +852,10 @@ int main(void) {
     EpdRect cancel=manage_rect(0,2);manage_action(&ctx,cancel.x+1,cancel.y+1);assert(!s_clear_confirm&&test_delete_calls==0);
     EpdRect del=manage_rect(3,4);manage_action(&ctx,del.x+1,del.y+1);assert(s_clear_confirm&&s_delete_confirm&&test_delete_calls==0);
     test_removed=false;test_delete_error=-1;manage_apply(&ctx);assert(s_view==MANAGE&&!s_file_removed&&s_manage_message[0]);
-    test_removed=true;manage_apply(&ctx);assert(s_view==MANAGE&&s_file_removed&&test_notify_count==1&&!pending_find(s_managed.path));assert(s_store_revision==book_store_revision());
-    test_forget_error=-1;manage_apply(&ctx);assert(s_view==MANAGE&&test_notify_count==1);
-    test_forget_error=0;manage_apply(&ctx);assert(s_view==SHELF&&test_notify_count==1);
+    int notifications_before_delete=test_notify_count;
+    test_removed=true;manage_apply(&ctx);assert(s_view==MANAGE&&s_file_removed&&test_notify_count==notifications_before_delete+1&&!pending_find(s_managed.path));assert(s_store_revision==book_store_revision());
+    test_forget_error=-1;manage_apply(&ctx);assert(s_view==MANAGE&&test_notify_count==notifications_before_delete+1);
+    test_forget_error=0;manage_apply(&ctx);assert(s_view==SHELF&&test_notify_count==notifications_before_delete+1);
     strcpy(s_managed.name,"Short.txt");assert(manage_panel().height<700);
     ctx.request_app=NULL;
     char long_name[256];memset(long_name,'W',255);long_name[255]=0;test_wrapped[0]=0;

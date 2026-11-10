@@ -69,7 +69,7 @@ int main(void){
     assert(app_home_component_at(2)==APP_HOME_WIDGET_EMPTY&&app_home_component_at(UINT32_MAX)==APP_HOME_WIDGET_EMPTY);
     assert(!app_home_component_set(2,APP_HOME_WIDGET_READING));
     assert(!app_home_component_set(0,(app_home_widget_t)-1));
-    assert(!app_home_component_set(0,(app_home_widget_t)4));assert(!writes&&!begins);
+    assert(!app_home_component_set(0,(app_home_widget_t)5));assert(!writes&&!begins);
     assert(app_home_component_set(0,APP_HOME_WIDGET_READING)&&!writes);
     reboot(true);choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);assert(!writes&&!begins);
     select_once(0,APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_WEATHER,APP_HOME_WIDGET_READING);
@@ -98,20 +98,30 @@ int main(void){
     int before=writes,valid_count=0;
     for(unsigned value=0;value<256;++value){
         disk=(uint8_t)value;
-        bool valid=value>=0x10&&value<=0x1f&&
-            ((value&3)!=((value>>2)&3)||(value&3)==2);
+        unsigned top=value&((value&128)?7:3), bottom=(value>>((value&128)?3:2))&((value&128)?7:3);
+        bool valid=(value&128)?(top<=4&&bottom<=4&&((value&64)||top==4||bottom==4)):(value>=0x10&&value<=0x1f);
+        valid=valid&&(top!=bottom||top==2);
         assert(app_home_components_value_valid((uint8_t)value)==valid);
         reboot(true);
         if(valid){++valid_count;assert(app_home_components_value()==value);}
         else choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);
         assert(writes==before);
     }
-    assert(valid_count==13);
+    assert(valid_count==42);
     app_home_components_apply(0x18);
     select_once(0,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_EMPTY);
     select_once(1,APP_HOME_WIDGET_JOURNAL,APP_HOME_WIDGET_EMPTY,APP_HOME_WIDGET_JOURNAL);
     open_allowed=false;reboot(false);open_allowed=true;choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY);
     get_allowed=false;reboot(true);get_allowed=true;choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_WEATHER);
+    select_once(1,APP_HOME_WIDGET_MINI_LIBRARY,APP_HOME_WIDGET_READING,APP_HOME_WIDGET_MINI_LIBRARY);
+    assert(!app_home_library_recent());
+    assert(app_home_library_set_recent(true));assert(app_home_library_recent());
+    uint8_t mode_byte=disk;reboot(false);assert(app_home_library_recent()&&disk==mode_byte);
+    select_once(0,APP_HOME_WIDGET_MINI_LIBRARY,APP_HOME_WIDGET_MINI_LIBRARY,APP_HOME_WIDGET_READING);
+    assert(app_home_library_recent());
+    commit_allowed=false;assert(!app_home_library_set_recent(false));commit_allowed=true;
+    assert(app_home_library_recent());reboot(false);assert(app_home_library_recent());
+    assert(app_home_library_set_recent(false));reboot(false);assert(!app_home_library_recent());
     int before_apply=writes;
     app_home_components_apply(0x18);choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY);assert(writes==before_apply);
     app_home_components_apply(0x10);choice(APP_HOME_WIDGET_READING,APP_HOME_WIDGET_EMPTY);assert(writes==before_apply);

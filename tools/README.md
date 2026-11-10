@@ -58,3 +58,7 @@ Register new host regressions in the shared runner and group doubles under the m
 
 `calendar_host_test.py` 穷举2000–2099年全部日期的历法、方位及神煞并核对固定源；`calendar_ui_host_test.py --output build/calendar-lock/native` 导出两款实际4bpp画面，验证老黄历无月历、三神方位、全部1231条宜忌列表的实际换行、720组神煞及文字互不重叠，以及万年历六行月份、闰月、字形、边界、时区及跨日缓存身份；`calendar_settings_ui_host_test.py` 检查100–200%字号、选择与保存失败。三个入口已纳入 `run_reader_baseline.py`。离线重生成命令和许可见 [CALENDAR](../docs/development/guides/CALENDAR.md)。
 The three suites cover exhaustive calendar/folk data, actual wrapping of all 1231 activity lists, all 720 spirit pairs, the grid-free almanac, three god directions, text overlap, native month layouts, clock/cache behavior and scaled settings interactions. They join the baseline runner. See the calendar contract for offline regeneration and licensing.
+
+### 迷你书库 / Mini library
+
+`mini_library_host_test.py` 校验无放回抽样、换批避重、最近排序与焦点；`home_library_host_test.py` 覆盖可取消扫描、失败保持和封面所有权；`mini_library_ui_host_test.py --output build/mini-library-preview` 导出真实4bpp预览并检查字体、边界和命中。`dashboard_home_host_test.py` 检查3个等距位置帧、40ms调度、即时改选、按住暂停、完整组件范围呈现、失败重试和首页开书。通过 `run_reader_baseline.py` 的同名套件运行，见[功能契约](../docs/development/guides/MINI_LIBRARY.md)。

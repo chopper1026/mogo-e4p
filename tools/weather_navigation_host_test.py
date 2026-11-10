@@ -59,7 +59,7 @@ void app_weather_init(void){++weather_inits;}
 bool ui_weather_prepare(void){++prepares;return true;}
 app_home_widget_t app_home_component_at(unsigned slot){assert(slot<2);return slots[slot];}
 bool app_home_component_set(unsigned slot,app_home_widget_t widget){
-    assert(slot<2&&(unsigned)widget<4);++layout_writes;
+    assert(slot<2&&(unsigned)widget<5);++layout_writes;
     if(layout_save_ok){unsigned other=slot?0:1;if(widget!=APP_HOME_WIDGET_EMPTY&&slots[other]==widget)slots[other]=slots[slot];slots[slot]=widget;}
     return layout_save_ok;
 }
@@ -135,7 +135,7 @@ void ui_weather_draw(uint8_t *fb,EpdRect region,bool tomorrow,const app_weather_
 unit += re.search(r'static const app_home_widget_t s_choices\[\]=\{[^;]+;', PAGE.read_text()).group(0)
 for name, path in (("valid_region", ROOT / "main/ui/ui_weather.c"), ("refresh_button", ROOT / "main/ui/ui_weather.c"),
                    ("ui_weather_hit", ROOT / "main/ui/ui_weather.c"),
-                   ("city_begin", PAGE), ("app_components_open", PAGE), ("app_components_open_home", PAGE), ("enter", PAGE),
+                   ("component_row", PAGE), ("city_begin", PAGE), ("app_components_open", PAGE), ("app_components_open_home", PAGE), ("enter", PAGE),
                    ("system_nav", PAGE), ("component_option", PAGE), ("city_result_row", PAGE), ("city_page_button", PAGE),
                    ("render", PAGE), ("keyboard_paint", PAGE), ("present", PAGE),
                    ("keyboard_hide", PAGE), ("submit", PAGE), ("back", PAGE),
@@ -170,21 +170,21 @@ int main(void){
             else assert(s_city==city&&nav==-1&&!ctx.request_return&&redraw==APP_REDRAW_NONE&&cancels==before);
         }
     }
-    s_city=s_weather_settings=false;ui_gesture_event_t event={UI_GESTURE_TAP,600,281};
+    s_city=s_weather_settings=false;ui_gesture_event_t event={UI_GESTURE_TAP,600,250};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[0]==APP_HOME_WIDGET_READING);
-    for(unsigned slot=0;slot<2;++slot)for(unsigned choice=0;choice<4;++choice){
-        event=(ui_gesture_event_t){UI_GESTURE_TAP,100,(slot?645:263)+(int)choice*76};
+    for(unsigned slot=0;slot<2;++slot)for(unsigned choice=0;choice<5;++choice){
+        event=(ui_gesture_event_t){UI_GESTURE_TAP,100,component_row(slot,choice)};
         assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[slot]==s_choices[choice]);
     }
     assert(slots[0]==APP_HOME_WIDGET_EMPTY&&slots[1]==APP_HOME_WIDGET_EMPTY);
     assert(tick(&ctx)==APP_REDRAW_NONE);
-    layout_save_ok=false;event=(ui_gesture_event_t){UI_GESTURE_TAP,624,365};
+    layout_save_ok=false;event=(ui_gesture_event_t){UI_GESTURE_TAP,624,374};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[0]==APP_HOME_WIDGET_EMPTY&&s_notice[0]);layout_save_ok=true;
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[0]==APP_HOME_WIDGET_WEATHER&&!s_notice[0]);
-    event=(ui_gesture_event_t){UI_GESTURE_TAP,624,743};
+    event=(ui_gesture_event_t){UI_GESTURE_TAP,624,746};
     assert(gesture(&ctx,&event)==APP_REDRAW_PAGE&&slots[1]==APP_HOME_WIDGET_WEATHER&&slots[0]==APP_HOME_WIDGET_EMPTY);
     for(int x=0;x<684;++x){
-        int before=layout_writes;event=(ui_gesture_event_t){UI_GESTURE_TAP,x,365};
+        int before=layout_writes;event=(ui_gesture_event_t){UI_GESTURE_TAP,x,374};
         app_redraw_t result=gesture(&ctx,&event);
         assert(result==((x>=36&&x<648)?APP_REDRAW_PAGE:APP_REDRAW_NONE));
         assert(layout_writes==before+((x>=36&&x<648)?1:0));

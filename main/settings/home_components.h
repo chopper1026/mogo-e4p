@@ -10,7 +10,8 @@ typedef enum {
     APP_HOME_WIDGET_READING,
     APP_HOME_WIDGET_WEATHER,
     APP_HOME_WIDGET_EMPTY,
-    APP_HOME_WIDGET_JOURNAL
+    APP_HOME_WIDGET_JOURNAL,
+    APP_HOME_WIDGET_MINI_LIBRARY
 } app_home_widget_t;
 enum { APP_HOME_SLOT_TOP, APP_HOME_SLOT_BOTTOM, APP_HOME_SLOT_COUNT };
 
@@ -27,3 +28,6 @@ uint8_t app_home_components_value(void);
 bool app_home_components_value_valid(uint8_t value);
 /// 设置恢复提交成功后更新内存，不另写NVS；忽略非法值。/ Apply after settings restore commits, without another NVS write; ignore invalid values.
 void app_home_components_apply(uint8_t value);
+/// 迷你书库模式和两槽布局同事务保存，并随既有版本化尾块备份。/ Persist the library mode with both slots and back it up in the versioned tail.
+bool app_home_library_recent(void);
+bool app_home_library_set_recent(bool recent);

@@ -21,6 +21,17 @@
 #include "book_search.h"
 #include "settings.h"
 
+bool book_shelf_hidden_read(nvs_handle_t handle, const char *path) {
+    uint32_t hash = UINT32_C(2166136261);
+    for (const unsigned char *p = (const unsigned char *)path; *p; ++p)
+        hash = (hash ^ *p) * UINT32_C(16777619);
+    char key[11], stored[BOOK_STORE_PATH_MAX];
+    snprintf(key, sizeof(key), "h_%08lx", (unsigned long)hash);
+    size_t len = sizeof(stored);
+    return nvs_get_str(handle, key, stored, &len) == ESP_OK && len > 0 && len <= sizeof(stored) &&
+        stored[len - 1] == 0 && !strcmp(stored, path);
+}
+
 // 截断必须停在UTF8字符边界。/ Truncation must stop at a UTF8 character boundary.
 static void copy_text(char *dst, size_t cap, const char *src) {
     if (!cap) return;
@@ -151,6 +162,7 @@ static bool shelf_backfill_visit(const char *path, const book_progress_t *progre
     shelf_backfill_t *backfill = ctx;
     const book_shelf_scan_t *scan = backfill->scan;
     if (backfill->truncated) return false;
+    if (scan->cancel && scan->cancel(scan->cancel_ctx)) return false;
     if (!book_file_path_supported(path)) return true;
     for (int i = 0; i < *scan->catalog.count; ++i)
         if (!strcmp((*scan->catalog.entries)[i].path, path)) return true;

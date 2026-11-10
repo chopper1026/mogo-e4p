@@ -9,6 +9,7 @@ import tempfile
 
 from home_cover_cache_host_test import function
 from run_reader_baseline import toolchain
+from home_library_test_support import doubles, ui_doubles
 
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path(os.environ.get("HOME_TEST_SOURCE", ROOT / "main/apps/app_dashboard.c"))
@@ -39,12 +40,12 @@ unit = r'''
 #define ESP_ERR_NOT_FINISHED 7
 #define DISPLAY_REFRESH_DEFAULT 0
 enum EpdDrawError {EPD_DRAW_SUCCESS, EPD_DRAW_FAILED};
-enum {DISPLAY_REFRESH_DETAIL, DISPLAY_REFRESH_FEEDBACK};
+enum {DISPLAY_REFRESH_DETAIL, DISPLAY_REFRESH_FEEDBACK, DISPLAY_REFRESH_MOTION, DISPLAY_REFRESH_SETTLE, DISPLAY_REFRESH_CLEANUP};
 enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RIGHT};
 typedef enum {APP_REDRAW_NONE, APP_REDRAW_AREA, APP_REDRAW_PAGE, APP_REDRAW_FULL} app_redraw_t;
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {bool touched;} touch_t;
-typedef struct {bool consumed;touch_t *touch;uint8_t *fb;void *hl;} app_ctx_t;
+typedef struct {bool consumed;touch_t *touch;uint8_t *fb;void *hl;int64_t now_ms;void *request_app;} app_ctx_t;
 enum {UI_GESTURE_PRESS, UI_GESTURE_MOVE, UI_GESTURE_TAP, UI_GESTURE_LONG_PRESS,
       UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
@@ -203,8 +204,9 @@ unit += "\n" + function("ui_weather_hit", ROOT / "main/ui/ui_weather.c")
 unit += "\n" + function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
 unit += "\n" + function("ui_contrast_gray", ROOT / "main/ui/ui_kit.c")
 unit += "\n" + function("ui_inset_rect", ROOT / "main/ui/ui_kit.c")
-for name in ("home_region", "continue_card_rect", "continue_card_hit_rect", "continue_card_pressed",
-             "control_feedback_area", "home_frame", "draw_cover", "render_reading", "render_widget", "redraw_widgets", "render_root", "render", "present", "on_tick",
+unit += doubles() + ui_doubles()
+for name in ("home_cover_generation_begin", "mini_frame", "mini_cancel", "home_region", "continue_card_rect", "continue_card_hit_rect", "continue_card_pressed",
+             "control_feedback_area", "home_frame", "draw_cover", "render_reading", "render_widget", "redraw_widgets", "mini_scan_cancel", "mini_select", "mini_presented", "render_root", "render", "present", "on_tick",
              "hit", "control", "on_gesture", "main_page_visible"):
     unit += "\n" + function(name, HOME)
 unit += r'''
@@ -290,7 +292,69 @@ static void cover_feedback(app_ctx_t *ctx){
     s_current.cover=NULL;s_current.cover_width=s_current.cover_height=0;fail_open=false;contrast=100;
     printf("PASS: %u real-cover press/hold/cancel/drag/tap cases, fixed grayscale/1bpp/placeholder pixels and binary margin feedback in both slots\n",cases);
 }
+
+static void mini_interaction(void){
+ app_ctx_t ctx={.fb=framebuffer,.now_ms=100};slots[0]=APP_HOME_WIDGET_MINI_LIBRARY;slots[1]=APP_HOME_WIDGET_EMPTY;
+ mini_view.count=5;for(unsigned i=0;i<5;++i)snprintf(mini_books[i].path,sizeof(mini_books[i].path),"/book%u.epub",i);
+ ui_gesture_event_t e={.type=UI_GESTURE_TAP,.x0=342,.y0=350};
+ mini_hit=(ui_mini_hit_t){UI_MINI_SELECT,3};
+ assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.selected==3&&s_mini_step==1);
+ assert(mini_frame().from==0&&mini_frame().progress==85&&mini_frame().motion);
+ draw_result=EPD_DRAW_FAILED;present(&ctx,APP_REDRAW_AREA);assert(s_mini_step==1);
+ draw_result=EPD_DRAW_SUCCESS;
+ const unsigned positions[]={85,170,256};int count_before=draws;
+ for(unsigned step=0;step<3;++step){ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_AREA);
+  assert(mini_frame().progress==positions[step]);
+  memcpy(before,framebuffer,sizeof(before));present(&ctx,APP_REDRAW_AREA);assert(last_intent==DISPLAY_REFRESH_MOTION);
+  assert(s_mini_due==ctx.now_ms+40);
+  assert(last_area.x==0&&last_area.y==168&&last_area.width==684&&last_area.height==472);isolated(last_area);}
+ assert(draws==count_before+3&&s_mini_motion==MINI_SETTLE);ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_AREA);
+ draw_result=EPD_DRAW_FAILED;present(&ctx,APP_REDRAW_AREA);assert(last_intent==DISPLAY_REFRESH_CLEANUP&&s_mini_motion==MINI_SETTLE);
+ assert(last_area.x==0&&last_area.y==168&&last_area.width==684&&last_area.height==472);
+ draw_result=EPD_DRAW_SUCCESS;ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_AREA);
+ present(&ctx,APP_REDRAW_AREA);assert(last_intent==DISPLAY_REFRESH_CLEANUP&&s_mini_motion==MINI_IDLE);
+ assert(!mini_frame().motion&&mini_frame().progress==256);
+ e.type=UI_GESTURE_SWIPE_L;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.selected==4);
+ assert(mini_frame().from==3&&mini_frame().progress==85);
+ present(&ctx,APP_REDRAW_AREA);assert(s_mini_step==2);
+ e.type=UI_GESTURE_SWIPE_L;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.selected==0);
+ assert(mini_frame().from==4&&mini_frame().progress==85&&s_mini_step==1);
+ e.type=UI_GESTURE_SWIPE_R;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.selected==4);
+ e.type=UI_GESTURE_SWIPE_R;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.selected==3);
+ touch_t held={.touched=true};ctx.touch=&held;
+ ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_NONE&&s_mini_step==1);
+ ctx.touch=NULL;
+ count_before=draws;
+ for(unsigned i=0;i<3;++i){ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_AREA);present(&ctx,APP_REDRAW_AREA);}
+ assert(draws==count_before+3&&s_mini_motion==MINI_SETTLE);
+ ctx.now_ms+=100;assert(on_tick(&ctx)==APP_REDRAW_AREA);present(&ctx,APP_REDRAW_AREA);
+ assert(draws==count_before+4&&s_mini_motion==MINI_IDLE);s_widget_dirty=0;
+ e.type=UI_GESTURE_TAP;mini_hit=(ui_mini_hit_t){UI_MINI_SHUFFLE,0};
+ unsigned shuffles=mini_shuffles;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&s_mini_motion==MINI_CLOSE);
+ assert(mini_frame().spread==128);present(&ctx,APP_REDRAW_AREA);ctx.now_ms+=100;
+ assert(on_tick(&ctx)==APP_REDRAW_AREA&&mini_frame().spread==0);present(&ctx,APP_REDRAW_AREA);
+ assert(s_mini_motion==MINI_WAIT&&mini_shuffles==shuffles+1);ctx.now_ms+=100;
+ assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_mini_motion==MINI_OPEN&&mini_frame().spread==128);present(&ctx,APP_REDRAW_AREA);ctx.now_ms+=100;
+ assert(on_tick(&ctx)==APP_REDRAW_AREA&&mini_frame().spread==256);present(&ctx,APP_REDRAW_AREA);ctx.now_ms+=100;
+ assert(on_tick(&ctx)==APP_REDRAW_AREA&&s_mini_motion==MINI_SETTLE);present(&ctx,APP_REDRAW_AREA);assert(s_mini_motion==MINI_IDLE);
+ mini_hit=(ui_mini_hit_t){UI_MINI_RECENT,0};mini_save_ok=false;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&!mini_view.recent&&!s_mini_motion);present(&ctx,APP_REDRAW_AREA);
+ mini_save_ok=true;assert(on_gesture(&ctx,&e)==APP_REDRAW_AREA&&mini_view.recent&&s_mini_motion==MINI_OPEN);mini_cancel();s_widget_dirty=0;
+ mini_hit=(ui_mini_hit_t){UI_MINI_OPEN,0};int opens=open_calls;nav=-1;
+ assert(on_gesture(&ctx,&e)==APP_REDRAW_NONE&&open_calls==opens+1&&nav==1);
+ mini_view.count=0;assert(on_gesture(&ctx,&e)==APP_REDRAW_NONE&&open_calls==opens+1);
+ mini_generation_needed=true;s_cover_next=1;s_clock_minute=minute;s_streak_pending=false;
+ unsigned generations=mini_generations,polls=mini_polls;assert(on_tick(&ctx)==APP_REDRAW_NONE);assert(mini_generations==generations+1&&mini_polls==polls+1);
+ slots[0]=APP_HOME_WIDGET_READING;polls=mini_polls;assert(on_tick(&ctx)==APP_REDRAW_NONE&&mini_polls==polls);
+ slots[0]=APP_HOME_WIDGET_EMPTY;slots[1]=APP_HOME_WIDGET_MINI_LIBRARY;s_mini_motion=MINI_SETTLE;
+ assert(redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY)==APP_REDRAW_AREA);memcpy(before,framebuffer,sizeof(before));
+ present(&ctx,APP_REDRAW_AREA);assert(last_intent==DISPLAY_REFRESH_CLEANUP&&s_mini_motion==MINI_IDLE);
+ assert(last_area.x==0&&last_area.y==640&&last_area.width==684&&last_area.height==472);isolated(last_area);
+ slots[1]=APP_HOME_WIDGET_EMPTY;
+ mini_view=(home_library_view_t){.books=mini_books,.notice=""};mini_hit=(ui_mini_hit_t){0};s_clock_minute=-2;s_cover_next=0;open_calls=0;nav=-1;
+ puts("PASS: mini fan taps/swipes, original three equal positions and 40ms schedule, direct retargeting, held-touch pause, failed-output retry, close-scan-open shuffle, mode-save rollback, real open origin, empty targets and no service poll without widget");
+}
 int main(void){
+    mini_interaction();
     app_ctx_t ctx={.fb=framebuffer};touch_t touch={0};ctx.touch=&touch;
     cover_feedback(&ctx);
     draws=pages=fulls=open_calls=library_calls=0;
@@ -428,7 +492,7 @@ with tempfile.TemporaryDirectory(prefix="dashboard-home-") as directory:
     c_file, binary = work / "test.c", work / "test"
     c_file.write_text(unit)
     subprocess.run(compiler + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-g",
-                    "-fsanitize=address,undefined", "-Imain/services", "-Imain/settings", "-Imain/ui",
+                    "-fsanitize=address,undefined", "-Imain/services", "-Imain/settings", "-Imain/ui", "-Imain/book",
                     str(c_file), "main/ui/ui_image_dither.c", "-o", str(binary)],
                    cwd=ROOT, env=env, check=True)
     subprocess.run([str(binary)], cwd=ROOT, env=env, check=True)

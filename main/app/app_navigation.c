@@ -76,7 +76,7 @@ void app_navigation_capture_reader_return(const app_desc_t *current) {
                                 &s_quick_return_fullscreen);
 }
 
-bool app_poll_main_navigation(app_ctx_t *ctx) {
+bool app_poll_main_navigation_from(app_ctx_t *ctx,unsigned current_tab) {
     if(!ctx||!ctx->read_touch)return false;
     if(ctx->request_app)return true;
     app_touch_t touch={0};
@@ -87,11 +87,12 @@ bool app_poll_main_navigation(app_ctx_t *ctx) {
     if(index<0)return false;
     if(!s_nav_contact_down) {
         s_nav_contact_down=s_nav_polled=true;
-        if(index!=1)ui_nav_request(ctx,index);
+        if((unsigned)index!=current_tab)ui_nav_request(ctx,index);
         ctx->user_activity=true;
     }
     return ctx->request_app!=NULL;
 }
+bool app_poll_main_navigation(app_ctx_t *ctx) {return app_poll_main_navigation_from(ctx,1);}
 
 void app_navigation_reset_contact(void) {
     s_nav_contact_down = s_nav_polled = false;

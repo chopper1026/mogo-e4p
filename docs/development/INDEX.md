@@ -19,6 +19,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 - [显示刷新契约](designs/DISPLAY_REFRESH.md)：显示意图、波形出口与失败恢复。/ Refresh intents, waveform exits and failure recovery.
 - [日历锁屏](guides/CALENDAR.md)：两款样式、北京时间、离线数据、v38备份和生成许可。/ Two faces, Beijing time, offline data, v38 backup and asset generation.
 - [组件与天气](guides/WEATHER.md)：首页布局、选城、网络生命周期与缓存。/ Home layout, city selection, networking and cache.
+- [迷你书库](guides/MINI_LIBRARY.md)：扇页选书、随机/最近模式、封面缓存与动画清理。/ Fan-deck selection, random/recent modes, cover caching and motion cleanup.
 - [阅读手账](guides/READING_JOURNAL.md)：当月逐日统计、日历、六图轮换与本机存储边界。/ Monthly daily records, calendar, six-scene rotation and local persistence limits.
 - [阅读性能测量](guides/READER_PERFORMANCE.md)：诊断开关、资源归属和样本解释边界。/ Diagnostic flags, resource ownership and measurement limits.
 - [阅读字典](guides/READER_DICTIONARY.md)：选字交互、阅读字体、TF 词库安装、来源许可、格式和取消边界。/ Selection, reader fonts, card packages, licensing, format and cancellation.

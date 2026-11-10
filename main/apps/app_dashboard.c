@@ -10,8 +10,8 @@
  * English: Home uses real resume data and cached complete sentences; painting never reads media.
  * 冻结（用户2026-11-06修订）：题头改为天数、七本紧贴递增书脊、连续阅读状态；每日满30分钟达标，保留跨月连续摘要，不恢复旧月明细或旧目标组件。
  * Frozen (user revision 2026-11-06): replace the title with days, seven touching ascending spines and streak status; thirty minutes completes a day, retaining cross-month summaries without old monthly details or goal widgets.
- * 冻结：上下等高区仍可选最近阅读、天气、手账或留白，天气直角铺满并直接接导航。
- * Frozen: equal regions still choose reading, weather, journal or empty, with edge-to-edge weather meeting navigation.
+ * 冻结（用户2026-11-10修订）：上下等高区增加唯一的迷你书库，最多五本书采用扇页书匣；随机或最近阅读，有限帧切换后定稿，满足用户选择的扇页交互。天气仍直角铺满并直接接导航。
+ * Frozen (user revision 2026-11-10): add one five-book fan-deck mini library to either equal region, with random/recent selection and finite motion followed by settling, implementing the chosen fan interaction. Weather still meets navigation edge to edge.
  * 用户2026-11-03修订：最近阅读移除设置图标及其点击入口，组件配置保留长按区域或设置页入口。
  * User revision 2026-11-03: remove the Reading settings icon and tap target; retain configuration through a region hold or Settings.
  * 用户修订：缓存原位换位，只用一个条目的栈空间；保留复用速度，避免启动时复制七条占用半个主任务栈。
@@ -62,6 +62,8 @@
 #include "board_sd.h"
 #include "settings.h"
 #include "home_components.h"
+#include "home_library.h"
+#include "ui_mini_library.h"
 #include "ttf_font.h"
 #include "ui_gesture.h"
 #include "ui_kit.h"
@@ -126,6 +128,20 @@ static EpdRect control_feedback_area(EpdRect control) {
 static bool s_home_force_full_once;
 static uint32_t s_cached_progress_revision=UINT32_MAX;
 static home_book_t *book_at(int index);
+enum { MINI_IDLE, MINI_SELECT, MINI_CLOSE, MINI_WAIT, MINI_OPEN, MINI_SETTLE };
+static unsigned s_mini_motion, s_mini_step, s_mini_from;
+static int64_t s_mini_due;
+static ui_mini_library_frame_t mini_frame(void) {
+    home_library_view_t v=home_library_view();
+    ui_mini_library_frame_t f={v.selected,256,256,false};
+    if(s_mini_motion==MINI_SELECT) {f.from=s_mini_from;f.progress=s_mini_step*256/3;f.motion=true;}
+    if(s_mini_motion==MINI_CLOSE) {f.spread=256-s_mini_step*128;f.motion=true;}
+    if(s_mini_motion==MINI_WAIT) {f.spread=0;f.motion=true;}
+    if(s_mini_motion==MINI_OPEN) {f.spread=s_mini_step*128;f.motion=true;}
+    return f;
+}
+static void mini_cancel(void) {s_mini_motion=MINI_IDLE;s_mini_step=0;}
+static void home_cover_generation_begin(void);
 
 static bool is_book(const char *name) {
     if (!name[0] || name[0] == '.' || !strncmp(name, "._", 2)) return false;
@@ -259,6 +275,7 @@ static void clear_cover_cache(void) {
 
 void app_home_cover_mode_changed(void) {
     clear_cover_cache();
+    home_library_cover_mode_changed();
     s_cover_next = 0;
 }
 static void restore_cover_cache(void) {
@@ -307,6 +324,10 @@ static void restore_cover_cache(void) {
 
 static unsigned s_cover_generation;
 static bool s_cover_waiting;
+static void home_cover_generation_begin(void) {
+    s_cover_generation=book_cover_jobs_begin();
+    home_library_cover_generation(s_cover_generation);
+}
 static bool load_cover(home_book_t *item,int slot) {
     s_cover_waiting=false;
     if(!pico_boot_asset_allowed(item->path))return false;
@@ -315,12 +336,12 @@ static bool load_cover(home_book_t *item,int slot) {
     snprintf(request.path,sizeof(request.path),"%s",item->path);
     snprintf(request.title,sizeof(request.title),"%s",item->title);
     snprintf(request.author,sizeof(request.author),"%s",item->author);
-    if(!s_cover_generation)s_cover_generation=book_cover_jobs_begin();
-    if(!book_cover_jobs_submit(s_cover_generation,slot,&request)){
-        s_cover_generation=book_cover_jobs_begin();
-        if(!book_cover_jobs_submit(s_cover_generation,slot,&request))return false;
+    if(!s_cover_generation)home_cover_generation_begin();
+    if(!book_cover_jobs_submit(s_cover_generation,0,&request)){
+        home_cover_generation_begin();
+        if(!book_cover_jobs_submit(s_cover_generation,0,&request))return false;
     }
-    book_cover_result_t result={0};int state=book_cover_jobs_take(s_cover_generation,slot,&result);
+    book_cover_result_t result={0};int state=book_cover_jobs_take(s_cover_generation,0,&result);
     if(!state){s_cover_waiting=true;return false;}if(state<0)return false;
     home_cover_cache_t *cached=&s_cover_cache[slot];free(cached->pixels);
     snprintf(cached->path,sizeof(cached->path),"%s",item->path);
@@ -442,6 +463,7 @@ static void render_widget(uint8_t *fb,unsigned slot) {
     case APP_HOME_WIDGET_READING: render_reading(fb,slot);break;
     case APP_HOME_WIDGET_WEATHER: ui_weather_draw(fb,region,s_weather_tomorrow[slot],app_weather_view(),app_weather_now());break;
     case APP_HOME_WIDGET_JOURNAL: ui_reading_journal_widget(fb,region,app_reading_journal_model(),app_reading_journal_today(),app_reading_journal_notice());break;
+    case APP_HOME_WIDGET_MINI_LIBRARY: {home_library_view_t v=home_library_view();ui_mini_library_draw(fb,region,&v,mini_frame());break;}
     default: ui_draw_icon(fb,632,region.y+38,27,UI_ICON_SLIDERS_HORIZONTAL,0);break;
     }
 }
@@ -454,6 +476,24 @@ static app_redraw_t redraw_widgets(app_home_widget_t widget) {
         s_widget_dirty|=1u<<slot;
     }
     return s_widget_dirty?APP_REDRAW_AREA:APP_REDRAW_NONE;
+}
+static bool mini_scan_cancel(void *ctx) {return app_poll_main_navigation_from(ctx,0);}
+static app_redraw_t mini_select(unsigned index) {
+    home_library_view_t v=home_library_view();
+    if(index>=v.count || index==v.selected)return APP_REDRAW_NONE;
+    s_mini_from=v.selected;home_library_select(index);
+    s_mini_motion=MINI_SELECT;s_mini_step=1;s_mini_due=0;
+    return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);
+}
+static void mini_presented(app_ctx_t *ctx) {
+    switch(s_mini_motion) {
+    case MINI_SELECT: if(++s_mini_step>3)s_mini_motion=MINI_SETTLE;break;
+    case MINI_CLOSE: if(++s_mini_step>2){s_mini_motion=MINI_WAIT;home_library_shuffle();}break;
+    case MINI_OPEN: if(++s_mini_step>2)s_mini_motion=MINI_SETTLE;break;
+    case MINI_SETTLE: mini_cancel();break;
+    default: break;
+    }
+    s_mini_due=ctx->now_ms+40;
 }
 static void render_root(uint8_t *fb) {
     ui_nav_status(fb);ui_reading_streak_draw(fb,&s_streak);
@@ -487,16 +527,20 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
         enum EpdDrawError result=display_refresh_area(ctx->hl,DISPLAY_REFRESH_DETAIL,area,DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl,result);s_streak_pending=result!=EPD_DRAW_SUCCESS;return true;
     }
+    bool mini_painted=false;
     if(redraw==APP_REDRAW_AREA&&s_widget_dirty) {
+        for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)
+            if((s_widget_dirty&(1u<<slot))&&app_home_component_at(slot)==APP_HOME_WIDGET_MINI_LIBRARY)mini_painted=true;
         for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)if(s_widget_dirty&(1u<<slot))render_widget(ctx->fb,slot);
     }
     else render(ctx,ctx->fb);
     s_widget_dirty=0;
     enum EpdDrawError result;
-    if(redraw==APP_REDRAW_AREA)result=display_refresh_area(ctx->hl, s_press_pending ? DISPLAY_REFRESH_FEEDBACK : DISPLAY_REFRESH_DETAIL, s_area, DISPLAY_REFRESH_DEFAULT);
+    if(redraw==APP_REDRAW_AREA)result=display_refresh_area(ctx->hl, mini_painted&&s_mini_motion==MINI_SETTLE ? DISPLAY_REFRESH_CLEANUP : mini_painted&&mini_frame().motion ? DISPLAY_REFRESH_MOTION : s_press_pending ? DISPLAY_REFRESH_FEEDBACK : DISPLAY_REFRESH_DETAIL, s_area, DISPLAY_REFRESH_DEFAULT);
     else if(redraw==APP_REDRAW_FULL||s_home_force_full_once) {s_home_force_full_once=false;result=update_display_full(ctx->hl);}
     else result=update_display_fast_page(ctx->hl);
     guard_draw_result(ctx->hl,result);
+    if(mini_painted&&result==EPD_DRAW_SUCCESS)mini_presented(ctx);
     if(redraw!=APP_REDRAW_AREA&&result==EPD_DRAW_SUCCESS)s_clock_minute=minute;
     if(redraw!=APP_REDRAW_AREA)s_streak_pending=result!=EPD_DRAW_SUCCESS;
     return true;
@@ -508,7 +552,9 @@ static void on_enter(app_ctx_t *ctx) {
     s_streak=reading_journal_streak_view(app_reading_journal_model(),app_reading_journal_today());s_streak_pending=false;
     memset(s_weather_tomorrow,0,sizeof(s_weather_tomorrow));s_widget_dirty=0;
     if(app_home_has_widget(APP_HOME_WIDGET_WEATHER))(void)ui_weather_prepare();
-    s_cover_generation=book_cover_jobs_begin();
+    mini_cancel();
+    if(app_home_has_widget(APP_HOME_WIDGET_MINI_LIBRARY))home_library_enter();
+    home_cover_generation_begin();
     const uint32_t progress_revision=book_progress_revision();
     (void)ctx;s_clock_pending=false;s_press_pending=false;
     s_home_force_full_once=app_settings_home_full_refresh();avatar_prepare_state();
@@ -533,11 +579,17 @@ static void on_enter(app_ctx_t *ctx) {
 }
 static void on_media_lost(app_ctx_t *ctx) {
     (void)ctx;clear_cover_cache();memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));
+    mini_cancel();home_library_media_lost();
     s_books_cache_valid=false;s_excerpt[0]=0;s_avatar_ready=s_avatar_pending=false;
 }
-static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;s_scan_pending=true;avatar_prepare_state();}
+static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;s_scan_pending=true;avatar_prepare_state();home_library_invalidate();}
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
+    if(app_home_has_widget(APP_HOME_WIDGET_MINI_LIBRARY)&&s_mini_motion&&ctx->now_ms>=s_mini_due) {
+        if(s_mini_motion!=MINI_WAIT)return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);
+        if(home_library_poll(mini_scan_cancel,ctx)) {s_mini_motion=MINI_OPEN;s_mini_step=1;return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);}
+        if(ctx->request_app)return APP_REDRAW_NONE;
+    }
     bool journal_changed=app_reading_journal_poll();
     reading_streak_view_t streak=reading_journal_streak_view(app_reading_journal_model(),app_reading_journal_today());
     if(s_streak.valid!=streak.valid||s_streak.days!=streak.days||
@@ -557,7 +609,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         board_sd_info_t info={0};if(board_sd_get_info(&info)==ESP_ERR_NOT_FINISHED)return APP_REDRAW_NONE;
         s_scan_pending=false;
         if(info.mounted) {
-            s_cover_generation=book_cover_jobs_begin();
+            home_cover_generation_begin();
             memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));s_cover_next=0;
             scan_books();restore_cover_cache();remember_scan_state(&info);refresh_excerpt();avatar_prepare_state();
             return APP_REDRAW_PAGE;
@@ -572,6 +624,11 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     if(s_cover_next==0&&app_home_has_widget(APP_HOME_WIDGET_READING)){
         s_cover_next=1;home_book_t *b=featured();
         if(b->path[0]&&!b->cover){int slot=b==&s_current?0:(int)(b-s_recent)+1;if(load_cover(b,slot))return redraw_widgets(APP_HOME_WIDGET_READING);if(s_cover_waiting)s_cover_next=0;}
+    }
+    if(app_home_has_widget(APP_HOME_WIDGET_MINI_LIBRARY)&&s_mini_motion==MINI_IDLE) {
+        if(home_library_needs_generation())home_cover_generation_begin();
+        if(home_library_poll(mini_scan_cancel,ctx))return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);
+        if(ctx->request_app)return APP_REDRAW_NONE;
     }
     if(ui_nav_clock_minute()!=s_clock_minute) {
         s_clock_pending=true;s_area=(EpdRect){24,18,156,44};return APP_REDRAW_AREA;
@@ -593,6 +650,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
        hit((EpdRect){0,HOME_REGION_TOP,684,UI_NAV_TOP-HOME_REGION_TOP},ev->x0,ev->y0)) {
         app_components_open(ctx,false);return APP_REDRAW_NONE;
     }
+    if(ev->type==UI_GESTURE_SWIPE_L||ev->type==UI_GESTURE_SWIPE_R) {
+        for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)
+            if(app_home_component_at(slot)==APP_HOME_WIDGET_MINI_LIBRARY&&hit(home_region(slot),ev->x0,ev->y0)) {
+                home_library_view_t v=home_library_view();
+                if(v.count>1 && s_mini_motion!=MINI_CLOSE && s_mini_motion!=MINI_WAIT)
+                    return mini_select((v.selected+v.count+(ev->type==UI_GESTURE_SWIPE_L?1:-1))%v.count);
+                return APP_REDRAW_NONE;
+            }
+    }
     if(ev->type!=UI_GESTURE_TAP) {if(restore){s_area=control_feedback_area(s_pressed);return APP_REDRAW_AREA;}return APP_REDRAW_NONE;}
     int x=ev->x0,y=ev->y0;
     int tab=y>=UI_NAV_TOP?ui_nav_hit(x,y):-1;if(tab>=0){ui_nav_request(ctx,tab);return APP_REDRAW_NONE;}
@@ -606,6 +672,24 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
     for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot) {
         EpdRect region=home_region(slot);
         if(!hit(region,x,y))continue;
+        if(app_home_component_at(slot)==APP_HOME_WIDGET_MINI_LIBRARY) {
+            home_library_view_t v=home_library_view();
+            ui_mini_hit_t action=ui_mini_library_hit(region,&v,x,y);
+            if(action.action==UI_MINI_RANDOM||action.action==UI_MINI_RECENT) {
+                bool recent=action.action==UI_MINI_RECENT;
+                if(recent==v.recent)return APP_REDRAW_NONE;
+                mini_cancel();
+                if(home_library_recent(recent)){s_mini_motion=MINI_OPEN;s_mini_step=1;}
+                return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);
+            }
+            if(s_mini_motion==MINI_CLOSE||s_mini_motion==MINI_WAIT)return APP_REDRAW_NONE;
+            if(action.action==UI_MINI_SELECT)return mini_select(action.index);
+            if(action.action==UI_MINI_SHUFFLE) {s_mini_motion=MINI_CLOSE;s_mini_step=1;return redraw_widgets(APP_HOME_WIDGET_MINI_LIBRARY);}
+            if(action.action==UI_MINI_OPEN && v.count && app_book_request_open_from_home(v.books[v.selected].path)) {
+                mini_cancel();ui_nav_request(ctx,1);return APP_REDRAW_NONE;
+            }
+            return APP_REDRAW_NONE;
+        }
         if(app_home_component_at(slot)==APP_HOME_WIDGET_JOURNAL) {
             if(hit(ui_reading_journal_art(region),x,y)) {
                 (void)app_reading_journal_next_scene();return redraw_widgets(APP_HOME_WIDGET_JOURNAL);
@@ -634,8 +718,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
 static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
 static bool main_page_visible(app_ctx_t *ctx) {(void)ctx;return true;}
 static display_rect_t area_hint(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}
-static void home_before_lock(app_ctx_t *ctx){(void)ctx;app_weather_cancel_join();(void)app_reading_journal_flush();}
-static void home_exit(app_ctx_t *ctx){home_before_lock(ctx);ui_weather_release();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
+static void home_before_lock(app_ctx_t *ctx){(void)ctx;mini_cancel();app_weather_cancel_join();(void)app_reading_journal_flush();}
+static void home_exit(app_ctx_t *ctx){home_before_lock(ctx);home_library_leave();ui_weather_release();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
 const app_desc_t app_dashboard={
     .title="首页 Home",.detail="继续阅读",.enter_full=false,.owns_keys=true,.menu_handle_enabled=no_menu_handle,
     .main_page_visible=main_page_visible,.on_enter=on_enter,.on_exit=home_exit,.on_before_lock=home_before_lock,.on_media_lost=on_media_lost,.on_media_ready=on_media_ready,
