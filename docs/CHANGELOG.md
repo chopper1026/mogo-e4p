@@ -3,6 +3,13 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.1.0 · 2026-11-10
+
+- 重新设计老黄历锁屏。
+- 优化最近阅读组件。
+- 新增迷你书库组件。
+- 新增锁屏样式-简约时钟。
+
 ## v1.0.9 · 本地测试 / Local testing · 2026-11-10
 
 - 新增简约时钟锁屏：24小时制，上下对齐的小时/分钟、月日、星期和电量；浅睡时每分钟刷新，兼容密码与定时关机，选择随重启和v40设置备份保留。/ Add a minimal 24-hour clock lock with aligned hour/minute rows, month/day, weekday and battery; refresh each minute in light sleep with PIN/timed shutdown and reboot/v40 backup persistence.
