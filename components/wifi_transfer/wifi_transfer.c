@@ -1014,7 +1014,8 @@ esp_err_t wifi_transfer_scan_wifi(wifi_transfer_network_t out[WIFI_TRANSFER_SCAN
             wifi_transfer_network_t item = {.rssi = ap->rssi, .authmode = (uint8_t)ap->authmode,
                 .requires_password = ap->authmode != WIFI_AUTH_OPEN && ap->authmode != WIFI_AUTH_OWE};
             memcpy(item.ssid, ap->ssid, sizeof(item.ssid) - 1);
-            item.supported = ap->authmode == WIFI_AUTH_OPEN || ap->authmode == WIFI_AUTH_WPA2_PSK ||
+            item.supported = ap->authmode == WIFI_AUTH_OPEN || ap->authmode == WIFI_AUTH_WPA_PSK ||
+                ap->authmode == WIFI_AUTH_WPA2_PSK ||
                 ap->authmode == WIFI_AUTH_WPA_WPA2_PSK || ap->authmode == WIFI_AUTH_WPA3_PSK ||
                 ap->authmode == WIFI_AUTH_WPA2_WPA3_PSK;
             scan_offer(out, count, &item);
