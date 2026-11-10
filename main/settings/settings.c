@@ -125,6 +125,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_CHROME_FOOTER_H "rd_ftr_h"
 #define NVS_KEY_READER_PROGRESS "rd_progress"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
+#define NVS_KEY_TAP_CONFIG "rd_tap_grid"
 #define NVS_KEY_BLE_TURNER "ble_turn"
 #define NVS_KEY_SHELF_RECENT "shelf_recent"
 #define NVS_KEY_BOOK_LINE "bk_line"
@@ -230,6 +231,28 @@ static uint8_t s_reader_chrome[6] = {
     APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS,
 };
 static bool s_reader_vertical_turn;
+static app_reader_tap_mode_t s_reader_tap_mode;
+#define READER_TAP_DEFAULT_ACTIONS \
+    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_NEXT, \
+    APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT, \
+    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_NEXT
+static const uint8_t s_reader_tap_defaults[APP_READER_TAP_CELLS] = {READER_TAP_DEFAULT_ACTIONS};
+static uint8_t s_reader_tap_actions[APP_READER_TAP_CELLS] = {READER_TAP_DEFAULT_ACTIONS};
+bool app_settings_reader_tap_action_valid(app_reader_key_action_t action) {
+    return (action >= APP_READER_KEY_PREV && action <= APP_READER_KEY_NONE) || action == APP_READER_KEY_FRONTLIGHT;
+}
+static bool reader_tap_valid(unsigned mode, const uint8_t *actions) {
+    if (mode > APP_READER_TAP_GRID || !actions) return false;
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i)
+        if (!app_settings_reader_tap_action_valid((app_reader_key_action_t)actions[i])) return false;
+    return true;
+}
+static void reader_tap_encode(char out[11], unsigned mode, const uint8_t *actions) {
+    out[0] = (char)('0' + mode);
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) out[i + 1] = (char)('0' + actions[i]);
+    out[10] = 0;
+}
+
 static bool s_reader_progress_bar = true;
 static uint8_t s_reader_chrome_heights[2] = {APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT};
 static bool reader_chrome_heights_valid(uint8_t header, uint8_t footer) {
@@ -520,7 +543,22 @@ void app_settings_init(void) {
         s_reader_keys[0] == APP_READER_KEY_PREV && s_reader_keys[1] == APP_READER_KEY_TOOLS &&
         s_reader_keys[2] == APP_READER_KEY_NEXT;
     uint8_t vertical_turn = 0;
-    if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) == ESP_OK) s_reader_vertical_turn = vertical_turn == 1;
+    if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) != ESP_OK) vertical_turn = 0;
+    s_reader_tap_mode = vertical_turn == 1 ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
+    memcpy(s_reader_tap_actions, s_reader_tap_defaults, sizeof(s_reader_tap_actions));
+    char tap_config[11] = {0};
+    size_t tap_size = sizeof(tap_config);
+    if (nvs_get_str(h, NVS_KEY_TAP_CONFIG, tap_config, &tap_size) == ESP_OK &&
+        tap_size == sizeof(tap_config) && tap_config[10] == 0 && strlen(tap_config) == 10) {
+        uint8_t actions[APP_READER_TAP_CELLS];
+        for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) actions[i] = (uint8_t)(tap_config[i + 1] - '0');
+        unsigned mode = (unsigned)(tap_config[0] - '0');
+        if (reader_tap_valid(mode, actions)) {
+            s_reader_tap_mode = (app_reader_tap_mode_t)mode;
+            memcpy(s_reader_tap_actions, actions, sizeof(actions));
+        }
+    }
+    s_reader_vertical_turn = s_reader_tap_mode == APP_READER_TAP_VERTICAL;
     uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0;
     if (nvs_get_u8(h, NVS_KEY_HIDE_IMAGES, &hide_images) == ESP_OK) s_reader_hide_images = hide_images == 1;
     if (nvs_get_u8(h, NVS_KEY_BLE_TURNER, &ble_turner) == ESP_OK) s_ble_turner = ble_turner == 1;
@@ -1240,10 +1278,29 @@ bool app_settings_set_reader_chrome_default(void) {
 
 bool app_settings_reader_hold_refresh(void) { return s_reader_hold_refresh; }
 bool app_settings_reader_vertical_turn(void) { return s_reader_vertical_turn; }
+app_reader_tap_mode_t app_settings_reader_tap_mode(void) { return s_reader_tap_mode; }
+app_reader_key_action_t app_settings_reader_tap_action(unsigned cell) {
+    if (cell >= APP_READER_TAP_CELLS) return APP_READER_KEY_NONE;
+    return (app_reader_key_action_t)s_reader_tap_actions[cell];
+}
+bool app_settings_set_reader_tap_config(app_reader_tap_mode_t mode, const uint8_t actions[APP_READER_TAP_CELLS]) {
+    if (!reader_tap_valid((unsigned)mode, actions)) return false;
+    char encoded[11];
+    reader_tap_encode(encoded, mode, actions);
+    nvs_handle_t h;
+    esp_err_t err = settings_write_open(&h);
+    if (err != ESP_OK) return false;
+    err = nvs_set_str(h, NVS_KEY_TAP_CONFIG, encoded);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err != ESP_OK) return false;
+    s_reader_tap_mode = mode;
+    s_reader_vertical_turn = mode == APP_READER_TAP_VERTICAL;
+    memmove(s_reader_tap_actions, actions, sizeof(s_reader_tap_actions));
+    return true;
+}
 void app_settings_set_reader_vertical_turn(bool on) {
-    if (s_reader_vertical_turn == on) return;
-    s_reader_vertical_turn = on;
-    nvs_put_u8(NVS_KEY_VERTICAL_TURN, on ? 1 : 0);
+    (void)app_settings_set_reader_tap_config(on ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL, s_reader_tap_actions);
 }
 void app_settings_set_reader_hold_refresh(bool on) {
     if (s_reader_hold_refresh == on) return;
@@ -1573,6 +1630,18 @@ typedef settings_backup_progress_bar_t settings_backup_touch_t;
 typedef settings_backup_progress_bar_t settings_backup_ticket_background_t;
 // v38追加日历子样式。/ V38 appends the calendar variant.
 typedef settings_backup_progress_bar_t settings_backup_calendar_t;
+// v39追加模式与九格映射；旧备份沿用原上下/左右模式及默认格子。/ V39 appends the mode and nine cells; older backups retain their original tap mode and default cells.
+typedef struct { uint8_t mode, actions[APP_READER_TAP_CELLS], checksum[4]; } settings_backup_tap_t;
+static uint32_t backup_tap_checksum(const settings_backup_tap_t *tap) {
+    uint32_t hash = (2166136261u ^ tap->mode) * 16777619u;
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) hash = (hash ^ tap->actions[i]) * 16777619u;
+    return hash;
+}
+static bool backup_tap_valid(const settings_backup_tap_t *tap) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)tap->checksum[i] << (8 * i);
+    return reader_tap_valid(tap->mode, tap->actions) && stored == backup_tap_checksum(tap);
+}
 static uint32_t backup_progress_bar_checksum(const settings_backup_progress_bar_t *bar) {
     return (2166136261u ^ bar->on) * 16777619u;
 }
@@ -1697,10 +1766,10 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     unsigned char c = backup->magic[7];
     // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐；Z 追加 v35 书内样式。
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
-    // a/b/c 追加 v36禁触、v37票根背景和v38日历子样式。/ a/b/c append v36 touch lock, v37 ticket backgrounds and v38 calendar variants.
+    // a/b/c/d追加禁触、票根背景、日历子样式与九宫格。/ a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1798,7 +1867,7 @@ esp_err_t app_settings_backup_save(void) {
     // v36：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V36 adds touch lock; a missing recovery binding restores touch.
     // v37：追加票根背景选择。/ V37 appends the ticket background choice.
     // v38：追加日历子样式，主样式编号4表示日历。/ V38 appends the calendar variant; main style 4 selects calendar.
-    memcpy(backup.magic, "PICOSETc", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETd", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1980,6 +2049,11 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t calendar_hash = backup_progress_bar_checksum(&calendar_style);
     for (unsigned i = 0; i < 4; ++i) calendar_style.checksum[i] = (uint8_t)(calendar_hash >> (8 * i));
     if (ok) ok = fwrite(&calendar_style, 1, sizeof(calendar_style), file) == sizeof(calendar_style);
+    settings_backup_tap_t tap = {.mode = (uint8_t)s_reader_tap_mode};
+    memcpy(tap.actions, s_reader_tap_actions, sizeof(tap.actions));
+    uint32_t tap_hash = backup_tap_checksum(&tap);
+    for (unsigned i = 0; i < 4; ++i) tap.checksum[i] = (uint8_t)(tap_hash >> (8 * i));
+    if (ok) ok = fwrite(&tap, 1, sizeof(tap), file) == sizeof(tap);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -2084,6 +2158,8 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_touch_t touch_lock = {.on = 0};
     settings_backup_ticket_background_t ticket_background = {.on = APP_TICKET_BACKGROUND_TRANSPARENT};
     settings_backup_calendar_t calendar_style = {.on = APP_CALENDAR_ALMANAC};
+    settings_backup_tap_t tap = {0};
+    memcpy(tap.actions, s_reader_tap_defaults, sizeof(tap.actions));
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
@@ -2192,6 +2268,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 36) ok = fread(&touch_lock, 1, sizeof(touch_lock), file) == sizeof(touch_lock) && backup_progress_bar_valid(&touch_lock);
     if (ok && version >= 37) ok = fread(&ticket_background, 1, sizeof(ticket_background), file) == sizeof(ticket_background) && backup_progress_bar_valid(&ticket_background);
     if (ok && version >= 38) ok = fread(&calendar_style, 1, sizeof(calendar_style), file) == sizeof(calendar_style) && backup_progress_bar_valid(&calendar_style);
+    if (ok && version >= 39) ok = fread(&tap, 1, sizeof(tap), file) == sizeof(tap) && backup_tap_valid(&tap);
+    if (version < 39) tap.mode = (profile.home_full_refresh & 32) ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
     bool has_history = ok && version >= 6;
@@ -2272,7 +2350,10 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_LOCK, idle_minutes);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BLE_TURNER, (profile.home_full_refresh & 8) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, (profile.home_full_refresh & 32) != 0);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, tap.mode == APP_READER_TAP_VERTICAL);
+    char tap_encoded[11];
+    reader_tap_encode(tap_encoded, tap.mode, tap.actions);
+    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_TAP_CONFIG, tap_encoded);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHAKE_TURN, shake.on);
     for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
@@ -2378,7 +2459,9 @@ esp_err_t app_settings_backup_restore(void) {
     s_auto_lock_minutes = idle_minutes;
     s_ble_turner = (profile.home_full_refresh & 8) != 0;
     s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;
-    s_reader_vertical_turn = (profile.home_full_refresh & 32) != 0;
+    s_reader_tap_mode = (app_reader_tap_mode_t)tap.mode;
+    s_reader_vertical_turn = s_reader_tap_mode == APP_READER_TAP_VERTICAL;
+    memcpy(s_reader_tap_actions, tap.actions, sizeof(s_reader_tap_actions));
     s_home_full_refresh = (profile.home_full_refresh & 1) != 0;
     s_main_refresh = main_refresh;
     s_reader_hide_images = (profile.home_full_refresh & 2) != 0;

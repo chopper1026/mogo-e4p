@@ -66,6 +66,9 @@ static unsigned app_settings_book_reading_line(void){return 0;}
 static unsigned app_settings_reader_full_pages(void){return 10;}
 static bool app_settings_reader_turn_effect(void){return false;}
 static bool app_settings_reader_vertical_turn(void){return false;}
+static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_vertical_turn()?1:0;}
+#define APP_READER_TAP_GRID 2
+
 static bool app_settings_reader_statusbar(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}
 static bool app_settings_book_vertical(void){return false;}
@@ -97,7 +100,7 @@ static bool bookmark_is_current(void){return false;}
     # Only leaf sheets not shown in this preview are replaced. All new screens use actual production paint.
     for name in ('draw_weight_settings', 'draw_layout_settings', 'draw_rule_settings', 'draw_font_picker',
                  'draw_reader_stats', 'draw_reader_bookmarks', 'draw_reader_stats_recent', 'draw_turn_settings',
-                 'draw_key_settings', 'draw_key_picker', 'draw_chrome_settings', 'draw_chrome_picker',
+                 'draw_tap_grid', 'draw_key_settings', 'draw_key_picker', 'draw_chrome_settings', 'draw_chrome_picker',
                  'draw_title_style_picker', 'draw_note_sheet'):
         code += f'static void {name}(uint8_t *fb){{(void)fb;}}\n'
     code += 'static void ui_text_set_system_scale(bool enabled){s_system_text_scale=enabled;}\n'

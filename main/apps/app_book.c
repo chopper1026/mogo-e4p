@@ -29,7 +29,8 @@
  * User revision 2026-10-30: update time/power with page turns, without idle top-band output;
  * shorten chrome output with default GL16 status and short-DU ordinary footers, retain default GL16
  * cleanup for chapter/illustration footers, and keep body-first presentation.
- * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「更多」中的全屏项与「切换全屏」按键动作切换。
+ * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义八动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部全屏提示移除。
+ * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body actions; the translucent editor activates only successfully saved drafts and removes the fullscreen footer hint.
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
  * 用户 2026-10-21 修订：按键控制示意图按本板实体顺序摆成中、左、右（中键最左），中键双击下新增音量键翻页开关。
@@ -244,6 +245,7 @@
 #include "ui_kit.h"
 #include "ui_reader_heading.h"
 #include "ui_reader_settings.h"
+#include "ui_reader_tap_grid.h"
 #include "ui_reader_notice.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
@@ -292,6 +294,7 @@ typedef enum {
     READER_PANEL_STATS_RECENT,
     READER_PANEL_REFRESH_SETTINGS,
     READER_PANEL_TURN_SETTINGS,
+    READER_PANEL_TAP_GRID,
     READER_PANEL_KEY_SETTINGS,
     READER_PANEL_KEY_PICKER,
     READER_PANEL_CHROME_SETTINGS,
@@ -584,6 +587,15 @@ static unsigned s_du_count;
 static EpdRect s_du_area;
 
 static ui_reader_settings_group_t s_reader_settings_group;
+static uint8_t s_tap_draft[APP_READER_TAP_CELLS];
+static int s_tap_selected = -1;
+static bool s_tap_picker;
+static char s_tap_error[64];
+static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action);
+static const app_reader_key_action_t s_tap_order[8] = {
+    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS, APP_READER_KEY_FULLSCREEN,
+    APP_READER_KEY_HOME, APP_READER_KEY_REFRESH, APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_NONE,
+};
 #define s_toolbar (s_reader_panel != READER_PANEL_NONE)
 
 static void render(app_ctx_t* ctx, uint8_t* fb);
@@ -2331,6 +2343,7 @@ static void draw_reading_settings(uint8_t* fb) {
         .full_pages = app_settings_reader_full_pages(),
         .turn_effect = app_settings_reader_turn_effect(),
         .vertical_turn = app_settings_reader_vertical_turn(),
+        .grid_tap = app_settings_reader_tap_mode() == APP_READER_TAP_GRID,
         .statusbar = app_settings_reader_statusbar(),
         .hide_images = app_settings_reader_hide_images(),
         .vertical_text = app_settings_book_vertical(),
@@ -2344,7 +2357,7 @@ static void draw_reading_settings(uint8_t* fb) {
 static void draw_turn_settings(uint8_t *fb) {
     draw_sheet(fb, 270, "翻页模式");
     draw_sheet_back(fb, 270);
-    ui_reader_turn_settings_draw(fb, app_settings_reader_vertical_turn(), app_settings_reader_shake_turn());
+    ui_reader_turn_settings_draw(fb, app_settings_reader_tap_mode(), app_settings_reader_shake_turn());
 }
 
 static const char *reader_key_label(app_reader_key_action_t action) {
@@ -2362,6 +2375,28 @@ static const char *reader_key_label(app_reader_key_action_t action) {
         [APP_READER_KEY_TOUCH] = "触摸开关",
     };
     return labels[action >= 0 && action < APP_READER_KEY_COUNT ? action : APP_READER_KEY_NONE];
+}
+static const char *reader_tap_label(app_reader_key_action_t action) {
+    return action == APP_READER_KEY_TOOLS ? "工具栏" : reader_key_label(action);
+}
+static void draw_tap_grid(uint8_t *fb) {
+    EpdRect cells[APP_READER_TAP_CELLS];
+    const char *labels[APP_READER_TAP_CELLS];
+    EpdRect body = body_rect();
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) {
+        cells[i] = book_reader_grid_cell(body, i);
+        labels[i] = reader_tap_label((app_reader_key_action_t)s_tap_draft[i]);
+    }
+    ui_reader_tap_grid_draw(fb, cells, labels, s_tap_selected, s_tap_error);
+    if (s_tap_picker) {
+        const char *options[8];
+        int selected = -1;
+        for (unsigned i = 0; i < 8; ++i) {
+            options[i] = reader_tap_label(s_tap_order[i]);
+            if (s_tap_order[i] == (app_reader_key_action_t)s_tap_draft[s_tap_selected]) selected = (int)i;
+        }
+        ui_reader_tap_picker_draw(fb, (unsigned)s_tap_selected, options, selected);
+    }
 }
 // 面板只占下方三分之二；双击说明收在动作列表里，页面上不再重复。
 // The sheet covers the lower two thirds; the double-press explanation lives in the picker,
@@ -3221,6 +3256,7 @@ static void draw_reader_panel(uint8_t* fb) {
     else if (s_reader_panel == READER_PANEL_STATS_RECENT) draw_reader_stats_recent(fb);
     else if (s_reader_panel == READER_PANEL_REFRESH_SETTINGS) draw_reading_settings(fb);
     else if (s_reader_panel == READER_PANEL_TURN_SETTINGS) draw_turn_settings(fb);
+    else if (s_reader_panel == READER_PANEL_TAP_GRID) draw_tap_grid(fb);
     else if (s_reader_panel == READER_PANEL_KEY_SETTINGS) draw_key_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_PICKER) draw_key_picker(fb);
     else if (s_reader_panel == READER_PANEL_CHROME_SETTINGS) draw_chrome_settings(fb);
@@ -5653,6 +5689,64 @@ static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t
     return APP_REDRAW_PAGE;
 }
 
+static app_redraw_t reader_tap_grid_action(app_ctx_t *ctx, uint16_t x, uint16_t y) {
+    (void)ctx;
+    if (ui_rect_hit(ui_reader_tap_cancel_rect(), x, y)) {
+        s_tap_picker = false;
+        s_reader_panel = READER_PANEL_TURN_SETTINGS;
+    } else if (ui_rect_hit(ui_reader_tap_save_rect(), x, y)) {
+        s_tap_picker = false;
+        if (app_settings_set_reader_tap_config(APP_READER_TAP_GRID, s_tap_draft)) s_reader_panel = READER_PANEL_TURN_SETTINGS;
+        else copy_text(s_tap_error, sizeof(s_tap_error), "保存失败，请重试");
+    } else if (s_tap_picker) {
+        if (y < 494 || ui_rect_hit(ui_reader_tap_picker_back_rect(), x, y)) s_tap_picker = false;
+        else for (unsigned i = 0; i < 8; ++i) {
+            if (!ui_rect_hit(ui_reader_tap_option_rect(i), x, y)) continue;
+            s_tap_draft[s_tap_selected] = (uint8_t)s_tap_order[i];
+            s_tap_picker = false;
+            s_tap_error[0] = 0;
+            invalidate_prep();
+            return APP_REDRAW_PAGE;
+        }
+        if (s_tap_picker) return APP_REDRAW_NONE;
+    } else if (y >= 106) {
+        int cell = book_reader_grid_hit(body_rect(), x, y);
+        if (cell < 0) return APP_REDRAW_NONE;
+        s_tap_selected = cell;
+        s_tap_picker = true;
+    } else return APP_REDRAW_NONE;
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+
+static app_redraw_t reader_turn_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t y) {
+    if (y < 270) s_reader_panel = READER_PANEL_NONE;
+    else if (ui_rect_hit(reader_sheet_back_rect(270), x, y)) s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
+    else if (ui_rect_hit(ui_reader_turn_shake_rect(), x, y)) {
+        app_settings_set_reader_shake_turn(!app_settings_reader_shake_turn());
+    } else {
+        unsigned mode;
+        for (mode = 0; mode < 3; ++mode) if (ui_rect_hit(ui_reader_turn_mode_rect(mode), x, y)) break;
+        if (mode == 3) return APP_REDRAW_NONE;
+        if (mode == APP_READER_TAP_GRID) {
+            for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) s_tap_draft[i] = (uint8_t)app_settings_reader_tap_action(i);
+            s_tap_selected = -1;
+            s_tap_picker = false;
+            s_tap_error[0] = 0;
+            s_reader_panel = READER_PANEL_TAP_GRID;
+        } else {
+            uint8_t actions[APP_READER_TAP_CELLS];
+            for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) actions[i] = (uint8_t)app_settings_reader_tap_action(i);
+            if (!app_settings_set_reader_tap_config((app_reader_tap_mode_t)mode, actions)) {
+                copy_text(s_reader_notice, sizeof(s_reader_notice), "设置未保存，请重试");
+                s_reader_notice_until = ctx->now_ms + 2000;
+            }
+        }
+    }
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+
 static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     // 注释弹层没有按钮：点任意处收起，回到刚才那一页。
     // The note sheet has no buttons: any tap dismisses it and returns to the same page.
@@ -5881,28 +5975,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         invalidate_prep();
         return APP_REDRAW_PAGE;
     }
-    if (s_reader_panel == READER_PANEL_TURN_SETTINGS) {
-        if (y < 270) s_reader_panel = READER_PANEL_NONE;
-        else if (ui_rect_hit(reader_sheet_back_rect(270), x, y)) s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
-        else {
-            // 晃动翻页整行开关，矩形与 ui_reader_turn_settings_draw 的行保持一致。
-            // The shake-turn toggle row; keep the rect in sync with ui_reader_turn_settings_draw.
-            if (ui_rect_hit((EpdRect){36, 1000, 612, 88}, x, y)) {
-                app_settings_set_reader_shake_turn(!app_settings_reader_shake_turn());
-                invalidate_prep();
-                return APP_REDRAW_PAGE;
-            }
-            for (int i = 0; i < 2; ++i) {
-                if (!ui_rect_hit((EpdRect){36, 370 + i * 322, 612, 292}, x, y)) continue;
-                app_settings_set_reader_vertical_turn(i != 0);
-                invalidate_prep();
-                return APP_REDRAW_PAGE;
-            }
-            return APP_REDRAW_NONE;
-        }
-        invalidate_prep();
-        return APP_REDRAW_PAGE;
-    }
+    if (s_reader_panel == READER_PANEL_TURN_SETTINGS) return reader_turn_settings_action(ctx, x, y);
+    if (s_reader_panel == READER_PANEL_TAP_GRID) return reader_tap_grid_action(ctx, x, y);
     if (s_reader_panel == READER_PANEL_WEIGHT_SETTINGS) {
         if (y < 580 || ui_rect_hit(reader_sheet_back_rect(580), x, y)) {
             s_reader_panel = y < 580 ? READER_PANEL_NONE : READER_PANEL_FONT_SETTINGS;
@@ -6428,6 +6502,10 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         EpdRect tap_area = body_rect();
         if (reader_image_slots(s_reader_session.position.page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
+        if (app_settings_reader_tap_mode() == APP_READER_TAP_GRID) {
+            int cell = book_reader_grid_hit(body_rect(), x, y);
+            return cell < 0 ? APP_REDRAW_NONE : reader_key_action(ctx, app_settings_reader_tap_action((unsigned)cell));
+        }
         int target = book_reader_tap_direction(tap_area, x, y,
                                               app_settings_reader_vertical_turn(),
                                               app_settings_book_vertical());

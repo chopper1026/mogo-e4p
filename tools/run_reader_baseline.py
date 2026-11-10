@@ -86,6 +86,8 @@ SUITES = {
     "images": [sys.executable, "tools/reader_images_host_test.py"],
     "webp": [sys.executable, "tools/webp_host_test.py"],
     "settings_view": ["bash", "tools/run_reader_settings_host_tests.sh"],
+    "tap_grid": [sys.executable, "tools/reader_tap_grid_host_test.py"],
+    "tap_grid_ui": [sys.executable, "tools/reader_tap_grid_preview.py"],
     "settings_backup": [sys.executable, "tools/settings_backup_host_test.py"],
     "controls": ["bash", "tools/run_reader_controls_host_tests.sh"],
     "prefetch": [sys.executable, "tools/reader_idle_prefetch_host_test.py"],

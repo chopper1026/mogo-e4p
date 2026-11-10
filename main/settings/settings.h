@@ -256,6 +256,19 @@ typedef enum {
     APP_READER_KEY_TOUCH, ///< 开关阅读触摸 / Toggle reader screen touch
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
+
+typedef enum {
+    APP_READER_TAP_HORIZONTAL,
+    APP_READER_TAP_VERTICAL,
+    APP_READER_TAP_GRID,
+} app_reader_tap_mode_t;
+#define APP_READER_TAP_CELLS 9
+app_reader_tap_mode_t app_settings_reader_tap_mode(void);
+app_reader_key_action_t app_settings_reader_tap_action(unsigned cell);
+/// 八个正文动作；不包含按键专用的触摸开关和历史占位。/ Eight body actions, excluding key-only touch recovery and legacy values.
+bool app_settings_reader_tap_action_valid(app_reader_key_action_t action);
+/// 模式与九格一起原子保存；失败不改变当前配置。/ Atomically persist the mode and all nine cells, retaining the current configuration on failure.
+bool app_settings_set_reader_tap_config(app_reader_tap_mode_t mode, const uint8_t actions[APP_READER_TAP_CELLS]);
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.
 app_reader_key_action_t app_settings_reader_key_action(unsigned key);
 /// 验证范围，关闭触摸期间不得移除最后一个恢复绑定；3为中键长按，4为中键双击，5为上键单击。

@@ -58,6 +58,11 @@ static unsigned app_settings_system_font_size(void) { ++setting_reads; return sc
 static unsigned app_settings_reader_full_pages(void) { ++setting_reads; return pages; }
 static bool app_settings_reader_turn_effect(void) { ++setting_reads; return (flags & 1) != 0; }
 static bool app_settings_reader_vertical_turn(void) { ++setting_reads; return (flags & 2) != 0; }
+#ifndef LEGACY
+static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_vertical_turn()?1:0;}
+#define APP_READER_TAP_GRID 2
+#endif
+
 static bool app_settings_reader_shake_turn(void) { ++setting_reads; return (flags & 32) != 0; }
 static bool app_settings_reader_statusbar(void) { ++setting_reads; return (flags & 4) != 0; }
 static bool app_settings_reader_hide_images(void) { ++setting_reads; return (flags & 8) != 0; }
@@ -132,7 +137,7 @@ int main(void) {
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, false);
     draw_reading_switch(framebuffer, (EpdRect){556, 660, 69, 39}, true);
 #ifndef LEGACY
-    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false, true, UI_READER_SETTINGS_PAGE};
+    const ui_reader_settings_values_t values = {150, 30, true, false, true, false, true, false, true, UI_READER_SETTINGS_PAGE, false};
     const ui_reader_settings_values_t before = values;
     unsigned reads_before = setting_reads;
     recording = false;

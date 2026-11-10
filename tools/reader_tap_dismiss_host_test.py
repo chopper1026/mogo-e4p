@@ -38,6 +38,10 @@ static EpdRect ui_rect_union(EpdRect a,EpdRect b){
  int y1=(a.y+a.height)>(b.y+b.height)?(a.y+a.height):(b.y+b.height);
  return (EpdRect){x0,y0,x1-x0,y1-y0};
 }
+#define APP_READER_TAP_GRID 2
+static int app_settings_reader_tap_mode(void){return vertical_turn?1:0;}
+static int app_settings_reader_tap_action(unsigned cell){(void)cell;return 0;}
+static app_redraw_t reader_key_action(app_ctx_t *ctx,int action){(void)ctx;(void)action;assert(0);return APP_REDRAW_NONE;}
 static bool app_settings_reader_vertical_turn(void){return vertical_turn;}
 static bool app_settings_book_vertical(void){return rtl_book;}
 '''

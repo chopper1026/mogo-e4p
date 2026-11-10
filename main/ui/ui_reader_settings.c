@@ -70,12 +70,6 @@ static void draw_reading_toggle(uint8_t *fb, unsigned scale, int index, const ch
     ui_hairline(fb, row.y+row.height-1, row.x+20, row.width-40, 0xa0);
 }
 
-// 这两个面板的居中文字沿用页面的原有留白与行高。/ Keep the page's original margins and line height for centered labels in these sheets.
-static void draw_centered_label(uint8_t *fb, int x, int cy, int px, const char *text, bool inverted) {
-    int width = 2 * (x < 342 ? x - 42 : 642 - x);
-    ui_text_box(fb, (EpdRect){x - width / 2, cy - 22, width, 44}, px, text, EPD_DRAW_ALIGN_CENTER, inverted);
-}
-
 void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *values) {
     static const char *const tabs[] = {"操作", "页面", "刷新"};
     unsigned scale = values->system_font_size;
@@ -86,7 +80,7 @@ void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *val
         ui_text_box(fb, (EpdRect){tab.x+12, tab.y+6, tab.width-24, tab.height-12}, 28, tabs[i], EPD_DRAW_ALIGN_CENTER, selected);
     }
     if (values->group == UI_READER_SETTINGS_INPUT) {
-        draw_reading_card(fb, scale, 2, "翻页方式", values->vertical_turn ? "上下点按 · 左右滑动" : "左右点按 · 左右滑动", false);
+        draw_reading_card(fb, scale, 2, "翻页方式", values->grid_tap ? "九宫格 · 自定义点按" : values->vertical_turn ? "上下点按 · 左右滑动" : "左右点按 · 左右滑动", false);
         draw_reading_card(fb, scale, 3, "按键控制", "短按、长按与双击动作", false);
         draw_reading_toggle(fb, scale, 9, "关闭触摸", "先在按键控制绑定触摸开关", values->touch_disabled);
     } else if (values->group == UI_READER_SETTINGS_PAGE) {
@@ -104,42 +98,47 @@ void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *val
     }
 }
 
-void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical, bool shake) {
-    for (int i = 0; i < 2; ++i) {
-        int y = 370 + i * 322;
-        bool selected = vertical == (i != 0);
-        EpdRect card = {36, y, 612, 292};
-        ui_fill_round_rect(fb, card, 22, selected ? 0xe0 : 0xf0);
-        ui_draw_control_frame(fb, card, 22, 0x50);
-        ui_draw_control_frame(fb, (EpdRect){37, y + 1, 610, 290}, 21, 0x50);
-        EpdRect diagram = {64, y + 37, 182, 220};
-        ui_fill_round_rect(fb, diagram, 12, UI_GRAY_WHITE);
-        ui_draw_control_frame(fb, diagram, 12, 0x58);
-        if (i) {
-            ui_hairline(fb, diagram.y + 73, 65, 180, 0x58);
-            draw_centered_label(fb, 155, diagram.y + 36, 21, "上一页", false);
-            draw_centered_label(fb, 155, diagram.y + 147, 21, "下一页", false);
+EpdRect ui_reader_turn_mode_rect(unsigned mode) {
+    return mode < 3 ? (EpdRect){36, 370 + (int)mode * 218, 612, 200} : (EpdRect){0};
+}
+EpdRect ui_reader_turn_shake_rect(void) { return (EpdRect){36, 1040, 612, 100}; }
+
+void ui_reader_turn_settings_draw(uint8_t *fb, unsigned mode, bool shake) {
+    static const char *const titles[] = {"左右翻页", "上下翻页", "九宫格翻页"};
+    static const char *const details[] = {"左右各半，轻点翻页", "上 1/3，下 2/3", "九个区域，自定义动作"};
+    for (unsigned i = 0; i < 3; ++i) {
+        EpdRect card = ui_reader_turn_mode_rect(i);
+        bool selected = mode == i;
+        ui_fill_round_rect(fb, card, 20, selected ? 0xe8 : UI_GRAY_WHITE);
+        ui_draw_control_frame(fb, card, 20, selected ? UI_GRAY_BLACK : 0x80);
+        if (selected) ui_draw_control_frame(fb, (EpdRect){card.x+2,card.y+2,card.width-4,card.height-4},18,UI_GRAY_BLACK);
+        EpdRect diagram = {60, card.y + 22, 128, 156};
+        ui_fill_round_rect(fb, diagram, 10, UI_GRAY_WHITE);
+        ui_draw_control_frame(fb, diagram, 10, 0x60);
+        if (i == 0) {
+            ui_fill_rect_fast((EpdRect){diagram.x+64,diagram.y+1,1,154},0x60,fb);
+            ui_draw_icon(fb,diagram.x+32,diagram.y+78,26,UI_ICON_CHEVRON_LEFT,UI_GRAY_BLACK);
+            ui_draw_icon(fb,diagram.x+96,diagram.y+78,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
+        } else if (i == 1) {
+            ui_hairline(fb,diagram.y+52,diagram.x+1,126,0x60);
+            ui_draw_icon(fb,diagram.x+64,diagram.y+27,24,UI_ICON_CHEVRON_UP,UI_GRAY_BLACK);
+            ui_draw_icon(fb,diagram.x+64,diagram.y+104,26,UI_ICON_CHEVRON_DOWN,UI_GRAY_BLACK);
         } else {
-            ui_fill_rect_fast((EpdRect){155, diagram.y + 1, 1, 218}, UI_GRAY_BLACK, fb);
-            ui_text_box(fb,(EpdRect){110-39,diagram.y+94-15,78,30},21,"上一",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){110-39,diagram.y+126-15,78,30},21,"页",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){201-39,diagram.y+94-15,78,30},21,"下一",EPD_DRAW_ALIGN_CENTER,false);
-            ui_text_box(fb,(EpdRect){201-39,diagram.y+126-15,78,30},21,"页",EPD_DRAW_ALIGN_CENTER,false);
+            for(int k=1;k<3;++k){
+                ui_fill_rect_fast((EpdRect){diagram.x+k*128/3,diagram.y+1,1,154},0x60,fb);
+                ui_hairline(fb,diagram.y+k*52,diagram.x+1,126,0x60);
+            }
+            ui_fill_round_rect(fb,(EpdRect){diagram.x+45,diagram.y+55,38,46},6,UI_GRAY_BLACK);
+            ui_text_box(fb,(EpdRect){diagram.x+46,diagram.y+56,36,44},24,"＋",EPD_DRAW_ALIGN_CENTER,true);
         }
-        ui_text_box(fb,(EpdRect){274,y+43,350,44},32,i ? "上下翻页" : "左右翻页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+112,350,44},23,i ? "上 1/3：上一页" : "左 1/2：上一页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+158,350,44},23,i ? "下 2/3：下一页" : "右 1/2：下一页",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){274,y+213,350,44},21,"左右滑动均可翻页",EPD_DRAW_ALIGN_LEFT,false);
-        epd_draw_circle(610, y + 61, 12, UI_GRAY_BLACK, fb);
-        if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
+        ui_text_box(fb,(EpdRect){216,card.y+36,340,54},30,titles[i],EPD_DRAW_ALIGN_LEFT,false);
+        ui_text_box(fb,(EpdRect){216,card.y+105,370,48},22,details[i],EPD_DRAW_ALIGN_LEFT,false);
+        epd_draw_circle(610,card.y+61,12,UI_GRAY_BLACK,fb);
+        if(selected)epd_fill_circle(610,card.y+61,7,UI_GRAY_BLACK,fb);
+        if(i==2)ui_draw_icon(fb,610,card.y+133,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
     }
-    // 晃动翻页整行开关：标题、方向说明与右端开关；全屏提示移到行下方。
-    // A full-width shake-turn toggle row: title, direction hint and a right-hand switch; the fullscreen hint moves below it.
-    EpdRect row = {36, 1000, 612, 88};
-    ui_fill_round_rect(fb, row, 20, UI_GRAY_WHITE);
-    ui_draw_control_frame(fb, row, 20, 0x68);
-    ui_text_box(fb,(EpdRect){row.x+20,row.y+10,row.width-40,row.height/2-14},21,"晃动翻页",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){row.x+20,row.y+row.height/2+2,row.width-40,row.height/2-12},17,"左晃上一页，右晃下一页",EPD_DRAW_ALIGN_LEFT,false);
-    ui_reader_settings_switch(fb,(EpdRect){row.x+row.width-90,row.y+row.height/2-19,69,39},shake);
-    draw_centered_label(fb, 342, 1110, 21, "工具栏「更多」中可切换全屏", false);
+    EpdRect row=ui_reader_turn_shake_rect();
+    ui_text_box(fb,(EpdRect){row.x+20,row.y+4,440,44},26,"晃动翻页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){row.x+20,row.y+50,440,38},20,"左晃上一页，右晃下一页",EPD_DRAW_ALIGN_LEFT,false);
+    ui_reader_settings_switch(fb,(EpdRect){row.x+row.width-90,row.y+30,69,39},shake);
 }

@@ -33,7 +33,7 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGH
 #define UI_INK_BLACK 0
 #define BOOK_PX_MIN 24
 #define BOOK_PX_MAX 60
-enum {UI_ICON_CHEVRON_RIGHT,UI_ICON_ROTATE_CW,UI_ICON_CHEVRON_DOWN};
+enum {UI_ICON_CHEVRON_RIGHT,UI_ICON_ROTATE_CW,UI_ICON_CHEVRON_DOWN,UI_ICON_CHEVRON_LEFT,UI_ICON_CHEVRON_UP};
 #define TTF_FONT_NAME_MAX 64
 #define TTF_FONT_SLOT_SYSTEM 0
 static unsigned scale=100,face;
@@ -93,6 +93,9 @@ static const char *ttf_font_display_name(void){return "测试字体的名称";}
 static unsigned app_settings_reader_full_pages(void){return 15;}
 static unsigned app_settings_reader_turn_effect(void){return 1;}
 static bool app_settings_reader_vertical_turn(void){return true;}
+static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_vertical_turn()?1:0;}
+#define APP_READER_TAP_GRID 2
+
 static bool app_settings_reader_statusbar(void){return true;}
 static bool app_settings_reader_progress_bar(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}

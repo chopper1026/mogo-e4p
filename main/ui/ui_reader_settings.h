@@ -28,6 +28,7 @@ typedef struct {
     bool book_styles; ///< 保留书内样式 / Keep in-book styles
     bool touch_disabled; ///< 关闭阅读屏幕触摸 / Reader screen touch disabled
     ui_reader_settings_group_t group; ///< 当前设置分组 / Visible settings group
+    bool grid_tap; ///< 九宫格点按 / Custom grid taps
 } ui_reader_settings_values_t;
 
 /// 阅读设置顶部；与页面命中共用，字号限制为100至200。/ Shared sheet top for drawing and hit testing, clamped to 100–200 percent.
@@ -43,4 +44,6 @@ void ui_reader_settings_switch(uint8_t *fb, EpdRect track, bool on);
 /// 绘制整行控件；调用方先画面板壳与左上返回，不推屏、不读取或修改设置。/ Paint full-width controls after the shell and top-left Back; no presentation or settings access.
 void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *values);
 /// 绘制翻页示意与晃动开关；调用方先画面板壳和左上返回。/ Paint turn diagrams and the shake toggle after the shell and top-left Back.
-void ui_reader_turn_settings_draw(uint8_t *fb, bool vertical, bool shake);
+EpdRect ui_reader_turn_mode_rect(unsigned mode);
+EpdRect ui_reader_turn_shake_rect(void);
+void ui_reader_turn_settings_draw(uint8_t *fb, unsigned mode, bool shake);
