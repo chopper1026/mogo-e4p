@@ -123,7 +123,7 @@ def source():
     code = UNIT + "\n".join(re.findall(r"^#define KEY_.*$", raw, re.M)) + "\n"
     code += raw[raw.index("static bool s_key_down;"):raw.index("static uint8_t bcd_to_dec")]
     for name in ("poll_key", "key_sampler_task", "device_power_key_sampler_start",
-                 "device_power_key_sampler_enable", "device_power_poll", "device_power_drain_events",
+                 "device_power_key_sampler_enable", "device_power_key_sampler_pause_for_sleep", "device_power_poll", "device_power_drain_events",
                  "device_power_take_key_action", "device_power_take_key_short",
                  "wake_battery_snapshot_reusable", "device_power_take_key_wakeup",
                  "device_power_consume_key_press"):
@@ -208,6 +208,12 @@ int main(void) {
     assert(device_power_key_sampler_enable(false)); assert(!device_power_key_sampler_enable(true));
     assert(device_power_take_key_action() == DEVICE_POWER_KEY_NONE);
 
+    // A complete short press during a clock scan survives the pause into light sleep.
+    clean_key();atomic_store(&down,true);usleep(80000);atomic_store(&down,false);usleep(50000);
+    device_power_key_sampler_pause_for_sleep();
+    unsigned scan_reads=atomic_load(&reads);usleep(30000);assert(atomic_load(&reads)==scan_reads);
+    assert(device_power_take_key_wakeup()&&!device_power_take_key_wakeup());
+    assert(!device_power_key_sampler_enable(true));
     // 暂停必须等在途硬件读取退场，返回后不能再清中断。/ Pause must join an in-flight read and prevent later IRQ-clearing reads.
     clean_key(); pthread_mutex_lock(&bus_mutex); block_read = true;
     while (!read_blocked) pthread_cond_wait(&bus_cond, &bus_mutex);

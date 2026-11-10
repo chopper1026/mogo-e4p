@@ -37,6 +37,10 @@
 #include "lock_pin.h"
 #include "lock_screen.h"
 #include "lock_calendar.h"
+#include "lock_clock.h"
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+#include "lock_sleep_trace.h"
+#endif
 #include "board_sd.h"
 
 #include <stdio.h>
@@ -350,7 +354,10 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
     return false;
 }
 
-static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t deadline_us) {
+static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t deadline_us, EpdiyHighlevelState *hl) {
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_begin();
+#endif
     sleep_trace_t trace = {.start_us = esp_timer_get_time()};
     const app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
     if (!handoff.jobs_ready) {
@@ -376,6 +383,9 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
     bool pickup = acc != NULL && app_settings_pickup_wake();
     bool acc_armed = false;
     periph_suspend(false);
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_PARKED, 0);
+#endif
     lock_arm_ioe_wakeup();
     if (pickup) {
         const esp_err_t arm_error = sc7a20h_arm_pickup_wake(acc, NULL);
@@ -466,6 +476,14 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
             pickup_wait_quiet(acc, 400, 1500);
             continue;
         }
+        if (hl && app_settings_lock_style() == APP_LOCK_STYLE_CLOCK) {
+            // 只在清醒绘屏期间快采，停用时保留本轮短按；回到循环顶部先处理输入和原截止时间。
+            // Sample keys during the awake scan, retain its short press, then recheck inputs and the original deadline.
+            (void)device_power_key_sampler_enable(true);
+            const bool refreshed = lock_clock_tick(hl);
+            device_power_key_sampler_pause_for_sleep();
+            if (refreshed) continue;
+        }
         if (!ble_stopped) {
             // 停栈失败：不睡，按同一轮询节奏等按键，锁屏画面保持不动。
             // Teardown failed: stay awake and poll at the same cadence; the lock face stays put.
@@ -492,7 +510,13 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
             continue;
         }
         int64_t t0 = esp_timer_get_time();
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+        lock_sleep_trace_mark(LOCK_TRACE_SLEEP_ENTER, 0);
+#endif
         esp_err_t sleep_error = app_s31_light_sleep_start();
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+        lock_sleep_trace_mark(LOCK_TRACE_SLEEP_RETURN, (int32_t)sleep_error);
+#endif
         int64_t elapsed_us = esp_timer_get_time() - t0;
         int64_t dt_ms = elapsed_us / 1000;
         // 唤醒路径不恢复 CACHE_L1 仲裁/门控配置，必须在任何刷新前写回。
@@ -501,6 +525,9 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
         if (sleep_error == ESP_OK) {
             cache_wake_restore_apply();
         }
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+        lock_sleep_trace_mark(LOCK_TRACE_CACHE_RESTORED, (int32_t)sleep_error);
+#endif
         const uint32_t causes = sleep_error == ESP_OK ? esp_sleep_get_wakeup_causes() : 0;
         bool key_read_failed = false;
         const bool key_latched = lock_capture_power_key(sleep_error, causes, &key_read_failed);
@@ -559,6 +586,9 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
     }
 
     device_power_batt_log_event(DEVICE_POWER_BATT_LOG_WAKE);
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_EXIT, (int32_t)exit);
+#endif
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
     gpio_wakeup_disable((gpio_num_t)BOARD_IOE_INT_GPIO);
     if (acc_armed) {
@@ -576,19 +606,19 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
 }
 
 app_wake_source_t app_light_sleep_wait(sc7a20h_handle_t acc) {
-    return light_sleep_wait_until(acc, 0);
+    return light_sleep_wait_until(acc, 0, NULL);
 }
 
 app_wake_source_t app_lock_sleep_wait(EpdiyHighlevelState *hl, sc7a20h_handle_t acc) {
     uint8_t minutes = app_settings_shutdown_minutes();
     int64_t deadline_us = minutes ? esp_timer_get_time() + (int64_t)minutes * 60 * 1000000 : 0;
-    app_wake_source_t wake = light_sleep_wait_until(acc, deadline_us);
+    app_wake_source_t wake = light_sleep_wait_until(acc, deadline_us, hl);
     if (wake != APP_WAKE_TIMEOUT) return wake;
     if (lock_screen_save(epd_hl_get_framebuffer(hl))) (void)pico_boot_mark_frame_cached();
     (void)app_enter_host_sleep(APP_SLEEP_OFF);
     // 下电失败后不反复打脉冲，也不把定时唤醒当解锁；沿用无期限锁屏等待及其故障恢复。
     // Do not repeat failed power pulses or treat timer wakes as unlocks; retain the untimed locked wait and its fault recovery.
-    return app_light_sleep_wait(acc);
+    return light_sleep_wait_until(acc, 0, hl);
 }
 
 esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
@@ -704,7 +734,7 @@ void enter_lock_and_sleep(
     bool ticket = lock_style == 0;
     bool overlay = (ticket && app_settings_ticket_background() == APP_TICKET_BACKGROUND_TRANSPARENT) || lock_style == 3;
     if (!overlay) epd_hl_set_all_white(hl);
-    bool system_lock = ticket || lock_style == 2 || lock_style == 4 || lock_pin_enabled();
+    bool system_lock = ticket || lock_style == 2 || lock_style == 4 || lock_style == APP_LOCK_STYLE_CLOCK || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
     if (system_lock) app_font_begin_lock(&lock_font);
     const int64_t lock_t_font = esp_timer_get_time();
@@ -714,7 +744,8 @@ void enter_lock_and_sleep(
         ? book_ticket_draw(framebuffer, reader_background)
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
           lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) :
-          lock_style == 4 ? lock_calendar_draw(framebuffer) : draw_wallpaper(framebuffer);
+          lock_style == 4 ? lock_calendar_draw(framebuffer) :
+          lock_style == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(framebuffer) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
         epd_hl_set_all_white(hl);
         (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOCK);
@@ -745,6 +776,7 @@ void enter_lock_and_sleep(
     } else lock_t_clear = lock_t_panel = esp_timer_get_time();
     if (lock_style == 2 && lock_drawn && result == EPD_DRAW_SUCCESS) book_lock_collage_cache_commit(framebuffer);
     if (lock_style == 1 && lock_drawn && result == EPD_DRAW_SUCCESS) ui_wallpaper_cache_commit(framebuffer);
+    if (lock_style == APP_LOCK_STYLE_CLOCK && lock_drawn) lock_clock_presented(result == EPD_DRAW_SUCCESS);
 
     app_lock_wait_key_idle(800);
     const int64_t lock_t_key = esp_timer_get_time();
@@ -771,7 +803,7 @@ void enter_lock_and_sleep(
             // light sleep and hand PIN locks back to the pad; never self-unlock.
             ESP_LOGW(TAG, "deep sleep unavailable (%s); stay locked", esp_err_to_name(handoff));
             if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false);
-            else (void)app_light_sleep_wait(acc);
+            else (void)light_sleep_wait_until(acc, 0, hl);
         }
     } else if (lock_pin_enabled()) {
         lock_screen_authenticate(hl, touch, acc, false);
@@ -818,12 +850,13 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     if (!lock_screen_restore(fb)) {
         // 冷启动丢失锁屏缓存时没有当前页面，用干净底图并继续密码校验。
         // A cold start with no retained art has no current page; use a clean base and keep authentication.
-        if (app_settings_lock_style() == 0 || app_settings_lock_style() == 3)
+        if (app_settings_lock_style() == 0 || app_settings_lock_style() == 3 || app_settings_lock_style() == APP_LOCK_STYLE_CLOCK)
             memset(fb,255,(size_t)epd_width()*epd_height()/2);
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
             app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) :
-            app_settings_lock_style() == 4 ? lock_calendar_draw(fb) : draw_wallpaper(fb);
+            app_settings_lock_style() == 4 ? lock_calendar_draw(fb) :
+            app_settings_lock_style() == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(fb) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); (void)ui_builtin_image_draw(fb, UI_BUILTIN_IMAGE_LOCK); }
     }
     lock_screen_authenticate(hl, touch, acc, true);

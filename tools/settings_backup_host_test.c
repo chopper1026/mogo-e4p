@@ -749,7 +749,7 @@ static void test_reader_touch_lock(void) {
         assert(app_settings_backup_save() == ESP_OK);
         file = fopen(BACKUP_FILE, "r+b");
         settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 39);
+        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 40);
         assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
         memcpy(header.magic, "PICOSETZ", 8); backup_seal(&header);
@@ -849,7 +849,7 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
     settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 39);
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 40);
     assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
     assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
     memcpy(header.magic, "PICOSETa", 8); backup_seal(&header);
@@ -867,6 +867,34 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_restore() == ESP_OK && !app_settings_book_styles() && !app_settings_reader_touch_disabled());
     assert(app_settings_ticket_background() == APP_TICKET_BACKGROUND_TRANSPARENT && durable_ticket == 0);
     puts("PASS: ticket backgrounds survive style switches, reboot and v37 backup; invalid values, write/commit/flash faults, corrupt/truncated tails and v36 migration");
+}
+
+// v40 adds the clock to the existing atomic lock-face field without new tail blocks.
+static void test_clock_style(void) {
+    for(unsigned calendar=0;calendar<2;++calendar){
+        assert(app_settings_set_calendar_style((app_calendar_style_t)calendar));
+        app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
+        assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK&&durable_face==10+(int)calendar);
+        s_lock_style=0;app_settings_init();
+        assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK&&app_settings_calendar_style()==(app_calendar_style_t)calendar);
+        assert(app_settings_backup_save()==ESP_OK);
+        app_settings_set_lock_style(2);assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_style()==APP_LOCK_STYLE_CLOCK);
+        for(unsigned fault=0;fault<4;++fault){
+            face_write_fails=fault==0;face_open_fails=fault==1;commit_fails=fault==2;flash_failure=fault==3;
+            app_settings_set_lock_style(0);assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK);
+        }
+        face_write_fails=face_open_fails=commit_fails=flash_failure=false;
+        // Reject style 5 in old v39 even with a valid base checksum.
+        settings_backup_v1_t header={0};memcpy(header.magic,"PICOSETd",8);
+        FILE *f=fopen(BACKUP_FILE,"rb");assert(f&&fread(&header,1,sizeof(header),f)==sizeof(header)&&!fclose(f));
+        assert(backup_version(&header)==40&&backup_valid(&header));
+        memcpy(header.magic,"PICOSETd",8);backup_seal(&header);assert(!backup_valid(&header));
+        header.flags[BK_LOCK]=4;backup_seal(&header);assert(backup_valid(&header));
+    }
+    unsigned commits=commit_count;app_settings_set_lock_style(6);app_settings_set_lock_style(255);
+    assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK&&(unsigned)commit_count==commits);
+    app_settings_set_lock_style(2); // Leave legacy-format tests with a representable pre-v40 style.
+    puts("PASS: v40 clock persistence/backup, preserved calendar variant, save failures, and v39 style rejection");
 }
 
 // 日历双字段须跨重启与备份保持一致，失败不发布半个选择。
@@ -2089,6 +2117,7 @@ int main(void) {
     test_reader_touch_lock();
     test_ticket_background();
     test_calendar_style();
+    test_clock_style();
     test_tap_grid();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;

@@ -47,7 +47,7 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 | `main/ui/` | 公共绘制、控件、交互反馈及题头样式；绘制接口不承担页面状态转换。/ Shared drawing, controls, feedback and heading styles; paint APIs do not own page transitions. |
 | `main/font/` | 字体来源、加载、字形缓存与渲染。系统/阅读字体的选择策略在 services。/ Font sources, loading, glyph caches and rendering; services owns system/reader face policy. |
 | `main/display/` | 统一刷新意图、波形目录、显示出口与几何、导航/阅读波形及灰阶归一；契约见 [DISPLAY_REFRESH.md](development/designs/DISPLAY_REFRESH.md)。/ Central refresh intents, waveform catalog, physical exits/geometry and navigation/reader/normalization waveforms; see the refresh contract. |
-| `main/lock/` | 自动锁屏判定、锁屏图缓存与密码凭据及验证流程；睡眠交接由 power 负责。/ Idle-lock decisions, lock-frame caches, PIN credentials and verification; power owns sleep handoff. |
+| `main/lock/` | 自动锁屏判定、锁屏图缓存、时钟分钟身份与密码验证；睡眠交接由 power 负责，时钟绘制由 ui 负责。/ Idle-lock decisions, art caches, clock minute identity and PIN verification; power owns sleep handoff and ui owns clock painting. |
 | `main/power/` | 锁屏进睡、唤醒、关机及 S31 CACHE_L1 恢复。/ Lock-to-sleep, wake, power-off and S31 CACHE_L1 restore. |
 | `main/ota/` | TF/联网升级、发布清单、下载校验与升级任务。/ Card/online upgrades, release manifests, download verification and update workers. |
 | `main/settings/` | NVS 设置、迁移与备份恢复，不含设置页面。/ NVS settings, migrations and backup/restore, separate from the settings page. |
@@ -143,3 +143,6 @@ board_*, cst836u_* and fca9555_* include active S31 compatibility interfaces. Ge
 
 第三方组件保留其许可和必要测试/示例；不能按目录大小判断它们都进入产品固件。生成字体、图标与波形表按各自生成流程维护。
 Third-party components retain licenses and needed tests/examples. Directory size does not indicate what is linked into firmware. Maintain generated fonts, icons and waveform tables through their generators.
+
+时钟锁屏的RTC只读锚点与成功呈现身份由 `lock_clock` 持有；`sleep` 在同一等待会话调用分钟更新，不恢复触摸/前光/网络、不重建关机截止时间。只有清醒绘屏期间临时恢复按键快采，睡前暂停并保留事件。时钟不读写磁盘锁屏帧；PIN等待和取消都重建当前白底时钟，不额外分配原图整帧。行为与生成入口见[简约时钟锁屏](development/guides/LOCK_CLOCK.md)。
+The clock owns read-only RTC anchors and successful-paint identities. Sleep updates it inside the same deadline/session without resuming peripherals or radios. Awake scans temporarily sample keys and retain events before sleeping. Clock art bypasses disk caches; PIN waits rebuild the current face without an extra original-frame copy.

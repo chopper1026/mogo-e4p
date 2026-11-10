@@ -14,7 +14,7 @@ BOARD = ROOT / "components/board_support/board_metalio_e4p.c"
 source = BOARD.read_text()
 # 保留实际引脚和寄存器定义，合并多行宏后提取。/ Keep real pins/registers and join continued macros before extraction.
 defines = "\n".join(line for line in source.replace("\\\n", "").splitlines()
-                    if re.match(r"#define (?:IOE_|IO_|P0_|P1_|TPS_REG_|BOARD_TCA_ADDR\b|BOARD_IOE_INT\b|EPD_PIN_XOE\b|EPD_PIN_MODE\b)", line))
+                    if re.match(r"#define (?:IOE_|IO_|P0_|P1_|TPS_REG_|BOARD_TCA_ADDR\b|BOARD_IOE_INT\b|BOARD_RAIL_SETTLE_MS\b|EPD_PIN_XOE\b|EPD_PIN_MODE\b)", line))
 unit = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -244,7 +244,8 @@ int main(void) {
         // Repeated parking and motor-off writes must leave P14 off until wake.
         assert(board_ioe_sleep(host_off) == ESP_OK && board_motor(false) == ESP_OK);
         assert(!(output[1] & IOE_BIT(IO_BT_PA_PWR)) && (output[1] & IOE_BIT(IO_TP_RST)));
-        assert(board_ioe_wake() == ESP_OK);
+        unsigned wake_waits = waits;
+        assert(board_ioe_wake() == ESP_OK && waits - wake_waits == BOARD_RAIL_SETTLE_MS);
         assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
         assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK && clears == 3);
     }
@@ -257,6 +258,12 @@ int main(void) {
     for (int port = 0; port < 2; ++port) {
         reset(); fail_config = port; assert(board_ioe_wake() == ESP_FAIL);
         fail_config = -1; assert(board_ioe_wake() == ESP_OK);
+    }
+    // A failed output latch write must not authorize a display scan after standby.
+    for (int port = 0; port < 2; ++port) {
+        reset(); init_fault_reg = 2 + port; init_failures = 1;
+        assert(board_ioe_wake() == ESP_FAIL);
+        assert(board_ioe_wake() == ESP_OK && (output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
     }
     reset(); board_poweron(&state); keep = output[0];
     assert(board_has_motor() && board_motor(true) == ESP_OK);

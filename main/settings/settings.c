@@ -437,7 +437,7 @@ void app_settings_init(void) {
     // One atomic NVS value holds style and calendar variant; absent values retain legacy lock_ui.
     uint8_t lock_face = 0;
     s_calendar_style = APP_CALENDAR_ALMANAC;
-    if (nvs_get_u8(h, NVS_KEY_LOCK_FACE, &lock_face) == ESP_OK && lock_face <= 9) {
+    if (nvs_get_u8(h, NVS_KEY_LOCK_FACE, &lock_face) == ESP_OK && lock_face <= 11) {
         s_lock_style = lock_face / 2;
         s_calendar_style = (app_calendar_style_t)(lock_face % 2);
     }
@@ -862,7 +862,7 @@ void app_settings_set_system_contrast(uint8_t percent) {
 }
 uint8_t app_settings_lock_style(void) { return s_lock_style; }
 void app_settings_set_lock_style(uint8_t style) {
-    if (style > 4 || style == s_lock_style) return;
+    if (style > APP_LOCK_STYLE_CLOCK || style == s_lock_style) return;
     nvs_handle_t h;
     if (settings_write_open(&h) != ESP_OK) return;
     esp_err_t err = nvs_set_u8(h, NVS_KEY_LOCK_FACE, (uint8_t)(style * 2 + s_calendar_style));
@@ -1766,10 +1766,11 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     unsigned char c = backup->magic[7];
     // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐；Z 追加 v35 书内样式。
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
-    // a/b/c/d追加禁触、票根背景、日历子样式与九宫格。/ a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids.
+    // a/b/c/d追加禁触、票根背景、日历子样式与九宫格；e允许时钟样式5，无新尾块。
+    // a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids; e accepts clock style 5 without new tails.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1867,7 +1868,8 @@ esp_err_t app_settings_backup_save(void) {
     // v36：追加关闭触摸；恢复时缺少快捷键则恢复触摸。/ V36 adds touch lock; a missing recovery binding restores touch.
     // v37：追加票根背景选择。/ V37 appends the ticket background choice.
     // v38：追加日历子样式，主样式编号4表示日历。/ V38 appends the calendar variant; main style 4 selects calendar.
-    memcpy(backup.magic, "PICOSETd", sizeof(backup.magic));
+    // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
+    memcpy(backup.magic, "PICOSETe", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2099,7 +2101,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
-        f[BK_LOCK] > (version >= 38 ? 4 : 3) || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
+        f[BK_LOCK] > (version >= 40 ? APP_LOCK_STYLE_CLOCK : version >= 38 ? 4 : 3) || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||

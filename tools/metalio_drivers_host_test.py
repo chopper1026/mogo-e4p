@@ -421,7 +421,7 @@ static int test_settimeofday(const struct timeval *tv,const void *tz){assert(!tz
 #define settimeofday test_settimeofday
 """
     for name in ['bcd_to_dec','dec_to_bcd','dev_read','dev_write','cx_update_bits','cx_set_vreg_mv',
-                 'cx_set_ichg_ma','cx_unlock_private','cx_charger_setup','cx_charger_park','cx_charger_poll','rtc_init','rtc_read','rtc_write','rtc_unix_utc','device_power_cmd']:
+                 'cx_set_ichg_ma','cx_unlock_private','cx_charger_setup','cx_charger_park','cx_charger_poll','rtc_init','rtc_read','rtc_write','rtc_unix_utc','device_power_read_rtc','device_power_cmd']:
         code += function(name, path) + '\n'
     return code
 
@@ -464,7 +464,16 @@ int main(void){
         for(unsigned i=0;i<sizeof(values)/sizeof(*values);++i){assert(rtc_write(values[i])==ESP_OK);
             unsigned before=clock_sets;assert(device_power_cmd(PMU_CMD_TIME_GET,NULL,0)==ESP_OK &&
                 clock_sets==before+1 && clock_value==values[i] && s_snap.unix_sec==(uint32_t)values[i]);}}
-    s_rtc->regs[2]|=0x80;unsigned before=clock_sets;
+    uint32_t read_utc=0;
+    unsigned rtc_sets=clock_sets,rtc_tx=tx_count;
+    pmu_snapshot_t previous_snapshot=s_snap;
+    assert(device_power_read_rtc(NULL)==ESP_ERR_INVALID_ARG);
+    assert(device_power_read_rtc(&read_utc)==ESP_OK&&read_utc==(uint32_t)values[sizeof(values)/sizeof(*values)-1]);
+    assert(clock_sets==rtc_sets&&tx_count==rtc_tx+1&&!memcmp(&previous_snapshot,&s_snap,sizeof(s_snap)));
+    read_utc=123;s_ready=false;assert(device_power_read_rtc(&read_utc)==ESP_ERR_INVALID_STATE&&read_utc==123);s_ready=true;
+    s_rtc->regs[2]|=0x80;
+    assert(device_power_read_rtc(&read_utc)==ESP_ERR_INVALID_STATE&&read_utc==123);
+    unsigned before=clock_sets;
     assert(device_power_cmd(PMU_CMD_TIME_GET,NULL,0)==ESP_ERR_INVALID_STATE && !s_snap.time_ok && clock_sets==before);
     s_rtc->regs[2]|=0x80;struct tm tm;bool valid=true;assert(rtc_read(&tm,&valid)==ESP_OK && !valid);
     s_rtc->regs[2]=0x6a;assert(rtc_read(&tm,&valid)==ESP_OK && !valid);
@@ -655,7 +664,20 @@ static void sleep_test_log(const char *tag,const char *fmt,...){
 enum { DEVICE_POWER_BATT_LOG_LOCK=128, DEVICE_POWER_BATT_LOG_WAKE=256 };
 static unsigned log_locks, log_wakes;
 static void device_power_batt_log_event(int event){if(event==128)++log_locks;else {assert(event==256);++log_wakes;}}
+typedef struct {int unused;} EpdiyHighlevelState;
+#define APP_LOCK_STYLE_CLOCK 5
+static bool clock_style;
+static unsigned clock_ticks, clock_refreshes;
+static uint8_t app_settings_lock_style(void){return clock_style?APP_LOCK_STYLE_CLOCK:0;}
 static bool key_sampling=true;
+static void device_power_key_sampler_pause_for_sleep(void){key_sampling=false;}
+static bool lock_clock_tick(EpdiyHighlevelState *hl){
+    assert(hl&&parked&&key_sampling&&suspend_count==1&&!resume_count);++clock_ticks;
+    if(scenario==23){key_pending=true;++clock_refreshes;now_us+=500000;return true;}
+    if(scenario==24){devices[0x19].regs[0x31]=0x40;++clock_refreshes;return true;}
+    if(scenario==25 || (scenario==20 && clock_ticks%30==1)){++clock_refreshes;now_us+=500000;return true;}
+    return false;
+}
 static uint64_t timer_us;
 static bool device_power_key_sampler_enable(bool enabled){bool previous=key_sampling;key_sampling=enabled;return previous;}
 static app_lifecycle_light_t app_lifecycle_prepare_light(void){return (app_lifecycle_light_t){jobs_ready,ble_stopped};}
@@ -714,7 +736,7 @@ SLEEP_TEST = r"""
 static void reset_sleep(int next){
     model_reset();now_us=1000;shared_irq=true;scenario=next;
     jobs_ready=ble_stopped=pickup_setting=true;key_pending=false;
-    key_sampling=true;
+    key_sampling=true;clock_style=false;clock_ticks=clock_refreshes=0;
     wake_causes=0;parked=no_ioe=false;
     suspend_count=resume_count=sleep_count=key_polls=cache_restores=last_wake=0;
     log_locks=log_wakes=0;timer_us=0;
@@ -843,7 +865,7 @@ int main(void){
     for(unsigned minutes=10;minutes<=60;minutes=minutes==10?30:minutes+30){
         reset_sleep(20);pickup_setting=false;
         int64_t deadline=now_us+(int64_t)minutes*60*1000000;
-        assert(light_sleep_wait_until(acc,deadline)==APP_WAKE_TIMEOUT);
+        assert(light_sleep_wait_until(acc,deadline,NULL)==APP_WAKE_TIMEOUT);
         assert(now_us==deadline+30000+(CONFIG_APP_SLEEP_DIAGNOSTICS?70000:0));
         assert(sleep_count==minutes*30&&cache_restores==sleep_count&&last_wake==APP_WAKE_NONE);
         assert(key_sampling&&resume_count==1);
@@ -855,27 +877,37 @@ int main(void){
 #endif
     }
     reset_sleep(20);pickup_setting=false;
-    assert(light_sleep_wait_until(acc,1501000)==APP_WAKE_TIMEOUT&&timer_us==1500000);
+    assert(light_sleep_wait_until(acc,1501000,NULL)==APP_WAKE_TIMEOUT&&timer_us==1500000);
     assert(now_us==1501000+30000+(CONFIG_APP_SLEEP_DIAGNOSTICS?70000:0));
     check_trace(1,1,0,SLEEP_TRACE_TIMEOUT);
     reset_sleep(21);pickup_setting=false;
-    assert(light_sleep_wait_until(acc,now_us+600000000)==APP_WAKE_KEY&&sleep_count==1);
+    assert(light_sleep_wait_until(acc,now_us+600000000,NULL)==APP_WAKE_KEY&&sleep_count==1);
     check_trace(1,1,0,SLEEP_TRACE_KEY);
     // 截止同一轮真实按键/拿起优先，保留按键锁存与诊断退出类型。
     // Key/pickup events at expiry win, preserving key capture and diagnostic exit types.
     reset_sleep(21);pickup_setting=false;
-    assert(light_sleep_wait_until(acc,now_us+2000000)==APP_WAKE_KEY);
+    assert(light_sleep_wait_until(acc,now_us+2000000,NULL)==APP_WAKE_KEY);
     check_trace(1,1,0,SLEEP_TRACE_KEY);
     reset_sleep(22);
-    assert(light_sleep_wait_until(acc,now_us+2000000)==APP_WAKE_PICKUP);
+    assert(light_sleep_wait_until(acc,now_us+2000000,NULL)==APP_WAKE_PICKUP);
     check_trace(1,1,0,SLEEP_TRACE_PICKUP);
     reset_sleep(14);pickup_setting=false;
-    assert(light_sleep_wait_until(acc,now_us+100000)==APP_WAKE_KEY&&sleep_count==1);
+    assert(light_sleep_wait_until(acc,now_us+100000,NULL)==APP_WAKE_KEY&&sleep_count==1);
     check_trace(1,1,0,SLEEP_TRACE_KEY);
 #if CONFIG_APP_SLEEP_DIAGNOSTICS
     assert(saved_trace().key_latched==1);
 #endif
     puts("PASS: actual sleep/SC shared IRQ key and pickup, prelatched motion before IOE checks, short-sleep filtering, arm/config failures, bounded stuck line, BLE/jobs fallback and sleep errors");
+    EpdiyHighlevelState hl={0};
+    reset_sleep(23);clock_style=true;pickup_setting=false;
+    assert(light_sleep_wait_until(acc,now_us+600000000,&hl)==APP_WAKE_KEY);
+    assert(clock_refreshes==1&&!sleep_count&&resume_count==1&&key_sampling);
+    reset_sleep(24);clock_style=true;
+    assert(light_sleep_wait_until(acc,now_us+600000000,&hl)==APP_WAKE_PICKUP&&clock_refreshes==1&&!sleep_count);
+    reset_sleep(25);clock_style=true;pickup_setting=false;
+    int64_t original_deadline=now_us+600000000;
+    assert(light_sleep_wait_until(acc,original_deadline,&hl)==APP_WAKE_TIMEOUT);
+    assert(clock_refreshes==1200&&!sleep_count&&resume_count==1);
     puts("PASS: GPIO P17 capture before release, motion-only/unknown/read-error/stale wake causes, diagnostic on/off, summary accounting and NVS/replay failure boundaries");
 }
 """

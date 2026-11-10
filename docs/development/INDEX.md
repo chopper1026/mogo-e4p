@@ -17,6 +17,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 ## 现行技术资料 / Technical References
 
 - [显示刷新契约](designs/DISPLAY_REFRESH.md)：显示意图、波形出口与失败恢复。/ Refresh intents, waveform exits and failure recovery.
+- [简约时钟锁屏](guides/LOCK_CLOCK.md)：极简24小时制、浅睡分钟刷新、RTC与密码/定时关机边界。/ Minimal clock, light-sleep minute updates, RTC and PIN/shutdown boundaries.
 - [日历锁屏](guides/CALENDAR.md)：两款样式、北京时间、离线数据、v38备份和生成许可。/ Two faces, Beijing time, offline data, v38 backup and asset generation.
 - [组件与天气](guides/WEATHER.md)：首页布局、选城、网络生命周期与缓存。/ Home layout, city selection, networking and cache.
 - [阅读手账](guides/READING_JOURNAL.md)：当月逐日统计、日历、六图轮换与本机存储边界。/ Monthly daily records, calendar, six-scene rotation and local persistence limits.

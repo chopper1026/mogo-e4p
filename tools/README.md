@@ -58,3 +58,9 @@ Register new host regressions in the shared runner and group doubles under the m
 
 `calendar_host_test.py` 穷举2000–2099年全部日期并核对固定源；`calendar_ui_host_test.py --output build/calendar-lock/native` 导出两款实际4bpp画面并验证六行月份、闰月、字形、边界、时区及跨日缓存身份；`calendar_settings_ui_host_test.py` 检查100–200%字号、选择与保存失败。三个入口已纳入 `run_reader_baseline.py`。离线重生成命令和许可见 [CALENDAR](../docs/development/guides/CALENDAR.md)。
 The three calendar suites cover exhaustive dates, native raster/layout/clock/cache behavior and scaled settings interactions, and join the baseline runner. See the calendar contract for offline regeneration and licensing.
+
+## 简约时钟锁屏 / Minimal clock lock
+
+`python3 tools/run_reader_baseline.py lock_clock lock_clock_ui lock_style lock sleep_power metalio_drivers power_key settings_backup calendar_settings_ui` 验证RTC锚点/回退、跨时日年、显示失败重试、分钟与电量去重、浅睡原截止点、绘屏短按保留、PIN重入、v40备份与六行设置。`python3 tools/lock_clock_ui_host_test.py --output build/clock-native` 导出实际4bpp图片，数字与224px原字库逐像素核对；`python3 tools/generate_clock_digits.py --check` 检查生成资源。图片使用样例时间与电量；不代表设备实屏或功耗验收。见[简约时钟锁屏契约](../docs/development/guides/LOCK_CLOCK.md)。
+
+`python3 tools/run_reader_baseline.py lock_sleep_trace` 验证可选RTC锁屏诊断的阶段、计数、USB重连后的第一次复位原因保留和有界重放；诊断开关默认关闭，不代表问题已修复或获得刷机授权。

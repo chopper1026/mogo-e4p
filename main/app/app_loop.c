@@ -42,6 +42,9 @@
 
 #include "../diagnostics/reader_perf.h"
 #include "app_loop.h"
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+#include "../diagnostics/lock_sleep_trace.h"
+#endif
 #include "app_lifecycle.h"
 #include "platform/s31_input.h"
 #include "app_input.h"
@@ -571,6 +574,9 @@ void app_loop_run(const app_loop_config_t* config) {
     bool just_transitioned = false;
     app_input_touch_filter_t touch_filter = {0};
     while (true) {
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+        lock_sleep_trace_replay(esp_timer_get_time());
+#endif
         // 先清旧切页请求，再摄取新帧；新页绘制期间积压的按键不能被清掉。
         // Clear stale transition requests before ingesting new frames, not keys buffered while the new page drew.
         if (just_transitioned) {

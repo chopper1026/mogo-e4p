@@ -41,6 +41,7 @@ static app_calendar_style_t app_settings_calendar_style(void){return APP_CALENDA
 static settings_page_t s_page;
 static app_ticket_background_t selected_background;
 static uint8_t selected_style;
+enum {APP_LOCK_STYLE_CLOCK=5};
 static bool save_fails,s_bookmark_picker,s_collage_prepare_pending;
 static char s_notice[96];
 static unsigned writes,scans;
@@ -53,7 +54,7 @@ static void wallpaper_scan(void){++scans;}
 static void settings_divider(uint8_t *fb,int y,int x,int width){ui_draw_separator(fb,y,x,width,0x60);}
 static void row(uint8_t *fb,int y,const char *label,const char *value){(void)fb;(void)y;(void)label;(void)value;assert(0);}
 '''
-    for name in ("settings_card", "back_header", "section", "settings_fit_text"):
+    for name in ("settings_card", "back_header", "section", "settings_fit_text", "lock_style_row"):
         code += host.function(name, SETTINGS) + "\n"
     render = host.function("render", SETTINGS)
     code += "\nstatic void paint(uint8_t *fb){ui_clear_page(fb);\n"

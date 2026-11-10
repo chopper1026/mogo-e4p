@@ -14,7 +14,7 @@ board = ROOT / 'components/board_support/board_metalio_e4p.c'
 sleep = ROOT / 'main/power/sleep.c'
 text = board.read_text()
 defines = '\n'.join(line for line in text.replace('\\\n', '').splitlines()
-                    if re.match(r'#define (?:IOE_|IO_|P0_|P1_)', line))
+                    if re.match(r'#define (?:IOE_|IO_|P0_|P1_|BOARD_RAIL_SETTLE_MS\b)', line))
 unit = r'''
 static int board_i2c_lock(int timeout) {(void)timeout; return 0;}
 static void board_i2c_unlock(void) {}
@@ -178,14 +178,14 @@ int main(void) {
         assert(key_sampling);
         assert(prepared == 1 && syncs == 1 && radio_stops == 1 && resumes == 1 && pauses == 1);
         assert(off_calls == 1 && deep_calls == (mode == APP_SLEEP_DEEP));
-        assert(waits == (ack ? 5000 : 0));
+        assert(waits == (ack ? 5000 : 0) + BOARD_RAIL_SETTLE_MS);
         assert(acc_on && tp_mode == CST836U_MODE_NORMAL);
         assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
     }
     // 通用应用交接仍保留有界重试，成功确认却未掉电时按超时恢复。
     // The shared application handoff keeps bounded retries and restores on an acknowledged but stuck power-off.
     reset(); soft_supported = true;
-    assert(app_enter_host_sleep(APP_SLEEP_DEEP) == ESP_FAIL && deep_calls == 3 && !off_calls && waits == 400);
+    assert(app_enter_host_sleep(APP_SLEEP_DEEP) == ESP_FAIL && deep_calls == 3 && !off_calls && waits == 400 + BOARD_RAIL_SETTLE_MS);
     reset(); transfer_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !prepared && !step);
     reset(); ota = true; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared);
     reset(); cover_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared); cover_ok = true;
@@ -275,7 +275,8 @@ static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *hl){assert(hl);retur
 static bool lock_screen_save(const uint8_t *fb){assert(fb==framebuffer&&waits==1);++saves;return save_ok;}
 static int pico_boot_mark_frame_cached(void){assert(save_ok&&saves==1);++marks;return 0;}
 static int app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_OFF&&saves==1);++offs;if(off_success)longjmp(powered_off,1);return -1;}
-static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc,int64_t deadline){
+static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc,int64_t deadline,EpdiyHighlevelState *hl){
+    assert(hl);
     (void)acc;++waits;seen_deadline=deadline;
     if(waits==1)return next_wake;
     assert(offs==1&&!deadline);

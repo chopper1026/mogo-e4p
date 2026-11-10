@@ -74,6 +74,7 @@
 #define BOARD_TCA_ADDR 0x20
 #define BOARD_TPS_ADDR 0x68
 #define BOARD_TPS_I2C_HZ 100000
+#define BOARD_RAIL_SETTLE_MS 80
 
 /* TCA9555 位号：手册 P0x/P1x → 0..15。 */
 /* TCA9555 bit numbers: P0x/P1x -> 0..15. */
@@ -195,9 +196,10 @@ static esp_err_t p0_write(void) {
     return err;
 }
 
-static void p1_write(void) {
+static esp_err_t p1_write(void) {
     esp_err_t err = ioe_write(3, s_p1_out); // OUT1
     if (err != ESP_OK) ESP_LOGW(TAG, "TCA OUT1 write: %s", esp_err_to_name(err));
+    return err;
 }
 
 static esp_err_t ioe_init(void) {
@@ -720,10 +722,13 @@ esp_err_t board_ioe_wake(void) {
     if (!s_ioe_ok) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ioe_write(6, P0_INPUT_MASK);
     if (err == ESP_OK) err = ioe_write(7, P1_INPUT_MASK);
-    if (err == ESP_OK) p0_write();
+    if (err == ESP_OK) err = p0_write();
     if (err == ESP_OK) {
         s_p1_out |= (uint8_t)(IOE_BIT(IO_TP_RST) | IOE_BIT(IO_BT_PA_PWR));
-        p1_write();
+        err = p1_write();
+        // P14恢复后等待原厂外围电源稳定时间，再允许下一路电源或显示上电。
+        // Allow the vendor's peripheral-rail settling time before the next supply or panel power-on.
+        if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(BOARD_RAIL_SETTLE_MS));
     }
     (void)fca9555_clear_int(s_ioe);
     return err;
