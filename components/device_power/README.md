@@ -153,3 +153,6 @@ handoff. Host tests do not replace device voltage, charging or power-off validat
 
 原有部分为 Apache-2.0，见 [LICENSE](LICENSE)；移植原厂部分保留 [MIT 声明](../board_i2c/LICENSE.Metalio)。
 Existing portions use Apache-2.0; adapted vendor material retains the MIT notice linked above.
+
+时钟锁屏通过 `device_power_read_rtc()` 只读PCF8563的UTC时间；无效日期、掉电标志或总线错误返回失败，不改系统时间、快照或寄存器。清醒绘屏期间可临时开启按键快采，随后用 `device_power_key_sampler_pause_for_sleep()` 等待在途读取并保留待处理按键，再由锁屏等待循环消费；常规独占/切页仍使用会丢弃旧动作的 `device_power_key_sampler_enable(false)`。
+The clock reads UTC through `device_power_read_rtc()` without modifying time, snapshots or registers. Its awake scan pauses the key sampler with `device_power_key_sampler_pause_for_sleep()` to retain pending wake input; normal ownership changes keep the existing discard-on-disable API.

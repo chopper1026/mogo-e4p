@@ -43,6 +43,7 @@ with tempfile.TemporaryDirectory() as folder:
 #define MODE_DU 2
 #define APP_SLEEP_DEEP 0
 #define APP_WAKE_KEY 1
+#define APP_LOCK_STYLE_CLOCK 5
 #define APP_WAKE_PICKUP 2
 #define APP_WAKE_TIMEOUT 3
 #define DEVICE_POWER_KEY_NONE 0
@@ -66,6 +67,7 @@ uint8_t app_settings_lock_style(void){return selected_style;}
 const char *app_settings_wallpaper_path(void){return wallpaper;}
 const char *app_settings_bookmark_path(void){return wallpaper;}
 
+static unsigned clock_draws,clock_presented,pad_backgrounds,original_allocs;
 static unsigned stage,idx,waits,verified,ready,held,pushes,fulls,wiped,stops,entries,settles;
 static bool enabled_storage=true,valid_storage=true,low_memory,boot_scenario,display_failure;
 static uint64_t now;
@@ -84,7 +86,9 @@ static void epd_poweron(void){}
 static void epd_poweroff(void){}
 static bool ui_builtin_image_draw(uint8_t *fb,int image){assert(image==UI_BUILTIN_IMAGE_LOCK);memset(fb,224,FRAME_BYTES);return true;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
-static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
+static void *heap_caps_malloc(size_t n,int caps){(void)caps;++original_allocs;return malloc(n);}
+static bool lock_clock_draw(uint8_t *fb){++clock_draws;memset(fb,(uint8_t)(0x30+clock_draws),FRAME_BYTES);return true;}
+static void lock_clock_presented(bool success){assert(success);++clock_presented;}
 static void app_lock_wait_key_idle(int ms){(void)ms;}
 static int app_lock_sleep_wait(EpdiyHighlevelState *hl,void *acc){assert(hl);(void)acc;++waits;return waits%2?APP_WAKE_KEY:APP_WAKE_PICKUP;}
 static int64_t esp_timer_get_time(void){return now*1000;}
@@ -98,7 +102,7 @@ static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
 int cst836u_read(void *tp,cst836u_touch_t *t){(void)tp;if(idx>=sample_count){*t=(cst836u_touch_t){0};return 0;}typeof(samples[0]) s=samples[idx++];*t=(cst836u_touch_t){.touched=s.count!=0,.count=s.count,.x=s.x,.y=s.y};if(s.error<-1){power_pending=-s.error;return ESP_OK;}return s.error;}
 static void vTaskDelay(int ms){now+=ms;assert(now<35000||!valid_storage);}
-static void ui_pinpad_begin(ui_pinpad_t *p,const uint8_t *fb,const char *title){(void)fb;ui_pinpad_end(p);ui_pinpad_reset(p,title,"");if(!low_memory)p->background=malloc(1);}
+static void ui_pinpad_begin(ui_pinpad_t *p,const uint8_t *fb,const char *title){(void)fb;ui_pinpad_end(p);ui_pinpad_reset(p,title,"");if(selected_style==5){++pad_backgrounds;assert(fb[0]==(uint8_t)(0x30+clock_draws));}if(!low_memory)p->background=malloc(1);}
 static void ui_pinpad_paint_input(uint8_t *f,const ui_pinpad_t *p){(void)p;f[0]=0xaa;}
 static void ui_pinpad_paint(uint8_t *fb,const ui_pinpad_t *p,EpdRect area){(void)p;if(area.y==470)++settles;if(area.y==0&&area.height==1216)++entries;fb[0]=0xaa;}
 
@@ -121,7 +125,7 @@ enum EpdDrawError display_refresh_area(EpdiyHighlevelState *h, display_refresh_i
  for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','lock_screen_authenticate'):
   unit+=function(n,ROOT/'main/lock/lock_screen.c')+'\n'
  unit+=r'''
-static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);}
+static void start(void){clock_draws=clock_presented=pad_backgrounds=original_allocs=0;idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);}
 int main(void){
  EpdiyHighlevelState hl={0};
  // 未开启和读取失败均不绘制密码、等待触摸或停蓝牙；读取恢复后已设密码正常验证。
@@ -196,6 +200,15 @@ int main(void){
  selected_style=0;lock_screen_save(framebuffer);FILE *rotated=fopen(LOCK_ART_PATH,"r+b");assert(rotated);
  uint32_t rotation=2;assert(fseek(rotated,4,SEEK_SET)==0&&fwrite(&rotation,1,sizeof(rotation),rotated)==sizeof(rotation)&&fclose(rotated)==0);assert(!lock_screen_restore(f));
  selected_style=0;lock_screen_save(framebuffer);assert(lock_screen_restore(f));FILE *bad=fopen(LOCK_ART_PATH,"r+b");assert(bad);fputc(0,bad);fclose(bad);assert(!lock_screen_restore(f));free(f);
+ // Clock never writes/loads stale disk frames and needs no extra original-frame allocation.
+ selected_style=5;assert(!lock_screen_restore(framebuffer)&&!lock_screen_save(framebuffer));
+ for(unsigned boot=0;boot<2;++boot)for(unsigned oom=0;oom<2;++oom){
+  start();low_memory=oom;lock_clock_draw(framebuffer);tap(144,1132);add(0,0,0,0);correct();
+  lock_screen_authenticate(&hl,(void*)1,(void*)2,boot);
+  assert(verified==1&&waits==(boot?1u:2u)&&!original_allocs);
+  assert(clock_presented==waits&&pad_backgrounds==1+waits&&clock_draws==1+2*waits);
+ }
+ low_memory=false;selected_style=0;
  assert(stops>=5);puts("PASS: actual exclusive auth loop blocks wrong/cancel/touch keys/pickup/multitouch/read faults; cold boot holds resume; OOM/display errors fail closed; cancel waits again and only the correct PIN releases; read faults follow the nonblocking policy; normal PIN and cached-art validation retained");
 }
 '''

@@ -18,6 +18,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_attr.h"
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+#include "lock_sleep_trace.h"
+#endif
 #include "esp_sleep.h"
 #include "esp_rom_sys.h"
 #include "esp_private/regi2c_ctrl.h"
@@ -33,8 +36,14 @@ uint32_t __real_pmu_sleep_start(uint32_t wake, uint32_t reject, uint32_t mem, bo
 void __real_rtc_clk_mpll_configure(uint32_t xtal, uint32_t frequency, bool clock_owned);
 
 uint32_t IRAM_ATTR __wrap_pmu_sleep_start(uint32_t wake, uint32_t reject, uint32_t mem, bool deep) {
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_PMU_ENTER, (int32_t)deep);
+#endif
     s_pmu_light_sleep = !deep;
     uint32_t result = __real_pmu_sleep_start(wake, reject, mem, deep);
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_PMU_RETURN, (int32_t)result);
+#endif
     s_pmu_light_sleep = false;
     return result;
 }
@@ -44,6 +53,9 @@ void IRAM_ATTR __wrap_rtc_clk_mpll_configure(uint32_t xtal, uint32_t frequency, 
         __real_rtc_clk_mpll_configure(xtal, frequency, clock_owned);
         return;
     }
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_MPLL_ENTER, 0);
+#endif
     // PMU 已屏蔽中断并暂停另一核；这里只能用内部内存和无锁寄存器访问。
     // PMU masks interrupts and stalls the other CPU; use internal memory and lock-free register access here.
     // 校准次序来自 Espressif 9726078b55430ef8d2ce4a460ebf21d889bb5c12。
@@ -60,6 +72,9 @@ void IRAM_ATTR __wrap_rtc_clk_mpll_configure(uint32_t xtal, uint32_t frequency, 
     _regi2c_impl_write_mask(mpll, 0, 3, 5, 4, 3);
     _regi2c_impl_write_mask(mpll, 0, 1, 2, 2, 0);
     __real_rtc_clk_mpll_configure(xtal, frequency, true);
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_mark(LOCK_TRACE_MPLL_RETURN, 0);
+#endif
     _regi2c_ctrl_ll_master_enable_clock(gate_enabled);
 }
 

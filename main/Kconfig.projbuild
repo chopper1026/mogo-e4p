@@ -77,6 +77,16 @@ endmenu
 # Panel self-test for bring-up; keep disabled in production images.
 menu "Bring-up diagnostics"
 
+    config APP_LOCK_SLEEP_TRACE
+        bool "Retain lock, sleep and clock-refresh stages across resets"
+        default n
+        help
+            在 RTC 内存记录锁屏、浅睡和时钟推屏阶段，重启后保留第一次复位原因。
+            启动及 10/30/60 秒重放现场，便于 USB 重连读取；不写 NVS 或 TF，
+            不增加唤醒、不关闭看门狗，不改变供电和睡眠策略。
+            Keep reset breadcrumbs in RTC RAM and replay after boot and at
+            10/30/60 seconds. No storage writes, extra wakeups or policy changes.
+
     config APP_SLEEP_DIAGNOSTICS
         bool "Save one light-sleep summary after wake and replay at boot"
         default n

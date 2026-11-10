@@ -18,6 +18,9 @@
 #include <time.h>
 
 #include "app_loop.h"
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+#include "lock_sleep_trace.h"
+#endif
 #include "ui_builtin_image.h"
 #include "app_content_open.h"
 #include "boot_state.h"
@@ -158,6 +161,9 @@ void app_main(void) {
 #endif
 
     const esp_reset_reason_t reset = esp_reset_reason();
+#if CONFIG_APP_LOCK_SLEEP_TRACE
+    lock_sleep_trace_boot();
+#endif
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
     // 在大缓冲和字体之前读取小型锁屏设置；读取失败不阻塞，之后的检查仍可重试。

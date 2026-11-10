@@ -840,6 +840,18 @@ static esp_err_t rtc_read(struct tm* out, bool* valid) {
     return ESP_OK;
 }
 
+esp_err_t device_power_read_rtc(uint32_t *utc_seconds) {
+    if (!utc_seconds) return ESP_ERR_INVALID_ARG;
+    if (!s_ready || !s_rtc) return ESP_ERR_INVALID_STATE;
+    struct tm day;
+    bool valid = false;
+    esp_err_t error = rtc_read(&day, &valid);
+    if (error != ESP_OK) return error;
+    if (!valid) return ESP_ERR_INVALID_STATE;
+    *utc_seconds = rtc_unix_utc(&day);
+    return ESP_OK;
+}
+
 static esp_err_t rtc_write(time_t now) {
     struct tm tm;
     if (gmtime_r(&now, &tm) == NULL) return ESP_ERR_INVALID_ARG;
@@ -932,6 +944,12 @@ bool device_power_key_sampler_enable(bool enabled) {
     if (s_key_sampling && !previous) xTaskNotifyGive(s_key_task);
     key_unlock();
     return previous;
+}
+
+void device_power_key_sampler_pause_for_sleep(void) {
+    key_lock();
+    s_key_sampling = false;
+    key_unlock();
 }
 
 static void poll_battery(void) {

@@ -119,7 +119,8 @@ void app_settings_set_system_font_size(uint8_t percent);
 uint8_t app_settings_system_contrast(void);
 void app_settings_set_system_contrast(uint8_t percent);
 /// 锁屏样式和壁纸路径。/ Lock style and wallpaper image path.
-/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封、4日历。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3), calendar (4).
+/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封、4日历、5简约时钟。/ Lock: ticket (0), wallpaper (1), collage (2), PNG cover (3), calendar (4), clock (5).
+enum { APP_LOCK_STYLE_CLOCK = 5 };
 uint8_t app_settings_lock_style(void);
 void app_settings_set_lock_style(uint8_t style);
 /// 阅读票根背景独立记忆，默认透明；仅在持久化成功后更新。/ Remember ticket backgrounds independently; default transparent and publish only after persistence.

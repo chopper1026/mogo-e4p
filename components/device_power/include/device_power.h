@@ -171,6 +171,8 @@ esp_err_t device_power_refresh(void);
 /// 轮询电量、充电状态与待处理电源键，供页面 tick 使用。
 /// / Poll battery, charging state and pending power keys for page ticks.
 esp_err_t device_power_poll(void);
+/// 只读 UTC RTC；不校准系统时间、不改快照或寄存器。/ Read UTC RTC without changing system time, snapshots or registers.
+esp_err_t device_power_read_rtc(uint32_t *utc_seconds);
 
 /// 创建默认暂停的电源键快采任务；失败时保留原轮询，由主循环调用一次。
 /// Create the initially paused fast key sampler once from the loop; failure retains direct polling.
@@ -178,6 +180,8 @@ bool device_power_key_sampler_start(void);
 /// 主循环切换快采并返回之前的启用状态；停用等待在途读取、丢弃旧动作及当前释放，浅睡/独占前必须停用。
 /// Loop-only: switch sampling and return its previous state; disable joins reads and discards stale actions/releases before sleep/exclusive use.
 bool device_power_key_sampler_enable(bool enabled);
+/// 锁屏绘屏后暂停快采并保留待处理唤醒；等待在途读取完成。/ Join and pause after a locked display scan, preserving pending wake input.
+void device_power_key_sampler_pause_for_sleep(void);
 
 /// 校准日志默认关闭；清醒时每分钟及关键事件异步写串口和 TF，格式 2 区分采样时间与有效性。
 /// Calibration logging defaults off; awake minute samples and key events asynchronously reach serial/TF in timestamped, validity-aware format 2.

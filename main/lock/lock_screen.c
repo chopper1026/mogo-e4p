@@ -8,6 +8,7 @@
 #include "platform/s31_input.h"
 #include "lock_pin.h"
 #include "lock_calendar.h"
+#include "lock_clock.h"
 #include "settings.h"
 #include "ui_pinpad.h"
 #include "ui_kit.h"
@@ -52,7 +53,7 @@ static uint64_t wallpaper_key(void){
     return key;
 }
 bool lock_screen_restore(uint8_t *frame){
-    if(!frame)return false;
+    if(!frame || app_settings_lock_style()==APP_LOCK_STYLE_CLOCK)return false;
     FILE *f=fopen(LOCK_ART_PATH,"rb");if(!f)return false;art_header_t h;
     // 跨样式/换壁纸后先拒绝旧图，再由锁屏入口绘制当前选择；不多分配一帧。
     // Reject old art before reading pixels after a style/wallpaper change; the lock entry draws the current choice without another frame.
@@ -62,6 +63,7 @@ bool lock_screen_restore(uint8_t *frame){
     fclose(f);return ok;
 }
 bool lock_screen_save(const uint8_t *frame){
+    if(!frame || app_settings_lock_style()==APP_LOCK_STYLE_CLOCK)return false;
     (void)mkdir(LOCK_SCREEN_CACHE_PARENT,0775);(void)mkdir(LOCK_SCREEN_CACHE_PARENT "/locks",0775);
     FILE *f=fopen(LOCK_ART_PATH ".tmp","wb");if(!f)return false;
     art_header_t h={.magic=ART_MAGIC,.rotation=(uint32_t)epd_get_rotation(),
@@ -75,15 +77,17 @@ bool lock_screen_save(const uint8_t *frame){
     return ok;
 }
 static void restore_art(uint8_t *fb,const uint8_t *original){
-    if(original)memcpy(fb,original,FRAME_BYTES);
+    if(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK)(void)lock_clock_draw(fb);
+    else if(original)memcpy(fb,original,FRAME_BYTES);
     else if(!lock_screen_restore(fb)){memset(fb,255,FRAME_BYTES);(void)ui_builtin_image_draw(fb,UI_BUILTIN_IMAGE_LOCK);}
 }
-static void present(EpdiyHighlevelState *hl,EpdRect area){
+static bool present(EpdiyHighlevelState *hl,EpdRect area){
     epd_poweron();enum EpdDrawError result=display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, area, DISPLAY_REFRESH_DEFAULT);
     guard_draw_result(hl,result);
     // 灰阶差分失败只重建同一密码画面，绝不进入未验证的页面。
     // On a display failure rebuild this same protected screen, never an unauthenticated page.
-    if(result!=EPD_DRAW_SUCCESS)guard_draw_result(hl,update_display_full(hl));
+    if(result!=EPD_DRAW_SUCCESS){result=update_display_full(hl);guard_draw_result(hl,result);}
+    return result==EPD_DRAW_SUCCESS;
 }
 static void present_input(EpdiyHighlevelState *hl,EpdRect area){
     enum EpdDrawError result=display_refresh_area(hl, DISPLAY_REFRESH_FEEDBACK, area, DISPLAY_REFRESH_DEFAULT);
@@ -99,7 +103,8 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     // restart the stack and reconnect after unlock.
     (void)ble_pt_stop_for_sleep(2000);
     lock_screen_save(fb);
-    uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
+    const bool clock=app_settings_lock_style()==APP_LOCK_STYLE_CLOCK;
+    uint8_t *original=!clock && heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
@@ -107,11 +112,15 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
         if(waiting){
-            restore_art(fb,original);present(hl,ui_pinpad_full());
+            restore_art(fb,original);bool painted=present(hl,ui_pinpad_full());
+            if(clock)lock_clock_presented(painted);
             app_lock_wait_key_idle(800);epd_poweroff();
             // 定时关机失败回退原有锁屏等待及故障恢复；超时不能绕过密码验证。
             // A failed timed power-off falls back to existing locked wait/recovery; expiry cannot bypass PIN verification.
             app_lock_sleep_wait(hl,acc);
+            // 浅睡期间日期可能变化；重建模糊底图，避免密码层恢复旧分钟。
+            // Rebuild the frost from the current face after sleep instead of restoring an old minute.
+            if(clock){(void)lock_clock_draw(fb);ui_pinpad_end(&pad);ui_pinpad_begin(&pad,fb,"输入密码");}
         }
         app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");

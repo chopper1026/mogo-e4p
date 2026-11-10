@@ -33,9 +33,9 @@ int main(int argc,char **argv){
     assert(argc==2&&ttf_font_open_builtin()==ESP_OK);uint8_t *fb=malloc(684*1216/2);assert(fb);char path[1024];
     for(font_percent=100;font_percent<=200;font_percent+=10){
         selected_style=2;selected_calendar=APP_CALENDAR_MONTH;s_page=SETTINGS_LOCK_STYLE;unsigned before=writes;
-        assert(tap(35,876)==APP_REDRAW_NONE&&tap(648,876)==APP_REDRAW_NONE);
-        assert(tap(300,819)==APP_REDRAW_NONE&&tap(300,932)==APP_REDRAW_NONE);
-        assert(tap(36,820)==APP_REDRAW_PAGE&&s_page==SETTINGS_CALENDAR&&selected_style==2&&writes==before);
+        assert(tap(35,788)==APP_REDRAW_NONE&&tap(648,788)==APP_REDRAW_NONE);
+        assert(tap(300,739)==APP_REDRAW_NONE&&tap(300,836)==APP_REDRAW_NONE);
+        assert(tap(36,740)==APP_REDRAW_PAGE&&s_page==SETTINGS_CALENDAR&&selected_style==2&&writes==before);
         for(int choice=0;choice<2;++choice){
             EpdRect box={36,300+choice*154,612,132};
             assert(tap(35,box.y+66)==APP_REDRAW_NONE&&tap(648,box.y+66)==APP_REDRAW_NONE);
@@ -48,10 +48,17 @@ int main(int argc,char **argv){
             assert(pixel_at(fb,609,box.y+66)==0&&pixel_at(fb,609,300+(1-choice)*154+66)==0xf0);
             snprintf(path,sizeof(path),"%s/calendar-picker-%d-%u.raw",argv[1],choice,font_percent);save(path,fb);
             assert(back()==APP_REDRAW_PAGE&&s_page==SETTINGS_LOCK_STYLE);paint(fb);
-            assert(pixel_at(fb,609,876)==0);snprintf(path,sizeof(path),"%s/calendar-parent-%d-%u.raw",argv[1],choice,font_percent);save(path,fb);
-            assert(tap(647,931)==APP_REDRAW_PAGE&&s_page==SETTINGS_CALENDAR);
+            assert(pixel_at(fb,609,788)==0);snprintf(path,sizeof(path),"%s/calendar-parent-%d-%u.raw",argv[1],choice,font_percent);save(path,fb);
+            assert(tap(647,835)==APP_REDRAW_PAGE&&s_page==SETTINGS_CALENDAR);
         }
         assert(tap(60,110)==APP_REDRAW_PAGE&&s_page==SETTINGS_LOCK_STYLE&&selected_style==4);
+        assert(tap(35,898)==APP_REDRAW_NONE&&tap(648,898)==APP_REDRAW_NONE);
+        assert(tap(300,849)==APP_REDRAW_NONE&&tap(300,946)==APP_REDRAW_NONE);
+        app_calendar_style_t remembered=selected_calendar;
+        assert(tap(36,850)==APP_REDRAW_PAGE&&selected_style==APP_LOCK_STYLE_CLOCK&&selected_calendar==remembered&&s_page==SETTINGS_LOCK_STYLE);
+        paint(fb);assert(pixel_at(fb,609,898)==0&&pixel_at(fb,609,788)!=0);
+        snprintf(path,sizeof(path),"%s/clock-choice-%u.raw",argv[1],font_percent);save(path,fb);
+        assert(tap(647,945)==APP_REDRAW_PAGE&&selected_style==APP_LOCK_STYLE_CLOCK);
     }
     free(fb);ttf_font_unload();puts("PASS: native calendar entry and two choices at 100..200%, no mutation on entry, hit bounds/gaps, marks, back navigation and failed-save retry");
 }

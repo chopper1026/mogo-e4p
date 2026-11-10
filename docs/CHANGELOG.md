@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.0.9 · 本地测试 / Local testing · 2026-11-10
 
+- 新增简约时钟锁屏：24小时制，上下对齐的小时/分钟、月日、星期和电量；浅睡时每分钟刷新，兼容密码与定时关机，选择随重启和v40设置备份保留。/ Add a minimal 24-hour clock lock with aligned hour/minute rows, month/day, weekday and battery; refresh each minute in light sleep with PIN/timed shutdown and reboot/v40 backup persistence.
 - 修复纯 WPA-PSK 网络在设备配网页被误标为不支持的问题，恢复选网、输入密码与连接入口；真实路由器连接待验收。/ Allow WPA-PSK networks in device provisioning so users can select them, enter a password and start connecting; router acceptance remains pending.
 - 首页新增「迷你书库」扇页书匣，展示最多五本书，支持随机／最近阅读、点封面或编号及左右划动选书、打开原书和合拢换批；模式随设置备份保存，静置无循环动画。实屏交互待验收。/ Add a five-book Home fan deck with random/recent modes, cover/index/swipe selection, original-book opening and close/redeal motion; back up the mode and keep idle frames still. Device interaction awaits acceptance.
 - 迷你书库封面在切页和阅读返回时保留缓存，进度更新与最近阅读重排复用有效封面；动画结束后对组件区域做GC16清理，处理旧文字和选中标记残影。修复后的实屏效果待验收。/ Retain valid covers across page/reader returns and recency updates; clean the widget with GC16 after motion to erase old labels/indicators. Optical acceptance remains pending.

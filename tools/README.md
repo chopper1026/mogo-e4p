@@ -63,3 +63,9 @@ The three suites cover exhaustive calendar/folk data, actual wrapping of all 123
 ### 迷你书库 / Mini library
 
 `mini_library_host_test.py` 校验无放回抽样、换批避重、最近排序与焦点；`home_library_host_test.py` 覆盖可取消扫描、失败保持和封面所有权；`mini_library_ui_host_test.py --output build/mini-library-preview` 导出真实4bpp预览并检查字体、边界和命中。`dashboard_home_host_test.py` 检查3个等距位置帧、40ms调度、即时改选、按住暂停、完整组件范围呈现、失败重试和首页开书。通过 `run_reader_baseline.py` 的同名套件运行，见[功能契约](../docs/development/guides/MINI_LIBRARY.md)。
+
+## 简约时钟锁屏 / Minimal clock lock
+
+`python3 tools/run_reader_baseline.py lock_clock lock_clock_ui lock_style lock sleep_power metalio_drivers power_key settings_backup calendar_settings_ui` 验证RTC锚点/回退、跨时日年、显示失败重试、分钟与电量去重、浅睡原截止点、绘屏短按保留、PIN重入、v40备份与六行设置。`python3 tools/lock_clock_ui_host_test.py --output build/clock-native` 导出实际4bpp图片，数字与224px原字库逐像素核对；`python3 tools/generate_clock_digits.py --check` 检查生成资源。图片使用样例时间与电量；不代表设备实屏或功耗验收。见[简约时钟锁屏契约](../docs/development/guides/LOCK_CLOCK.md)。
+
+`python3 tools/run_reader_baseline.py lock_sleep_trace` 验证可选RTC锁屏诊断的阶段、计数、USB重连后的第一次复位原因保留和有界重放；诊断开关默认关闭，不代表问题已修复或获得刷机授权。
