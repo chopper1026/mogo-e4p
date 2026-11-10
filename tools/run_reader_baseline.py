@@ -17,6 +17,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "home_reading": [sys.executable, "tools/home_reading_preview.py"],
     "calendar": [sys.executable, "tools/calendar_host_test.py"],
     "calendar_ui": [sys.executable, "tools/calendar_ui_host_test.py"],
     "calendar_settings_ui": [sys.executable, "tools/calendar_settings_ui_host_test.py"],

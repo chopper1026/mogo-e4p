@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.0.9 · 本地测试 / Local testing · 2026-11-10
+
+- 首页最近阅读改为书刊式排版，加入错层纸页、大号阅读进度和引文装饰，保留原比例封面、续读及长按配置。/ Restyle recent reading with offset pages, larger progress and quotation accents, retaining proportional covers, resume and hold-to-configure interactions.
+
 ## v1.0.9 · 2026-11-10
 
 - 锁屏样式-阅读票据增加透明背景和封面背景两种可选项。

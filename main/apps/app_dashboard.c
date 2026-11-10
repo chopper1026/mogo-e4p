@@ -24,6 +24,8 @@
  * User revision: UI surfaces and controls use black, white and one fixed gray; resume cards are white, while covers and avatars retain their tones.
  * 用户2026-11-06修订：移除“首页”文字，打卡题头沿用左侧起点和批准的固定字号，不随系统字号缩放。
  * User revision 2026-11-06: remove the Home title; the streak keeps the left anchor and approved fixed sizes independent of system text scale.
+ * 用户2026-11-10修订：最近阅读采用现代书刊排版，以错层纸页、大号进度和引文点缀白底。
+ * User revision 2026-11-10: style recent reading as a modern book spread with offset pages, large progress and quotation accents on white.
  */
 #include <dirent.h>
 #include <stdio.h>
@@ -362,6 +364,9 @@ static void draw_cover(uint8_t *fb,const home_book_t *item,EpdRect bounds,bool p
             epd_draw_pixel(box.x+x,box.y+y,g,fb);
         }
     } else ui_fill_rect_fast(box,0xe0,fb);
+    // 错层纸页与按下外缘分开，避免反馈刷新改变装饰。/ Offset pages stay clear of the press outline.
+    ui_fill_rect_fast((EpdRect){box.x+box.width+6,box.y+10,2,box.height-2},UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){box.x+8,box.y+box.height+6,box.width,2},UI_GRAY_BLACK,fb);
     home_frame(fb,box,0);
     // 按下只改白色外缘，避免用 DU 移动灰阶封面后留下旧底边。
     // Change only the white margin on press so DU never moves gray cover pixels or leaves their old bottom edge.
@@ -412,8 +417,11 @@ static int title_lines(uint8_t *fb,int top,const char *text,uint8_t background) 
 }
 static void render_reading(uint8_t *fb,unsigned slot) {
     const int top=home_region(slot).y;
-    label(fb,36,top+38,26,"最近阅读",EPD_DRAW_ALIGN_LEFT,0);
     home_book_t *b=featured();
+    label(fb,36,top+35,26,"最近阅读",EPD_DRAW_ALIGN_LEFT,0);
+    ui_fill_rect_fast((EpdRect){36,top+61,86,5},UI_GRAY_BLACK,fb);
+    ui_fill_rect_fast((EpdRect){122,top+64,526,2},UI_GRAY_BLACK,fb);
+    for(int i=0;i<3;++i)ui_fill_rect_fast((EpdRect){608+i*12,top+22+i*4,5,24-i*4},UI_GRAY_BLACK,fb);
     if(b->path[0]) {
         draw_cover(fb,b,(EpdRect){36,top+84,178,242},continue_card_pressed(slot));
         int rows=title_lines(fb,top,b->title,UI_GRAY_WHITE);
@@ -421,18 +429,25 @@ static void render_reading(uint8_t *fb,unsigned slot) {
             char author[128];snprintf(author,sizeof(author),"%s",b->author);fit(author,25,400);
             label_on(fb,248,top+(rows==2?222:181),25,author,EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
         }
-        char value[32];snprintf(value,sizeof(value),"已读 %u%%",b->has_progress?b->progress.pct:0);
-        label_on(fb,248,top+250,27,value,EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
-        EpdRect track={248,top+279,400,6};ui_fill_rect_fast(track,UI_GRAY_LIGHT,fb);
-        track.width=400*(b->has_progress?b->progress.pct:0)/100;
+        unsigned pct=b->has_progress?b->progress.pct:0;if(pct>100)pct=100;
+        label_on(fb,248,top+245,20,"已读",EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
+        char value[16];snprintf(value,sizeof(value),"%u%%",pct);
+        int px=64;while(px>32&&ui_text_fixed_width_px(px,value)>220)--px;
+        label_on(fb,248,top+290,px,value,EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
+        EpdRect track={248,top+325,220,4};ui_fill_rect_fast(track,UI_GRAY_LIGHT,fb);
+        track.width=220*pct/100;
         if(track.width)ui_fill_rect_fast(track,0,fb);
         label_on(fb,612,top+322,27,"继续阅读",EPD_DRAW_ALIGN_RIGHT,0,UI_GRAY_WHITE);
         ui_draw_icon(fb,635,top+322,25,UI_ICON_CHEVRON_RIGHT,0);
     } else label_on(fb,342,top+230,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0,UI_GRAY_WHITE);
     if(s_excerpt[0]) {
-        char quote[BOOK_EXCERPT_CAP+12];snprintf(quote,sizeof(quote),"“%s”",s_excerpt);
-        int px=24;while(px>16&&ui_text_fixed_width_px(px,quote)>612)--px;
-        if(ui_text_fixed_width_px(px,quote)<=612)label_on(fb,36,top+390,px,quote,EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
+        for(int i=0;i<2;++i) {
+            ui_fill_rect_fast((EpdRect){36+i*14,top+365,9,15},UI_GRAY_BLACK,fb);
+            ui_fill_rect_fast((EpdRect){36+i*14,top+380,4,5},UI_GRAY_BLACK,fb);
+        }
+        ui_fill_rect_fast((EpdRect){84,top+372,564,2},UI_GRAY_LIGHT,fb);
+        int px=24;while(px>16&&ui_text_fixed_width_px(px,s_excerpt)>612)--px;
+        if(ui_text_fixed_width_px(px,s_excerpt)<=612)label_on(fb,36,top+416,px,s_excerpt,EPD_DRAW_ALIGN_LEFT,0,UI_GRAY_WHITE);
     }
 }
 static void render_widget(uint8_t *fb,unsigned slot) {
