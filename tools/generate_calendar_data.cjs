@@ -24,6 +24,12 @@ function intern(s) {if (!ids.has(s)) {ids.set(s, strings.length); strings.push(s
 const pairs = [];
 for (const m of LunarUtil.JIA_ZI) for (const d of LunarUtil.JIA_ZI)
   pairs.push([intern(LunarUtil.getDayYi(m,d).join(' ')), intern(LunarUtil.getDayJi(m,d).join(' '))]);
+const folkStrings = [], folkIds = new Map();
+function folkId(s) {if (!folkIds.has(s)) {folkIds.set(s, folkStrings.length); folkStrings.push(s);} return folkIds.get(s);}
+const spiritPairs = [];
+for (let month = 0; month < 12; ++month) for (const day of LunarUtil.JIA_ZI)
+  spiritPairs.push([folkId(LunarUtil.getDayJiShen(month,day).join(' ')), folkId(LunarUtil.getDayXiongSha(month,day).join(' '))]);
+const dayRoles = new Array(144), joy = new Array(10), fortune = new Array(10);
 for (let year = 2000; year <= 2099; ++year) {
   const table = Solar.fromYmd(year,7,1).getLunar().getJieQiTable();
   const actual = Object.values(table).filter(s => s.getYear() === year).sort((a,b) => serial(a)-serial(b));
@@ -36,7 +42,10 @@ for (let year = 2000; year <= 2099; ++year) {
       const s = Solar.fromYmd(year,month,day), l = s.getLunar();
       const cycle = LunarUtil.JIA_ZI.indexOf(l.getMonthInGanZhi());
       if (cycle !== last) {runs.push([serial(s)-base,cycle]); last=cycle;}
-      if (process.argv.includes('--oracle')) oracle.push([year,month,day,l.getYear(),l.getMonth(),l.getDay(),cycle,LunarUtil.JIA_ZI.indexOf(l.getDayInGanZhi()),l.getDayYi().join(' '),l.getDayJi().join(' '),l.getDayPositionCaiDesc(),l.getDayChongDesc(),l.getDaySha()]);
+      const roleIndex = l.getMonthZhiIndex()*12+l.getDayZhiIndex(), stem = l.getDayGanIndex();
+      if (!dayRoles[roleIndex]) dayRoles[roleIndex] = [folkId(l.getZhiXing()),folkId(l.getDayTianShen()),folkId(l.getDayTianShenType())];
+      joy[stem] = l.getDayPositionXiDesc();fortune[stem] = l.getDayPositionFuDesc();
+      if (process.argv.includes('--oracle')) oracle.push([year,month,day,l.getYear(),l.getMonth(),l.getDay(),cycle,LunarUtil.JIA_ZI.indexOf(l.getDayInGanZhi()),l.getDayYi().join(' '),l.getDayJi().join(' '),l.getDayPositionCaiDesc(),l.getDayChongDesc(),l.getDaySha(),l.getDayPositionXiDesc(),l.getDayPositionFuDesc(),l.getDayJiShen().join(' '),l.getDayXiongSha().join(' '),l.getZhiXing(),l.getDayTianShen(),l.getDayTianShenType()]);
     }
   }
 }
@@ -49,6 +58,13 @@ out += array('char *const', 'calendar_terms', terms.map(quote));
 out += array('char *const', 'calendar_ganzhi', LunarUtil.JIA_ZI.map(quote));
 out += array('char *const', 'calendar_yiji', strings.map(quote));
 out += `static const uint16_t calendar_yiji_pairs[3600][2] = {\n${pairs.map(v=>`{${v}}`).join(',\n')}\n};\n`;
+if (dayRoles.filter(Boolean).length !== 144 || joy.filter(Boolean).length !== 10 || fortune.filter(Boolean).length !== 10)
+  throw new Error('Incomplete daily folk tables');
+out += array('char *const', 'calendar_folk', folkStrings.map(quote));
+out += `static const uint16_t calendar_spirit_pairs[720][2] = {\n${spiritPairs.map(v=>`{${v}}`).join(',\n')}\n};\n`;
+out += `static const uint16_t calendar_day_roles[144][3] = {\n${dayRoles.map(v=>`{${v}}`).join(',\n')}\n};\n`;
+out += array('char *const', 'calendar_joy', joy.map(quote));
+out += array('char *const', 'calendar_fortune', fortune.map(quote));
 const dest = path.join(root, 'main/assets/calendar_data.h');
 if (process.argv.includes('--check')) {if (fs.readFileSync(dest,'utf8') !== out) throw new Error('Stale calendar data');}
 else fs.writeFileSync(dest,out);

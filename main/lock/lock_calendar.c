@@ -12,7 +12,7 @@
 static uint64_t s_frame_key;
 static uint64_t date_key(const calendar_date_t *date,bool valid) {
     uint64_t day=valid?(uint64_t)(date->year*10000+date->month*100+date->day):0;
-    return UINT64_C(0x43414c0300000000)|(day<<1)|(uint64_t)app_settings_calendar_style();
+    return UINT64_C(0x43414c0400000000)|(day<<1)|(uint64_t)app_settings_calendar_style();
 }
 static bool today(calendar_date_t *date) {
     struct timeval tv;gettimeofday(&tv,NULL);

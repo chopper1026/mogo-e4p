@@ -57,6 +57,14 @@ bool calendar_date(int year,int month,int day,calendar_date_t *out) {
     static const char *const animals[]={"鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"};
     static const char *const sha[]={"南","东","北","西"};
     out->wealth=wealth[out->day_cycle%10];out->clash=animals[(out->day_cycle+6)%12];out->sha=sha[out->day_cycle%4];
+    unsigned spirit=(unsigned)(out->month_cycle%12*60+out->day_cycle);
+    unsigned role=(unsigned)(out->month_cycle%12*12+out->day_cycle%12);
+    out->joy=calendar_joy[out->day_cycle%10];out->fortune=calendar_fortune[out->day_cycle%10];
+    out->auspicious=calendar_folk[calendar_spirit_pairs[spirit][0]];
+    out->inauspicious=calendar_folk[calendar_spirit_pairs[spirit][1]];
+    out->officer=calendar_folk[calendar_day_roles[role][0]];
+    out->guardian=calendar_folk[calendar_day_roles[role][1]];
+    out->guardian_type=calendar_folk[calendar_day_roles[role][2]];
     return true;
 }
 bool calendar_from_utc(int64_t ms,calendar_date_t *out) {

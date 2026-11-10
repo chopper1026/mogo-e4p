@@ -150,6 +150,117 @@ static void badge(uint8_t *fb,int x,int y,int size,bool yi) {
     if(yi)epd_fill_rect(box,UI_GRAY_BLACK,fb);else epd_draw_rect(box,UI_GRAY_BLACK,fb);
     text(fb,x+size/2,y+size/2,size*2/3,yi?"宜":"忌",EPD_DRAW_ALIGN_CENTER,yi);
 }
+// 按实际字宽排词，末行预留省略号；有高度时整组垂直居中。
+// Wrap measured words with a final-row ellipsis, centering the block within an optional height.
+static int almanac_words(uint8_t *fb,const char *words,int x,int y,int width,int px,int limit,int height,enum EpdFontFlags align) {
+    char rows[4][192]={{0}};int row=0;
+    const char *p=words;
+    while(*p){
+        const char *end=strchr(p,' ');size_t length=end?(size_t)(end-p):strlen(p);
+        char candidate[224];int used=snprintf(candidate,sizeof(candidate),"%s%s%.*s%s",rows[row],rows[row][0]?"　":"",(int)length,p,row==limit-1&&end?"…":"");
+        if(used<0||(size_t)used>=sizeof(rows[row])||ui_text_fixed_width_px(px,candidate)>width){
+            if(row+1<limit){++row;continue;}
+            strcat(rows[row],"…");break;
+        }
+        size_t offset=strlen(rows[row]);
+        if(offset){memcpy(rows[row]+offset,"　",3);offset+=3;}
+        memcpy(rows[row]+offset,p,length);rows[row][offset+length]=0;
+        p=end?end+1:p+length;
+    }
+    if(!rows[0][0]&&row==0)snprintf(rows[0],sizeof(rows[0]),"无");
+    if(height)y+=(height-row*34)/2;
+    for(int i=0;i<=row;++i)if(rows[i][0])text(fb,x,y+i*34,px,rows[i],align,false);
+    return row+1;
+}
+static void engraving(uint8_t *fb,int x,int y,const ornament_point_t (*curves)[4],unsigned count) {
+    for(unsigned i=0;i<count;++i){
+        ornament_point_t p[4];
+        for(int j=0;j<4;++j)p[j]=ornament_at(x,y,1,1,curves[i][j].x,curves[i][j].y);
+        ornament_curve(fb,p[0],p[1],p[2],p[3]);
+    }
+}
+static void blossom(uint8_t *fb,int x,int y) {
+    static const ornament_point_t petals[]={{0,-7},{7,-2},{4,6},{-4,6},{-7,-2}};
+    for(unsigned i=0;i<5;++i)epd_draw_circle(x+petals[i].x,y+petals[i].y,5,UI_GRAY_BLACK,fb);
+    epd_fill_circle(x,y,2,UI_GRAY_BLACK,fb);
+}
+static void plum_branch(uint8_t *fb,int x,int y) {
+    static const ornament_point_t curves[][4]={
+        {{-104,24},{-42,16},{17,-2},{72,-26}},{{-91,24},{-36,22},{20,1},{63,-18}},
+        {{-8,3},{-13,-7},{-18,-13},{-19,-23}},{{25,-10},{22,-20},{24,-24},{29,-31}},
+        {{-46,15},{-36,1},{-28,2},{-30,12}},{{43,-15},{48,-3},{61,-2},{60,-14}}};
+    engraving(fb,x,y,curves,sizeof(curves)/sizeof(curves[0]));
+    blossom(fb,x+72,y-26);blossom(fb,x-19,y-23);blossom(fb,x+29,y-31);
+    epd_fill_circle(x-62,y+15,3,UI_GRAY_BLACK,fb);
+}
+static void almanac_activities(uint8_t *fb,const calendar_date_t *d) {
+    const char *const words[]={d->yi,d->ji};
+    for(int i=0;i<2;++i){
+        int x=i?492:192;
+        if(i){epd_draw_circle(x,538,25,UI_GRAY_BLACK,fb);epd_draw_circle(x,538,23,UI_GRAY_BLACK,fb);}
+        else epd_fill_circle(x,538,25,UI_GRAY_BLACK,fb);
+        text(fb,x,538,36,i?"忌":"宜",EPD_DRAW_ALIGN_CENTER,!i);
+        for(int side=-1;side<=1;side+=2){
+            ornament_curve(fb,(ornament_point_t){x+side*40,538},(ornament_point_t){x+side*58,525},
+                (ornament_point_t){x+side*78,550},(ornament_point_t){x+side*100,537});
+            lozenge(fb,x+side*112,537);
+        }
+        unsigned items=1;for(const char *p=words[i];*p;++p)if(*p==' ')++items;
+        int rows=almanac_words(fb,words[i],x,582,260,items<=4?32:26,4,0,EPD_DRAW_ALIGN_CENTER);
+        if(rows<=2)plum_branch(fb,x,680);
+    }
+}
+static void almanac_cut_frame(uint8_t *fb,EpdRect r,int cut,uint8_t gray) {
+    int right=r.x+r.width-1,bottom=r.y+r.height-1;
+    const ornament_point_t p[]={{r.x+cut,r.y},{right-cut,r.y},{right,r.y+cut},{right,bottom-cut},
+        {right-cut,bottom},{r.x+cut,bottom},{r.x,bottom-cut},{r.x,r.y+cut}};
+    for(unsigned i=0;i<8;++i)epd_draw_line(p[i].x,p[i].y,p[(i+1)%8].x,p[(i+1)%8].y,gray,fb);
+}
+static void almanac_plaque(uint8_t *fb,EpdRect r,const char *s,int px) {
+    const int cut=6;
+    for(int y=0;y<r.height;++y){
+        int inset=y<cut?cut-y:y>=r.height-cut?y-(r.height-cut-1):0;
+        epd_fill_rect((EpdRect){r.x+inset,r.y+y,r.width-inset*2,1},UI_GRAY_BLACK,fb);
+    }
+    almanac_cut_frame(fb,(EpdRect){r.x+3,r.y+3,r.width-6,r.height-6},4,UI_GRAY_WHITE);
+    text(fb,r.x+r.width/2,r.y+r.height/2,px,s,EPD_DRAW_ALIGN_CENTER,true);
+}
+static void almanac_details(uint8_t *fb,const calendar_date_t *d) {
+    almanac_cut_frame(fb,(EpdRect){56,737,572,125},10,UI_GRAY_BLACK);
+    almanac_cut_frame(fb,(EpdRect){57,738,570,123},9,UI_GRAY_BLACK);
+    almanac_cut_frame(fb,(EpdRect){61,742,562,115},7,UI_GRAY_BLACK);
+    almanac_plaque(fb,(EpdRect){266,721,152,36},"三神吉位",24);
+    const char *const labels[]={"财神","喜神","福神"};
+    const char *const positions[]={d->wealth,d->joy,d->fortune};
+    for(int i=0;i<3;++i){
+        int x=152+i*190;
+        text(fb,x,779,24,labels[i],EPD_DRAW_ALIGN_CENTER,false);
+        text(fb,x,821,42,positions[i],EPD_DRAW_ALIGN_CENTER,false);
+        if(i<2){
+            line(fb,x+95,778,1,52);
+            epd_fill_circle(x+95,773,2,UI_GRAY_BLACK,fb);
+            epd_fill_circle(x+95,835,2,UI_GRAY_BLACK,fb);
+        }
+    }
+    almanac_cut_frame(fb,(EpdRect){56,884,572,181},10,UI_GRAY_BLACK);
+    almanac_cut_frame(fb,(EpdRect){60,888,564,173},8,UI_GRAY_BLACK);
+    const char *const titles[]={"吉神宜趋","凶煞宜忌"};
+    const char *const spirits[]={d->auspicious,d->inauspicious};
+    for(int i=0;i<2;++i){
+        almanac_plaque(fb,(EpdRect){74,903+i*92,122,40},titles[i],24);
+        almanac_words(fb,spirits[i],218,890+i*92,390,26,2,70,EPD_DRAW_ALIGN_LEFT);
+    }
+    for(int x=77;x<607;x+=6)line(fb,x,974,2,1);
+    char s[96];
+    almanac_plaque(fb,(EpdRect){68,1083,66,32},"值神",22);
+    snprintf(s,sizeof(s),"%s（%s）",d->guardian,d->guardian_type);
+    fitted(fb,146,1099,24,270,s,EPD_DRAW_ALIGN_LEFT,false);
+    almanac_plaque(fb,(EpdRect){450,1083,66,32},"建除",22);
+    snprintf(s,sizeof(s),"%s日",d->officer);text(fb,532,1099,26,s,EPD_DRAW_ALIGN_LEFT,false);
+    almanac_cut_frame(fb,(EpdRect){148,1125,388,33},7,UI_GRAY_BLACK);
+    snprintf(s,sizeof(s),"冲%s（%s）· 煞%s",d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
+    text(fb,342,1141,26,s,EPD_DRAW_ALIGN_CENTER,false);
+}
 static void grid(uint8_t *fb,const calendar_date_t *d,bool large) {
     static const char *const labels[]={"日","一","二","三","四","五","六"};
     int left=large?48:56,width=large?588:572;
@@ -194,18 +305,12 @@ void ui_calendar_draw(uint8_t *fb,const calendar_date_t *d,bool monthly) {
         snprintf(s,sizeof(s),"%s · %s年",calendar_cycle_name(d->year_cycle),animals[d->year_cycle%12]);
         text(fb,636,132,24,s,EPD_DRAW_ALIGN_RIGHT,false);line(fb,48,158,588,1);
         fret_band(fb,176);
-        vertical(fb,96,334,calendar_month_name(d->month));vertical(fb,588,334,weekdays[d->weekday]);
-        number(fb,d->day,342-number_width(d->day,240)/2,210,240);
-        fitted(fb,342,501,48,564,lunar,EPD_DRAW_ALIGN_CENTER,false);
-        stems(d,s,sizeof(s));text(fb,342,568,26,s,EPD_DRAW_ALIGN_CENTER,false);
-        cloud(fb,62,521,1);cloud(fb,622,521,-1);
-        lozenge(fb,342,601);line(fb,296,601,28,1);line(fb,360,601,28,1);
-        line(fb,56,624,572,2);badge(fb,56,639,54,true);yiji(fb,d->yi,136,650,492,3,28);
-        line(fb,56,704,572,1);badge(fb,56,719,54,false);yiji(fb,d->ji,136,730,492,3,28);
-        folk(fb,d,56,628,804);line(fb,56,830,572,2);
-        text(fb,56,856,26,calendar_month_name(d->month),EPD_DRAW_ALIGN_LEFT,false);
-        snprintf(s,sizeof(s),"%d年",d->year);text(fb,628,856,24,s,EPD_DRAW_ALIGN_RIGHT,false);
-        line(fb,56,875,572,1);grid(fb,d,false);season(fb,d,1186);
+        vertical(fb,96,310,calendar_month_name(d->month));vertical(fb,588,310,weekdays[d->weekday]);
+        number(fb,d->day,342-number_width(d->day,184)/2,210,184);
+        fitted(fb,342,437,40,352,lunar,EPD_DRAW_ALIGN_CENTER,false);
+        stems(d,s,sizeof(s));text(fb,342,489,26,s,EPD_DRAW_ALIGN_CENTER,false);
+        cloud(fb,62,435,1);cloud(fb,622,435,-1);
+        almanac_activities(fb,d);almanac_details(fb,d);season(fb,d,1186);
     }else{
         landscape(fb);
         int w=number_width(d->month,78);number(fb,d->month,48,95,78);
