@@ -6,6 +6,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-11
 
 - 顶部快捷栏第二排增加触摸震动开关，长按0.5秒直达强度设置；从阅读页进入后，返回原书及阅读位置，保留全屏状态，兼容展开的阅读弹层。/ Add a second-row haptics switch with a half-second hold to open intensity settings; return directly to the same book, reading position and full-screen state, including visits from open reader sheets.
+
+- 阅读线新增实线和「跟随正文」开关：开启后按横排每行、竖排每列的实际文字范围绘制，避开缩进、空行与行尾留白；样式卡片采用白底，选中项以加粗黑边框和勾选标记区分；默认保留铺满正文区域，选择随重启及 v41 配置备份保存。/ Add solid guides and text-follow for actual horizontal/vertical text spans, excluding indentation, blank lines and trailing space; use white style cards with a thicker black frame and checkmark for the selection, retain full-body spans by default and persist through restart/v41 backups.
+
 - 修复阅读页左右边缘有触摸震动却不翻页：点按与滑动支持左右留白，九宫格留白归相邻边缘格，保留正文分区、页眉页脚与弹层规则。/ Accept reader taps and swipes in side margins, mapping grid margins to adjacent edge cells while retaining body divisions, header/footer bounds and panel behavior.
 
 ## v1.1.0 · 2026-11-10

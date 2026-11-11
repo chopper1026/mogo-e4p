@@ -33,6 +33,8 @@
  * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body actions; the translucent editor activates only successfully saved drafts and removes the fullscreen footer hint.
  * 用户2026-11-11修复：阅读点按与滑动接纳左右留白，九宫格留白归相邻边缘格；正文分区与上下热区不变，修复边缘有震动却无动作。
  * User fix 2026-11-11: accept side margins for reader taps/swipes and map grid margins to adjacent edge cells, retaining body divisions and vertical bounds to fix vibrating edge taps with no action.
+ * 用户同日修订：阅读线新增实线和跟随正文开关，缩短到实际文字范围；默认保留铺满正文区域。
+ * Same-day user revision: add solid guides and a text-follow switch for actual text spans; retain full-body spans by default.
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
  * 用户 2026-10-21 修订：按键控制示意图按本板实体顺序摆成中、左、右（中键最左），中键双击下新增音量键翻页开关。
@@ -2088,9 +2090,10 @@ static EpdRect reader_font_card(int index) {
 #define s_rule_card reader_font_card(5)
 #define s_antialias_card reader_font_card(6)
 static void draw_reading_switch(uint8_t *fb, EpdRect track, bool on);
-static const EpdRect s_rule_offset_up = {36, 980, 190, 88};
-static const EpdRect s_rule_offset_reset = {246, 980, 192, 88};
-static const EpdRect s_rule_offset_down = {458, 980, 190, 88};
+static const EpdRect s_rule_follow = {36, 924, 612, 112};
+static const EpdRect s_rule_offset_up = {36, 1092, 190, 88};
+static const EpdRect s_rule_offset_reset = {246, 1092, 192, 88};
+static const EpdRect s_rule_offset_down = {458, 1092, 190, 88};
 
 // 阅读背景选择面板已随 2026-10-25 入口迁移删除；本文件只保留背景的解码与绘制调用。
 // The reading-background picker panel was removed when its entry moved to Settings on
@@ -2153,7 +2156,7 @@ static void draw_font_settings(uint8_t* fb) {
         draw_reading_switch(fb, (EpdRect){row.x+row.width-90, row.y+row.height/2-19, 69, 39}, on[i]);
         ui_hairline(fb, row.y+row.height-1, row.x+20, row.width-40, 0xa0);
     }
-    static const char *const rule_names[] = {"无", "虚线", "点线"};
+    static const char *const rule_names[] = {"无", "虚线", "点线", "实线"};
     draw_font_pair(fb, s_rule_card, "阅读线", rule_names[app_settings_book_reading_line()]);
     ttf_set_antialias(prior_aa);
 }
@@ -2195,7 +2198,7 @@ static void draw_weight_settings(uint8_t *fb) {
 }
 
 static EpdRect rule_style_rect(int index) {
-    return (EpdRect){36 + index * 208, 788, 196, 120};
+    return (EpdRect){36 + index * 156, 788, 144, 120};
 }
 
 static void draw_rule_settings(uint8_t *fb) {
@@ -2203,32 +2206,44 @@ static void draw_rule_settings(uint8_t *fb) {
     draw_sheet(fb, top, "阅读线");
     draw_sheet_back(fb, top);
     reader_panel_text(fb, 42, 741, 21, "选择样式", EPD_DRAW_ALIGN_LEFT, false);
-    static const char *const names[] = {"无", "虚线", "点线"};
+    static const char *const names[] = {"无", "虚线", "点线", "实线"};
     int selected = app_settings_book_reading_line();
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         EpdRect card = rule_style_rect(i);
-        ui_fill_round_rect(fb, card, 20, selected == i ? 0xc8 : 0xe8);
-        ui_draw_control_frame(fb, card, 20, selected == i ? 0x40 : 0x78);
-        reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 37, 24, names[i], EPD_DRAW_ALIGN_CENTER, false);
+        bool active = selected == i;
+        ui_fill_round_rect(fb, card, 20, UI_GRAY_WHITE);
+        ui_draw_control_frame(fb, card, 20, UI_GRAY_BLACK);
+        if (active) {
+            ui_draw_control_frame(fb, (EpdRect){card.x+2, card.y+2, card.width-4, card.height-4}, 18, UI_GRAY_BLACK);
+            epd_fill_circle(card.x+card.width-20, card.y+36, 11, UI_GRAY_BLACK, fb);
+            ui_draw_icon(fb, card.x+card.width-20, card.y+36, 18, UI_ICON_CHECK, UI_GRAY_WHITE);
+        }
+        ui_text_box(fb, (EpdRect){card.x+8, card.y+10, card.width-48, 54}, 24, names[i], EPD_DRAW_ALIGN_CENTER, false);
         if (i) {
-            int span = i == 1 ? 14 : 3, step = i == 1 ? 24 : 13;
             int start = card.x + 25, end = card.x + card.width - 25;
+            int span = i == 1 ? 14 : i == 2 ? 3 : end - start;
+            int step = i == 1 ? 24 : i == 2 ? 13 : end - start;
             for (int x = start; x < end; x += step)
                 ui_fill_rect_fast((EpdRect){x, card.y + 83, x + span <= end ? span : end - x, 2}, UI_GRAY_BLACK, fb);
-        } else reader_panel_text_vc(fb, card.x + card.width / 2, card.y + 83, 17, "不显示", EPD_DRAW_ALIGN_CENTER, false);
+        } else ui_text_box(fb, (EpdRect){card.x+8, card.y+64, card.width-16, 46}, 17, "不显示", EPD_DRAW_ALIGN_CENTER, false);
     }
+    bool follow = app_settings_book_reading_line_follow_text();
+    ui_text_box(fb, (EpdRect){s_rule_follow.x+20, s_rule_follow.y+6, 480, 46}, 27, "跟随正文", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){s_rule_follow.x+20, s_rule_follow.y+58, 480, 44}, 19,
+                follow ? "仅显示在文字下方" : "沿正文区域铺满整行", EPD_DRAW_ALIGN_LEFT, false);
+    draw_reading_switch(fb, (EpdRect){558, s_rule_follow.y+36, 69, 39}, follow);
+    ui_hairline(fb, s_rule_follow.y+s_rule_follow.height-1, 56, 572, 0xa0);
     char offset[36];
     snprintf(offset, sizeof(offset), "上下位置  %+d", app_settings_book_reading_line_offset());
-    reader_panel_text(fb, 42, 936, 21, offset, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){42, 1042, 600, 42}, 21, selected ? offset : "选择样式后可调整位置", EPD_DRAW_ALIGN_LEFT, false);
     const EpdRect controls[] = {s_rule_offset_up, s_rule_offset_reset, s_rule_offset_down};
     const char *const labels[] = {"上移 2px", "恢复居中", "下移 2px"};
     for (int i = 0; i < 3; ++i) {
         ui_fill_round_rect(fb, controls[i], 20, selected ? 0xe0 : 0xf0);
         ui_draw_control_frame(fb, controls[i], 20, selected ? 0x60 : 0xa0);
-        reader_panel_text_vc(fb, controls[i].x + controls[i].width / 2,
-                   controls[i].y + controls[i].height / 2, 22, labels[i], EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){controls[i].x+8, controls[i].y+8, controls[i].width-16, controls[i].height-16},
+                    22, labels[i], EPD_DRAW_ALIGN_CENTER, false);
     }
-    if (!selected) reader_panel_text(fb, 42, 1080, 18, "选择虚线或点线后可调整位置", EPD_DRAW_ALIGN_LEFT, false);
 }
 
 // 底部返回按钮移除后拉开滑杆和缩进控件间距；标题样式已提升至排版主面板。
@@ -6152,10 +6167,17 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             s_reader_panel = READER_PANEL_FONT_SETTINGS;
             return APP_REDRAW_PAGE;
         }
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 4; ++i) {
             if (!ui_rect_hit(rule_style_rect(i), x, y)) continue;
             app_settings_set_book_reading_line((uint8_t)i);
             book_layout_set_reading_line((unsigned)i);
+            invalidate_prep();
+            return APP_REDRAW_PAGE;
+        }
+        if (ui_rect_hit(s_rule_follow, x, y)) {
+            bool follow = !app_settings_book_reading_line_follow_text();
+            app_settings_set_book_reading_line_follow_text(follow);
+            book_layout_set_reading_line_follow_text(follow);
             invalidate_prep();
             return APP_REDRAW_PAGE;
         }
@@ -6617,6 +6639,7 @@ static void on_enter(app_ctx_t* ctx) {
     book_layout_set_first_line_indent(app_settings_book_indent());
     book_layout_set_first_line_indent_adjust(app_settings_book_indent_adjust());
     book_layout_set_reading_line(app_settings_book_reading_line());
+    book_layout_set_reading_line_follow_text(app_settings_book_reading_line_follow_text());
     book_layout_set_reading_line_offset(app_settings_book_reading_line_offset());
     // 字体页可能刚改过书内字体开关；回正文时重排当前章，别让用户对着旧排版猜。
     // The font page may have just changed the embedded-face switch; re-typeset this chapter

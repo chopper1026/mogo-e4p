@@ -369,9 +369,12 @@ void app_settings_set_book_indent(uint8_t em);
 /// 正文首行缩进微调，-100..100像素，默认0；无缩进时不生效。/ First-line adjustment in pixels, -100..100 (default 0); ignored with no indent.
 int8_t app_settings_book_indent_adjust(void);
 void app_settings_set_book_indent_adjust(int8_t px);
-/// 正文阅读线：0 无，1 虚线，2 点线。/ Body reading guides: none, dashed or dotted.
+/// 正文阅读线：0 无，1 虚线，2 点线，3 实线。/ Body reading guides: none, dashed, dotted or solid.
 uint8_t app_settings_book_reading_line(void);
 void app_settings_set_book_reading_line(uint8_t style);
+/// 阅读线只跟随文字范围，默认关闭；随重启和备份保存。/ Limit guides to text spans; default off, persisted and backed up.
+bool app_settings_book_reading_line_follow_text(void);
+void app_settings_set_book_reading_line_follow_text(bool enabled);
 /// 阅读线相对默认位置 -8..+8 像素，2 像素一步，默认 0。/ Guide offset in 2 px steps.
 int8_t app_settings_book_reading_line_offset(void);
 void app_settings_set_book_reading_line_offset(int8_t offset_px);

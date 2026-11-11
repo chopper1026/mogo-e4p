@@ -369,6 +369,7 @@ static int app_settings_book_tracking(void){return 15;}
 static int app_settings_book_indent(void){return 2;}
 static int app_settings_book_indent_adjust(void){return 0;}
 static int app_settings_book_reading_line(void){return 0;}
+static bool app_settings_book_reading_line_follow_text(void){return false;}
 static int app_settings_book_reading_line_offset(void){return 0;}
 static bool app_settings_reader_statusbar(void){return test_reader_statusbar;}
 static int s_chrome_height[2]={80,57};
@@ -382,6 +383,7 @@ static void book_layout_set_typography(int tracking){(void)tracking;}
 static void book_layout_set_first_line_indent(unsigned em){(void)em;}
 static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
+static void book_layout_set_reading_line_follow_text(bool on){(void)on;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
 static bool test_book_styles=true,test_layout_book_styles=true;

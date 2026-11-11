@@ -22,6 +22,7 @@ unit = r'''
 static const char *s_text="IMG\ntail";
 static size_t s_count=1,s_len=8,s_pages[]={0};
 static int s_px=10,s_lead_height,s_reading_line,s_reading_line_offset,s_tracking_px;
+static bool s_reading_line_follow_text;
 static EpdRect s_rect={0,0,100,100};
 static int right_slack(void){return s_rect.x;}
 static char s_line[16];
@@ -61,6 +62,7 @@ int ttf_font_select(int slot){(void)slot;return 0;}
 static void draw_vertical_page(uint8_t *fb,size_t page,EpdRect rect){(void)fb;(void)page;(void)rect;}
 int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;
 uint8_t test_guide_gray;
+EpdRect test_guide_rects[4096];
 void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags align,uint8_t fg,uint8_t bg){
  (void)fb;(void)x;(void)px;(void)align;(void)fg;(void)bg;assert(!strcmp(text,"tail"));++painted;baseline=y;
 }
@@ -76,7 +78,7 @@ static unsigned *s_link_hits_out_count;
 void ttf_draw_text_px_observed(uint8_t *fb,int x,int y,int px,const char *text,enum EpdFontFlags a,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px(fb,x,y,px,text,a,fg,bg);}
 void ttf_draw_text_px_spaced_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px_spaced(fb,x,y,px,text,tracking,fg,bg);}
 void ttf_draw_text_px_fitted_observed(uint8_t *fb,int x,int y,int px,const char *text,int tracking,int target,uint8_t fg,uint8_t bg,const ttf_glyph_observer_t *o){(void)o;ttf_draw_text_px_fitted(fb,x,y,px,text,tracking,target,fg,bg);}
-'''+source[start:end]+r'''
+'''+source[source.index('typedef struct { int start, end; bool vertical; } reading_guide_span_t;'):source.index('\nvoid book_layout_set_runs(')].replace('    record_glyph(NULL, p);', '    (void)p;')+source[start:end]+r'''
 int main(void){
  uint8_t fb=0;
  draw_page_impl(&fb,0,s_rect,10);assert(painted==1&&baseline==45);
