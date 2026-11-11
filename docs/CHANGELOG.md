@@ -7,6 +7,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 锁屏样式改为六类缩略图及同页选择，壁纸/透明书封支持三图分页、点选应用与长按放大；新增可取消的后台图片加载、跨页面内存/TF缩略缓存和下一页预读，预览就绪后统一整屏清刷，保存失败保留原选择。/ Redesign lock styles with six previews and inline choices; add three-image paging, apply-on-tap, hold preview, cancellable background loading, thumbnails reused across visits and next-page prefetch; settle completed previews with one full refresh and retain the choice on failed saves.
 
+- 完善电量校准日志：增加区间统计、低电提前点、判满/恢复原因与跨重启检查点；保留写卡失败记录并明确丢失情况，合并充电阶段重复事件，不增加睡眠唤醒或等待日志后才欠压保护。/ Add interval statistics, low-voltage milestones, full/restore diagnostics and cross-boot checkpoints; retain failed writes, report losses and coalesce charger chatter without extra sleep wakeups or delaying undervoltage protection.
+
+- 根据连续放电日志校正中低段电量曲线，减少低电量虚高与末段集中下降；首次使用新曲线时重新估算电量，保留充电策略、欠压保护和 3.30 V 空电显示边界。新曲线设备准确度待验收。/ Calibrate the middle/lower battery curve from continuous discharge to reduce overstated low levels and late drops; re-estimate on the first start with the new curve, retaining charging, undervoltage protection and the 3.30 V empty-display boundary. Device accuracy awaits acceptance.
+
 - 天气背景改为逐行无损压缩，传书网页以内嵌 gzip 交付，保留原始图像与网页内容；减少固件占用，为双 5 MiB OTA 槽留出更多余量。/ Losslessly pack weather rows and gzip the embedded transfer page, preserving pixels and page content while leaving more room in both 5 MiB OTA slots.
 - 继续压缩界面图标、日历数字和拼音字符索引，保持显示效果、字符与多音字覆盖、输入法候选顺序，增加 OTA 空间余量。/ Further compact icons, calendar numerals and the pinyin character index while retaining rendered pixels, character/polyphonic coverage and IME ordering.
 

@@ -303,6 +303,7 @@ failed:
 
 static bool s_charger_configured, s_charger_uv_shutdown;
 static int64_t s_charger_next_us, s_charger_resume_us;
+static void batt_log_undervoltage(int64_t now, uint16_t mv, bool have_i, int16_t ma, uint8_t status);
 
 // 主机停止维护前恢复硬件终止，不能把补充充电的暂时停充阶段留给断电后的芯片。
 // Restore hardware termination before host maintenance stops; never leave a recharge disable pending after power-off.
@@ -340,7 +341,7 @@ static void cx_charger_poll(int64_t now, bool have_v, uint16_t mv,
     const bool below = mv < CX_CHG_VREG_MV;
     const uint8_t vbus = status & 0x07;
     if (!s_charger_uv_shutdown && mv <= 3100 && have_status && vbus == 0) {
-        device_power_batt_log_event(DEVICE_POWER_BATT_LOG_UNDERVOLTAGE);
+        batt_log_undervoltage(now, mv, have_i, ma, status);
         const uint8_t shutdown = 0x01;
         if (dev_write(s_cx, CX_REG_CHG_CTRL3, &shutdown, 1) == ESP_OK) {
             s_charger_uv_shutdown = true;
@@ -399,9 +400,9 @@ static esp_err_t bq_read_current(int16_t* ma) {
 #define BATT_MAX_STEP_PERMILLE 10        // 单次可见变化最多 1%。 / At most 1% per visible step.
 #define BATT_MIN_STEP_INTERVAL_MS 60000  // 正常电量每分钟最多变化 1%。 / Normal levels move at most 1% per minute.
 #define BATT_LOW_STEP_INTERVAL_MS 10000  // 低电量保留快速跟随。 / Keep faster tracking at low levels.
-#define BATT_LOW_PERMILLE 140            // 保留 3.6 V 及以下的低电量锚点。 / Preserve low anchors at/below 3.6 V.
+#define BATT_LOW_PERMILLE 140            // 目标不高于 14% 时加快跟随。 / Track faster when the target is at/below 14%.
 #define BATT_RESTORE_TOL_PERMILLE 150    // 开机恢复容差。 / Boot-restore tolerance.
-#define BATT_STATE_VERSION 1            // 新曲线不恢复旧的无版本百分比。 / Do not restore unversioned percentages onto the revised curve.
+#define BATT_STATE_VERSION 2            // 中低段重标后不恢复旧百分比。 / Reject saved percentages from the previous curve.
 #define BATT_DONE_MIN_MV 4300            // 判满电压门槛，防状态位误判。 / Voltage gate for the done snap.
 // 涓流判满：原厂在充电期间关掉终止，STATUS1 停在恒压码 2，top-off 码 3 不会出现，
 // done 路径可能永不触发；高电压下持续近零电流即视为充满。
@@ -420,34 +421,24 @@ static esp_err_t bq_read_current(int16_t* ma) {
 // serial and card carry the same line.
 #define BATT_LOG_PATH "/sdcard/batt.log"
 
-// 4.4 V 高压电池 OCV-SOC 锚点（mV → ‰），mV 降序。2026-10-25 卡上日志实测充满平台
-// 4374–4385 mV（289 点、|I|≤15 mA，中位 4379、免载最高 4385）：原 4400 mV 锚点不可达，
-// 曲线满电只算到 98%，再被涓流判满硬拉到 100%，形成 2% 跳变。顶锚点改为 4380 mV。
-// 中段锚点 2026-10-27 用回充对账校准（batt_副本.log，849 行、34.5 h）：满电拔线深放
-// 8.4 h 至 4075 mV 后回满，净充 346 mAh；另一次夜间放到 4241 mV 回充 ~93 mAh。两条
-// 回充腿与放电库仑积分互相一致（容量取规格 2050 mAh）：4300→955、4200→875、4100→790。
-// 原锚点为无数据推测，中段偏低 6–11%。2026-11-05 新日志的连续清醒段以 4100 mV / 790‰
-// 为相对基准：至 4050/4000/3950 mV 分别放出 116379/195716/330144 µAh（2050 mAh 假定容量），
-// 得到 733/695/629‰；这些是相对估算，不是绝对 SOC 实测。3950–3600 mV 暂用直线衔接，
-// 不沿用无依据的 3900 mV 陡降；3600 mV 及以下保留原锚点，完整低段仍待整周期校准。
-// OCV-SOC anchors for the 4.4 V LiHV pack (mV -> permille), descending in mV. The
-// 2026-10-25 card log measured a full-charge plateau of 4374–4385 mV (289 samples,
-// |I| ≤ 15 mA, median 4379, 4385 unloaded max): the old 4400 mV anchor was unreachable, so
-// the curve topped out near 98% and the taper-full snap pulled it to 100% as a 2% jump.
-// The top anchor is now 4380 mV. Mid anchors were recalibrated 2026-10-27 by refill
-// accounting (batt_副本.log, 849 rows, 34.5 h): a full pack discharged 8.4 h to 4075 mV
-// took 346 mAh net to recharge, and a second overnight leg to 4241 mV took ~93 mAh. Both
-// refill legs agree with the discharge coulomb integral (capacity per spec, 2050 mAh):
-// 4300→955, 4200→875, 4100→790. The old mid anchors were guesses and read 6–11% low.
-// The continuous awake segment supplied on 2026-11-05 uses 4100 mV / 790 permille as
-// a relative baseline: 116379/195716/330144 uAh to 4050/4000/3950 mV yields 733/695/629
-// permille at the assumed 2050 mAh capacity, not measured absolute SOC. Provisionally
-// interpolate 3950–3600 mV rather than introduce another unsupported cliff at 3900 mV.
-// Anchors at/below 3600 mV remain unchanged; the low range still needs a full-cycle calibration.
+// 4.4 V 高压电池补偿/EMA 电压 → 显示千分比，mV 降序；不是静置 OCV 实测。
+// 4380 mV 满电平台及 3950 mV 以上基准保留。2026-11-11 连续放电日志在
+// 3950→3300 mV 间累计放出 1358437.917 µAh，按剩余积分归一到既有 629→0‰，
+// 替代无数据的低段直线。保留 3300 mV 的显示余量；不推断绝对容量或实际断电点。
+// 来源、公式与限制见本组件 README；曲线调整须同时递增 BATT_STATE_VERSION。
+// Compensated/EMA voltage -> displayed permille for the 4.4 V LiHV pack, descending
+// in mV; this is not measured rested OCV. Keep the 4380 mV full plateau and anchors
+// at/above 3950 mV. The continuous discharge supplied on 2026-11-11 delivered
+// 1358437.917 uAh between 3950 and 3300 mV; normalize remaining charge to the existing
+// 629->0 permille endpoints, replacing the provisional low-range line. Keep the
+// 3300 mV display reserve without inferring absolute capacity or physical cutoff.
+// See the component README for provenance and limits; bump BATT_STATE_VERSION with curve changes.
 static const int32_t s_soc_curve[][2] = {
     {4380, 1000}, {4300, 955}, {4200, 875}, {4100, 790}, {4050, 733},
-    {4000, 695},  {3950, 629}, {3600, 140}, {3500, 80},
-    {3400, 40},   {3300, 0},
+    {4000, 695},  {3950, 629}, {3900, 558}, {3850, 504}, {3825, 461},
+    {3800, 406},  {3775, 324}, {3750, 224}, {3725, 169}, {3700, 133},
+    {3675, 104},  {3650, 57},  {3625, 40},  {3600, 33},  {3500, 18},
+    {3400, 7},    {3300, 0},
 };
 
 // 滤波状态：跨 poll 保持，首采时初始化。 / Filter state held across polls, seeded by the first sample.
@@ -587,6 +578,11 @@ static int bq_read_soc(void) {
 
 // 电量持久化到 NVS，供深睡唤醒后恢复显示。 / Persist the percent to NVS for deep-standby wake restore.
 static int32_t s_batt_persisted_permille = -1;
+// 0 未首采、1 采用、2 无记录/读取失败、3 版本不符、4 数值非法、5 超容差。
+// 0 pending, 1 accepted, 2 absent/read error, 3 version mismatch, 4 invalid, 5 outside tolerance.
+static uint8_t s_batt_restore;
+static int32_t s_batt_restore_value = -1;
+static uint32_t s_batt_restore_version;
 
 static void batt_save(int32_t permille) {
     if (permille < 0 || permille > 1000 || permille == s_batt_persisted_permille) return;
@@ -603,9 +599,18 @@ static int32_t batt_load(void) {
     nvs_handle_t nvs;
     int32_t value = -1;
     uint32_t version = 0;
+    s_batt_restore = 2;
+    s_batt_restore_value = -1;
+    s_batt_restore_version = 0;
     if (nvs_open("pmu", NVS_READONLY, &nvs) != ESP_OK) return -1;
-    if (nvs_get_u32(nvs, "soc_ver", &version) != ESP_OK || version != BATT_STATE_VERSION ||
-        nvs_get_i32(nvs, "soc", &value) != ESP_OK || value < 0 || value > 1000) value = -1;
+    const bool have_version = nvs_get_u32(nvs, "soc_ver", &version) == ESP_OK;
+    const bool have_value = nvs_get_i32(nvs, "soc", &value) == ESP_OK;
+    if (have_version) s_batt_restore_version = version;
+    if (have_value) s_batt_restore_value = value;
+    if (!have_version || !have_value) value = -1;
+    else if (version != BATT_STATE_VERSION) { s_batt_restore = 3; value = -1; }
+    else if (value < 0 || value > 1000) { s_batt_restore = 4; value = -1; }
+    else s_batt_restore = 0;
     nvs_close(nvs);
     return value;
 }
@@ -624,10 +629,12 @@ static StaticSemaphore_t s_batt_io_storage;
 static SemaphoreHandle_t s_batt_io_mutex;
 static bool s_batt_io_available;
 static bool s_batt_log_busy;
+static bool s_batt_log_pending;
 static TaskHandle_t s_batt_log_task;
 static uint32_t s_batt_io_errors, s_batt_file_missed;
+static uint32_t s_batt_file_seq, s_batt_retry_request;
 static uint64_t s_batt_boot_id;
-static char s_batt_metadata[768];
+static char s_batt_metadata[1024];
 static int8_t s_batt_ic_soc = -1;
 static int64_t s_batt_ic_us = -1;
 
@@ -659,6 +666,12 @@ bool device_power_batt_log_storage(bool available, uint32_t timeout_ms) {
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
     s_batt_io_available = available;
     xSemaphoreGive(mutex);
+    if (available) {
+        portENTER_CRITICAL(&s_batt_log_mux);
+        ++s_batt_retry_request;
+        portEXIT_CRITICAL(&s_batt_log_mux);
+        batt_log_notify();
+    }
     return true;
 }
 
@@ -687,15 +700,70 @@ void device_power_batt_log_event(device_power_batt_log_event_t event) {
 
 bool device_power_batt_log_flush(uint32_t timeout_ms) {
     const int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    portENTER_CRITICAL(&s_batt_log_mux);
+    ++s_batt_retry_request;
+    portEXIT_CRITICAL(&s_batt_log_mux);
     batt_log_notify();
     for (;;) {
         portENTER_CRITICAL(&s_batt_log_mux);
-        const bool drained = s_batt_log.count == 0 && !s_batt_log_busy;
+        const bool drained = s_batt_log.count == 0 && !s_batt_log_busy && !s_batt_log_pending;
+        const bool lost = s_batt_log.dropped != 0 || s_batt_file_missed != 0;
         portEXIT_CRITICAL(&s_batt_log_mux);
-        if (drained) return true;
+        if (drained) return !lost;
         if (s_batt_log_task == NULL || esp_timer_get_time() >= deadline) return false;
         vTaskDelay(1);
     }
+}
+
+static void batt_log_undervoltage(int64_t now, uint16_t mv, bool have_i, int16_t ma, uint8_t status) {
+    // 只保存触发保护的真实读数到 RAM；不在保护路径等待存储或追加总线读取。
+    // Capture the actual protection inputs in RAM without storage waits or extra bus reads.
+    const int64_t sampled = esp_timer_get_time();
+    const batt_log_sample_t sample = {
+        .up_us = sampled, .wall_sec = batt_log_wall(), .read_us = (uint32_t)(sampled - now),
+        .have_v = true, .have_i = have_i,
+        .have_chg = true, .raw_mv = mv, .ma = ma, .charger_status = status,
+        .ic_soc = -1, .ic_us = -1, .full_hold_ms = -1,
+    };
+    portENTER_CRITICAL(&s_batt_log_mux);
+    batt_log_observe(&s_batt_log, &sample);
+    batt_log_note(&s_batt_log, BATT_LOG_UNDERVOLTAGE, sampled, sample.wall_sec);
+    const bool pending = s_batt_log.count != 0;
+    portEXIT_CRITICAL(&s_batt_log_mux);
+    if (pending) batt_log_notify();
+}
+
+static bool batt_log_checkpoint_load(batt_log_checkpoint_t *checkpoint) {
+    nvs_handle_t nvs;
+    if (nvs_open("battlog", NVS_READONLY, &nvs) != ESP_OK) return false;
+    size_t size = sizeof(*checkpoint);
+    const bool ok = nvs_get_blob(nvs, "checkpoint", checkpoint, &size) == ESP_OK &&
+                    size == sizeof(*checkpoint) && batt_log_checkpoint_valid(checkpoint);
+    nvs_close(nvs);
+    return ok;
+}
+
+static bool batt_log_checkpoint_save(const batt_log_checkpoint_t *checkpoint) {
+    if (!batt_log_checkpoint_valid(checkpoint)) return false;
+    nvs_handle_t nvs;
+    if (nvs_open("battlog", NVS_READWRITE, &nvs) != ESP_OK) return false;
+    const bool ok = nvs_set_blob(nvs, "checkpoint", checkpoint, sizeof(*checkpoint)) == ESP_OK &&
+                    nvs_commit(nvs) == ESP_OK;
+    nvs_close(nvs);
+    return ok;
+}
+
+static void batt_log_session_metadata(char *text, size_t size, const batt_log_checkpoint_t *base) {
+    snprintf(text, size,
+        "%s chain=%016llx resume=%d prev_boot=%016llx prev_session=%u prev_seq=%u "
+        "prev_t=%lld base_covered_ms=%lld base_unknown_ms=%lld base_lock_ms=%lld "
+        "base_in_uah_est=%lld base_out_uah_est=%lld between_boots=unknown",
+        s_batt_metadata, (unsigned long long)base->chain, (int)(base->boot != 0),
+        (unsigned long long)base->boot, (unsigned)base->session, (unsigned)base->seq,
+        base->boot ? (long long)base->wall_sec : -1LL,
+        (long long)(base->covered_us / 1000), (long long)(base->unknown_us / 1000),
+        (long long)(base->locked_us / 1000), (long long)(base->in_ma_us / 3600000),
+        (long long)(base->out_ma_us / 3600000));
 }
 
 // 只被事件或新到期采样唤醒；不为日志增加睡眠唤醒定时器。
@@ -703,45 +771,97 @@ bool device_power_batt_log_flush(uint32_t timeout_ms) {
 static void batt_log_task(void *arg) {
     (void)arg;
     batt_log_file_t file = {.header = true};
-    uint32_t serial_session = 0;
+    // 文件积压单独保留，避免缺卡挡住新的串口记录和低电检查点。
+    // Keep file backlog separate so missing storage cannot block serial output or new low-battery checkpoints.
+    static batt_log_state_t backlog;
+    uint32_t serial_session = 0, checkpoint_session = 0, retry_seen = 0, checkpoint_errors = 0;
+    batt_log_checkpoint_t base = {0};
+    int64_t retry_after = 0, checkpoint_attempt = -1;
+    char metadata[1536], line[BATT_LOG_LINE_SIZE];
+    batt_log_record_t record;
     for (;;) {
         (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (;;) {
-            batt_log_record_t record;
             portENTER_CRITICAL(&s_batt_log_mux);
             const bool have = batt_log_pop(&s_batt_log, &record);
-            s_batt_log_busy = have;
-            const uint32_t errors = s_batt_io_errors, missed = s_batt_file_missed;
+            s_batt_log_busy = have || backlog.count != 0;
+            const uint32_t errors = s_batt_io_errors, missed = s_batt_file_missed, file_seq = s_batt_file_seq;
             portEXIT_CRITICAL(&s_batt_log_mux);
             if (!have) break;
-            char line[BATT_LOG_LINE_SIZE];
+            if (checkpoint_session != record.session) {
+                const bool resumed = checkpoint_session == 0 && record.session == 1 &&
+                                     batt_log_checkpoint_load(&base) && base.active;
+                if (!resumed) base = (batt_log_checkpoint_t){.chain = s_batt_boot_id ^ record.session};
+                if (!base.chain) base.chain = 1;
+                checkpoint_session = record.session;
+                checkpoint_attempt = -1;
+            }
+            const bool boundary = (record.events & (BATT_LOG_BEGIN | BATT_LOG_END | BATT_LOG_LOW |
+                BATT_LOG_OFF | BATT_LOG_RESTART | BATT_LOG_UNDERVOLTAGE)) != 0;
+            const bool full_checkpoint = (record.events & BATT_LOG_FULL) && record.sample.charge_done &&
+                record.up_us - checkpoint_attempt >= BATT_LOG_PERIOD_US;
+            if (checkpoint_attempt < 0 || boundary || full_checkpoint ||
+                record.up_us - checkpoint_attempt >= BATT_LOG_CHECKPOINT_US) {
+                batt_log_checkpoint_t checkpoint;
+                batt_log_checkpoint_make(&checkpoint, &base, &record, s_batt_boot_id);
+                if (!batt_log_checkpoint_save(&checkpoint)) ++checkpoint_errors;
+                checkpoint_attempt = record.up_us;
+            }
+            record.base = base;
+            record.checkpoint_errors = checkpoint_errors;
+            if (serial_session != record.session) {
+                batt_log_session_metadata(metadata, sizeof(metadata), &base);
+                ESP_LOGI(TAG, "batt-meta: fmt=3 session=%u %s", (unsigned)record.session, metadata);
+                serial_session = record.session;
+            }
             const int n = batt_log_format(line, sizeof(line), &record, s_batt_boot_id,
-                                          esp_timer_get_time(), errors, missed);
-            bool ok = n > 0;
-            bool attempted = false;
+                                          esp_timer_get_time(), errors, missed, file_seq);
+            if (n > 0) ESP_LOGI(TAG, "batt: %.*s", n - 1, line);
+            const bool lost = batt_log_retain(&backlog, &record);
+            portENTER_CRITICAL(&s_batt_log_mux);
+            if (lost) ++s_batt_file_missed;
+            s_batt_log_pending = backlog.count != 0;
+            portEXIT_CRITICAL(&s_batt_log_mux);
+        }
+        while (backlog.count) {
+            const int64_t now = esp_timer_get_time();
+            portENTER_CRITICAL(&s_batt_log_mux);
+            const uint32_t errors = s_batt_io_errors, missed = s_batt_file_missed,
+                           file_seq = s_batt_file_seq, retry = s_batt_retry_request;
+            portEXIT_CRITICAL(&s_batt_log_mux);
+            if (now < retry_after && retry == retry_seen) break;
+            retry_seen = retry;
+            const batt_log_record_t *next = &backlog.queue[backlog.head];
+            batt_log_session_metadata(metadata, sizeof(metadata), &next->base);
+            const int n = batt_log_format(line, sizeof(line), next, s_batt_boot_id,
+                                          now, errors, missed, file_seq);
+            bool ok = n > 0, attempted = false;
             if (ok) {
-                if (serial_session != record.session) {
-                    ESP_LOGI(TAG, "batt-meta: fmt=2 session=%u %s", (unsigned)record.session, s_batt_metadata);
-                    serial_session = record.session;
-                }
-                ESP_LOGI(TAG, "batt: %.*s", n - 1, line);
                 SemaphoreHandle_t mutex = batt_log_io_mutex();
                 (void)xSemaphoreTake(mutex, portMAX_DELAY);
                 attempted = s_batt_io_available;
                 ok = attempted && batt_log_append(&file, BATT_LOG_PATH, BATT_LOG_PATH ".1",
-                    BATT_LOG_FILE_LIMIT, record.session, s_batt_metadata, line);
+                    BATT_LOG_FILE_LIMIT, next->session, metadata, line);
                 xSemaphoreGive(mutex);
             }
             portENTER_CRITICAL(&s_batt_log_mux);
-            if (!ok) {
-                ++s_batt_file_missed;
-                if (attempted || n <= 0) ++s_batt_io_errors;
-            }
-            s_batt_log_busy = false;
+            if (ok) s_batt_file_seq = next->seq;
+            if (!ok && (attempted || n <= 0)) ++s_batt_io_errors;
+            if (n <= 0) ++s_batt_file_missed;
             portEXIT_CRITICAL(&s_batt_log_mux);
-            if (!ok) file.header = true;
-            if (!ok && attempted) ESP_LOGW(TAG, "battery log write/sync failed");
+            if (ok || n <= 0) (void)batt_log_pop(&backlog, &record);
+            if (ok) retry_after = 0;
+            if (!ok) {
+                file.header = true;
+                retry_after = now + BATT_LOG_PERIOD_US;
+                if (attempted) ESP_LOGW(TAG, "battery log write/sync failed");
+                break;
+            }
         }
+        portENTER_CRITICAL(&s_batt_log_mux);
+        s_batt_log_pending = backlog.count != 0;
+        s_batt_log_busy = false;
+        portEXIT_CRITICAL(&s_batt_log_mux);
     }
 }
 
@@ -762,13 +882,16 @@ static void batt_log_metadata(void) {
     snprintf(s_batt_metadata, sizeof(s_batt_metadata),
         "fw=%.31s elf=%s built=%s boot=%016llx reset=%d curve_hash=%08lx "
         "r_mohm=%d comp_cap_mv=%d ema_ms=%d deadband=%d step=%d step_ms=%d "
-        "full_mv=%d full_ma=%d full_ms=%d max_dt_ms=%lld q=sampled_estimate "
+        "full_mv=%d full_ma=%d full_ms=%d max_dt_ms=%lld state_ver=%d low_step_ms=%d low_target=%d "
+        "restore_tol=%d saved_ver=%lu saved_soc=%ld q=sampled_estimate "
         "units=mv,ma,permille,ms,uah valid_bits=v1,i2,cx4,ic8",
         app->version, sha, built, (unsigned long long)s_batt_boot_id,
         (int)esp_reset_reason(), (unsigned long)hash, BATT_R_MOHM, BATT_COMP_CAP_MV,
         BATT_EMA_TAU_MS, BATT_DEADBAND_PERMILLE, BATT_MAX_STEP_PERMILLE,
         BATT_MIN_STEP_INTERVAL_MS, BATT_FULL_MV, BATT_FULL_MA, BATT_FULL_CONFIRM_MS,
-        (long long)(BATT_LOG_MAX_INTERVAL_US / 1000));
+        (long long)(BATT_LOG_MAX_INTERVAL_US / 1000), BATT_STATE_VERSION,
+        BATT_LOW_STEP_INTERVAL_MS, BATT_LOW_PERMILLE, BATT_RESTORE_TOL_PERMILLE,
+        (unsigned long)s_batt_restore_version, (long)s_batt_restore_value);
 }
 
 static batt_filter_t s_batt_filter;
@@ -991,7 +1114,9 @@ static void poll_battery(void) {
     // Taper-full fallback: the CX never reports done even at zero current (see
     // the BATT_FULL_* notes); sustained near-zero current at a high voltage also
     // enters the filter's charge-done alignment.
-    if (now < s_batt_poll_us || now - s_batt_poll_us > BATT_FULL_MAX_GAP_US)
+    const bool full_gap = now < s_batt_poll_us || now - s_batt_poll_us > BATT_FULL_MAX_GAP_US;
+    const bool was_confirming = s_batt_full_since_us >= 0;
+    if (full_gap)
         s_batt_full_since_us = -1;
     const bool charge_done = batt_full_now(charge_done_cx, charging, have_v, (int32_t)mv,
                                            have_i, ma, now, &s_batt_full_since_us);
@@ -1005,6 +1130,11 @@ static void poll_battery(void) {
     if (have_v) {
         int32_t ocv_mv = (int32_t)mv;
         int32_t disp = 0;
+        if (!s_batt_filter.inited && s_batt_saved_permille >= 0) {
+            const int32_t delta = s_batt_saved_permille - batt_curve_soc(batt_compensated_mv(mv, have_i, ma));
+            s_batt_restore = delta <= BATT_RESTORE_TOL_PERMILLE &&
+                             delta >= -BATT_RESTORE_TOL_PERMILLE ? 1 : 5;
+        }
         batt_filter_step(&s_batt_filter, now, mv, have_i, ma, charging, charge_done,
                          s_batt_saved_permille, &ocv_mv, &disp);
         s_batt_saved_permille = -1;  // 恢复值只喂首采。 / The restore value feeds the first sample only.
@@ -1047,6 +1177,18 @@ static void poll_battery(void) {
             .curve_permille = have_v ? batt_curve_soc(s_snap.battery_mv) : -1,
             .disp_permille = have_v ? s_snap.soc_permille : -1,
             .ic_soc = s_batt_ic_soc, .ic_us = s_batt_ic_us,
+            .have_filter = have_v,
+            .full_hold_ms = s_batt_full_since_us < 0 ? -1 :
+                (int32_t)((now - s_batt_full_since_us) / 1000 > BATT_FULL_CONFIRM_MS ?
+                    BATT_FULL_CONFIRM_MS : (now - s_batt_full_since_us) / 1000),
+            .full_gate = (charging ? 0 : BATT_LOG_FULL_NOT_CHARGING) |
+                (have_v ? (mv < BATT_FULL_MV ? BATT_LOG_FULL_LOW_V : 0) : BATT_LOG_FULL_NO_V) |
+                (have_i ? ((ma >= BATT_FULL_MA ? BATT_LOG_FULL_HIGH_I : 0) |
+                           (ma <= -BATT_FULL_MA ? BATT_LOG_FULL_DISCHARGE : 0)) : BATT_LOG_FULL_NO_I) |
+                (full_gap ? BATT_LOG_FULL_GAP : 0),
+            .full_reset = was_confirming && !charge_done_cx &&
+                          (full_gap || s_batt_full_since_us < 0),
+            .restore = s_batt_restore,
         };
         portENTER_CRITICAL(&s_batt_log_mux);
         batt_log_observe(&s_batt_log, &sample);
@@ -1120,7 +1262,7 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
     // Calibration logger task: failing to start only costs the serial/card log.
     batt_log_metadata();
     if (s_batt_log_task == NULL &&
-        xTaskCreate(batt_log_task, "battlog", 6144, NULL, 1, &s_batt_log_task) != pdPASS) {
+        xTaskCreate(batt_log_task, "battlog", 8192, NULL, 1, &s_batt_log_task) != pdPASS) {
         ESP_LOGW(TAG, "battery log task not started");
     }
     batt_log_notify();
@@ -1130,15 +1272,17 @@ esp_err_t device_power_init(i2c_master_bus_handle_t bus_handle,
 }
 
 esp_err_t device_power_deinit(void) {
-    // 句柄释放前收齐采样；任务留在通知等待中，后续初始化可复用。
-    // Join sampling before releasing handles; retain the notification-blocked task for reinitialization.
+    // 释放前停采样；独立日志任务可保留文件积压，后续初始化复用。
+    // Stop sampling before teardown; retain the independent logger and its file backlog for reinitialization.
     (void)device_power_key_sampler_enable(false);
     const esp_err_t parked = cx_charger_park();
     if (parked != ESP_OK) return parked;
     s_charger_configured = false;
     s_charger_next_us = s_charger_resume_us = 0;
     device_power_set_batt_log(false);
-    if (!device_power_batt_log_flush(2000)) return ESP_ERR_TIMEOUT;
+    // 日志任务不访问 I2C；缺卡/历史丢行不能阻止释放板级句柄。
+    // The logger never accesses I2C; unavailable storage or earlier loss must not block driver teardown.
+    (void)device_power_batt_log_flush(2000);
     // 保留等待通知的任务，避免异步删除打断文件关闭；后续初始化复用。
     // Retain the notification-blocked task so asynchronous deletion cannot interrupt close; reinitialize by reusing it.
     if (s_bq) i2c_master_bus_rm_device(s_bq);
