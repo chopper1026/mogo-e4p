@@ -15,8 +15,10 @@ extern int test_guide_second_y;
 extern int test_guide_last_y;
 extern int test_guide_height;
 extern uint8_t test_guide_gray;
+extern EpdRect test_guide_rects[4096];
 static inline void epd_fill_rect(EpdRect rect, uint8_t gray, uint8_t* fb) {
     (void)fb;
+    if (test_guide_segments < 4096) test_guide_rects[test_guide_segments] = rect;
     if (!test_guide_segments) {
         test_guide_first_x = rect.x;
         test_guide_first_y = rect.y;

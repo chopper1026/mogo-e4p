@@ -55,6 +55,7 @@ int test_guide_second_y;
 int test_guide_last_y;
 int test_guide_height;
 uint8_t test_guide_gray;
+EpdRect test_guide_rects[4096];
 // 宿主假字体：一个可配置就绪位的槽表 + 一个可配置的当前槽，用来验证按 run 换字体。
 // Host stand-in font: a slot table with configurable readiness plus a current slot, enough to
 // check that measuring follows the runs.
@@ -166,7 +167,9 @@ static void observe_test(const char *text, int x, int y, int px, int tracking, b
         for(size_t j=0;j<n;++j) if(((unsigned char)one[j]&0xc0)!=0x80)
             advance += test_zero_width&&one[j]=='~'?0:(unsigned char)one[j]>=0x80&&test_cjk_advance?test_cjk_advance:one[j]=='i'?px/2:one[j]=='W'?px+px/2:px;
         advance += test_slot_advance[test_slot];
-        ttf_glyph_position_t position={at,at+n,0,x,vertical?y:y-px,vertical?px:advance,vertical?advance:px};
+        uint32_t cp=(unsigned char)one[0];
+        if(n>1){cp&=n==2?0x1f:n==3?0x0f:0x07;for(size_t j=1;j<n;++j)cp=(cp<<6)|((unsigned char)one[j]&0x3f);}
+        ttf_glyph_position_t position={at,at+n,cp,x,vertical?y:y-px,vertical?px:advance,vertical?advance:px};
         observer->record(observer->context,&position);
         if(vertical)y+=advance+tracking;else x+=advance+tracking;
         at+=n;
@@ -851,6 +854,61 @@ int main(void) {
     book_layout_set_reading_line_offset(0);
     book_layout_set_reading_line(0);
     book_layout_set_vertical(false);
+    // Text-follow uses actual font pens, including its justification fallback, rather than requested width.
+    r=(EpdRect){10,20,400,120};
+    book_layout_set_first_line_indent(2);
+    book_layout_set_reading_line(3);
+    book_layout_set_reading_line_follow_text(false);
+    assert(book_layout_build("甲乙丙丁",strlen("甲乙丙丁"),r,40));
+    drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,40);
+    assert(test_guide_segments==1 && test_guide_rects[0].x==10 && test_guide_rects[0].width==400);
+    book_layout_set_reading_line_follow_text(true);
+    for(unsigned style=1;style<=3;++style){
+        book_layout_set_reading_line(style);
+        drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,40);
+        assert(test_guide_segments>0 && first_draw_x==90);
+        for(int i=0;i<test_guide_segments;++i)assert(test_guide_rects[i].x>=90 && test_guide_rects[i].x+test_guide_rects[i].width<=250);
+        if(style==3)assert(test_guide_segments==1 && test_guide_rects[0].x==90 && test_guide_rects[0].width==160);
+    }
+    book_layout_set_reading_line(3);book_layout_set_first_line_indent(0);
+    // Center/end alignment and whitespace-only lines keep empty margins unruled.
+    const char aligned_text[]="甲乙";
+    blk_t guide_block={.offset=0,.len=strlen(aligned_text),.image=-1};
+    for(unsigned align=0;align<3;++align){
+        guide_block.align=align;
+        assert(book_layout_build_blocks(aligned_text,strlen(aligned_text),&guide_block,1,r,40));
+        drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,40);
+        int expected=r.x+(align==1?160:align==2?320:0);
+        assert(test_guide_segments==1 && test_guide_rects[0].x==expected && test_guide_rects[0].width==80);
+    }
+    assert(book_layout_build("  \n甲乙  \n\n",strlen("  \n甲乙  \n\n"),r,20));
+    drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,20);
+    assert(test_guide_segments==1 && test_guide_rects[0].width==40);
+    // The host fitted font deliberately declines justification; the line still stops at the real last glyph.
+    r.width=95;
+    assert(book_layout_build("abcdefghi",9,r,20));
+    drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,20);
+    assert(test_guide_segments>=2 && test_guide_rects[0].width==80);
+    for(int i=0;i<test_guide_segments;++i)assert(test_guide_rects[i].y+test_guide_rects[i].height<=r.y+r.height);
+    // Sliced prefetch and full rendering must produce the same guide rectangles.
+    EpdRect synchronous[4096];int expected_count=test_guide_segments;
+    memcpy(synchronous,test_guide_rects,(size_t)expected_count*sizeof(*synchronous));
+    book_layout_draw_cursor_t guide_cursor={0};test_guide_segments=0;drawn[0]=0;
+    while(book_layout_draw_slice(&fb,0,r,20,&guide_cursor)==0){}
+    assert(!guide_cursor.failed && test_guide_segments==expected_count && !memcmp(synchronous,test_guide_rects,(size_t)expected_count*sizeof(*synchronous)));
+    book_layout_set_vertical(true);book_layout_set_first_line_indent(2);
+    r=(EpdRect){10,20,160,400};
+    assert(book_layout_build("甲乙丙丁",strlen("甲乙丙丁"),r,40));
+    drawn[0]=0;test_guide_segments=0;book_layout_draw_page(&fb,0,r,40);
+    assert(test_guide_segments==1 && test_guide_rects[0].y==100 && test_guide_rects[0].height==160 && test_guide_rects[0].width==2);
+    assert(test_guide_rects[0].x>=last_vertical_x+40);
+    book_layout_set_reading_line_follow_text(false);test_guide_segments=0;drawn[0]=0;
+    book_layout_draw_page(&fb,0,r,40);
+    assert(test_guide_segments==1 && test_guide_rects[0].y==r.y && test_guide_rects[0].height==r.height);
+    book_layout_set_reading_line_follow_text(true);book_layout_set_reading_line(0);
+    test_guide_segments=0;drawn[0]=0;book_layout_draw_page(&fb,0,r,40);assert(!test_guide_segments);
+    book_layout_set_reading_line_follow_text(false);book_layout_set_vertical(false);
+    puts("PASS: solid/full/text-follow guides, indent/alignment/blank/short rows, actual font pens, prefetch and vertical spans");
     // 右标点可在安全留白内悬挂，下一页必须仍从正文开始。/ Hang a closer safely without starting the next page with punctuation.
     book_layout_set_first_line_indent(0);
     r = (EpdRect){40, 0, 40, 15};

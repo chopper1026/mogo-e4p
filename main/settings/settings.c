@@ -143,6 +143,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_BOOK_INDENT "bk_indent"
 #define NVS_KEY_BOOK_INDENT_ADJUST "bk_indent_adj"
 #define NVS_KEY_BOOK_RULE "bk_rule"
+#define NVS_KEY_BOOK_RULE_TEXT "bk_rule_text"
 #define NVS_KEY_BOOK_RULE_OFFSET "bk_rule_y"
 #define NVS_KEY_SHELF_STYLE "shelf_ui"
 #define NVS_KEY_SHELF_V22 "shelf_v22"
@@ -299,6 +300,7 @@ static uint8_t book_title_size_snap(unsigned px) {
     return (uint8_t)(APP_BOOK_TITLE_SIZE_MIN + step * APP_BOOK_TITLE_SIZE_STEP);
 }
 static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_book_rule_offset = 4;
+static bool s_book_reading_line_follow_text;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 // 默认无操作 5 分钟自动锁屏。
@@ -594,8 +596,10 @@ void app_settings_init(void) {
             s_book_tracking=(uint8_t)(px-APP_BOOK_TRACK_MIN);
         } else if(tracking>=192 && tracking<192+APP_BOOK_TRACK_COUNT)s_book_tracking=tracking-192;
     }
-    if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 2)
+    if (nvs_get_u8(h, NVS_KEY_BOOK_RULE, &reading_line) == ESP_OK && reading_line <= 3)
         s_book_reading_line = reading_line;
+    uint8_t rule_follow = 0;
+    s_book_reading_line_follow_text = nvs_get_u8(h, NVS_KEY_BOOK_RULE_TEXT, &rule_follow) == ESP_OK && rule_follow == 1;
     if (nvs_get_u8(h, NVS_KEY_BOOK_RULE_OFFSET, &rule_offset) == ESP_OK && rule_offset <= 8)
         s_book_rule_offset = rule_offset;
     if (nvs_get_u8(h, NVS_KEY_BOOK_INDENT, &indent) == ESP_OK && indent <= 3)
@@ -1360,9 +1364,15 @@ void app_settings_set_book_indent_adjust(int8_t px) {
 }
 uint8_t app_settings_book_reading_line(void) { return s_book_reading_line; }
 void app_settings_set_book_reading_line(uint8_t style) {
-    if (style > 2 || style == s_book_reading_line) return;
+    if (style > 3 || style == s_book_reading_line) return;
     s_book_reading_line = style;
     nvs_put_u8(NVS_KEY_BOOK_RULE, style);
+}
+bool app_settings_book_reading_line_follow_text(void) { return s_book_reading_line_follow_text; }
+void app_settings_set_book_reading_line_follow_text(bool enabled) {
+    if (enabled == s_book_reading_line_follow_text) return;
+    s_book_reading_line_follow_text = enabled;
+    nvs_put_u8(NVS_KEY_BOOK_RULE_TEXT, enabled ? 1 : 0);
 }
 int8_t app_settings_book_reading_line_offset(void) { return (int8_t)((int)s_book_rule_offset - 4) * 2; }
 void app_settings_set_book_reading_line_offset(int8_t offset_px) {
@@ -1766,11 +1776,11 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     unsigned char c = backup->magic[7];
     // W 追加 v32 信息栏高度；X 追加 v33 首页布局；Y 追加 v34 进度条显隐；Z 追加 v35 书内样式。
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
-    // a/b/c/d追加禁触、票根背景、日历子样式与九宫格；e允许时钟样式5，无新尾块。
-    // a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids; e accepts clock style 5 without new tails.
+    // a/b/c/d追加禁触、票根背景、日历子样式与九宫格；e允许时钟，f在阅读线低两位保存样式、bit2保存跟随正文，无新尾块。
+    // a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids; e accepts clocks, f packs guide style in bits 0–1 and text-follow in bit 2 without new tails.
     // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
     // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1869,7 +1879,7 @@ esp_err_t app_settings_backup_save(void) {
     // v37：追加票根背景选择。/ V37 appends the ticket background choice.
     // v38：追加日历子样式，主样式编号4表示日历。/ V38 appends the calendar variant; main style 4 selects calendar.
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
-    memcpy(backup.magic, "PICOSETe", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETf", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1887,7 +1897,7 @@ esp_err_t app_settings_backup_save(void) {
     // bit meaning: 1 = status bar hidden.
     f[BK_IMMERSIVE] = s_reader_statusbar ? 0 : 1;
     f[BK_TRACKING] = s_book_tracking;
-    f[BK_READING_LINE] = s_book_reading_line;
+    f[BK_READING_LINE] = s_book_reading_line | (s_book_reading_line_follow_text ? 4 : 0);
     f[BK_LINE_SPACING] = s_book_line;
     // 旧槽位只供旧固件读取，上限仍是 48；四向真值在 v29 尾块里。
     // The legacy slot only serves older firmware and keeps its 48 px ceiling; the real four
@@ -2106,7 +2116,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
         f[BK_TURN] > 1 || f[BK_POWER_TURN] > 1 || f[BK_IMMERSIVE] > 1 ||
-        f[BK_TRACKING] > (legacy_local_layout ? 4 : version>=20 ? APP_BOOK_TRACK_COUNT-1 : version==19 ? 20 : 4) || f[BK_READING_LINE] > 2 ||
+        f[BK_TRACKING] > (legacy_local_layout ? 4 : version>=20 ? APP_BOOK_TRACK_COUNT-1 : version==19 ? 20 : 4) || f[BK_READING_LINE] > (version >= 41 ? 7 : 2) ||
         f[BK_LINE_SPACING] < 110 || f[BK_LINE_SPACING] > 150 ||
         f[BK_MARGIN] > (legacy_local_layout ? 60 : 48) ||
         (version>=20 ?
@@ -2408,7 +2418,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT_FINE, fine_weight+APP_BOOK_WEIGHT_FINE_MAX);
     const bool antialias = version < 15 || backup.flags[BK_SHAKE] == 0;
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_AA, antialias ? 1 : 0);
-    BACKUP_SET_U8(NVS_KEY_BOOK_RULE, BK_READING_LINE);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE, backup.flags[BK_READING_LINE] & 3);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_TEXT, (backup.flags[BK_READING_LINE] & 4) ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
     BACKUP_SET_U8(NVS_KEY_BOOK_LINE, BK_LINE_SPACING);
     BACKUP_SET_U8(NVS_KEY_BOOK_MARGIN, BK_MARGIN);
@@ -2493,7 +2504,8 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;
-    s_book_reading_line = f[BK_READING_LINE];
+    s_book_reading_line = f[BK_READING_LINE] & 3;
+    s_book_reading_line_follow_text = (f[BK_READING_LINE] & 4) != 0;
     s_book_rule_offset = rule_offset;
     s_book_line = f[BK_LINE_SPACING];
     s_book_margin_l = margins.left;

@@ -174,6 +174,7 @@ static int durable_touch = -1, pending_touch = -1;
 static int durable_ticket = -1, pending_ticket = -1;
 static bool ticket_write_fails;
 static int durable_face = -1, pending_face = -1;
+static int durable_rule = -1, pending_rule = -1, durable_rule_follow = -1, pending_rule_follow = -1;
 static bool face_write_fails, face_open_fails;
 static int durable_up = -1, pending_up = -1;
 static bool regions_write_fails, progress_write_fails, touch_write_fails;
@@ -186,12 +187,15 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     pending_touch = -1;
     pending_ticket = -1;
     pending_face = -1;
+    pending_rule = pending_rule_follow = -1;
     if (mode == NVS_READWRITE && face_open_fails) return ESP_FAIL;
     pending_up = -1;
     return nvs_open(ns, mode, h);
 }
 void backup_nvs_close(nvs_handle_t h) { pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_BOOK_RULE)) { if (durable_rule < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_rule; return ESP_OK; }
+    if (!strcmp(key, NVS_KEY_BOOK_RULE_TEXT)) { if (durable_rule_follow < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_rule_follow; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (durable_face < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_face; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_TICKET_BACKGROUND)) {
         if (durable_ticket < 0) return ESP_ERR_NVS_NOT_FOUND;
@@ -224,6 +228,8 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key, NVS_KEY_BOOK_RULE)) { pending_rule = value; return ESP_OK; }
+    if (!strcmp(key, NVS_KEY_BOOK_RULE_TEXT)) { pending_rule_follow = value; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (face_write_fails) return ESP_FAIL; pending_face = value; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_TICKET_BACKGROUND)) {
         if (ticket_write_fails) return ESP_FAIL;
@@ -266,6 +272,8 @@ esp_err_t backup_nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_rule >= 0) durable_rule = pending_rule;
+    if (err == ESP_OK && pending_rule_follow >= 0) durable_rule_follow = pending_rule_follow;
     if (err == ESP_OK && pending_tap[0]) memcpy(durable_tap,pending_tap,sizeof(durable_tap));
     if (err == ESP_OK && pending_face >= 0) durable_face = pending_face;
     if (err == ESP_OK && pending_regions >= 0) durable_regions = pending_regions;
@@ -749,7 +757,7 @@ static void test_reader_touch_lock(void) {
         assert(app_settings_backup_save() == ESP_OK);
         file = fopen(BACKUP_FILE, "r+b");
         settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 40);
+        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 41);
         assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
         memcpy(header.magic, "PICOSETZ", 8); backup_seal(&header);
@@ -849,7 +857,7 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
     settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 40);
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 41);
     assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
     assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
     memcpy(header.magic, "PICOSETa", 8); backup_seal(&header);
@@ -887,7 +895,7 @@ static void test_clock_style(void) {
         // Reject style 5 in old v39 even with a valid base checksum.
         settings_backup_v1_t header={0};memcpy(header.magic,"PICOSETd",8);
         FILE *f=fopen(BACKUP_FILE,"rb");assert(f&&fread(&header,1,sizeof(header),f)==sizeof(header)&&!fclose(f));
-        assert(backup_version(&header)==40&&backup_valid(&header));
+        assert(backup_version(&header)==41&&backup_valid(&header));
         memcpy(header.magic,"PICOSETd",8);backup_seal(&header);assert(!backup_valid(&header));
         header.flags[BK_LOCK]=4;backup_seal(&header);assert(backup_valid(&header));
     }
@@ -1056,6 +1064,47 @@ static void test_tap_grid(void) {
     }
     durable_tap[0]=0;loaded_vertical=0;app_settings_init();
     puts("PASS: nine tap cells/eight actions/three modes, reboot, atomic open/write/commit/flash faults, v39 roundtrip, invalid/checksum/truncated tails and v38 migration");
+}
+
+static void test_reading_guides(void) {
+    app_settings_set_lock_style(2);
+    for (unsigned style=0; style<4; ++style) for (unsigned follow=0; follow<2; ++follow) {
+        app_settings_set_book_reading_line(style);
+        app_settings_set_book_reading_line_follow_text(follow);
+        app_settings_init();
+        assert(app_settings_book_reading_line()==style && app_settings_book_reading_line_follow_text()==(bool)follow);
+        assert(app_settings_backup_save()==ESP_OK);
+        FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
+        assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && !fclose(file));
+        assert(backup_version(&header)==41 && header.flags[BK_READING_LINE]==(style|(follow?4:0)));
+        app_settings_set_book_reading_line((style+1)%4);
+        app_settings_set_book_reading_line_follow_text(!follow);
+        commit_fails=true;assert(app_settings_backup_restore()==ESP_FAIL);commit_fails=false;
+        assert(app_settings_book_reading_line()==(style+1)%4 && app_settings_book_reading_line_follow_text()==!follow);
+        assert(app_settings_backup_restore()==ESP_OK);
+        app_settings_init();
+        assert(app_settings_book_reading_line()==style && app_settings_book_reading_line_follow_text()==(bool)follow);
+        for(unsigned invalid=8;invalid<256;++invalid){header.flags[BK_READING_LINE]=invalid;backup_seal(&header);assert(!backup_valid(&header));}
+        memcpy(header.magic,"PICOSETe",8);
+        header.flags[BK_READING_LINE]=3;backup_seal(&header);assert(!backup_valid(&header));
+        header.flags[BK_READING_LINE]=4;backup_seal(&header);assert(!backup_valid(&header));
+    }
+    // v40 has the same tail; reseal each header-dependent checksum and retain its full history.
+    app_settings_set_book_reading_line(2);app_settings_set_book_reading_line_follow_text(false);
+    assert(app_settings_backup_save()==ESP_OK);
+    FILE *file=fopen(BACKUP_FILE,"r+b");settings_backup_v1_t header;uint8_t ext[7];settings_backup_profile_t profile;
+    assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fread(ext,1,7,file)==7 && fread(&profile,1,sizeof(profile),file)==sizeof(profile));
+    memcpy(header.magic,"PICOSETe",8);backup_seal(&header);
+    uint32_t hash=backup_shutdown_checksum(&header,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[i+3]=(uint8_t)(hash>>(8*i));
+    hash=backup_profile_checksum(&header,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
+    rewind(file);assert(fwrite(&header,1,sizeof(header),file)==sizeof(header) && fwrite(ext,1,7,file)==7 && fwrite(&profile,1,sizeof(profile),file)==sizeof(profile) && !fclose(file));
+    app_settings_set_book_reading_line(3);app_settings_set_book_reading_line_follow_text(true);
+    assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
+    assert(app_settings_book_reading_line()==2 && !app_settings_book_reading_line_follow_text());
+    app_settings_set_book_reading_line(255);assert(app_settings_book_reading_line()==2);
+    durable_rule_follow=2;app_settings_init();assert(!app_settings_book_reading_line_follow_text());
+    app_settings_set_book_reading_line(0);durable_rule_follow=-1;
+    puts("PASS: all guide styles/follow modes, restart, v41 backup, failed restore, invalid values and v40 migration");
 }
 
 int main(void) {
@@ -2117,6 +2166,7 @@ int main(void) {
     test_reader_touch_lock();
     test_ticket_background();
     test_calendar_style();
+    test_reading_guides();
     test_clock_style();
     test_tap_grid();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");

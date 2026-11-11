@@ -36,6 +36,7 @@ static unsigned s_first_line_indent_em = 2;
 static int s_first_line_indent_adjust_px;
 static unsigned s_reading_line;
 static int s_reading_line_offset;
+static bool s_reading_line_follow_text;
 static bool s_images_visible = true;
 static bool s_book_styles = true;
 // 竖排：同一套折行与禁则逻辑，只是推进方向朝下、堆叠方向朝左。
@@ -149,6 +150,42 @@ static void record_glyph(void *context, const ttf_glyph_position_t *p) {
         .x = p->x, .y = p->y, .width = p->width, .height = p->height};
 }
 static const ttf_glyph_observer_t s_glyph_observer = {record_glyph, NULL};
+
+typedef struct { int start, end; bool vertical; } reading_guide_span_t;
+static void record_reading_guide_glyph(void *context, const ttf_glyph_position_t *p) {
+    record_glyph(NULL, p);
+    if (p->codepoint <= 0x20 || p->codepoint == 0xa0 || p->codepoint == 0x3000) return;
+    reading_guide_span_t *span = context;
+    int start = span->vertical ? p->y : p->x;
+    int length = span->vertical ? p->height : p->width;
+    if (length <= 0 || start > INT_MAX - length) return;
+    if (start < span->start) span->start = start;
+    if (start + length > span->end) span->end = start + length;
+}
+
+static void draw_reading_guide(uint8_t *fb, EpdRect area, reading_guide_span_t span) {
+    int origin = span.vertical ? area.y : area.x;
+    int limit = origin + (span.vertical ? area.height : area.width);
+    int start = origin, end = limit;
+    if (s_reading_line_follow_text) {
+        if (span.start > start) start = span.start;
+        if (span.end < end) end = span.end;
+    }
+    if (start >= end) return;
+    int dash = s_reading_line == 1 ? 19 : s_reading_line == 2 ? 2 : end - start;
+    int period = s_reading_line == 1 ? 31 : s_reading_line == 2 ? 13 : end - start;
+    // 裁短范围仍沿用正文原点的虚实相位。/ Clipped guides retain the body's dash phase.
+    int pos = s_reading_line == 3 ? start : origin + (start - origin) / period * period;
+    for (; pos < end; pos += period) {
+        int first = pos < start ? start : pos;
+        int last = pos + dash < end ? pos + dash : end;
+        if (first >= last) continue;
+        EpdRect segment = area;
+        if (span.vertical) { segment.y = first; segment.height = last - first; }
+        else { segment.x = first; segment.width = last - first; }
+        epd_fill_rect(segment, 0x50, fb);
+    }
+}
 
 void book_layout_set_runs(const html_run_t* runs, size_t count) {
     s_runs = (runs != NULL && count > 0) ? runs : NULL;
@@ -524,8 +561,9 @@ void book_layout_set_first_line_indent_adjust(int px) {
     s_first_line_indent_adjust_px = px >= -100 && px <= 100 ? px : 0;
 }
 void book_layout_set_reading_line(unsigned style) {
-    s_reading_line = style <= 2 ? style : 0;
+    s_reading_line = style <= 3 ? style : 0;
 }
+void book_layout_set_reading_line_follow_text(bool enabled) { s_reading_line_follow_text = enabled; }
 void book_layout_set_reading_line_offset(int offset_px) {
     s_reading_line_offset = offset_px < -8 ? -8 : offset_px > 8 ? 8 : offset_px;
 }
@@ -1109,6 +1147,13 @@ static void draw_vertical_column(uint8_t* fb, EpdRect rect, int left, int pitch,
         int slack = available - indent - run_height;
         if (glyphs > 1 && slack > 0) extra = slack / (glyphs - 1);
     }
+    reading_guide_span_t guide = {.start = INT_MAX, .end = INT_MIN, .vertical = true};
+    ttf_glyph_observer_t guide_observer = {record_reading_guide_glyph, &guide};
+    // 直接观察实际落笔，避免字体引擎放弃两端对齐后仍画出目标宽度。
+    // Observe actual pens, including cases where the font engine declines justification.
+    const ttf_glyph_observer_t *observer = s_reading_line && s_reading_line_follow_text
+        ? &guide_observer : &s_glyph_observer;
+    EpdRect guide_area = {0, rect.y, 2, rect.height};
     if (s_reading_line) {
         // 阅读线跟着列走，位置在列的右侧：把整页逆时针转 90° 来读这一列，横排的「字下」正落在这里。
         // 原先画在列中线上（cell + px/2），等于穿字而过，看上去就是错乱。
@@ -1120,25 +1165,12 @@ static void draw_vertical_column(uint8_t* fb, EpdRect rect, int left, int pitch,
         const int cell_left = left + (pitch - px) / 2;
         int guide_x = left + pitch - 2 + s_reading_line_offset;
         if (guide_x < cell_left + px + 1) guide_x = cell_left + px + 1;
-        const int dash = s_reading_line == 1 ? 19 : 2;
-        const int period = s_reading_line == 1 ? 31 : 13;
-        // 与横排对称：横排的虚线走整页宽度、从页左边起算，竖排就走整页高度、从页上边起算。
-        // 这样每列的虚实节奏完全一样，也不会因为列首缩进、居中或列长短而各画各的——原先每列
-        // 从自己的字首起算、画到自己的字尾，看着就是疏密不一、长短不齐。
-        // Symmetric with the horizontal rule: horizontally the dashes span the page width and count from
-        // its left edge, so vertically they span the page height and count from its top edge. Every
-        // column then shares one rhythm instead of each drawing its own from its own first glyph to its
-        // own last, which read as uneven spacing and uneven lengths.
-        for (int pos = rect.y; pos < rect.y + rect.height; pos += period) {
-            int height = pos + dash <= rect.y + rect.height ? dash : rect.y + rect.height - pos;
-            if (height > 0) epd_fill_rect((EpdRect){guide_x, pos, 2, height}, 0x50, fb);
-        }
+        guide_area.x = guide_x;
+        if (!s_reading_line_follow_text) draw_reading_guide(fb, guide_area, guide);
     }
-    // 整列一次交给字体引擎：它按 run 换字体，并按竖排规则决定每字正立、抬角还是转 90°。
-    // Hand the whole column to the font engine: it follows the run table for faces and decides
-    // per glyph whether it stands upright, lifts into the corner or turns 90°.
     ttf_draw_set_runs(s_line_run_count ? s_line_runs : NULL, s_line_run_count);
-    (void)ttf_draw_text_px_vertical_observed(fb, cell, y, px, s_line, s_tracking_px + extra, 0, 15, &s_glyph_observer);
+    (void)ttf_draw_text_px_vertical_observed(fb, cell, y, px, s_line, s_tracking_px + extra, 0, 15, observer);
+    if (s_reading_line && s_reading_line_follow_text) draw_reading_guide(fb, guide_area, guide);
     // 画完把游标还回去：页面其它文字、界面和状态栏都按系统字体走。
     // Hand the cursor back: every other page, the UI and the status bar use the system face.
     ttf_draw_set_runs(NULL, 0);
@@ -1299,19 +1331,15 @@ static void draw_page_impl(uint8_t* fb, size_t page, EpdRect rect, int px) {
         used += gap + leading;
         pending_gap = 0;
         if (s_line[0]) {
-            if (s_reading_line) {
-                int guide_y = rect.y + (int)used + line_px + (line_height - line_px) / 2 +
-                              s_reading_line_offset;
-                // 页底允许行盒悬出正文，阅读线不能跟着画进页脚带。
-                // The page-bottom line may hang its box; the guide must stay off the footer band.
-                if (guide_y > rect.y + rect.height - 2) guide_y = rect.y + rect.height - 2;
-                int dash = s_reading_line == 1 ? 19 : 2;
-                int period = s_reading_line == 1 ? 31 : 13;
-                for (int dx = 0; dx < rect.width; dx += period) {
-                    int width = dx + dash <= rect.width ? dash : rect.width - dx;
-                    epd_fill_rect((EpdRect){rect.x + dx, guide_y, width, 2}, 0x50, fb);
-                }
-            }
+            reading_guide_span_t guide = {.start = INT_MAX, .end = INT_MIN};
+            ttf_glyph_observer_t guide_observer = {record_reading_guide_glyph, &guide};
+            const ttf_glyph_observer_t *observer = s_reading_line && s_reading_line_follow_text
+                ? &guide_observer : &s_glyph_observer;
+            int guide_y = rect.y + (int)used + line_px + (line_height - line_px) / 2 +
+                          s_reading_line_offset;
+            if (guide_y > rect.y + rect.height - 2) guide_y = rect.y + rect.height - 2;
+            EpdRect guide_area = {rect.x, guide_y, rect.width, 2};
+            if (s_reading_line && !s_reading_line_follow_text) draw_reading_guide(fb, guide_area, guide);
             int x = rect.x + indent;
             int available = rect.width - indent;
             if (align == 1) x += (available - line_width) / 2;
@@ -1336,14 +1364,23 @@ static void draw_page_impl(uint8_t* fb, size_t page, EpdRect rect, int px) {
                 int slack = right_slack();
                 int hang = slack > 4 ? line_px / 3 : 0;
                 if (hang > slack - 4) hang = slack - 4;
-                int target = line_width > available ? available + hang : available;
-                justify_target = target;
-                ttf_draw_text_px_fitted_observed(fb, x, baseline, line_px, s_line, s_tracking_px,
-                                        target, 0, 15, &s_glyph_observer);
-            } else if (s_tracking_px && !heading)
-                ttf_draw_text_px_spaced_observed(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15, &s_glyph_observer);
-            else
-                ttf_draw_text_px_observed(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15, &s_glyph_observer);
+                justify_target = line_width > available ? available + hang : available;
+            }
+            // 位置上移或页底裁剪可能落进字格，画线后补回这一行，避免盖浅原有笔画；不重复记字形。
+            // An offset or bottom clamp may enter glyph cells; repaint that row over the guide without recording it twice.
+            bool follow = s_reading_line && s_reading_line_follow_text;
+            unsigned passes = follow && guide_y < rect.y + (int)used + line_px ? 2 : 1;
+            for (unsigned pass = 0; pass < passes; ++pass) {
+                if (justify_target)
+                    ttf_draw_text_px_fitted_observed(fb, x, baseline, line_px, s_line, s_tracking_px,
+                                                   justify_target, 0, 15, observer);
+                else if (s_tracking_px && !heading)
+                    ttf_draw_text_px_spaced_observed(fb, x, baseline, line_px, s_line, s_tracking_px, 0, 15, observer);
+                else
+                    ttf_draw_text_px_observed(fb, x, baseline, line_px, s_line, EPD_DRAW_ALIGN_LEFT, 0, 15, observer);
+                if (follow && !pass) draw_reading_guide(fb, guide_area, guide);
+                observer = NULL;
+            }
             // 画完把游标还回去：页面其它文字、界面和状态栏都按系统字体走。
             // Hand the cursor back: every other page, the UI and the status bar use the system
             // face.

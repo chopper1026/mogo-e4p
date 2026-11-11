@@ -45,8 +45,10 @@ void book_layout_set_typography(int tracking_px);
 void book_layout_set_first_line_indent(unsigned em);
 /// 正文首行按像素微调-100..100，0为默认，不改变标题/对齐块或无缩进。/ Fine-tune body indent by -100..100px; default 0, leaving headings/aligned/no-indent blocks intact.
 void book_layout_set_first_line_indent_adjust(int px);
-/// 正文阅读线：0 无，1 虚线，2 点线。/ Reading guides: none, dashed or dotted.
+/// 正文阅读线：0 无，1 虚线，2 点线，3 实线。/ Reading guides: none, dashed, dotted or solid.
 void book_layout_set_reading_line(unsigned style);
+/// 开启后只覆盖每行/列的文字范围；默认铺满正文区域。/ Limit guides to text spans; default is the full body span.
+void book_layout_set_reading_line_follow_text(bool enabled);
 /// 阅读线相对默认位置上下移动 -8..+8 像素；负值上移。/ Move guide -8..+8 px; negative is up.
 void book_layout_set_reading_line_offset(int offset_px);
 /// 关闭插图时，排版跳过图片块，不为其保留页或正文空位。/ When false, omit image blocks without reserving pages or body space.
