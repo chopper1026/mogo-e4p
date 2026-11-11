@@ -24,6 +24,7 @@ typedef int esp_err_t;
 static bool cover_ok=true,avatar_ok=true;
 static int cover_calls,avatar_calls,remounts;
 static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);++cover_calls;return cover_ok;}
+bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);++avatar_calls;return avatar_ok;}
 #define APP_REDRAW_NONE 0
 #define APP_REDRAW_PAGE 1

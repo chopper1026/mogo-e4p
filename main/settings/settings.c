@@ -916,14 +916,48 @@ void app_settings_set_bookmark_path(const char *path) {
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
 void app_settings_set_wallpaper_path(const char* path) {
-    if (!path || (path[0] && strncmp(path, "/sdcard/", 8)) ||
-        strnlen(path, sizeof(s_wallpaper)) >= sizeof(s_wallpaper)) return;
-    strlcpy(s_wallpaper, path, sizeof(s_wallpaper));
+    if (!path || (path[0] && strncmp(path,"/sdcard/",8)) || strnlen(path,sizeof(s_wallpaper))>=sizeof(s_wallpaper)) return;
     nvs_handle_t h;
-    if (settings_write_open(&h) != ESP_OK) return;
-    nvs_set_str(h, NVS_KEY_WALLPAPER, s_wallpaper);
-    nvs_commit(h);
+    if(settings_write_open(&h)!=ESP_OK)return;
+    esp_err_t err=nvs_set_str(h,NVS_KEY_WALLPAPER,path);
+    if(err==ESP_OK)err=nvs_commit(h);
     settings_write_close(h);
+    if(err==ESP_OK)strlcpy(s_wallpaper,path,sizeof(s_wallpaper));
+}
+bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
+    if(style>APP_LOCK_STYLE_CLOCK||option>1)return false;
+    if(style==1||style==3){
+        const char *ext=image?strrchr(image,'.'):NULL;
+        if(!image||strncmp(image,"/sdcard/",8)||strnlen(image,sizeof(s_wallpaper))>=sizeof(s_wallpaper)||!ext||
+           (strcasecmp(ext,".png")&&(style==3||(strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))))return false;
+    }
+    unsigned calendar=style==4?option:(unsigned)s_calendar_style;
+    bool same=style==s_lock_style && (style!=0||option==(unsigned)s_ticket_background) &&
+        (style!=4||option==(unsigned)s_calendar_style) && (style!=1||!strcmp(image,s_wallpaper)) &&
+        (style!=3||!strcmp(image,s_bookmark));
+    if(same)return true;
+    nvs_handle_t h;
+    if(settings_write_open(&h)!=ESP_OK)return false;
+    esp_err_t err=ESP_OK;
+    if(style==1||style==3)err=nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,image);
+    if(style==0)err=nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,option);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,style*2+calendar);
+    if(err==ESP_OK)err=nvs_commit(h);
+    if(err!=ESP_OK){
+        // NVS逐项立即写入；后续字段失败时尽力恢复已写副项，运行态始终保持旧值。
+        // NVS writes items immediately; restore secondary fields on a later failure and retain live state.
+        if(style==1||style==3)(void)nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,style==1?s_wallpaper:s_bookmark);
+        if(style==0)(void)nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,s_ticket_background);
+        (void)nvs_set_u8(h,NVS_KEY_LOCK_FACE,s_lock_style*2+s_calendar_style);
+        (void)nvs_commit(h);
+    }
+    settings_write_close(h);
+    if(err!=ESP_OK)return false;
+    s_lock_style=style;s_calendar_style=(app_calendar_style_t)calendar;
+    if(style==0)s_ticket_background=(app_ticket_background_t)option;
+    if(style==1)strlcpy(s_wallpaper,image,sizeof(s_wallpaper));
+    if(style==3)strlcpy(s_bookmark,image,sizeof(s_bookmark));
+    return true;
 }
 
 static void nvs_put_u8(const char* key, uint8_t value) {

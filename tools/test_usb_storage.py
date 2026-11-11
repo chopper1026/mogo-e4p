@@ -75,6 +75,8 @@ bool tud_mounted(void);
 void tud_disconnect(void);
 bool book_cover_jobs_quiesce(unsigned timeout_ms);
 void book_lock_collage_invalidate(void);
+bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
+void lock_images_close(void);
 bool ui_avatar_quiesce(unsigned timeout_ms);
 '''
 UNIT = r'''
@@ -87,12 +89,13 @@ static sdmmc_card_t *borrowed;
 static int stage,delete_error,usb_error,msc_error,busy,deletes,remounts;
 static int switch_level=1,switch_resets,switch_directions;
 static bool cover_ok=true,avatar_ok=true;
-static int cover_calls,avatar_calls;
+static int cover_calls,avatar_calls,thumbnail_invalidations;
+void lock_images_close(void){++thumbnail_invalidations;}
 static int failed(int where){return stage==where?ESP_FAIL:ESP_OK;}
 void vTaskDelay(int ms){assert(ms>0);}
 const char *esp_err_to_name(int e){(void)e;return "test";}
 int board_sd_get_info(board_sd_info_t *i){i->mounted=mounted;return ESP_OK;}
-int board_sd_sync(void){assert(mounted);mounted=false;return ESP_OK;}
+int board_sd_sync(void){assert(mounted&&thumbnail_invalidations>0);mounted=false;return ESP_OK;}
 int board_sd_remount(void){assert(!driver&&!borrowed&&!msc&&!host&&switch_level==1);mounted=true;++remounts;return ESP_OK;}
 bool ttf_font_is_builtin(void){return true;}
 int ttf_font_open_builtin(void){return ESP_OK;}
@@ -126,8 +129,8 @@ static void stopped(void){assert(mounted&&!usb_storage_active()&&!usb_storage_co
 static void retained(void){assert(!mounted&&usb_storage_active()&&!usb_storage_connected()&&s_cleanup_pending&&s_card&&host&&switch_level==0);assert(usb_storage_start()==ESP_ERR_INVALID_STATE);}
 int main(void){
     usb_storage_phy_init();usb_storage_phy_init();assert(!switch_resets);
-    cover_ok=false;assert(usb_storage_start()==ESP_ERR_NOT_FINISHED);stopped();assert(cover_calls==1&&!avatar_calls&&!remounts&&!switch_resets);
-    cover_ok=true;avatar_ok=false;assert(usb_storage_start()==ESP_ERR_NOT_FINISHED);stopped();assert(cover_calls==2&&avatar_calls==1&&!remounts&&!switch_resets);
+    cover_ok=false;assert(usb_storage_start()==ESP_ERR_NOT_FINISHED);stopped();assert(cover_calls==1&&thumbnail_invalidations==1&&!avatar_calls&&!remounts&&!switch_resets);
+    cover_ok=true;avatar_ok=false;assert(usb_storage_start()==ESP_ERR_NOT_FINISHED);stopped();assert(cover_calls==2&&thumbnail_invalidations==2&&avatar_calls==1&&!remounts&&!switch_resets);
     avatar_ok=true;
     assert(usb_storage_stop()==ESP_OK);stopped();
     for(int i=0;i<3;++i){assert(usb_storage_start()==ESP_OK&&usb_storage_connected());busy=3;assert(usb_storage_stop()==ESP_OK);stopped();}

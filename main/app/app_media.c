@@ -14,6 +14,7 @@
 #include "book/book_cover_jobs.h"
 #include "book/book_lock_collage.h"
 #include "storage_jobs.h"
+#include "lock_style_images.h"
 #include "usb_storage.h"
 
 // 失效锁存后卡回位的自动重挂间隔；重挂本身失败时下次再试。
@@ -68,7 +69,7 @@ bool app_media_poll(app_ctx_t* ctx, const app_desc_t* current,
     bool gained = !*mounted && ready;
     *mounted = ready;
     if (ready) *invalidated = false;
-    if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
+    if (gained || lost) { lock_images_close(); ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
     if (!lost) return false;
     *invalidated = true;

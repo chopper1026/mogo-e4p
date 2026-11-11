@@ -184,12 +184,17 @@ int main(int argc,char **argv){
  assert(book_lock_collage_prepare(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES)&&live==warm);
  assert(cache_payload_read==cover_bytes&&s_pending_frame==other);
  FILE *missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
- book_lock_collage_cache_commit(fb);assert(!s_pending_frame);
+ unsigned preview_revision=book_lock_collage_preview_revision();
+ book_lock_collage_cache_commit(fb);assert(!s_pending_frame&&book_lock_collage_preview_revision()==preview_revision);
  missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
  assert(book_lock_collage_prepare(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES));
  assert(!book_lock_collage_prepare(NULL)&&!s_pending_frame);
  book_lock_collage_cache_commit(other);missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
  assert(book_lock_collage_prepare(other));book_lock_collage_cache_commit(other);assert(!s_pending_frame);
+ assert(book_lock_collage_preview_revision()==preview_revision+1);
+ unsigned preview_scans=directory_scans,preview_decodes=decoded;
+ assert(book_lock_collage_preview(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES));
+ assert(directory_scans==preview_scans&&decoded==preview_decodes&&book_lock_collage_preview_revision()==preview_revision+1);
  unsigned plots_before=plotted;assert(book_lock_collage_draw(other)&&plotted==plots_before&&!memcmp(fb,other,LOCK_FRAME_BYTES));
  unsigned scans_before=directory_scans;
  for(unsigned i=0;i<4;++i){assert(book_lock_collage_draw(other));assert(!memcmp(fb,other,LOCK_FRAME_BYTES)&&live==warm&&cover_requests==requests);}
@@ -204,7 +209,7 @@ int main(int argc,char **argv){
  promoted=-1;recent_bump=0;
  assert(book_lock_collage_draw(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES));
  FILE *preview=fopen(argv[3],"wb");assert(preview&&fwrite(fb,1,LOCK_FRAME_BYTES,preview)==LOCK_FRAME_BYTES&&fclose(preview)==0);
- corrupt_frame();assert(book_lock_collage_draw(other));assert(!memcmp(fb,other,LOCK_FRAME_BYTES)&&decoded==15);
+ corrupt_frame();assert(!book_lock_collage_preview(other));assert(book_lock_collage_draw(other));assert(!memcmp(fb,other,LOCK_FRAME_BYTES)&&decoded==15);
  profile="自定义名字";assert(book_lock_collage_draw(other)&&memcmp(fb,other,LOCK_FRAME_BYTES));assert(decoded==15);profile="名字很长名字很长名字很长名字很长名字很长";assert(book_lock_collage_draw(other));profile="Kiiko";
  // 损坏封面头不能把无效比例带入几何计算；重解码后重新建立缓存。
  // Invalid cover metadata cannot enter geometry; decode again and rebuild the cache.

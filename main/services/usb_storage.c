@@ -7,6 +7,7 @@
  * Frozen: Firmware and host never mount SD together, including host eject; never auto-format.
  */
 #include "storage_jobs.h"
+#include "lock_style_images.h"
 #include "book_lock_collage.h"
 #include "usb_storage.h"
 #include <stdlib.h>
@@ -112,6 +113,7 @@ static void restore_local(void) {
 }
 
 esp_err_t usb_storage_start(void) {
+    lock_images_close();
     book_lock_collage_invalidate();
     if (!storage_jobs_quiesce(2000)) return ESP_ERR_NOT_FINISHED;
     if (s_cleanup_pending) return ESP_ERR_INVALID_STATE;

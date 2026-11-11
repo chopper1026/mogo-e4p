@@ -56,6 +56,7 @@ static int step, fault, clears;
 static bool buzzer, acc_on, transfer_ok = true, ota;
 static bool cover_ok = true, avatar_ok = true;
 static bool book_cover_jobs_quiesce(unsigned ms) { assert(ms == 2000); return cover_ok; }
+bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 static bool ui_avatar_quiesce(unsigned ms) { assert(ms == 2000); return avatar_ok; }
 static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 #define DEVICE_POWER_BATT_LOG_OFF 512

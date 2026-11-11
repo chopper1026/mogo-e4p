@@ -57,3 +57,6 @@ baseline TF JPEG uses the ROM TJpgDec streaming interface.
 用新版本覆盖 `src/`，重新套用上面三项改动，并保持 `CMakeLists.txt` 只注册可移植路径。
 Re-copy `src/`, re-apply the three changes above, and keep `CMakeLists.txt` on the portable
 path only.
+
+文件流 C 包装层为锁屏缩略图接收取消回调；read/seek 回调终止过期工作，不改变上游解码器。
+The file-stream C wrapper accepts a cancellation callback for lock-style thumbnails; read/seek callbacks stop stale work without changing the upstream decoder.

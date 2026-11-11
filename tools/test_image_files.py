@@ -5,10 +5,12 @@ import argparse
 from pathlib import Path
 import random
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 from PIL import Image
+from run_reader_baseline import toolchain
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,15 +18,23 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument("--png-prefix", type=Path)
     options = args.parse_args()
+    if not options.png_prefix and not shutil.which("pkg-config"):
+        for prefix in (Path("/opt/homebrew/opt/libpng"), Path("/usr/local/opt/libpng")):
+            if (prefix / "include/libpng16/png.h").is_file():
+                options.png_prefix = prefix
+                break
     if options.png_prefix:
         png_cflags = ["-I" + str(options.png_prefix / "include/libpng16")]
         png_link = ["-L" + str(options.png_prefix / "lib"), "-lpng16", "-lz",
                     "-Wl,-rpath," + str(options.png_prefix / "lib")]
     else:
+        if not shutil.which("pkg-config"):
+            args.error("libpng requires pkg-config or --png-prefix <installation prefix>")
         png_cflags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "libpng"], text=True))
         png_link = shlex.split(subprocess.check_output(["pkg-config", "--libs", "libpng"], text=True))
     with tempfile.TemporaryDirectory(prefix="pico-image-stream-") as temp:
         work = Path(temp)
+        env,_ = toolchain(work)
         (work / "sdkconfig.h").write_text("\n".join([
             "#define CONFIG_JD_SZBUF 512", "#define CONFIG_JD_FORMAT 0", "#define CONFIG_JD_USE_SCALE 1",
             "#define CONFIG_JD_TBLCLIP 1", "#define CONFIG_JD_FASTDECODE 0"]) + "\n")
@@ -44,11 +54,11 @@ def main():
             # retain ASan there, and full UB checks in the new file/stream wrappers.
             upstream_flags = ["-fno-sanitize=alignment,shift"] if source.endswith("JPEGDEC.cpp") else []
             subprocess.run(["c++" if cpp else "cc", "-std=c++17" if cpp else "-std=c11", *flags, *upstream_flags,
-                            "-c", str(ROOT / source), "-o", str(obj)], check=True)
+                            "-c", str(ROOT / source), "-o", str(obj)], check=True,env=env)
             objects.append(str(obj))
         gc = "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections"
         exe = work / "test"
-        subprocess.run(["c++", *flags, gc, *objects, *png_link, "-o", str(exe)], check=True)
+        subprocess.run(["c++", *flags, gc, *objects, *png_link, "-o", str(exe)], check=True,env=env)
         image = Image.frombytes("RGB", (1536, 1536), random.Random(82).randbytes(1536 * 1536 * 3))
         image.save(work / "large.jpg", quality=100, subsampling=0)
         image.save(work / "large.png")
@@ -57,13 +67,13 @@ def main():
         Image.new("RGB", (53, 41), (160, 160, 160)).save(work / "small.jpg", progressive=True)
         files = [work / name for name in ("large.jpg", "large.png", "progressive.jpg", "odd.jpg", "small.jpg")]
         assert all(path.stat().st_size > 2 * 1024 * 1024 for path in files[:3])
-        subprocess.run([str(exe), "read", *map(str, files)], check=True)
+        subprocess.run([str(exe), "read", *map(str, files)], check=True,env=env)
         (work / "bad.jpg").write_bytes(b"not an image")
         (work / "bad.png").write_bytes((work / "large.png").read_bytes()[:400])
         with (work / "overlimit.jpg").open("wb") as file:
             file.write((work / "odd.jpg").read_bytes())
             file.truncate(50 * 1024 * 1024 + 1)
-        subprocess.run([str(exe), "reject", *map(str, [work / "bad.jpg", work / "bad.png", work / "overlimit.jpg"])], check=True)
+        subprocess.run([str(exe), "reject", *map(str, [work / "bad.jpg", work / "bad.png", work / "overlimit.jpg"])], check=True,env=env)
         print("PASS: streaming baseline/progressive JPEG and PNG over 2 MiB; odd/small dimensions; corruption/limit bounds")
 
 if __name__ == "__main__":

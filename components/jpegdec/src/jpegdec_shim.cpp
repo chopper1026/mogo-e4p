@@ -47,22 +47,28 @@ int jpegdec_gray_progressive(const uint8_t *data, int size, JPEG_DRAW_CALLBACK *
 }
 
 
+typedef struct { FILE *file; bool (*cancelled)(void *); void *context; } cancellable_file_t;
 static int32_t file_read(JPEGFILE *file, uint8_t *buf, int32_t size) {
     if (!file || !file->fHandle || size < 0) return 0;
-    int32_t got = (int32_t)fread(buf, 1, (size_t)size, (FILE *)file->fHandle);
+    cancellable_file_t *input = (cancellable_file_t *)file->fHandle;
+    if (input->cancelled && input->cancelled(input->context)) return 0;
+    int32_t got = (int32_t)fread(buf, 1, (size_t)size, input->file);
     file->iPos += got;
     return got;
 }
 static int32_t file_seek(JPEGFILE *file, int32_t pos) {
-    if (!file || !file->fHandle || pos < 0 || pos > file->iSize || fseek((FILE *)file->fHandle, pos, SEEK_SET)) return -1;
+    if (!file || !file->fHandle || pos < 0 || pos > file->iSize) return -1;
+    cancellable_file_t *input = (cancellable_file_t *)file->fHandle;
+    if ((input->cancelled && input->cancelled(input->context)) || fseek(input->file,pos,SEEK_SET)) return -1;
     file->iPos = pos;
     return pos;
 }
 // C 调用方持有文件及目标平面；JPEGDEC 保持 MCU 级缓冲，不读入整个文件。
 // The C caller owns the file and destination plane; JPEGDEC only buffers MCUs.
-int jpegdec_gray_file(FILE *file, int size, unsigned source_w, unsigned source_h,
+int jpegdec_gray_file_cancel(FILE *file, int size, unsigned source_w, unsigned source_h,
                      unsigned out_w, unsigned out_h, bool progressive,
-                     JPEG_DRAW_CALLBACK *draw, void *user, unsigned *scaled_w, unsigned *scaled_h) {
+                     JPEG_DRAW_CALLBACK *draw, void *user, unsigned *scaled_w, unsigned *scaled_h,
+                     bool (*cancelled)(void *), void *context) {
     if (!file || size <= 0 || !source_w || !source_h || !draw) return 0;
     unsigned divisor = 1;
     if (progressive) divisor = 8;
@@ -72,7 +78,8 @@ int jpegdec_gray_file(FILE *file, int size, unsigned source_w, unsigned source_h
     JPEGDEC *jpeg = new (std::nothrow) JPEGDEC();
     if (!jpeg) return 0;
     int ok = 0;
-    if (jpeg->open(file, size, nullptr, file_read, file_seek, draw)) {
+    cancellable_file_t input = {file,cancelled,context};
+    if (jpeg->open(&input, size, nullptr, file_read, file_seek, draw)) {
         jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
         jpeg->setUserPointer(user);
         int option = divisor == 8 ? JPEG_SCALE_EIGHTH : divisor == 4 ? JPEG_SCALE_QUARTER : divisor == 2 ? JPEG_SCALE_HALF : 0;

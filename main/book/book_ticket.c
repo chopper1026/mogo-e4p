@@ -265,8 +265,7 @@ static void ticket_heading(uint8_t *fb,int top,int height,int px,char *text) {
     px=ui_text_title_fit(text,px,520,text);
     ui_text_title_vc(fb,82,top+height/2,px,text,text,EPD_DRAW_ALIGN_LEFT);
 }
-bool book_ticket_draw(uint8_t *fb, bool reader_background) {
-    (void)reader_background;
+bool book_ticket_preview(uint8_t *fb, bool cover_background) {
     char path[288];
     if (!book_progress_last_path(path, sizeof(path))) return false;
     struct stat st;
@@ -283,7 +282,7 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     ticket_stats_t stats; stats_load(&stats);
     uint32_t day = local_day();
     uint8_t *gray = cover_load(path, title, author);
-    if (app_settings_ticket_background() == APP_TICKET_BACKGROUND_COVER)
+    if (cover_background)
         cover_background_draw(fb, gray);
     ticket_shadow_draw(fb);
     ticket_paper_draw(fb);
@@ -319,4 +318,9 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
         ui_text_box(fb, (EpdRect){82, 1068, 520, 58}, 26, quote, EPD_DRAW_ALIGN_LEFT, false);
     }
     return true;
+}
+
+bool book_ticket_draw(uint8_t *fb, bool reader_background) {
+    (void)reader_background;
+    return book_ticket_preview(fb,app_settings_ticket_background()==APP_TICKET_BACKGROUND_COVER);
 }

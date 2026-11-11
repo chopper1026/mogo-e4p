@@ -319,16 +319,17 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
     return decoded;
 }
 
-typedef struct { const uint8_t *data; size_t size, pos; FILE *file; } png_input_t;
+typedef struct { const uint8_t *data; size_t size, pos; FILE *file; image_cancel_fn cancelled; void *context; } png_input_t;
 static void png_read_mem(png_structp png, png_bytep dst, png_size_t count) {
     png_input_t *input = png_get_io_ptr(png);
+    if (input->cancelled && input->cancelled(input->context)) png_error(png, "cancelled PNG");
     if (count > input->size - input->pos) png_error(png, "truncated PNG");
     if (input->file) { if (fread(dst, 1, count, input->file) != count) png_error(png, "truncated PNG file"); }
     else memcpy(dst, input->data + input->pos, count);
     input->pos += count;
 }
-static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
-                     unsigned out_height, uint8_t *out, uint8_t *alpha) {
+static bool png_gray_input_cancel(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
+                     unsigned out_height, uint8_t *out, uint8_t *alpha, image_cancel_fn cancelled, void *context) {
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (!png) return false;
     png_infop info = png_create_info_struct(png);
@@ -344,7 +345,7 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
     scale_step_t *volatile xmap = NULL, *volatile ymap = NULL;
     uint8_t *volatile rows[2] = {NULL, NULL};
     uint8_t *volatile masks[2] = {NULL, NULL};
-    png_input_t input = {data, size, 0, file};
+    png_input_t input = {data, size, 0, file, cancelled, context};
     bool ok = false;
     if (setjmp(png_jmpbuf(png))) goto done;
     png_set_read_fn(png, &input, png_read_mem);
@@ -379,6 +380,7 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
     }
     if (xmap && ymap && rows[0] && rows[1] && (!alpha || (masks[0] && masks[1]))) {
         for (png_uint_32 y = 0; y < height; ++y) {
+            if (cancelled && cancelled(context)) goto done;
             png_read_row(png, row, NULL);
             decode_yield((unsigned)y);
             const int wy = (int)y - (int)crop.y;
@@ -422,6 +424,11 @@ done:
     return ok;
 }
 
+static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigned out_width,
+                           unsigned out_height, uint8_t *out, uint8_t *alpha) {
+    return png_gray_input_cancel(data,size,file,out_width,out_height,out,alpha,NULL,NULL);
+}
+
 bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
                           unsigned out_width, unsigned out_height, uint8_t *out) {
     if (!data || !size || !out || !out_width || !out_height ||
@@ -435,7 +442,7 @@ bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
 
 
 
-static bool file_frame(FILE *file, bool png, uint8_t *sof, unsigned *width, unsigned *height) {
+static bool file_frame(FILE *file, bool png, uint8_t *sof, unsigned *width, unsigned *height, image_cancel_fn cancelled, void *context) {
     if (fseek(file, 0, SEEK_SET)) return false;
     if (png) {
         uint8_t header[24];
@@ -443,11 +450,12 @@ static bool file_frame(FILE *file, bool png, uint8_t *sof, unsigned *width, unsi
     }
     if (fgetc(file) != 0xff || fgetc(file) != 0xd8) return false;
     for (unsigned segment = 0; segment < 4096; ++segment) {
+        if(cancelled&&cancelled(context))return false;
         int first = fgetc(file);
         if (first == EOF) return false;
         if (first != 0xff) continue;
         int marker;
-        do { marker = fgetc(file); } while (marker == 0xff);
+        do { if(cancelled&&cancelled(context))return false; marker = fgetc(file); } while (marker == 0xff);
         if (marker == EOF || marker == 0xda || marker == 0xd9) return false;
         if (marker == 0x01 || (marker >= 0xd0 && marker <= 0xd8)) continue;
         int high = fgetc(file), low = fgetc(file);
@@ -473,7 +481,7 @@ bool book_image_file_dimensions(const char *path, bool png, unsigned *width, uns
     FILE *file = fopen(path, "rb");
     if (!file) return false;
     *width = *height = 0;
-    bool ok = file_frame(file, png, NULL, width, height);
+    bool ok = file_frame(file, png, NULL, width, height, NULL, NULL);
     fclose(file);
     return ok;
 }
@@ -483,9 +491,12 @@ typedef struct {
     size_t pixels;
     unsigned blocks;
     FILE *file;
+    image_cancel_fn cancelled;
+    void *context;
 } jpeg_file_plane_t;
 static int jpeg_file_collect(JPEGDRAW *draw) {
     jpeg_file_plane_t *plane = draw->pUser;
+    if (plane && plane->cancelled && plane->cancelled(plane->context)) return 0;
     if (!plane || !draw->pPixels || draw->iBpp != 8 || draw->iWidth <= 0 || draw->iHeight <= 0 || draw->x < 0 || draw->y < 0) return 0;
     book_crop_t crop = book_cover_crop(plane->source_w, plane->source_h, plane->width, plane->height);
     const uint8_t *block = (const uint8_t *)draw->pPixels;
@@ -512,12 +523,14 @@ static int jpeg_file_collect(JPEGDRAW *draw) {
 }
 static stream_jpeg_size_t jpeg_stream_read(JDEC *decoder, uint8_t *bytes, stream_jpeg_size_t count) {
     jpeg_file_plane_t *plane = decoder->device;
+    if (plane->cancelled && plane->cancelled(plane->context)) return 0;
     if (!plane || !plane->file) return 0;
     if (!bytes) return fseek(plane->file, (long)count, SEEK_CUR) == 0 ? count : 0;
     return (stream_jpeg_size_t)fread(bytes, 1, count, plane->file);
 }
 static stream_jpeg_result_t jpeg_stream_collect(JDEC *decoder, void *bitmap, JRECT *rect) {
     jpeg_file_plane_t *plane = decoder->device;
+    if (plane->cancelled && plane->cancelled(plane->context)) return 0;
     unsigned width = rect->right - rect->left + 1, height = rect->bottom - rect->top + 1;
     if (!width || !height || width * height > 256) return 0;
     uint8_t gray[256];
@@ -540,25 +553,26 @@ static bool jpeg_baseline_file(FILE *file, unsigned source_w, unsigned source_h,
     free(workspace);
     return ok;
 }
-extern int jpegdec_gray_file(FILE *, int, unsigned, unsigned, unsigned, unsigned, bool,
-                             JPEG_DRAW_CALLBACK *, void *, unsigned *, unsigned *);
-bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsigned height, uint8_t *out) {
+extern int jpegdec_gray_file_cancel(FILE *, int, unsigned, unsigned, unsigned, unsigned, bool,
+                             JPEG_DRAW_CALLBACK *, void *, unsigned *, unsigned *, image_cancel_fn, void *);
+bool book_image_file_grayscale_cancel(const char *path, bool png, unsigned width, unsigned height,
+                                      uint8_t *out, image_cancel_fn cancelled, void *context) {
     if (!path || !out || !width || !height || width > 1216 || height > 1216 || (uint64_t)width * height > 684u * 1216u) return false;
     struct stat st;
     if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;
     bool ok = false;
-    if (png) ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, out, NULL);
+    if (png) ok = png_gray_input_cancel(NULL, (size_t)st.st_size, file, width, height, out, NULL, cancelled, context);
     else {
         uint8_t sof = 0;
         unsigned source_w = 0, source_h = 0;
-        if (file_frame(file, false, &sof, &source_w, &source_h) && !fseek(file, 0, SEEK_SET)) {
-            jpeg_file_plane_t plane = {.out = out, .width = width, .height = height};
+        if (file_frame(file, false, &sof, &source_w, &source_h, cancelled, context) && !fseek(file, 0, SEEK_SET)) {
+            jpeg_file_plane_t plane = {.out = out, .width = width, .height = height, .cancelled = cancelled, .context = context};
             memset(out, 255, (size_t)width * height);
             if (sof == 0xc2)
-                ok = jpegdec_gray_file(file, (int)st.st_size, source_w, source_h, width, height, true,
-                    jpeg_file_collect, &plane, &plane.source_w, &plane.source_h) != 0;
+                ok = jpegdec_gray_file_cancel(file, (int)st.st_size, source_w, source_h, width, height, true,
+                    jpeg_file_collect, &plane, &plane.source_w, &plane.source_h, cancelled, context) != 0;
             else ok = jpeg_baseline_file(file, source_w, source_h, width, height, &plane);
             ok = ok && plane.pixels >= (size_t)width * height;
         }
@@ -567,13 +581,22 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
     return ok;
 }
 
-bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint8_t *gray, uint8_t *alpha) {
+bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsigned height, uint8_t *out) {
+    return book_image_file_grayscale_cancel(path,png,width,height,out,NULL,NULL);
+}
+
+bool book_png_file_layer_cancel(const char *path, unsigned width, unsigned height,
+                                 uint8_t *gray, uint8_t *alpha, image_cancel_fn cancelled, void *context) {
     struct stat st;
     if (!path || !gray || !alpha || !width || !height || width > 684 || height > 1216 ||
         stat(path, &st) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     FILE *file = fopen(path, "rb");
     if (!file) return false;
-    bool ok = png_gray_input(NULL, (size_t)st.st_size, file, width, height, gray, alpha);
+    bool ok = png_gray_input_cancel(NULL, (size_t)st.st_size, file, width, height, gray, alpha, cancelled, context);
     fclose(file);
     return ok;
+}
+
+bool book_png_file_layer(const char *path, unsigned width, unsigned height, uint8_t *gray, uint8_t *alpha) {
+    return book_png_file_layer_cancel(path,width,height,gray,alpha,NULL,NULL);
 }

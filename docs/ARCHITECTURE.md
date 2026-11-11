@@ -152,3 +152,5 @@ Third-party components retain licenses and needed tests/examples. Directory size
 
 时钟锁屏的RTC只读锚点与成功呈现身份由 `lock_clock` 持有；`sleep` 在同一等待会话调用分钟更新，不恢复触摸/前光/网络、不重建关机截止时间。只有清醒绘屏期间临时恢复按键快采，睡前暂停并保留事件。时钟不读写磁盘锁屏帧；PIN等待和取消都重建当前白底时钟，不额外分配原图整帧。行为与生成入口见[简约时钟锁屏](development/guides/LOCK_CLOCK.md)。
 The clock owns read-only RTC anchors and successful-paint identities. Sleep updates it inside the same deadline/session without resuming peripherals or radios. Awake scans temporarily sample keys and retain events before sleeping. Clock art bypasses disk caches; PIN waits rebuild the current face without an extra original-frame copy.
+
+锁屏样式选择由 `ui/ui_lock_style` 拥有交互、布局与内置缩图，`services/lock_style_images` 拥有单个可取消文件任务、目录、LRU和TF缩略缓存；`image`解码器只接收取消回调。普通离页保留有界小图，介质/USB交接推进失效代次，UI取回目录后校验并退役变化源；当前可见批次结束只请求一次整屏定稿。文件任务纳入 `storage_jobs_quiesce`，UI绘图不读文件。具体边界见[锁屏选择器](development/guides/LOCK_STYLE_PICKER.md)。

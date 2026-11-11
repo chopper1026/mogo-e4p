@@ -14,3 +14,9 @@ void book_lock_bookmark_prepare(const char *png);
 /// 最近一次绘制是否命中TF卡图层缓存 / Whether the last draw hit the SD-card layer cache
 bool book_lock_bookmark_cached(void);
 void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect area);
+
+/// 选图用的小画布，保持完整PNG比例、alpha与去白规则；仅文件/像素，不调用字库。
+/// Picker thumbnail preserving canvas ratio, alpha and white removal; file/pixel work only.
+#include "image_decode.h"
+bool book_lock_bookmark_thumbnail(const char *path,unsigned width,unsigned height,uint8_t *gray,
+                                  image_cancel_fn cancelled,void *context);

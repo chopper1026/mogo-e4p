@@ -18,3 +18,6 @@ bool book_ticket_recent_days(uint32_t seconds[30]);
 bool book_ticket_month_days(int year, int month, uint32_t seconds[31]);
 /// 按背景偏好叠加票根或先铺书籍封面；无最近阅读记录时返回 false。/ Paint a ticket over the current frame or a full-screen book cover as selected; false without reading history.
 bool book_ticket_draw(uint8_t *fb, bool reader_background);
+
+/// 预览独立背景选项，不修改持久偏好。/ Preview a background without changing preferences.
+bool book_ticket_preview(uint8_t *fb,bool cover_background);

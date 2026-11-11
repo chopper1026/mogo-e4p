@@ -32,8 +32,8 @@ typedef struct {unsigned x,y,width,height;} book_crop_t;
 for name in ('luminance','scale_axis'):unit+=fn(name)+'\n'
 unit+='typedef struct {uint16_t at;uint8_t frac;} scale_step_t;\n'
 for name in ('scale_map','scale_next','bilinear4','book_cover_crop'):unit+=fn(name)+'\n'
-unit+='typedef struct {const uint8_t *data;size_t size,pos;FILE *file;} png_input_t;\n'
-for name in ('png_read_mem','png_gray_input'):unit+=fn(name)+'\n'
+unit+='typedef bool (*image_cancel_fn)(void *);\ntypedef struct {const uint8_t *data;size_t size,pos;FILE *file;image_cancel_fn cancelled;void *context;} png_input_t;\n'
+for name in ('png_read_mem','png_gray_input_cancel','png_gray_input'):unit+=fn(name)+'\n'
 unit+=r'''
 #undef free
 int main(int argc,char **argv){

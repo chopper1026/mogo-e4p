@@ -29,3 +29,8 @@ bool book_lock_collage_warm_cover(const char *path);
 
 /// 换卡/书库隐藏设置变化时丢弃小型目录索引；不改TF成品画面。/ Discard the small catalogue index on media/visibility changes, preserving completed TF artwork.
 void book_lock_collage_invalidate(void);
+
+/// 选择器只读取上次整帧快照，不扫描或解码书架。/ Picker reads the last frame without scanning/decoding the library.
+bool book_lock_collage_preview(uint8_t *framebuffer);
+/// 已完成快照在本次开机中的代次；纯查询。/ Pure query of the completed-frame revision during this boot.
+unsigned book_lock_collage_preview_revision(void);

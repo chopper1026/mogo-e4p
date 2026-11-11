@@ -28,6 +28,7 @@
 - [docs/development/INDEX.md](INDEX.md)
 - [docs/development/guides/CALENDAR.md](guides/CALENDAR.md)
 - [docs/development/guides/LOCK_CLOCK.md](guides/LOCK_CLOCK.md)
+- [docs/development/guides/LOCK_STYLE_PICKER.md](guides/LOCK_STYLE_PICKER.md)
 - [docs/development/guides/MINI_LIBRARY.md](guides/MINI_LIBRARY.md)
 - [docs/development/guides/MOBI.md](guides/MOBI.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)

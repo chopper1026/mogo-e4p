@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "book_cover.h"
+static bool stop(void *p){unsigned *calls=p;return ++*calls>=4;}
 int main(int argc, char **argv) {
     assert(argc > 2);
     for (int i = 2; i < argc; ++i) {
@@ -21,7 +22,10 @@ int main(int argc, char **argv) {
             unsigned sum = 0;
             for (unsigned j = 0; j < ow * oh; ++j) sum += pixels[j];
             assert(sum > 30u * ow * oh && sum < 230u * ow * oh);
-            printf("decoded: %s (%ux%u)\n", argv[i], w, h);
+            unsigned calls=0;
+            assert(!book_image_file_grayscale_cancel(argv[i],png,ow,oh,pixels,stop,&calls));
+            assert(calls>=4);
+            printf("decoded and cancelled: %s (%ux%u)\n", argv[i], w, h);
         }
         for (unsigned j = 0; j < 16; ++j) assert(pixels[(size_t)ow * oh + j] == 0xcc);
         free(pixels);

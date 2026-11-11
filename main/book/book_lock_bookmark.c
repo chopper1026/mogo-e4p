@@ -341,3 +341,29 @@ void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect 
     for(int y=0;y<area.height;++y)for(int x=0;x<area.width;++x)
         epd_draw_pixel(area.x+x,area.y+y,pixel(canvas,x*684/area.width,y*1216/area.height)&0xf0,fb);
 }
+
+bool book_lock_bookmark_thumbnail(const char *path,unsigned width,unsigned height,uint8_t *out,
+                                  image_cancel_fn cancelled,void *context) {
+    unsigned sw,sh;
+    if(!out||!width||!height||width>342||height>608||!book_image_file_dimensions(path,true,&sw,&sh)||!sw||!sh)return false;
+    unsigned w=width,h=(uint64_t)sh*w/sw;
+    if(h>height){h=height;w=(uint64_t)sw*h/sh;}
+    if(!w||!h)return false;
+    size_t count=(size_t)w*h;
+    uint8_t *layer=heap_caps_malloc(count*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!layer)return false;
+    bool ok=book_png_file_layer_cancel(path,w,h,layer,layer+count,cancelled,context);
+    if(ok&&(!cancelled||!cancelled(context)))ok=remove_white_background(layer,layer+count,w,h);
+    else ok=false;
+    if(ok){
+        // 淡棋盘仅表示透明区域，不冒充当前阅读页；完整画布居中而不裁切。
+        // A quiet checker identifies transparency; center the complete canvas without cropping.
+        for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)out[y*width+x]=((x/12+y/12)&1)?238:255;
+        unsigned ox=(width-w)/2,oy=(height-h)/2;
+        for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+            size_t at=y*w+x,to=(y+oy)*width+x+ox;
+            out[to]=layer[at]+(out[to]*(255u-layer[count+at])+127u)/255u;
+        }
+    }
+    free(layer);return ok;
+}

@@ -48,7 +48,7 @@ typedef enum{APP_REDRAW_NONE,APP_REDRAW_PAGE}app_redraw_t;
 typedef struct{int type,x0,y0;}ui_gesture_event_t;
 enum{UI_GESTURE_TAP,UI_GESTURE_SWIPE_U};
 typedef struct{int unused;}app_desc_t;
-typedef struct{const app_desc_t*request_app;}app_ctx_t;
+typedef struct{const app_desc_t*request_app;uint8_t *fb;}app_ctx_t;
 const app_desc_t app_transfer={0};
 const app_desc_t app_components={0};
 static void app_components_open(app_ctx_t *ctx,bool city){assert(!city);ctx->request_app=&app_components;}
@@ -76,6 +76,7 @@ static bool s_font_sync_confirm,s_config_confirm,s_panel_repair_pending;
 static bool s_reading_bg_confirm,s_reading_bg_ready,s_reading_bg_pending;
 static char s_reading_bg_notice[96];
 static void reading_bg_scan(void){}
+static void ui_lock_style_open(const uint8_t *fb){(void)fb;}
 static char s_font_sync_path[192],s_notice[96],s_ble_notice[96],s_ble_feedback[96];
 static int font_scans,profile_edits,wifi_requests;
 static bool home_full;

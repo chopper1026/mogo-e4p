@@ -1208,6 +1208,8 @@ bool ble_pt_connected(void) { return false; }
 // 调度回归链接真实生命周期服务；失败组合由独立生命周期测试控制。
 // Scheduler regressions link the actual lifecycle service; dedicated lifecycle tests control failure combinations.
 bool wifi_transfer_pause_for_sleep(void) { return true; }
+bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
+void lock_images_close(void){}
 bool ui_avatar_quiesce(unsigned timeout) { (void)timeout; return true; }
 esp_err_t ble_pt_stop(uint32_t timeout) { (void)timeout; return ESP_OK; }
 esp_err_t ble_pt_stop_for_sleep(uint32_t timeout) { (void)timeout; return ESP_OK; }

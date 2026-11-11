@@ -2,6 +2,10 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
+ * 用户 2026-11-11 修订：锁屏样式改为六类缩略图及同页选择，图片加载独立于绘图和输入。
+ * User revision: lock styles use six thumbnails and inline choices, with image I/O outside drawing/input.
+ * 用户实屏反馈：锁屏样式保留小图，加载完成只整屏定稿一次，避免逐张局刷导致文字变灰。
+ * Device feedback: retain thumbnails and settle completed batches once to avoid faded text from repeated partial updates.
  * 用户新增：阅读票根提供透明或封面背景，独立记忆选择并在保存失败时保留原值。
  * User addition: tickets offer transparent/cover backgrounds with independent persistence and failed-save retention.
  * 中文：分组设置页；网络短时对时后 PMU 持续走时，开机恢复系统时钟。
@@ -60,8 +64,6 @@
 #include "haptics.h"
 #include "lock_pin_flow.h"
 #include "ui_pinpad.h"
-#include "book_lock_collage.h"
-#include "book_lock_bookmark.h"
 #include "boot_state.h"
 #include "ble_page_turner.h"
 #include "device_power.h"
@@ -76,6 +78,7 @@
 #include "ui_keyboard.h"
 #include "ui_nav.h"
 #include "ui_wallpaper.h"
+#include "ui_lock_style.h"
 #include "ui_reader_background.h"
 #include "ui_avatar.h"
 #include "ui_builtin_image.h"
@@ -109,15 +112,13 @@ static const app_main_refresh_mode_t s_main_refresh_choices[] = {
 typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_TIME_EDIT, SETTINGS_SHELF_STYLE, SETTINGS_SYSTEM_FONT,
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
-               SETTINGS_WALLPAPER, SETTINGS_WALLPAPER_PREVIEW,
                SETTINGS_READING_BG, SETTINGS_READING_BG_PREVIEW,
                SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_HAPTIC,
                SETTINGS_POWER_LOG,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
                SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT,
-               SETTINGS_TICKET_BACKGROUND, SETTINGS_CALENDAR } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
 static settings_page_t s_page;
 // 快捷栏长按蓝牙或震动圆键的待定子页；on_enter 消费一次后回到主列表。
 // Pending sub-page from a quick-bar Bluetooth or haptics hold; on_enter consumes it once and returns to the main list.
@@ -173,7 +174,6 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
 static int s_style_scroll, s_main_scroll;
-static bool s_collage_prepare_pending;
 static bool s_scroll_drag_consumed, s_scroll_present_pending;
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
 // Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
@@ -355,7 +355,6 @@ bool app_device_settings_offer_update(bool already_in_settings) {
 static const char *const TAG = "device_settings";
 // 主设置始终单行；大字号只改变字形，字体预览单独保留足够空间。
 // Main rows never stack; larger glyphs share one centerline, with extra space only in font previews.
-static EpdRect lock_style_row(int index) { return (EpdRect){36, 300 + index * 110, 612, 96}; }
 
 static bool settings_stacked(void) { return app_settings_system_font_size() >= 150; }
 static int settings_profile_height(void) { return 106; }
@@ -459,15 +458,11 @@ static bool wallpapers_alloc(void) {
 }
 static int s_wallpaper_count;
 static int s_wallpaper_selected;
-static bool s_wallpaper_confirm, s_wallpaper_preview_ok;
 // 阅读背景选择：预览解码延迟到 tick，ready 只在解码成功后置位，notice 兼作列表页反馈行。
 // Reading-background picker: preview decoding defers to the tick, ready is set only after a
 // successful decode, and notice doubles as the list page's feedback line.
 static bool s_reading_bg_confirm, s_reading_bg_ready, s_reading_bg_pending;
 static char s_reading_bg_notice[96];
-static bool s_bookmark_picker;
-static uint8_t *s_bookmark_preview;
-static uint8_t *s_bookmark_preview_base;
 
 static void wallpaper_scan_dir(const char *root) {
     if (!wallpapers_alloc()) return;
@@ -478,7 +473,6 @@ static void wallpaper_scan_dir(const char *root) {
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
         const char *ext = strrchr(entry->d_name, '.');
         if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg") && strcasecmp(ext, ".png"))) continue;
-        if(s_bookmark_picker && strcasecmp(ext,".png"))continue;
         wallpaper_item_t *item = &s_wallpapers[s_wallpaper_count];
         if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
         struct stat st;
@@ -489,27 +483,6 @@ static void wallpaper_scan_dir(const char *root) {
         ++s_wallpaper_count;
     }
     closedir(dir);
-}
-static void bookmark_preview_release(void) {
-    free(s_bookmark_preview);s_bookmark_preview=NULL;
-    free(s_bookmark_preview_base);s_bookmark_preview_base=NULL;
-}
-static void bookmark_preview_prepare(const uint8_t *background) {
-    free(s_bookmark_preview);s_bookmark_preview=NULL;
-    if(!s_bookmark_picker || s_wallpaper_selected<0 || s_wallpaper_selected>=s_wallpaper_count)return;
-    const size_t bytes=684u*1216u/2u;
-    if(!background || heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<(s_bookmark_preview_base?bytes:2*bytes)+2304u*1024u)return;
-    // 一次保存目录画面，切换PNG预览时不反复叠加上一张；离开预览即释放。
-    // Save the directory frame once so swiping never nests old PNG previews; release on leaving preview.
-    if(!s_bookmark_preview_base){
-        s_bookmark_preview_base=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-        if(s_bookmark_preview_base)memcpy(s_bookmark_preview_base,background,bytes);
-    }
-    if(!s_bookmark_preview_base)return;
-    uint8_t *canvas=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-    if(canvas)memcpy(canvas,s_bookmark_preview_base,bytes);
-    if(canvas && book_lock_bookmark_preview(canvas,s_wallpapers[s_wallpaper_selected].path))s_bookmark_preview=canvas;
-    else free(canvas);
 }
 static void wallpaper_scan(void) {
     s_wallpaper_count = s_wallpaper_page = 0;
@@ -528,7 +501,6 @@ static void reading_bg_scan(void) {
         if (!strcmp(s_wallpapers[i].path, app_settings_book_background_path())) s_wallpaper_selected = i;
 }
 
-
 static void profile_editor_open(bool signature) {
     s_editor_signature = signature;
     snprintf(s_editor, sizeof(s_editor), "%s", signature ? app_settings_status_signature() : app_settings_device_name());
@@ -537,9 +509,6 @@ static void profile_editor_open(bool signature) {
     ui_keyboard_begin(&s_editor_input, false);
     s_page = SETTINGS_TEXT_EDIT;
 }
-
-
-
 
 static int days_in_month(int year, int month) {
     static const int days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
@@ -1216,122 +1185,12 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
-    if (s_page == SETTINGS_TICKET_BACKGROUND) {
-        back_header(fb, "阅读票根背景");
-        section(fb, 248, "选择票根背景");
-        const char *labels[] = {"透明背景", "封面背景"};
-        const char *details[] = {"保留锁屏前页面，叠加票根", "最近书籍封面铺满背景"};
-        for (int i = 0; i < 2; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
-            bool active = app_settings_ticket_background() == (app_ticket_background_t)i;
-            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text_box(fb, (EpdRect){64, box.y + 14, 520, 58}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text_box(fb, (EpdRect){64, box.y + 82, 520, 40}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
-        }
-        if (s_notice[0]) ui_text(fb, 54, 660, 23, s_notice, EPD_DRAW_ALIGN_LEFT, false);
-        ui_nav_draw(fb, 3);
-        return;
-    }
-    if (s_page == SETTINGS_CALENDAR) {
-        back_header(fb, "日历");
-        section(fb, 248, "选择日历锁屏样式");
-        const char *labels[] = {"老黄历", "万年历"};
-        const char *details[] = {"大日期 · 农历干支 · 每日宜忌", "整月公农历对照 · 节气 · 宜忌"};
-        for (int i = 0; i < 2; ++i) {
-            EpdRect box = {36, 300 + i * 154, 612, 132};
-            bool active = app_settings_lock_style() == 4 && app_settings_calendar_style() == (app_calendar_style_t)i;
-            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text_box(fb, (EpdRect){64, box.y + 14, 520, 58}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text_box(fb, (EpdRect){64, box.y + 82, 520, 40}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
-        }
-        ui_text_box(fb, (EpdRect){54, 638, 576, 66}, 23, "按锁屏时日期生成 · 请先校准时间", EPD_DRAW_ALIGN_LEFT, false);
-        if (s_notice[0]) ui_text_box(fb, (EpdRect){54, 724, 576, 66}, 23, s_notice, EPD_DRAW_ALIGN_LEFT, false);
-        ui_nav_draw(fb, 3);
-        return;
-    }
+
     if (s_page == SETTINGS_LOCK_STYLE) {
-        back_header(fb, "锁屏样式");
-        section(fb, 248, "选择电源键锁屏后的画面");
-        const char *labels[] = {"壁纸锁屏", "阅读票根", "书架拼贴", "透明 PNG 书封", "日历", "简约时钟"};
-        const char *details[] = {"使用 TF 卡中的 JPG / PNG 图片",
-            app_settings_ticket_background() == APP_TICKET_BACKGROUND_COVER ? "封面背景 · 点按选择背景" : "透明背景 · 点按选择背景",
-            "真实封面 · 名称与数量 · 系统字体", "当前页面作底 · 白底 PNG 自动去白",
-            app_settings_calendar_style() == APP_CALENDAR_MONTH ? "万年历 · 点按选择样式" : "老黄历 · 点按选择样式",
-            "浅睡时每分钟更新 · 24小时制"};
-        const uint8_t values[] = {1, 0, 2, 3, 4, APP_LOCK_STYLE_CLOCK};
-        for (int i = 0; i < 6; ++i) {
-            EpdRect box = lock_style_row(i);
-            bool active = app_settings_lock_style() == values[i];
-            settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text_box(fb, (EpdRect){64, box.y + 4, 520, 44}, 31, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text_box(fb, (EpdRect){64, box.y + 54, 520, 32}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 48, 8, UI_GRAY_BLACK, fb);
-        }
-        ui_text(fb,54,966,21,"透明书封放入 pictures · 推荐 684 × 1216",EPD_DRAW_ALIGN_LEFT,false);
-        if (app_settings_wallpaper_path()[0])
-            row(fb, 1010, "当前壁纸", strrchr(app_settings_wallpaper_path(), '/') + 1);
-        ui_nav_draw(fb, 3);
+        ui_lock_style_render(fb);
         return;
     }
-    if (s_page == SETTINGS_WALLPAPER) {
-        back_header(fb,s_bookmark_picker?"选择透明书封":"选择壁纸");
-        section(fb,244,s_bookmark_picker?"pictures · 透明 PNG · 保留整张画布":"TF 卡图片 · JPG / PNG · 不超过 50 MB");
-        if (!s_wallpaper_count)
-            ui_text(fb, 54, 325, 25, "未找到图片，请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
-        for (int i = 0; i < 8; ++i) {
-            int index = s_wallpaper_page * 8 + i;
-            if (index >= s_wallpaper_count) break;
-            EpdRect box = {36, 292 + i * 92, 612, 78};
-            bool active = !strcmp(s_wallpapers[index].path,s_bookmark_picker?app_settings_bookmark_path():app_settings_wallpaper_path());
-            settings_card(fb, box, 18, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[index].name);
-            fit_value(name, 490);
-            ui_text_vc(fb, 60, box.y + 39, 24, name, EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 39, 6, UI_GRAY_BLACK, fb);
-        }
-        ui_nav_draw(fb, 3);
-        return;
-    }
-    if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
-        back_header(fb,s_bookmark_picker?"预览透明书封":"预览壁纸");
-        EpdRect image = {166, 194, 352, 626};
-        ui_fill_round_rect(fb, image, 8, UI_GRAY_WHITE);
-        s_wallpaper_preview_ok = s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count &&
-            (s_bookmark_picker ? s_bookmark_preview != NULL : ui_wallpaper_draw(fb, s_wallpapers[s_wallpaper_selected].path, image));
-        if(s_bookmark_picker && s_bookmark_preview)book_lock_bookmark_preview_paint(fb,s_bookmark_preview,image);
-        ui_draw_round_rect(fb, image, 8, 0x70);
-        if (!s_wallpaper_preview_ok)
-            ui_text_vc(fb, 342, 507, 23, s_bookmark_picker?"PNG无法加载，请更换图片":"图片无法预览", EPD_DRAW_ALIGN_CENTER, false);
-        if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
-            char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[s_wallpaper_selected].name);
-            fit_value(name, 570);
-            ui_text_vc(fb, 342, 859, 24, name, EPD_DRAW_ALIGN_CENTER, false);
-            char position[40];
-            snprintf(position, sizeof(position), "%d / %d · 上下滑动切换", s_wallpaper_selected + 1, s_wallpaper_count);
-            ui_text_vc(fb, 342, 908, 20, position, EPD_DRAW_ALIGN_CENTER, false);
-        }
-        if (s_wallpaper_preview_ok) {
-            EpdRect button = {94, 962, 496, 70};
-            ui_fill_round_rect(fb, button, 22, 0x30);
-            ui_text_vc(fb, 342, 997, 25, s_bookmark_picker?"使用透明书封":"设为锁屏壁纸", EPD_DRAW_ALIGN_CENTER, true);
-        }
-        if (s_wallpaper_confirm) {
-            EpdRect dialog = {68, 435, 548, 306};
-            ui_fill_round_rect(fb, dialog, 26, UI_GRAY_WHITE);
-            ui_draw_control_frame(fb, dialog, 26, 0x50);
-            ui_text_vc(fb, 342, 503, 31, s_bookmark_picker?"开启透明书封锁屏？":"设为壁纸锁屏？", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, 342, 565, 20, s_bookmark_picker?"以锁屏前当前页面为背景":"确认后，短按电源键将显示此图片", EPD_DRAW_ALIGN_CENTER, false);
-            EpdRect cancel = {94, 643, 232, 68}, confirm = {358, 643, 232, 68};
-            ui_fill_round_rect(fb, cancel, 18, 0xe0);
-            ui_fill_round_rect(fb, confirm, 18, 0x30);
-            ui_text_vc(fb, 210, 677, 24, "取消", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, 474, 677, 24, "确认", EPD_DRAW_ALIGN_CENTER, true);
-        }
-        ui_nav_draw(fb, 3);
-        return;
-    }
+
     if (s_page == SETTINGS_READING_BG) {
         back_header(fb, "阅读背景");
         section(fb, 244, "TF 卡 pictures · JPG / PNG · 不超过 50 MB");
@@ -1784,17 +1643,16 @@ void app_device_settings_request_haptics(bool return_to_origin) {
     s_enter_ble_from_quick = false;
 }
 static void on_enter(app_ctx_t *ctx) {
+    ui_lock_style_close();
     (void)ctx;
     pin_setup_close();
     s_notice[0] = 0;
     s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
-    s_collage_prepare_pending = false;
     s_scroll_drag_consumed = s_scroll_present_pending = false;
     s_wallpaper_selected = -1;
-    s_bookmark_picker=false;bookmark_preview_release();
-    s_wallpaper_confirm = s_wallpaper_preview_ok = false;
+
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
     s_config_confirm = false;
@@ -1897,22 +1755,8 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
     }
     if (s_page == SETTINGS_PIN_ENTRY) return pin_setup_tick(ctx);
-    if (s_collage_prepare_pending && s_page == SETTINGS_LOCK_STYLE) {
-        s_collage_prepare_pending = false;
-        // 先让选中反馈可见，再生成卡上缓存；render 本身只绘图。
-        // Show selection feedback first, then prepare the SD cache; render stays paint-only.
-        const size_t bytes = UI_LOCK_WIDTH * UI_LOCK_HEIGHT / 2u;
-        size_t available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        uint8_t *preview = available > bytes + 1024u * 1024u
-            ? heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
-        if (preview) {
-            app_lock_font_t saved;
-            app_font_begin_lock(&saved);
-            (void)book_lock_collage_draw(preview);
-            app_font_end_lock(&saved);
-            free(preview);
-        }
-        return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_LOCK_STYLE && !(ctx->touch && ctx->touch->touched) && ui_lock_style_tick(ctx->now_ms)) {
+        return APP_REDRAW_FULL;
     }
 
     // 阅读背景预览：解码上限 50 MB，只能放 tick 里做，render 只画缓存。
@@ -2104,6 +1948,17 @@ static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, in
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    if (s_page == SETTINGS_LOCK_STYLE) {
+        if (ev->type==UI_GESTURE_TAP) {
+            int tab=ui_nav_hit(ev->x0,ev->y0);
+            if(tab>=0){ui_lock_style_close();s_page=SETTINGS_MAIN;ui_nav_request(ctx,tab);return APP_REDRAW_PAGE;}
+        }
+        if (ev->type==UI_GESTURE_TAP && ev->y0<140 && ev->x0<170) {
+            if (ui_lock_style_back()) return APP_REDRAW_PAGE;
+            ui_lock_style_close();s_page=SETTINGS_MAIN;settings_prepare_profile();return APP_REDRAW_PAGE;
+        }
+        return ui_lock_style_gesture(ev)?APP_REDRAW_PAGE:APP_REDRAW_NONE;
+    }
     // 快捷栏直达的返回只属于这次访问：回到设置主列表后恢复普通返回。
     // Quick-bar back targets belong to this visit only: once the main list
     // is shown again the ordinary back returns.
@@ -2217,15 +2072,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_scroll_present_pending = true;
         return APP_REDRAW_AREA;
     }
-    if (s_page == SETTINGS_WALLPAPER_PREVIEW && !s_wallpaper_confirm &&
-        (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
-        int next = s_wallpaper_selected + (ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
-        if (next < 0 || next >= s_wallpaper_count) return APP_REDRAW_NONE;
-        s_wallpaper_selected = next;
-        bookmark_preview_prepare(ctx->fb);
-        s_wallpaper_page = next / 8;
-        return APP_REDRAW_PAGE;
-    }
+
     if (s_page == SETTINGS_READING_BG_PREVIEW && !s_reading_bg_confirm &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int next = s_wallpaper_selected + (ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
@@ -2239,11 +2086,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         s_reading_bg_notice[0] = 0;
         return APP_REDRAW_PAGE;
     }
-    if ((s_page == SETTINGS_SYSTEM_FONT || s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_READING_BG) &&
+    if ((s_page == SETTINGS_SYSTEM_FONT || s_page == SETTINGS_READING_BG) &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int *page = s_page == SETTINGS_SYSTEM_FONT ? &s_font_page : &s_wallpaper_page;
         int count = s_page == SETTINGS_SYSTEM_FONT ? ttf_font_count() + 1 : s_wallpaper_count;
-        int slots = s_page == SETTINGS_SYSTEM_FONT ? system_font_layout().slots : (s_page == SETTINGS_READING_BG ? 7 : 8);
+        int slots = s_page == SETTINGS_SYSTEM_FONT ? system_font_layout().slots : 7;
         int pages = count > 0 ? (count + slots - 1) / slots : 1;
         int old = *page;
         if (ev->type == UI_GESTURE_SWIPE_U && *page + 1 < pages) ++*page;
@@ -2253,23 +2100,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_AREA;
     }
     if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
-    if (s_page == SETTINGS_WALLPAPER_PREVIEW && s_wallpaper_confirm) {
-        if (ev->y0 >= 643 && ev->y0 < 711 && ev->x0 >= 358 && ev->x0 < 590) {
-            const char *path = s_wallpapers[s_wallpaper_selected].path;
-            if(s_bookmark_picker)app_settings_set_bookmark_path(path);
-            else app_settings_set_wallpaper_path(path);
-            if (!strcmp(s_bookmark_picker?app_settings_bookmark_path():app_settings_wallpaper_path(), path)) {
-                app_settings_set_lock_style(s_bookmark_picker?3:1);
-                s_page = SETTINGS_LOCK_STYLE;
-                // 先释放预览缓冲，再按可用内存预建图层缓存；锁屏时只做合成。
-                // Release the preview buffers first, then prebuild the layer cache so a lock only composites.
-                bookmark_preview_release();
-                if (s_bookmark_picker) book_lock_bookmark_prepare(path);
-            }
-        }
-        s_wallpaper_confirm = false;
-        return APP_REDRAW_PAGE;
-    }
+
     if (s_page == SETTINGS_TIME_EDIT) {
         if (ev->y0 < 190) { s_page = SETTINGS_TIME; return APP_REDRAW_PAGE; }
         if (ev->y0 >= 354 && ev->y0 < 597) {
@@ -2291,7 +2122,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_PROFILE) {
         if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         if (y >= 266 && y < 350) { profile_editor_open(false); return APP_REDRAW_PAGE; }
-        if (y >= 366 && y < 450) { s_bookmark_picker=false;wallpaper_scan(); s_page = SETTINGS_AVATAR; return APP_REDRAW_PAGE; }
+        if (y >= 366 && y < 450) { wallpaper_scan(); s_page = SETTINGS_AVATAR; return APP_REDRAW_PAGE; }
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_AVATAR) {
@@ -2307,18 +2138,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
-        if (y < 190) { bookmark_preview_release(); s_page = SETTINGS_WALLPAPER; return APP_REDRAW_PAGE; }
-        if (s_wallpaper_preview_ok && y >= 194 && y < 1032) {
-            s_wallpaper_confirm = true;
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    if (s_page == SETTINGS_WALLPAPER && y < 190) {
-        s_page = SETTINGS_LOCK_STYLE;
-        return APP_REDRAW_PAGE;
-    }
+
     if (s_page == SETTINGS_READING_BG_PREVIEW) {
         if (y < 190) { s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
         if (s_reading_bg_confirm) {
@@ -2326,8 +2146,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 if (app_settings_set_book_background_path(s_wallpapers[s_wallpaper_selected].path))
                     snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已设为阅读背景，下次打开书籍生效");
             }
-            // 与壁纸弹窗一致：其余点按一律视为取消。
-            // Same as the wallpaper dialog: any other tap just cancels.
+            // 其余点按一律视为取消。
+            // Any other tap cancels the pending background choice.
             s_reading_bg_confirm = false;
             return APP_REDRAW_PAGE;
         }
@@ -2383,12 +2203,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_CALENDAR && y < 190) {
-        s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE;
-    }
-    if (s_page == SETTINGS_TICKET_BACKGROUND && y < 190) {
-        s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE;
-    }
+
     if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_AUTO_LOCK) {
@@ -2486,48 +2301,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         app_settings_set_system_contrast((uint8_t)(100 + index * 10));
         return APP_REDRAW_PAGE;
     }
-    if (s_page == SETTINGS_TICKET_BACKGROUND) {
-        for (int i = 0; i < 2; ++i) {
-            if (!ui_rect_hit((EpdRect){36, 300 + i * 154, 612, 132}, ev->x0, y)) continue;
-            bool saved = app_settings_set_ticket_background((app_ticket_background_t)i);
-            snprintf(s_notice, sizeof(s_notice), "%s", saved ? "" : "保存失败，请重试");
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    if (s_page == SETTINGS_CALENDAR) {
-        for (int i = 0; i < 2; ++i) if (ui_rect_hit((EpdRect){36, 300 + i * 154, 612, 132}, ev->x0, y)) {
-            snprintf(s_notice, sizeof(s_notice), "%s", app_settings_set_calendar_style((app_calendar_style_t)i) ? "已设为日历锁屏" : "保存失败，请重试");
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    if (s_page == SETTINGS_LOCK_STYLE) {
-        for (int i = 0; i < 6; ++i) if (ui_rect_hit(lock_style_row(i), ev->x0, y)) {
-            if (i == 0) { s_bookmark_picker = false; wallpaper_scan(); s_page = SETTINGS_WALLPAPER; }
-            else if (i == 1) { app_settings_set_lock_style(0); s_notice[0] = 0; s_page = SETTINGS_TICKET_BACKGROUND; }
-            else if (i == 2) { app_settings_set_lock_style(2); s_collage_prepare_pending = true; }
-            else if (i == 3) { s_bookmark_picker = true; wallpaper_scan(); s_page = SETTINGS_WALLPAPER; }
-            else if (i == 4) { s_notice[0] = 0; s_page = SETTINGS_CALENDAR; }
-            else { app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK); }
-            return APP_REDRAW_PAGE;
-        }
-        if (ui_rect_hit((EpdRect){36, 1010, 612, 80}, ev->x0, y) && app_settings_wallpaper_path()[0]) {
-            s_bookmark_picker=false;wallpaper_scan();s_page=SETTINGS_WALLPAPER;
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    if (s_page == SETTINGS_WALLPAPER) {
-        if (y < 292 || y >= 1028) return APP_REDRAW_NONE;
-        int index = s_wallpaper_page * 8 + (y - 292) / 92;
-        if (index >= s_wallpaper_count) return APP_REDRAW_NONE;
-        s_wallpaper_selected = index;
-        bookmark_preview_prepare(ctx->fb);
-        s_wallpaper_confirm = false;
-        s_page = SETTINGS_WALLPAPER_PREVIEW;
-        return APP_REDRAW_PAGE;
-    }
+
     if (s_page == SETTINGS_TIME) {
         if (y >= TIME_ROW_AUTO_Y && y < TIME_ROW_AUTO_Y + TIME_ROW_HIT_H) {
             app_settings_set_auto_time_sync(!app_settings_auto_time_sync());
@@ -2744,7 +2518,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if(y>=SETTINGS_PERSONAL_Y && y<SETTINGS_PERSONAL_Y+SETTINGS_PERSONAL_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_PERSONAL_Y)/SETTINGS_ROW_H;
         if(row==0) {s_page=SETTINGS_SHELF_STYLE;s_style_scroll=0;}
-        else if(row==1)s_page=SETTINGS_LOCK_STYLE;
+        else if(row==1){ui_lock_style_open(ctx->fb);s_page=SETTINGS_LOCK_STYLE;}
         else if(row==2){s_page=SETTINGS_LOCK_PIN;s_notice[0]=0;}
         else if(row==3)profile_editor_open(true);
         else if(row==4){
@@ -2802,20 +2576,19 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         ble_pt_scan_stop();
         if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
     }
+    if (s_page==SETTINGS_LOCK_STYLE) {
+        if(key!=1 && ui_lock_style_back())return APP_REDRAW_PAGE;
+        ui_lock_style_close();s_page=SETTINGS_MAIN;
+        if(key==1){ui_nav_request(ctx,0);return APP_REDRAW_NONE;}
+        settings_prepare_profile();return APP_REDRAW_PAGE;
+    }
     if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back) {
         s_haptics_shortcut_back = false;
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
-        if (s_wallpaper_confirm) s_wallpaper_confirm = false;
-        else { bookmark_preview_release(); s_page = SETTINGS_WALLPAPER; }
-        return APP_REDRAW_PAGE;
-    }
-    if (s_page == SETTINGS_WALLPAPER) { s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_CALENDAR) { s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_TICKET_BACKGROUND) { s_notice[0] = 0; s_page = SETTINGS_LOCK_STYLE; return APP_REDRAW_PAGE; }
+
     if (s_page == SETTINGS_READING_BG_PREVIEW) { s_reading_bg_confirm = false; s_page = SETTINGS_READING_BG; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_READING_BG) { s_page = SETTINGS_MAIN; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_AVATAR) { s_page = SETTINGS_PROFILE; return APP_REDRAW_PAGE; }
@@ -2827,7 +2600,8 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 static void settings_exit(app_ctx_t *ctx) {
-    bookmark_preview_release();s_bookmark_picker=false;
+    ui_lock_style_close();
+
     // 阅读背景预览缓存只在设置页存活；阅读器打开时会按当前路径重新解码。
     // The reading-background preview cache lives only while settings is open; the reader
     // re-decodes from the stored path when it opens.
@@ -2835,11 +2609,11 @@ static void settings_exit(app_ctx_t *ctx) {
     s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
-    s_collage_prepare_pending = false;
     s_upgrade_job = UPGRADE_JOB_NONE;
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
 }
 static void on_before_lock(app_ctx_t *ctx) {
+    if(s_page==SETTINGS_LOCK_STYLE){ui_lock_style_close();s_page=SETTINGS_MAIN;}
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     // 锁屏唤醒后 tick 不会再补解码，预览页会停在白框：锁屏前退回主列表并释放缓存。
     // After waking from lock no tick re-runs the decode, so the preview page would sit on a
@@ -2856,7 +2630,7 @@ static void on_before_lock(app_ctx_t *ctx) {
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
-    bookmark_preview_release();
+    ui_lock_style_media_lost();
     // 拔卡后背景图片和列表都失效；退回主列表，避免停留在一个空预览。
     // Losing the card invalidates the image and the list; fall back to the main list instead
     // of staying on an empty preview.
@@ -2867,7 +2641,7 @@ static void settings_media_lost(app_ctx_t *ctx) {
     }
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
-static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_prepare_profile(); }
+static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; ui_lock_style_media_ready(); settings_prepare_profile(); }
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
@@ -2887,7 +2661,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_AREA && s_scroll_present_pending &&
         (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN ||
          s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
-         s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_AVATAR ||
+         s_page == SETTINGS_AVATAR ||
          s_page == SETTINGS_READING_BG)) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);

@@ -12,6 +12,7 @@
 static char events[64];
 static size_t used;
 static int tab, save_error, ble_error;
+static bool images_ok;
 static bool reader, fullscreen, ota, cover_ok, avatar_ok, transfer_ok;
 static bool page_flushed;
 static pico_resume_t saved;
@@ -25,7 +26,7 @@ static void expect(const char *value) { assert(!strcmp(events, value)); }
 static void reset(void) {
     used = 0; events[0] = 0; save_error = ble_error = 0;
     ota = page_flushed = reader = fullscreen = false;
-    cover_ok = avatar_ok = transfer_ok = true;
+    images_ok = cover_ok = avatar_ok = transfer_ok = true;
     memset(&saved, 0xa5, sizeof(saved));
 }
 static void page_before_lock(app_ctx_t *ctx) {
@@ -48,6 +49,7 @@ esp_err_t pico_boot_save_resume(const pico_resume_t *resume) {
 void app_time_service_cancel(void) { event('T'); }
 void pico_ota_auto_cancel(void) { event('U'); }
 bool pico_online_busy(void) { event('O'); return ota; }
+bool lock_images_quiesce(unsigned timeout_ms) { assert(timeout_ms==2000); event('G'); return images_ok; }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('C'); return cover_ok; }
 bool ui_avatar_quiesce(unsigned timeout_ms) { assert(timeout_ms == 2000); event('A'); return avatar_ok; }
 bool wifi_transfer_pause_for_sleep(void) { event('W'); return transfer_ok; }
@@ -82,18 +84,20 @@ int main(void) {
         transfer_ok = bits & 8; ble_error = bits & 16 ? ESP_FAIL : ESP_OK;
         bool admitted = app_lifecycle_prepare_poweroff();
         if (ota) { expect("UTO"); assert(!admitted); }
-        else if (!cover_ok) { expect("UTOC"); assert(!admitted); }
-        else if (!avatar_ok) { expect("UTOCA"); assert(!admitted); }
-        else if (!transfer_ok) { expect("UTOCAW"); assert(!admitted); }
-        else { expect("UTOCAWB"); assert(admitted); }
+        else if (!cover_ok) { expect("UTOGC"); assert(!admitted); }
+        else if (!avatar_ok) { expect("UTOGCA"); assert(!admitted); }
+        else if (!transfer_ok) { expect("UTOGCAW"); assert(!admitted); }
+        else { expect("UTOGCAWB"); assert(admitted); }
     }
     for (unsigned bits = 0; bits < 8; ++bits) {
         reset(); cover_ok = bits & 1; avatar_ok = bits & 2; ble_error = bits & 4 ? ESP_FAIL : ESP_OK;
         app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
         assert(handoff.jobs_ready == (cover_ok && avatar_ok));
         assert(handoff.ble_stopped == (cover_ok && avatar_ok && ble_error == ESP_OK));
-        if (!cover_ok) expect("C"); else if (!avatar_ok) expect("CA"); else expect("CAL");
+        if (!cover_ok) expect("GC"); else if (!avatar_ok) expect("GCA"); else expect("GCAL");
     }
+    reset();images_ok=false;assert(!app_lifecycle_prepare_poweroff());expect("UTOG");
+    reset();images_ok=false;assert(!app_lifecycle_prepare_light().jobs_ready);expect("G");
     for (unsigned i = 0; i < 100; ++i) {
         reset(); transfer_ok = i & 1;
         assert(app_lifecycle_pause_for_lock() == transfer_ok); expect("UTW");

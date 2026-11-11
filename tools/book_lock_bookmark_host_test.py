@@ -57,8 +57,8 @@ typedef struct{unsigned x,y,width,height;}book_crop_t;
 for n in ('luminance','scale_axis'):u+=function(n,c)+'\n'
 u+='typedef struct{uint16_t at;uint8_t frac;}scale_step_t;\n'
 for n in ('scale_map','scale_next','bilinear4','book_cover_crop'):u+=function(n,c)+'\n'
-u+='typedef struct{const uint8_t *data;size_t size,pos;FILE *file;}png_input_t;\n'
-for n in ('png_read_mem','png_gray_input','book_png_file_layer'):u+=function(n,c)+'\n'
+u+='typedef bool (*image_cancel_fn)(void *);\ntypedef struct{const uint8_t *data;size_t size,pos;FILE *file;image_cancel_fn cancelled;void *context;}png_input_t;\n'
+for n in ('png_read_mem','png_gray_input_cancel','png_gray_input','book_png_file_layer_cancel','book_png_file_layer'):u+=function(n,c)+'\n'
 u+=r'''
 static bool book_image_file_dimensions(const char *path,bool png,unsigned *w,unsigned *h){
  (void)png;uint8_t b[24];FILE *f=fopen(path,"rb");if(!f)return false;bool ok=fread(b,1,24,f)==24&&!memcmp(b,"\211PNG\r\n\032\n",8);fclose(f);
@@ -72,6 +72,7 @@ u+=function("ui_image_dither_gray",r/"main/ui/ui_image_dither.c")+"\n"
 u+=source
 u+=r'''
 
+static bool thumb_cancel(void *ctx){(void)ctx;return true;}
 static void check_white_regions(void){
  uint8_t gray[31*19],before[31*19],alpha[31*19],reach[31*19];unsigned queue[31*19],seed=47;
  // 和独立像素BFS对照，覆盖分岔、窄缝、封闭白岛及单行单列。
@@ -98,6 +99,13 @@ static void check_white_regions(void){
 }
 int main(int argc,char **argv){
  assert(argc>=4);check_white_regions();
+ uint8_t thumbnail[160*284+16];memset(thumbnail,0xaa,sizeof(thumbnail));
+ assert(book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,NULL,NULL));
+ assert(thumbnail[15*160+15]>=238&&thumbnail[90*160+120]==0);
+ for(unsigned i=160*284;i<sizeof(thumbnail);++i)assert(thumbnail[i]==0xaa);
+ assert(!book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,thumb_cancel,NULL));
+ budget=0;assert(!book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,NULL,NULL));budget=8u*1024u*1024u;
+
  uint8_t *fb=malloc(BYTES),*original=malloc(BYTES);assert(fb&&original);memset(original,0xaa,BYTES);
  memcpy(fb,original,BYTES);
  assert(book_lock_bookmark_draw(fb,argv[2]));

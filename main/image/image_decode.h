@@ -33,3 +33,11 @@ bool book_image_file_dimensions(const char *path, bool png, unsigned *width, uns
 bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsigned height, uint8_t *out);
 /// PNG 预乘灰度和 alpha，各由调用方提供 width*height 字节。/ Premultiplied PNG gray and alpha, each in caller-owned width*height bytes.
 bool book_png_file_layer(const char *path,unsigned width,unsigned height,uint8_t *gray,uint8_t *alpha);
+
+/// 可取消的文件解码；回调只查询当前请求是否已过期，不绘屏、不访问字库。
+/// Cancellable file decoding; the callback only checks request lifetime.
+typedef bool (*image_cancel_fn)(void *context);
+bool book_image_file_grayscale_cancel(const char *path, bool png, unsigned width, unsigned height,
+                                      uint8_t *out, image_cancel_fn cancelled, void *context);
+bool book_png_file_layer_cancel(const char *path, unsigned width, unsigned height,
+                                 uint8_t *gray, uint8_t *alpha, image_cancel_fn cancelled, void *context);

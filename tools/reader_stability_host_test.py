@@ -196,7 +196,7 @@ static uint32_t local_day(void){return 0;}
 '''
 ticket_path=ROOT/'main/book/book_ticket.c'
 ticket_art+=function('ui_image_dither_gray',ROOT/'main/ui/ui_image_dither.c')+'\n'
-for name in ('text_fit','cover_load','cover_background_draw','notch_depth','ticket_paper_draw','ticket_shadow_draw','cover_draw','ticket_stat','ticket_heading','book_ticket_draw'):
+for name in ('text_fit','cover_load','cover_background_draw','notch_depth','ticket_paper_draw','ticket_shadow_draw','cover_draw','ticket_stat','ticket_heading','book_ticket_preview','book_ticket_draw'):
  ticket_art+=function(name,ticket_path)+'\n'
 ticket_art+=r'''
 int main(void){

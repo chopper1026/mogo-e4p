@@ -415,3 +415,6 @@ esp_err_t app_settings_backup_save(void);
 /// 校验备份后恢复 NVS；缺失的外部字体或壁纸回退到内建资源。
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);
+
+/// 同页选择保存成功后才发布；失败保留原样式、路径和子选项。/ Publish the inline selection only after saving; retain old state on failure.
+bool app_settings_select_lock(uint8_t style,const char *image,unsigned option);

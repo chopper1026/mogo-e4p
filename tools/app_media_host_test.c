@@ -52,6 +52,8 @@ int ttf_font_open(const char *path) {
 int ttf_font_open_builtin(void) { event('B'); builtin = font_ready = true; return ESP_OK; }
 void ui_avatar_invalidate(void) { event('A'); }
 bool book_cover_jobs_quiesce(unsigned timeout_ms) { assert(timeout_ms == 0); event('Q'); return quiesce_ok; }
+bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
+void lock_images_close(void){event('T');}
 bool ui_avatar_quiesce(unsigned timeout_ms) { assert(timeout_ms == 0); event('V'); return avatar_ok; }
 void book_lock_collage_invalidate(void) { event('C'); }
 void ui_text_set_system_font(bool active) { assert(!active); event('S'); }
@@ -71,7 +73,7 @@ int main(void) {
     assert(!app_media_initial_mounted()); expect("I");
     info.mounted = true;
     assert(app_media_initial_mounted()); expect("I");
-    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCR");
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("ITAQCR");
     assert(mounted && !invalidated && ready_count == 1);
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
     // 正在探测时保留旧状态；不可把暂未完成误报为拔卡。
@@ -82,7 +84,7 @@ int main(void) {
     // 停封面工作先于页面关闭，页面先于字体回退；不重复通知。
     // Quiesce covers before closing the page, then fall back the face; never notify twice.
     status = -9; builtin = false; quiesce_ok = false;
-    assert(app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCLBS");
+    assert(app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("ITAQCLBS");
     assert(!mounted && invalidated && lost_count == 1);
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("I");
     info.present = true;
@@ -107,7 +109,7 @@ int main(void) {
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IQVM");
     assert(remounts == 2);
     status = ESP_OK; info.mounted = true;
-    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCR");
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("ITAQCR");
     assert(mounted && !invalidated && ready_count == 2);
     // USB 所有权期间不访问卡、不发失效通知；退出后走已有就绪通知。
     // Under USB ownership, never access the card or signal loss; exiting uses the existing ready notification.
@@ -115,12 +117,12 @@ int main(void) {
     assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("");
     assert(!mounted && !invalidated);
     usb = false;
-    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCR");
+    assert(!app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("ITAQCR");
     // 没有页面回调及尚无可用字体时，仍正确传播失效并选择系统回退。
     // Without page callbacks or a ready face, propagate loss and select the system fallback.
     page.on_media_lost = NULL; page.on_media_ready = NULL;
     info.present = info.mounted = false; font_ready = false;
-    assert(app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("IAQCS");
+    assert(app_media_poll(&ctx, &page, &mounted, &invalidated)); expect("ITAQCS");
     assert(!mounted && invalidated);
     // 字体探测受允许标志控制；未完成、内建选择和打开失败均不会报告成功。
     // The probe-permission flag gates font probing; unfinished work, a built-in selection and failed opens never report success.

@@ -907,6 +907,27 @@ static void test_clock_style(void) {
 
 // 日历双字段须跨重启与备份保持一致，失败不发布半个选择。
 // The two calendar fields stay coherent across reboot/backup and are not published on failure.
+static void test_inline_lock_selection(void) {
+    const char *old="/sdcard/pictures/old.jpg",*next="/sdcard/pictures/next.jpg";
+    app_settings_set_wallpaper_path(old);app_settings_set_lock_style(1);
+    for(unsigned fault=0;fault<4;++fault){
+        face_write_fails=fault==0;face_open_fails=fault==1;commit_fails=fault==2;flash_failure=fault==3;
+        assert(!app_settings_select_lock(1,next,0)&&!strcmp(app_settings_wallpaper_path(),old)&&app_settings_lock_style()==1);
+        assert(!app_settings_select_lock(0,NULL,1)&&app_settings_lock_style()==1);
+        assert(!app_settings_select_lock(4,NULL,1)&&app_settings_lock_style()==1);
+        if(fault>0){app_settings_set_wallpaper_path(next);assert(!strcmp(app_settings_wallpaper_path(),old));}
+    }
+    face_write_fails=face_open_fails=commit_fails=flash_failure=false;
+    assert(!app_settings_select_lock(1,NULL,0)&&!app_settings_select_lock(3,next,0));
+    assert(!app_settings_select_lock(6,NULL,0)&&!app_settings_select_lock(4,NULL,2));
+    assert(app_settings_select_lock(1,next,0)&&!strcmp(app_settings_wallpaper_path(),next));
+    unsigned before=commit_count;assert(app_settings_select_lock(1,next,0)&&(unsigned)commit_count==before);
+    assert(app_settings_select_lock(3,"/sdcard/pictures/cover.png",0)&&app_settings_lock_style()==3);
+    assert(app_settings_select_lock(0,NULL,1)&&app_settings_lock_style()==0&&app_settings_ticket_background()==1);
+    assert(app_settings_select_lock(4,NULL,1)&&app_settings_calendar_style()==1&&app_settings_lock_style()==4);
+    puts("PASS: inline lock choice publishes after save; failed open/write/commit retains style/path/options; duplicate choice skips flash");
+}
+
 static void test_calendar_style(void) {
     durable_face = -1;
     app_settings_set_lock_style(1);
@@ -2164,6 +2185,7 @@ int main(void) {
     test_home_regions_backup();
     test_device_name_branding();
     test_reader_touch_lock();
+    test_inline_lock_selection();
     test_ticket_background();
     test_calendar_style();
     test_reading_guides();

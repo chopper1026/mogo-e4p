@@ -86,6 +86,8 @@ typedef struct {
 typedef struct { float x, y, w; unsigned index; } lock_placement_t;
 static lock_library_t *s_library_index;
 static unsigned s_library_revision,s_library_root_count;
+static unsigned s_preview_revision;
+unsigned book_lock_collage_preview_revision(void){return s_preview_revision;}
 void book_lock_collage_invalidate(void) { free(s_library_index);s_library_index=NULL; }
 static const uint8_t *s_pending_frame;
 static lock_cache_t s_pending_cache;
@@ -283,7 +285,10 @@ static void cache_write(const char *path, lock_cache_t header, const uint8_t *da
     if (fclose(file)) good = false;
     // FatFs 的 rename 不覆盖同名目标，换拼贴后必须先删旧缓存。
     // FatFs rename does not overwrite an existing name; drop the old cache before a new collage.
-    if (good){(void)remove(path);if(!rename(temporary, path))return;}
+    if (good){(void)remove(path);if(!rename(temporary, path)){
+        if(!strcmp(path,LOCK_CACHE_DIR "/collage.bin"))++s_preview_revision;
+        return;
+    }}
     (void)remove(temporary);
 }
 static bool cache_header(FILE *file, lock_cache_t *header, uint64_t key) {
@@ -663,4 +668,17 @@ void book_lock_collage_cache_commit(const uint8_t *fb) {
     bool pending = fb && s_pending_frame == fb;
     s_pending_frame = NULL;
     if (pending) cache_write(LOCK_CACHE_DIR "/collage.bin", s_pending_cache, fb);
+}
+
+bool book_lock_collage_preview(uint8_t *fb) {
+    if(!fb)return false;
+    // 选择器只展示上次生成的快照；不为一个分类缩图递归扫描书库。
+    // Show the last generated snapshot without recursively scanning the library for a thumbnail.
+    FILE *f=fopen(LOCK_CACHE_DIR "/collage.bin","rb");if(!f)return false;
+    lock_cache_t h;
+    bool ok=fread(&h,1,sizeof(h),f)==sizeof(h)&&h.magic==LOCK_CACHE_MAGIC&&h.version==LOCK_CACHE_VERSION&&
+        h.width==684&&h.height==1216&&h.rotation==(unsigned)epd_get_rotation()&&h.bytes==LOCK_FRAME_BYTES&&
+        fread(fb,1,LOCK_FRAME_BYTES,f)==LOCK_FRAME_BYTES&&fgetc(f)==EOF&&!ferror(f)&&
+        hash_bytes(UINT64_C(14695981039346656037),fb,LOCK_FRAME_BYTES)==h.checksum;
+    fclose(f);return ok;
 }
