@@ -10,20 +10,42 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void enqueue(batt_log_state_t *s, uint32_t events, int64_t now, int64_t wall) {
-    if (s->count == BATT_LOG_QUEUE_SIZE) {
-        s->head = (s->head + 1) % BATT_LOG_QUEUE_SIZE;
-        --s->count;
+static bool critical(uint32_t events) {
+    return (events & (BATT_LOG_BEGIN | BATT_LOG_END | BATT_LOG_FULL | BATT_LOG_LOW |
+                     BATT_LOG_OFF | BATT_LOG_RESTART | BATT_LOG_UNDERVOLTAGE)) != 0;
+}
+
+bool batt_log_retain(batt_log_state_t *s, const batt_log_record_t *record) {
+    const bool lost = s->count == BATT_LOG_QUEUE_SIZE;
+    if (lost) {
+        unsigned remove_at = 0;
+        while (remove_at < s->count &&
+               critical(s->queue[(s->head + remove_at) % BATT_LOG_QUEUE_SIZE].events)) ++remove_at;
         ++s->dropped;
+        if (remove_at == s->count) {
+            if (!critical(record->events)) return true;
+            remove_at = 0;
+        }
+        for (unsigned i = remove_at; i + 1 < s->count; ++i)
+            s->queue[(s->head + i) % BATT_LOG_QUEUE_SIZE] =
+                s->queue[(s->head + i + 1) % BATT_LOG_QUEUE_SIZE];
+        --s->count;
     }
-    s->queue[(s->head + s->count++) % BATT_LOG_QUEUE_SIZE] = (batt_log_record_t){
+    s->queue[(s->head + s->count++) % BATT_LOG_QUEUE_SIZE] = *record;
+    return lost;
+}
+
+static void enqueue(batt_log_state_t *s, uint32_t events, int64_t now, int64_t wall) {
+    batt_log_record_t record = {
         .sample = s->latest, .have_sample = s->have_sample, .locked = s->locked,
         .session = s->session, .seq = ++s->seq, .events = events, .dropped = s->dropped,
         .up_us = now, .wall_sec = wall, .covered_us = s->covered_us,
         .unknown_us = s->unknown_us, .locked_us = s->locked_us,
         .in_ma_us = s->in_ma_us, .out_ma_us = s->out_ma_us,
+        .stats = s->stats, .low_mask = s->low_mask,
     };
-    s->last_emit_us = now;
+    if (s->count == BATT_LOG_QUEUE_SIZE) ++record.dropped;
+    (void)batt_log_retain(s, &record);
 }
 
 // 分别积分正负电流；跨零时按线性过零点分割，不能用净值抵消。
@@ -55,7 +77,35 @@ void batt_log_set_enabled(batt_log_state_t *s, bool enabled, int64_t now, int64_
     s->cursor_us = now;
     s->covered_us = s->unknown_us = s->locked_us = 0;
     s->in_ma_us = s->out_ma_us = 0;
+    s->last_period_us = now;
+    s->last_cx_emit_us = now - BATT_LOG_PERIOD_US;
+    s->low_mask = 0;
+    s->stats = (batt_log_stats_t){.start_us = now};
     enqueue(s, BATT_LOG_BEGIN, now, wall);
+}
+
+static void observe_stats(batt_log_state_t *s, const batt_log_sample_t *v) {
+    batt_log_stats_t *w = &s->stats;
+    ++w->samples;
+    if (s->locked) ++w->locked_samples;
+    if (s->have_sample && v->up_us > s->latest.up_us &&
+        v->up_us - s->latest.up_us > w->max_gap_us) w->max_gap_us = v->up_us - s->latest.up_us;
+    if (v->have_v) {
+        if (!w->v_count || v->raw_mv < w->v_min) w->v_min = v->raw_mv;
+        if (!w->v_count || v->raw_mv > w->v_max) w->v_max = v->raw_mv;
+        ++w->v_count;
+        w->v_sum += v->raw_mv;
+    }
+    if (v->have_i) {
+        if (!w->i_count || v->ma < w->i_min) w->i_min = v->ma;
+        if (!w->i_count || v->ma > w->i_max) w->i_max = v->ma;
+        ++w->i_count;
+        w->i_sum += v->ma;
+    }
+    if (v->full_reset) {
+        ++w->full_resets;
+        w->full_reset_mask |= v->full_gate;
+    }
 }
 
 void batt_log_observe(batt_log_state_t *s, const batt_log_sample_t *sample) {
@@ -82,19 +132,46 @@ void batt_log_observe(batt_log_state_t *s, const batt_log_sample_t *sample) {
         const batt_log_sample_t *p = &s->latest;
         if (p->have_v != sample->have_v || p->have_i != sample->have_i ||
             p->have_chg != sample->have_chg) events |= BATT_LOG_VALIDITY;
-        if (p->charging != sample->charging ||
-            (p->have_chg && sample->have_chg && p->charger_status != sample->charger_status))
+        const bool cx_changed = p->have_chg && sample->have_chg &&
+                                p->charger_status != sample->charger_status;
+        if (cx_changed) {
+            if (!s->stats.cx_changes) s->stats.cx_first_us = now;
+            ++s->stats.cx_changes;
+            s->stats.cx_last_us = now;
+        }
+        // 输入、充电开关立即记；普通阶段抖动保留计数，每分钟至多额外写一次。
+        // Record input/charging transitions immediately; summarize phase chatter at most once a minute.
+        if (p->charging != sample->charging || (cx_changed &&
+            (((p->charger_status ^ sample->charger_status) & ~0x18u) ||
+             now - s->last_cx_emit_us >= BATT_LOG_PERIOD_US))) {
             events |= BATT_LOG_CHARGER;
+            s->last_cx_emit_us = now;
+        }
         if (p->charge_done != sample->charge_done || p->done_source != sample->done_source)
             events |= BATT_LOG_FULL;
+    }
+    observe_stats(s, sample);
+    if (sample->charging) s->low_mask = 0;
+    if (sample->have_v && sample->have_i && sample->have_chg &&
+        !sample->charging && (sample->charger_status & 7) == 0 && sample->ma < 0) {
+        uint8_t low = 0;
+        const int thresholds[] = {3500, 3400, 3300, 3200};
+        for (unsigned i = 0; i < sizeof(thresholds) / sizeof(thresholds[0]); ++i)
+            if (sample->raw_mv <= thresholds[i]) low |= 1u << i;
+        if (low & ~s->low_mask) events |= BATT_LOG_LOW;
+        s->low_mask |= low;
     }
     s->latest = *sample;
     s->have_sample = s->have_cursor = true;
     s->previous_valid = valid && !s->locked && ordered;
     s->cursor_us = now;
-    if (!s->locked && now - s->last_emit_us >= BATT_LOG_PERIOD_US)
+    if (!s->locked && now - s->last_period_us >= BATT_LOG_PERIOD_US)
         events |= BATT_LOG_SAMPLE;
     if (events) enqueue(s, events, now, sample->wall_sec);
+    if (events & BATT_LOG_SAMPLE) {
+        s->last_period_us = now;
+        s->stats = (batt_log_stats_t){.start_us = now};
+    }
 }
 
 void batt_log_note(batt_log_state_t *s, uint32_t events, int64_t now, int64_t wall) {
@@ -123,7 +200,8 @@ bool batt_log_pop(batt_log_state_t *s, batt_log_record_t *record) {
 }
 
 int batt_log_format(char *line, size_t size, const batt_log_record_t *r, uint64_t boot,
-                    int64_t write_us, uint32_t io_errors, uint32_t file_missed) {
+                    int64_t write_us, uint32_t io_errors, uint32_t file_missed,
+                    uint32_t file_seq) {
     const batt_log_sample_t *s = &r->sample;
     const bool v = r->have_sample && s->have_v;
     const bool i = r->have_sample && s->have_i;
@@ -131,11 +209,15 @@ int batt_log_format(char *line, size_t size, const batt_log_record_t *r, uint64_
     const int flags = (v ? 1 : 0) | (i ? 2 : 0) | (chg ? 4 : 0) |
                       (r->have_sample && s->ic_soc >= 0 ? 8 : 0);
     const int n = snprintf(line, size,
-        "fmt=2 boot=%016llx session=%u seq=%u event=%u t=%lld up_ms=%lld "
+        "fmt=3 boot=%016llx session=%u seq=%u event=%u t=%lld up_ms=%lld "
         "sample_t=%lld sample_ms=%lld age_ms=%lld write_ms=%lld read_us=%u valid=%d "
         "raw=%d ma=%d chg=%d done=%d done_src=%u cx=%d comp=%ld ocv=%ld curve=%ld disp=%ld "
         "ic_soc=%d ic_age_ms=%lld locked=%d covered_ms=%lld unknown_ms=%lld lock_ms=%lld "
-        "in_uah_est=%lld out_uah_est=%lld dropped=%u io_errors=%u file_missed=%u\n",
+        "in_uah_est=%lld out_uah_est=%lld dropped=%u io_errors=%u file_missed=%u file_seq=%u "
+        "low_mask=%u full_hold_ms=%ld full_gate=%u restore=%u "
+        "win_ms=%lld n=%u locked_n=%u v_n=%u v_min=%ld v_avg=%lld v_max=%ld "
+        "i_n=%u i_min=%ld i_avg=%lld i_max=%ld max_gap_ms=%lld "
+        "cx_changes=%u cx_first_ms=%lld cx_last_ms=%lld full_resets=%u full_reset_mask=%u checkpoint_errors=%u\n",
         (unsigned long long)boot, (unsigned)r->session, (unsigned)r->seq, (unsigned)r->events,
         (long long)r->wall_sec, (long long)(r->up_us / 1000),
         r->have_sample ? (long long)s->wall_sec : -1LL,
@@ -144,16 +226,30 @@ int batt_log_format(char *line, size_t size, const batt_log_record_t *r, uint64_
         (long long)(write_us / 1000), r->have_sample ? (unsigned)s->read_us : 0u, flags,
         v ? (int)s->raw_mv : -1, i ? (int)s->ma : -1,
         r->have_sample && (chg || i) ? (int)s->charging : -1,
-        r->have_sample && v && (chg || i) ? (int)s->charge_done : -1,
+        r->have_sample && s->have_filter && v && (chg || i) ? (int)s->charge_done : -1,
         v ? (unsigned)s->done_source : 0u, chg ? (int)s->charger_status : -1,
-        v ? (long)s->comp_mv : -1L, v ? (long)s->ocv_mv : -1L,
-        v ? (long)s->curve_permille : -1L, v ? (long)s->disp_permille : -1L,
+        v && s->have_filter ? (long)s->comp_mv : -1L, v && s->have_filter ? (long)s->ocv_mv : -1L,
+        v && s->have_filter ? (long)s->curve_permille : -1L, v && s->have_filter ? (long)s->disp_permille : -1L,
         r->have_sample ? (int)s->ic_soc : -1,
         r->have_sample && s->ic_soc >= 0 ? (long long)((write_us - s->ic_us) / 1000) : -1LL,
         (int)r->locked, (long long)(r->covered_us / 1000), (long long)(r->unknown_us / 1000),
         (long long)(r->locked_us / 1000), (long long)(r->in_ma_us / 3600000),
         (long long)(r->out_ma_us / 3600000), (unsigned)r->dropped,
-        (unsigned)io_errors, (unsigned)file_missed);
+        (unsigned)io_errors, (unsigned)file_missed, (unsigned)file_seq,
+        (unsigned)r->low_mask, r->have_sample ? (long)s->full_hold_ms : -1L,
+        (unsigned)s->full_gate, (unsigned)s->restore,
+        (long long)(r->stats.start_us / 1000), (unsigned)r->stats.samples,
+        (unsigned)r->stats.locked_samples, (unsigned)r->stats.v_count,
+        r->stats.v_count ? (long)r->stats.v_min : -1L,
+        r->stats.v_count ? (long long)(r->stats.v_sum / r->stats.v_count) : -1LL,
+        r->stats.v_count ? (long)r->stats.v_max : -1L, (unsigned)r->stats.i_count,
+        r->stats.i_count ? (long)r->stats.i_min : -1L,
+        r->stats.i_count ? (long long)(r->stats.i_sum / r->stats.i_count) : -1LL,
+        r->stats.i_count ? (long)r->stats.i_max : -1L,
+        (long long)(r->stats.max_gap_us / 1000), (unsigned)r->stats.cx_changes,
+        r->stats.cx_changes ? (long long)(r->stats.cx_first_us / 1000) : -1LL,
+        r->stats.cx_changes ? (long long)(r->stats.cx_last_us / 1000) : -1LL,
+        (unsigned)r->stats.full_resets, (unsigned)r->stats.full_reset_mask, (unsigned)r->checkpoint_errors);
     return n > 0 && (size_t)n < size ? n : -1;
 }
 
@@ -173,7 +269,7 @@ bool batt_log_append(batt_log_file_t *file, const char *path, const char *backup
     if (!f) { file->header = true; return false; }
     bool ok = true;
     if (empty || file->header || file->session != session) {
-        ok = fprintf(f, "\n# battlog fmt=2 session=%u %s\n", (unsigned)session, metadata) > 0;
+        ok = fprintf(f, "\n# battlog fmt=3 session=%u %s\n", (unsigned)session, metadata) > 0;
     }
     if (ok) ok = fputs(line, f) != EOF;
     if (fflush(f) != 0) ok = false;
@@ -182,4 +278,33 @@ bool batt_log_append(batt_log_file_t *file, const char *path, const char *backup
     file->header = !ok;
     if (ok) file->session = session;
     return ok;
+}
+
+bool batt_log_checkpoint_valid(const batt_log_checkpoint_t *c) {
+    // 100 年上限拒绝格式损坏值，并保证累计时仍有充分的 int64 余量。
+    // A 100-year bound rejects corrupt data while leaving ample int64 accumulation headroom.
+    const int64_t time_limit = 100LL * 366 * 86400 * 1000000;
+    const int64_t charge_limit = INT64_MAX / 4;
+    return c->version == BATT_LOG_CHECKPOINT_VERSION && c->active <= 1 && c->chain && c->boot &&
+        c->session && c->seq && c->wall_sec >= -1 && c->covered_us >= 0 &&
+        c->covered_us < time_limit && c->unknown_us >= 0 && c->unknown_us < time_limit &&
+        c->locked_us >= 0 && c->locked_us <= c->unknown_us &&
+        c->in_ma_us >= 0 && c->in_ma_us < charge_limit &&
+        c->out_ma_us >= 0 && c->out_ma_us < charge_limit;
+}
+
+void batt_log_checkpoint_make(batt_log_checkpoint_t *out, const batt_log_checkpoint_t *base,
+                              const batt_log_record_t *r, uint64_t boot) {
+    *out = *base;
+    out->version = BATT_LOG_CHECKPOINT_VERSION;
+    out->active = (r->events & BATT_LOG_END) == 0;
+    out->boot = boot;
+    out->session = r->session;
+    out->seq = r->seq;
+    out->wall_sec = r->wall_sec;
+    out->covered_us += r->covered_us;
+    out->unknown_us += r->unknown_us;
+    out->locked_us += r->locked_us;
+    out->in_ma_us += r->in_ma_us;
+    out->out_ma_us += r->out_ma_us;
 }

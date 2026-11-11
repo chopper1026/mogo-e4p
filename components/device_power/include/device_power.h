@@ -183,8 +183,8 @@ bool device_power_key_sampler_enable(bool enabled);
 /// 锁屏绘屏后暂停快采并保留待处理唤醒；等待在途读取完成。/ Join and pause after a locked display scan, preserving pending wake input.
 void device_power_key_sampler_pause_for_sleep(void);
 
-/// 校准日志默认关闭；清醒时每分钟及关键事件异步写串口和 TF，格式 2 区分采样时间与有效性。
-/// Calibration logging defaults off; awake minute samples and key events asynchronously reach serial/TF in timestamped, validity-aware format 2.
+/// 校准日志默认关闭；格式 3 记录采样、区间统计和检查点，异步写串口和 TF。
+/// Calibration logging defaults off; format 3 samples, window statistics and checkpoints asynchronously reach serial/TF.
 void device_power_set_batt_log(bool enabled);
 
 typedef enum {
@@ -197,8 +197,8 @@ typedef enum {
 /// 只排队，不读硬件或写卡；事件时间与最近采样时间分别保留，关闭时只跟踪锁屏状态。
 /// Enqueue without hardware/file I/O; preserve separate event/sample times, tracking only lock state while disabled.
 void device_power_batt_log_event(device_power_batt_log_event_t event);
-/// 有界等待日志任务交还；成功只说明已处理，实际文件失败计数见日志。
-/// Bounded wait for logger handoff; success means processed, with file-failure counters in the log.
+/// 有界等待文件落盘；积压、超时或本次启动已丢记录返回 false，不能据此中断欠压保护。
+/// Bounded file-persistence wait; backlog, timeout or boot-time record losses return false, never delaying undervoltage protection.
 bool device_power_batt_log_flush(uint32_t timeout_ms);
 /// 板级挂载后开放写入，卸载/格式化前关闭并等待在途 I/O；超时不得卸载。
 /// Board mounts allow writes; close the gate and join in-flight I/O before unmount/format, aborting those operations on timeout.

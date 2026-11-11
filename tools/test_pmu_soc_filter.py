@@ -73,7 +73,7 @@ int main(void) {
  int changes=0;
  prev=695;
  for (int i=1;i<=6300;i++) {
-  step((int64_t)i*200000, 3700, 0, false, false, false, -1);
+  step((int64_t)i*200000, 3750, 0, false, false, false, -1);
   if (s_pm!=prev) {
    assert((int64_t)i*200000-last_t>=60000000);
    assert(prev-s_pm>0 && prev-s_pm<=10);
@@ -165,11 +165,33 @@ int main(void) {
   int error=batt_curve_soc(mv[i])-relative;
   assert(error>=-1 && error<=1);
  }
- assert(batt_curve_soc(3600)==140 && batt_curve_soc(3500)==80);
- assert(batt_curve_soc(3400)==40 && batt_curve_soc(3300)==0);
+ // 2026-11-11 连续放电段：固定既有 3950mV/629‰ 与 3300mV/0‰，
+ // 按两端之间实际采样放出量分配剩余比例；不是额定容量或芯片 SOC 真值。
+ // Continuous discharge: retain 3950mV/629 permille and 3300mV/0, distributing
+ // the measured charge between them; neither rated capacity nor gauge SOC is ground truth.
+ // 两端累计量为 287037 与 1645474.917uAh；下列是非锚点原始观测。
+ // Endpoint counters are 287037 and 1645474.917uAh; these observations are between anchors.
+ const int observed_mv[] = {3925,3875,3838,3812,3788,3763,3738,3713,3688,3663,3638,3611,3549,3445,3343};
+ const int observed_uah[] = {371067,495951,598549,704914,847154,1070170,1220990,1322131,
+                             1391757,1466619,1544736,1567347,1592832,1621187,1639772};
+ for (unsigned i=0;i<sizeof(observed_mv)/sizeof(observed_mv[0]);i++) {
+  int relative=(1645475LL-observed_uah[i])*629/(1645475-287037);
+  int error=batt_curve_soc(observed_mv[i])-relative;
+  assert(error>=-15 && error<=15);
+ }
+ // 低压段必须提前反映余量，不再到 3.6V 仍显示 14%。
+ // Reflect the remaining charge before the low-voltage tail, rather than 14% at 3.6V.
+ assert(batt_curve_soc(3750)>=210 && batt_curve_soc(3750)<=240);
+ assert(batt_curve_soc(3700)>=120 && batt_curve_soc(3700)<=145);
+ assert(batt_curve_soc(3650)>=45 && batt_curve_soc(3650)<=70);
+ assert(batt_curve_soc(3600)>=25 && batt_curve_soc(3600)<=45);
+ assert(batt_curve_soc(3400)>=0 && batt_curve_soc(3400)<=15);
+ assert(batt_curve_soc(3300)==0 && batt_curve_soc(2500)==0 && batt_curve_soc(5000)==1000);
  for(int v=2501;v<=5000;v++) {
   int delta=batt_curve_soc(v)-batt_curve_soc(v-1);
-  assert(delta>=0 && delta<=2);
+  // 实测平台拐点每 mV 可变化 4‰；全区间仍连续、单调、有界。
+  // The measured plateau knee reaches 4 permille per mV; retain continuity and monotonic bounds.
+  assert(delta>=0 && delta<=4);
  }
  // 13) 插拔重新计时，正常区间不在几秒内连跳；低电量不受一分钟限制。
  // Rearm on transitions; no immediate normal-range jumps, but low levels retain fast tracking.
@@ -178,7 +200,7 @@ int main(void) {
  step(60000000,3960,-100,true,false,false,-1);assert(s_pm==before);
  step(119999999,3960,-100,true,false,false,-1);assert(s_pm==before);
  step(120000000,3960,-100,true,false,false,-1);assert(s_pm==before-10);
- reset();step(0,3450,0,true,false,false,-1);
+ reset();step(0,3650,0,true,false,false,-1);
  before=s_pm;step(10000000,3300,0,true,false,false,-1);assert(s_pm==before-10);
  reset();step(0,3300,0,true,false,false,5);
  step(10000000,3300,0,true,false,false,-1);assert(s_pm==0);

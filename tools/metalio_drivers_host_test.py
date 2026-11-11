@@ -415,7 +415,9 @@ def power_source():
 static bool s_ready=true;
 static pmu_snapshot_t s_snap;
 static unsigned clock_sets, uv_log_events;
-void device_power_batt_log_event(device_power_batt_log_event_t event) { assert(event == DEVICE_POWER_BATT_LOG_UNDERVOLTAGE); ++uv_log_events; }
+static void batt_log_undervoltage(int64_t now,uint16_t mv,bool have_i,int16_t ma,uint8_t status) {
+    (void)now;(void)ma;assert(mv<=3100 && have_i && !(status&7));++uv_log_events;
+}
 static time_t clock_value;
 static int test_settimeofday(const struct timeval *tv,const void *tz){assert(!tz);++clock_sets;clock_value=tv->tv_sec;return 0;}
 #define settimeofday test_settimeofday
@@ -518,6 +520,7 @@ static bool batt_log_enabled(void){return logging;}
 static int64_t batt_log_wall(void){return 0;}
 static void batt_log_notify(void){}
 static int32_t s_batt_persisted_permille=-1;
+static uint8_t s_batt_restore;
 static void batt_save(int32_t value){(void)value;}
 void batt_log_observe(batt_log_state_t *state,const batt_log_sample_t *sample){
     assert(state==&s_batt_log && sample);++observations;

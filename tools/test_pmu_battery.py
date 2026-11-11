@@ -36,6 +36,7 @@ static batt_filter_t s_batt_filter;
 static batt_log_state_t s_batt_log;
 static int s_batt_log_mux;
 static int32_t s_batt_saved_permille;
+static uint8_t s_batt_restore;
 static int32_t s_batt_persisted_permille;
 static bool s_batt_charging_last;
 static int64_t s_batt_last_save_us, s_batt_ic_us, s_batt_full_since_us;
@@ -151,6 +152,19 @@ int main(void) {
     reset(); raw_mv=4370; raw_ma=10; charger_state=2; poll_battery();
     now_us=1000000;current_fail=true;poll_battery();assert(s_batt_full_since_us==-1);
     current_fail=false;raw_ma=-100;now_us+=1000000;poll_battery();assert(s_batt_full_since_us==-1);
+    // 日志使用真正的确认窗口，短暂高电流和长空白均保留中断原因。
+    reset();raw_mv=4370;raw_ma=10;charger_state=2;
+    batt_log_set_enabled(&s_batt_log,true,0,batt_log_wall());poll_battery();
+    now_us=1000000;poll_battery();assert(s_batt_log.latest.full_hold_ms==1000);
+    raw_ma=100;now_us+=1000000;poll_battery();
+    assert(s_batt_log.latest.full_reset && (s_batt_log.latest.full_gate&BATT_LOG_FULL_HIGH_I));
+    assert(s_batt_log.latest.full_hold_ms==-1);
+    raw_ma=10;now_us+=1000000;poll_battery();
+    now_us+=6000000;poll_battery();
+    assert(s_batt_log.latest.full_reset && (s_batt_log.latest.full_gate&BATT_LOG_FULL_GAP));
+    assert(s_batt_log.latest.full_hold_ms==0);
+    reset();s_batt_saved_permille=700;poll_battery();assert(s_batt_restore==1);
+    reset();s_batt_saved_permille=100;poll_battery();assert(s_batt_restore==5);
     // 累计变化提前保存，但不突破一分钟写入门限。
     // Save accumulated changes without crossing the one-minute write gate.
     reset();s_batt_persisted_permille=650;poll_battery();assert(!saves);
@@ -181,7 +195,9 @@ persist = r'''
 typedef int nvs_handle_t;
 static pmu_snapshot_t s_snap;
 static int32_t s_batt_persisted_permille=-1, stored_soc=600;
-static uint32_t stored_ver;
+static uint32_t stored_ver, s_batt_restore_version;
+static uint8_t s_batt_restore;
+static int32_t s_batt_restore_value;
 static unsigned opens, closes, commits, writes, restarts;
 static int fault;
 static int nvs_open(const char *name,int mode,nvs_handle_t *out) {
@@ -213,9 +229,10 @@ for name in ('batt_save', 'batt_load', 'batt_save_current', 'device_power_action
     persist += function(name, backend) + '\n'
 persist += r'''
 int main(void) {
-    assert(batt_load()==-1); // 不恢复旧曲线 / do not restore the old curve
+    assert(batt_load()==-1 && s_batt_restore==3); // 不恢复旧曲线 / do not restore the old curve
+    stored_ver=1;assert(batt_load()==-1); // 中低段重标后拒绝上一版百分比 / reject percentages from the prior curve
     stored_ver=BATT_STATE_VERSION+1;assert(batt_load()==-1);
-    stored_ver=BATT_STATE_VERSION;assert(batt_load()==600);
+    stored_ver=BATT_STATE_VERSION;assert(batt_load()==600 && s_batt_restore==0 && s_batt_restore_value==600);
     stored_soc=-1;assert(batt_load()==-1);stored_soc=1001;assert(batt_load()==-1);
     stored_soc=600;
     for(int f=1;f<=6;f++){if(f!=1 && f!=5 && f!=6)continue;fault=f;assert(batt_load()==-1);}

@@ -27,14 +27,31 @@ Compensate voltage using signed BQ27220 current: subtract while charging and add
 普通区间每 60 秒最多变化 1%，充放电切换后重新计时；确认充满仍直接对齐 100%。放电目标不高于 14% 时保留每 10 秒最多下降 1%，空电目标允许清掉不足 1% 的尾数，不让死区长期显示 1%。这是显示平滑，不是延长实际续航。
 Normal levels move at most 1% every 60 seconds, rearming after charging transitions; confirmed full still aligns directly to 100%. Discharge targets at or below 14% retain 1% steps every ten seconds, and an empty target can clear a sub-1% remainder. Smoothing does not extend physical runtime.
 
-中段 4.05/4.00/3.95 V 目标为 73.3/69.5/62.9%，来自连续清醒采样的相对放电量，以既有 4.10 V / 79% 和假定 2050 mAh 为基准。它们不是绝对电量实测；锁屏空白、校时跳变和芯片 SOC 不参与容量真值拟合。3.95–3.60 V 暂用直线衔接，3.60 V 及以下沿用原锚点；完整低段与实际可用容量仍须完整充放电验证。
-Targets at 4.05/4.00/3.95 V are 73.3/69.5/62.9%, derived from relative discharge over continuous awake samples, anchored to the existing 4.10 V / 79% and assumed 2050 mAh capacity. They are not measured absolute SOC. Sleep gaps, wall-clock jumps and gauge SOC are not calibration ground truth. The 3.95–3.60 V range provisionally interpolates to unchanged anchors at/below 3.60 V; the full low range and usable capacity still require a complete charge/discharge validation.
+曲线使用负载补偿和 EMA 后的电压，不是静置实测 OCV。4.38 V 满电平台及 4.30/4.20/4.10 V 的 95.5/87.5/79% 保留；它们来自早期满电平台和回充对账。4.05/4.00/3.95 V 的 73.3/69.5/62.9% 保留 2026-11-05 连续清醒段的相对估算，以 4.10 V / 79% 和假定 2050 mAh 为基准，并非绝对电量实测。
+The curve uses load-compensated, EMA-filtered voltage, not measured rested OCV. Retain the 4.38 V full plateau and 95.5/87.5/79% at 4.30/4.20/4.10 V from earlier plateau/refill observations. The 73.3/69.5/62.9% targets at 4.05/4.00/3.95 V retain the 2026-11-05 relative awake-discharge estimate, anchored to 4.10 V / 79% and an assumed 2050 mAh capacity, not measured absolute SOC.
+
+3.95–3.30 V 改用 2026-11-11 提供日志的连续放电形状，替代旧低段直线与偏高尾段。保持 3.95 V / 62.9% 和 3.30 V / 0% 两个边界，在两者之间按剩余采样放电量归一，不把日志末行当成真实断电点，也不重新估计额定容量。关键目标如下：
+The 3.95–3.30 V range follows the continuous discharge supplied on 2026-11-11, replacing the provisional line and overstated tail. Keep 3.95 V / 62.9% and 3.30 V / 0%, normalizing sampled remaining charge between them without treating the last row as the physical cutoff or estimating rated capacity.
+
+| 补偿/EMA 电压 / Filtered voltage | 显示目标 / Target |
+| --- | --- |
+| 3.90 / 3.85 / 3.80 V | 55.8 / 50.4 / 40.6% |
+| 3.775 / 3.75 / 3.725 V | 32.4 / 22.4 / 16.9% |
+| 3.70 / 3.675 / 3.65 V | 13.3 / 10.4 / 5.7% |
+| 3.625 / 3.60 / 3.50 V | 4.0 / 3.3 / 1.8% |
+| 3.40 / 3.30 V | 0.7 / 0% |
+
+可复核来源：输入日志 SHA-256 `a1a70c633afe1390ba858ea02b1df9fdb901fe189d3eb985066d62e11d5aca6f`，格式 2，`boot=75406354784d6057`、`session=1`、`seq=2..1181`；1,180 条连续清醒记录共 19.684 小时、约 1,660.266 mAh，区间内 `unknown_ms` 不增长，序号无缺失、无新增丢队列/写卡错误。`file_missed=1` 是首条前已发生的文件缺失，区间内保持不变。取第一次下降跨越目标电压的相邻记录，线性插值 `out_uah_est`：3.95 V 为 287037 µAh，3.30 V 为 1645474.917 µAh。每个锚点的千分比为 `round(629 × (1645474.917 − Q(V)) / 1358437.917)`；最终显示仍经过死区和单向限速。
+Reproducible source: log SHA-256 `a1a70c633afe1390ba858ea02b1df9fdb901fe189d3eb985066d62e11d5aca6f`, format 2, `boot=75406354784d6057`, `session=1`, `seq=2..1181`. Its 1,180 continuous awake records cover 19.684 hours and about 1660.266 mAh with no growth in unknown time, sequence gaps, queue drops or write errors. `file_missed=1` predates the first row and stays fixed. Linearly interpolate `out_uah_est` at each first descending voltage crossing: 287037 uAh at 3.95 V and 1645474.917 uAh at 3.30 V. Anchor permille is `round(629 × (1645474.917 − Q(V)) / 1358437.917)`; the visible percentage still applies deadband and one-way rate limits.
+
+3.30 V 以下到末行仍记录约 14.8 mAh，保留为显示余量。较早日志有长时间锁屏缺测，后续充电跨重启且未记录确认充满；这些段、校时时钟跳变和芯片 SOC 均不参与本次曲线拟合。单台设备、单次连续放电只能校正该段形状；容量老化、温度、其他负载、充电阶段及新曲线设备体验仍须验证，不能据此宣称绝对电量准确度或续航已提高。
+About 14.8 mAh remains recorded below 3.30 V through the last row, retained as display reserve. Earlier logs have long sleep gaps; later charging spans restarts without confirmed full. Those segments, wall-clock jumps and gauge SOC do not enter this fit. One device and one continuous discharge support this segment's shape only; aging, temperature, other loads, charging and the new display still require validation, with no claim of absolute SOC accuracy or improved runtime.
 
 高压近零电流判满需要连续有效采样；超过 5 秒的采样空白、读数失败或明显放电会重新确认，保留硬件 top-off 和原电压门槛。显示算法不修改充电电流、截止电压、终止策略或欠压保护。
 High-voltage near-zero-current full confirmation requires continuous valid sampling. Gaps longer than five seconds, read failures or material discharge restart confirmation, retaining hardware top-off and existing voltage gates. Display logic does not change charge current, regulation voltage, termination policy or undervoltage protection.
 
-NVS 百分比带 `soc_ver` 算法版本；旧的无版本记录和不兼容记录不恢复，首次按新曲线估算，不清空其他设置。以后在五分钟周期、充电状态变化、累计变化至少 2%（至少隔一分钟）及正常重启/关机前保存有效值，相同值不重复写。保存失败不记作成功；意外断电仍可能丢失最近变化，启动时仍按电压容差决定是否恢复。
-NVS percentages carry an algorithm revision in `soc_ver`. Unversioned or incompatible records are ignored so the first start estimates from the new curve without erasing other settings. Save valid values every five minutes, on charger changes, after at least 2% movement (at least one minute apart), and before normal restart/shutdown; duplicate values skip writes. Failed saves are not cached as successes. Unexpected power loss may still lose recent movement, and boot restoration remains subject to voltage tolerance.
+NVS 百分比带 `soc_ver` 算法版本，当前为 2；旧的无版本、版本 1 和其他不兼容记录不恢复，首次按新曲线估算，不清空其他设置。以后在五分钟周期、充电状态变化、累计变化至少 2%（至少隔一分钟）及正常重启/关机前保存有效值，相同值不重复写。保存失败不记作成功；意外断电仍可能丢失最近变化，启动时仍按电压容差决定是否恢复。
+NVS percentages carry algorithm revision 2 in `soc_ver`. Unversioned, revision-1 and other incompatible records are ignored so the first start estimates from the new curve without erasing other settings. Save valid values every five minutes, on charger changes, after at least 2% movement (at least one minute apart), and before normal restart/shutdown; duplicate values skip writes. Failed saves are not cached as successes. Unexpected power loss may still lose recent movement, and boot restoration remains subject to voltage tolerance.
 
 ## 电源键采样 / Power-key sampling
 
@@ -93,38 +110,60 @@ See board_i2c for vendor provenance and scheduling differences.
 
 ## 电量校准日志 / Battery calibration log
 
-设置中的「电量校准日志」默认关闭。开启后，清醒状态每分钟记录新采样，采样有效性、CX 状态或判满结果变化时额外记录；锁屏等待开始和结束、关机与重启请求也产生事件。关闭时补一条会话结束记录，之后不再采样芯片 SOC 或写新日志。写卡在独立任务完成，不增加睡眠唤醒定时器。
-The battery-calibration log defaults off. While enabled, new awake samples are recorded each minute, with extra records for sample-validity, CX-status and full-decision changes, locked-wait boundaries, and power-off/restart requests. Disabling adds a session-end record and stops further gauge-SOC reads and new logging. A separate task writes the file without adding sleep wakeup timers.
+设置中的「电量校准日志」默认关闭。开启后使用格式 3，清醒状态每分钟记录新采样及区间统计；有效性、充电开关、输入状态、判满结果、锁屏等待边界、关机/重启请求额外记录。关闭补一条会话结束记录；停止新的芯片 SOC 采样，后台仍尝试交付已产生的记录。写任务不新增睡眠唤醒定时器，欠压保护不等待 TF 或 NVS。
+Calibration logging defaults off. Format 3 records awake minute samples and interval statistics, with extra records for validity, charging/input/full transitions, locked-wait boundaries and shutdown/restart requests. Disabling adds an end record and stops new gauge-SOC reads while queued records may still be delivered. The writer adds no sleep wake timer; undervoltage protection never waits for TF or NVS.
 
-串口 `batt-meta` 与卡上 `# battlog` 元信息包含格式版本、固件版本、ELF SHA-256、编译时间、启动编号、复位原因、曲线散列和算法参数。同一正式版本的本地测试包通过 ELF 散列区分；每次重新开启日志递增 `session`，本次开机内的记录序号 `seq` 持续递增。先按 `boot/session` 分段，再按 `seq` 分析；不能只按固件版本合并数据。
-Serial `batt-meta` and card `# battlog` metadata include format and firmware versions, ELF SHA-256, build time, boot ID, reset reason, curve hash and algorithm parameters. ELF hashes distinguish local test images sharing a published version. Each enable increments `session`, while `seq` increases throughout the boot. Group by `boot/session` before analyzing sequences; firmware version alone is insufficient.
-
-格式 2 的每条数据均带 `fmt=2`，主要字段如下。旧格式记录可与新格式共存，但必须分别解析；未知值为 `-1`，有符号电流的 `-1 mA` 本身也是合法读数，必须结合 `valid` 判断。
-Each format-2 row carries `fmt=2`. Legacy and new rows may coexist and require separate parsers. Unknown values are `-1`; signed current of `-1 mA` is also a valid measurement, so always consult `valid`.
+串口 `batt-meta` 与卡上 `# battlog` 包含固件版本、ELF SHA-256、编译时间、启动编号、复位原因、曲线散列、状态版本、限速/判满/恢复参数以及启动时读取的 `saved_ver/saved_soc`。同一正式版本的测试包由 ELF 散列区分。按 `boot/session/seq` 分析：每次开启增加 `session`，`seq` 在本次开机内递增。旧格式与格式 3 可以共存，逐行识别 `fmt`；不要把不认识的字段或格式默认为零。同步/关闭失败后重试可能产生同序号重复行，按这个三元组去重；损坏或不完整的行不能参与积分。
+Metadata identifies the firmware/ELF/build/boot/reset, curve and state versions, rate/full/restore settings, and the saved version/value read at startup. Group by boot/session and order by sequence; each enable starts a session. Legacy and format-3 rows coexist and must be parsed by their own format. Failed sync/close retries can duplicate a boot/session/sequence; deduplicate by that key and reject malformed/truncated rows.
 
 | 字段 / Field | 含义 / Meaning |
 | --- | --- |
-| `t`, `up_ms` | 事件的日历秒和本次开机单调毫秒；未校时 `t=-1`。/ Event wall seconds and boot-monotonic milliseconds; unknown wall time is -1. |
-| `sample_t`, `sample_ms`, `read_us` | 最近采样尝试的日历时间、单调时间与电压/电流/CX 读取耗时；事件不会伪造新采样。/ Latest sampling-attempt times and voltage/current/CX read duration; events never fabricate new samples. |
-| `write_ms`, `age_ms` | 输出开始的单调时间及最近采样的年龄，含队列延迟；不代表落盘完成时间。/ Output-start monotonic time and sample age including queue delay, not completed persistence. |
-| `valid` | 位 1 电压、2 电流、4 CX、8 芯片 SOC；无效电压不会沿用旧值，无效电流不会写成零。/ Bits 1 voltage, 2 current, 4 CX, 8 gauge SOC; invalid voltage never reuses an old value and invalid current never becomes zero. |
-| `raw`, `ma`, `cx`, `chg` | 原始 mV、正充负放 mA、完整 CX 状态字节、现有算法的充电判断。CX 低三位保留输入状态编码。/ Raw mV, signed mA, complete CX status byte and the existing charging decision; CX low three bits retain the input-state code. |
-| `done`, `done_src` | 现有算法判满；来源 0 无、1 CX top-off、2 软件高压低电流持续判定。不是独立满电测量。/ Existing full decision; source 0 none, 1 CX top-off, 2 sustained software voltage/current decision, not independent proof of full capacity. |
-| `comp`, `ocv`, `curve`, `disp` | 即时负载补偿 mV、EMA 后 mV、查表目标和最终显示千分比；`ocv` 不是静置实测开路电压。/ Instant compensated mV, EMA mV, curve target and displayed permille; `ocv` is not measured rested open-circuit voltage. |
-| `ic_soc`, `ic_age_ms` | 每分钟独立读取的芯片百分比和其输出时年龄，仅用于对照；读取失败为 -1。/ Separately sampled gauge percent and its age at output, comparison only; -1 after failed reads. |
-| `locked`, `lock_ms` | 是否处于锁屏等待及会话内累计等待时长，包含定时唤醒轮询，不是精确 CPU 睡眠时长。/ Locked-wait state and session wait duration including timer-wake polling, not exact CPU sleep duration. |
-| `covered_ms`, `unknown_ms` | 会话内可积分与无覆盖的时间。锁屏等待、无效端点、超过 5 秒的采样间隔及事件边界均不外推容量。/ Eligible and uncovered session durations; never extrapolate locked waits, invalid endpoints, intervals above 5 seconds or event boundaries. |
-| `in_uah_est`, `out_uah_est` | 相邻有效清醒采样按时间作梯形积分，跨零分别计算充入/放出，单位 µAh；均为估算。/ Separate charge/discharge trapezoidal estimates in µAh from adjacent valid awake samples, splitting zero crossings. |
-| `dropped`, `io_errors`, `file_missed` | 队列丢弃、文件/格式失败、未确认成功写入文件的累计记录数；同步或关闭失败时数据可能已写入，I/O 计数在后续记录反映。/ Queue drops, file/format failures and records without confirmed successful file persistence; data may already have been written when sync or close fails, and I/O counters appear in subsequent rows. |
+| `t`, `up_ms` | 事件的日历秒和本次开机单调毫秒；未校时 `t=-1`。积分只使用单调时间。/ Event wall seconds and boot-monotonic milliseconds; unknown wall time is -1. Integration uses monotonic time only. |
+| `sample_t`, `sample_ms`, `read_us` | 最近采样尝试时间和总线读取耗时；普通事件保留旧样本，欠压事件使用真正触发保护的原始读数。/ Latest attempt times and bus-read duration; ordinary events retain the previous sample, while undervoltage events capture actual protection inputs. |
+| `write_ms`, `age_ms` | 本次输出开始时间及样本年龄，含队列/重试延迟；不是落盘完成时间。/ Output-start time and sample age including queue/retry delays, not persistence completion. |
+| `valid` | 位 1 电压、2 电流、4 CX、8 芯片 SOC。无效数字为 -1；有效 -1 mA 仍须由位图区分。/ Bits 1 voltage, 2 current, 4 CX, 8 gauge SOC; flags distinguish invalid -1 from a real -1 mA. |
+| `raw`, `ma`, `cx`, `chg` | 原始 mV、有符号 mA（正充负放）、完整 CX 状态字节、现有充电判断；低三位保留输入编码。/ Raw mV, signed mA, full charger status and existing charging decision, including low-three-bit input code. |
+| `done`, `done_src` | 软件判满及来源：0 无、1 CX top-off、2 高压低电流持续判定。不是容量真值。/ Software full decision and source: none, CX top-off, or sustained taper; not capacity ground truth. |
+| `full_hold_ms`, `full_gate` | 连续判满窗口已满足时长（封顶 300000 ms，未开始为 -1）及本轮阻断位图，见下文。/ Continuous full-confirmation time, capped at 300000 ms and -1 when inactive, plus blockers below. |
+| `comp`, `ocv`, `curve`, `disp` | 负载补偿 mV、EMA mV、曲线目标和显示千分比。欠压紧急快照尚未计算滤波和判满时这些值及 `done` 为 -1；`ocv` 不是静置 OCV。/ Compensation/EMA mV and target/display permille; uncomputed emergency filter/full values are -1, and EMA is not rested OCV. |
+| `restore` | 首次有效采样的恢复决策：0 待判定、1 接受保存值、2 无记录/读取失败、3 版本不符、4 值非法、5 超出曲线容差。后续行保留本次启动决定。/ Boot restore: pending, accepted, missing/read error, wrong version, invalid value, or outside tolerance; retained on subsequent samples. |
+| `ic_soc`, `ic_age_ms` | 每分钟独立读取的芯片 SOC 及年龄；只读对照，失败为 -1。/ Separate minute gauge-SOC sample and age, comparison only, -1 after failure. |
+| `locked`, `lock_ms` | 当前是否锁屏等待及累计时长，包含定时唤醒轮询，不是精确 CPU 睡眠时间。/ Locked wait and cumulative duration including timer polling, not precise CPU sleep. |
+| `covered_ms`, `unknown_ms` | 会话内可积分/无覆盖时间；锁屏、无效端点、超过 5 秒的间隔及事件边界不外推容量。覆盖率可用 covered/(covered+unknown)，不含跨启动缺口。/ Eligible/uncovered session time; no extrapolation across locks, invalid endpoints, gaps over 5 seconds or event boundaries. Session coverage excludes inter-boot gaps. |
+| `in_uah_est`, `out_uah_est` | 有效清醒区间梯形积分，跨零分开充入/放出，单位 µAh，仍是采样估算。/ Separate charge/discharge trapezoidal estimates in µAh over eligible awake intervals. |
+| `win_ms`, `n`, `locked_n` | 区间起点、采样次数、其中锁屏采样次数。首次/周期记录后开新窗口，其他事件携带当前累计窗口，不能重复相加。/ Window start, sample count and locked subset. First/periodic rows reset the window; event rows overlap and must not be added together. |
+| `v_n/v_min/v_avg/v_max`, `i_n/i_min/i_avg/i_max` | 各自有效次数、最小值、算术平均和最大值；无有效样本为 -1。均值按采样次数，非时间加权；积分仍按实际时间。含锁屏采样的窗口不能当作睡眠电流均值。/ Valid counts, extrema and sample-weighted means; not time-weighted means or measured sleep averages. |
+| `max_gap_ms` | 窗口内相邻采样的最大间隔，包含跨窗口边界的首个间隔。/ Largest adjacent-sample interval, including the first interval crossing a window boundary. |
+| `cx_changes/cx_first_ms/cx_last_ms` | 有效 CX 字节切换次数及首末时间；普通充电阶段抖动每分钟最多额外输出一次，输入/充电开关及充电阶段位之外的状态边沿立即输出。/ Charger-byte change count and first/last times; phase chatter is coalesced, input/charging and non-phase status edges remain immediate. |
+| `full_resets/full_reset_mask` | 本窗口判满确认被打断的次数和原因并集，短暂尖峰也会保留。/ Window full-confirmation interruptions and combined causes, retaining brief spikes. |
+| `low_mask` | 本次放电首次见到原始电压 ≤3500/3400/3300/3200 mV，分别为位 1/2/4/8；要求有效电压、电流和无输入状态，回弹不重复，充电后重置。/ Once-per-discharge low milestones; valid voltage/current and absent input required, reset on charging. |
+| `dropped`, `io_errors`, `file_missed` | 采样队列丢弃数、文件/格式失败尝试数、文件积压溢出或格式错误导致的未交付数。暂时无卡但仍缓冲的行不计丢失。/ Producer drops, I/O/format failure attempts, and permanent backlog/format losses; buffered rows are not yet losses. |
+| `file_seq`, `checkpoint_errors` | 本行输出前同一启动最后确认写入并同步关闭成功的序号（不保证之前无缺口），以及 NVS 检查点保存失败数。/ Last confirmed file sequence before this output, not a gap-free watermark, and NVS checkpoint failures. |
 
-`event` 为可组合位图：1 定期/首次采样、2 开启、4 关闭、8 充电/CX 变化、16 判满变化、32 有效性变化、64 清醒长空白、128 锁屏等待开始、256 等待结束、512 关机请求、1024 重启请求、2048 欠压保护请求。事件只说明软件观察或请求，不能证明设备已经断电；欠压保护不会等待日志落盘。
-`event` is a combinable mask: 1 periodic/first sample, 2 enable, 4 disable, 8 charger/CX change, 16 full-decision change, 32 validity change, 64 long awake gap, 128 locked-wait start, 256 wait end, 512 power-off request, 1024 restart request, 2048 undervoltage-protection request. Events describe software observations or requests, not proof of power loss; undervoltage protection never waits for logging.
+`full_gate/full_reset_mask` 位图：1 未充电、2 电压无效、4 电流无效、8 电压低于 4360 mV、16 电流 ≥25 mA、32 电流 ≤−25 mA、64 采样空白超过 5 秒或时间倒退。CX 硬件 top-off 优先，阻断位是软件涓流条件的诊断，不覆盖硬件判定。
+Full blockers: 1 not charging, 2 invalid voltage, 4 invalid current, 8 below 4360 mV, 16 at least 25 mA, 32 at most −25 mA, 64 sample gap over five seconds or time reversal. These diagnose taper confirmation; CX top-off remains authoritative for the existing algorithm.
 
-日志最多保留约 4 MiB 的 `batt.log` 和上一份 `batt.log.1`；单条记录可能略超轮转门槛。已有旧日志先继续保留并追加新会话头，达到门槛后正常轮转。每条检查写入、刷新、同步和关闭结果；失败后下一条重新写元信息。队列为 16 条，满时丢最旧记录并递增 `dropped`。无卡或 USB 交出 TF 时保留串口输出并累计 `file_missed`，不无限重试；卸载或格式化前等待在途日志 I/O 结束，超时中止该存储操作。断电仍可能丢失记录或损坏文件，不能承诺只丢最后一行。
-Logging retains approximately 4 MiB in `batt.log` and one previous `batt.log.1`, with a possible one-row overshoot. Existing legacy rows remain until normal rotation, with new metadata appended. Every record checks write, flush, sync and close results; failures require metadata again. The 16-record queue drops its oldest record on overflow and increments `dropped`. Missing/exported cards retain serial output and increment `file_missed` without endless retries. Unmount/format joins in-flight log I/O and aborts on timeout. Power loss can still lose records or damage files; last-row-only loss is not guaranteed.
+`event` 位图保留 1 定期/首次采样、2 开启、4 关闭、8 充电/CX 变化、16 判满变化、32 有效性变化、64 清醒长空白、128 锁屏开始、256 锁屏结束、512 关机请求、1024 重启请求、2048 欠压请求，新增 4096 低电提前点。请求不证明设备已断电；3.1 V 保护仍立即执行，日志可能来不及落盘。提前点也可能由瞬时负载触发，应结合区间极值分析。
+The existing event bits 1–2048 retain their meanings; 4096 adds low-voltage milestones. Requests do not prove shutdown. The 3.1 V protection still executes immediately and may precede persistence; low milestones can also reflect transient loads.
 
-校准优先使用版本已知、充满与停止使用条件明确的自有设备记录。累计值只覆盖所采到的区间，不是硬件库仑计，也不能用锁屏前后两次瞬时电流推算整夜容量。日志不能代替电流表验证待机功耗；芯片 SOC 和软件判满结果也不能直接作为校准真值。
-Prefer logs from an identified build and device with known full-charge and discharge endpoints. Totals cover sampled intervals only; they are not hardware coulomb counters, and endpoint current samples cannot establish overnight capacity. Logs do not replace standby-current instrumentation, and neither gauge SOC nor software full decisions are calibration ground truth.
+### 跨重启检查点 / Cross-boot checkpoints
+
+写任务只在开启日志后读写 NVS `battlog/checkpoint`，约每 5 分钟以及开启/关闭、低电点、关机/重启/欠压请求保存累计快照；判满保存至少间隔 1 分钟。格式、长度和数值异常不继承，失败不影响电量与保护。恢复的是最近成功检查点，不保证是断电前最后样本；写入低电提前点也无法保证意外断电前成功。
+The writer uses NVS `battlog/checkpoint` only after logging is enabled, around every five minutes and at enable/end, low milestones and shutdown/restart/undervoltage requests. Full-decision checkpoints are limited to once per minute. Invalid layouts/ranges are rejected; failures never change battery/protection behavior. The last successful checkpoint may precede the final sample.
+
+元信息 `chain` 是日志连续启用链的标识，不是已完成的完整充放电循环。首次开启可继承上次 `active` 检查点：`resume=1`，`prev_boot/prev_session/prev_seq/prev_t` 指向恢复源，`base_*` 为其累计覆盖时间和充放电估算；本行链总量为 `base_* + 本会话累计值`。不能把已包含的旧会话总量再加一遍。显式关闭再开启会新建链。
+`chain` identifies a logging chain, not a complete physical charge cycle. A boot's first enable may resume an active checkpoint; `prev_*` identifies that checkpoint and `base_*` holds its totals. Chain estimates equal the base plus current-session totals; do not add the old session again. Explicit disable/re-enable starts a new chain.
+
+`between_boots=unknown` 明确表示上次检查点之后到本次开启之间未连续观测，时间校正、断电和尚未保存的尾段都不能补积分。`base_unknown_ms` 仅包括之前会话内已计量的缺测时间，不包括这个跨启动缺口；不得用这些累计量声称绝对容量或整夜待机耗电。
+The interval after the previous checkpoint through the new enable remains unobserved, including unsaved tails, power-off time and clock changes. `base_unknown_ms` excludes that unmeasured inter-boot gap. The chain does not establish absolute capacity or overnight standby consumption.
+
+### 文件交付与边界 / File delivery and limits
+
+保留约 4 MiB 的 `batt.log` 和上一份 `batt.log.1`，旧行继续保留至正常轮转。每条检查写入、刷新、同步和关闭。采样队列与文件积压各有 16 条，优先保留开启/关闭、判满、低电、关机/重启/欠压事件；全是关键事件时仍可能淘汰最旧关键记录，并计数。
+Files retain roughly 4 MiB plus one rotated backup. Each write checks flush, sync and close. The producer and file-backlog queues each hold 16 records, preferring lifecycle/full/low/protection events; an all-critical overflow can still evict the oldest critical record and is counted.
+
+存储未就绪或写入失败时保留有限积压，新的串口输出和检查点继续处理；后续通知到来且间隔达到一分钟时重试，挂载恢复或显式 flush 可立即重试一次，不新增重试定时器。`flush` 只有无积压、无在途写入且本次启动未发生记录丢失才成功；单条成功序号不表示无缺口。TF 卸载/格式化仍用原互斥门控等待在途文件 I/O，超时中止存储操作。断电仍可能丢记录或损坏文件。
+Storage failures retain bounded backlog while new serial output/checkpoints continue. Subsequent notifications retry at most once a minute; remount or explicit flush permits an immediate retry, without a timer. Flush succeeds only after all pending writes finish with no boot-time record loss. Existing storage ownership gates still join in-flight file I/O before unmount/format. Power loss can still lose records or damage files.
 
 ## 兼容边界 / Compatibility boundary
 
