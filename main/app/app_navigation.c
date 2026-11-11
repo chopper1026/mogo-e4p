@@ -71,7 +71,9 @@ static void app_navigation_switch_to(
 }
 
 void app_navigation_capture_reader_return(const app_desc_t *current) {
-    s_quick_return_body = current == &app_book && app_book_reader_body_visible() &&
+    // 阅读弹层仍属于当前书；由阅读会话检查排除书架、无书和保存失败的状态。
+    // Reader sheets still belong to the active book; the session excludes shelf, missing-book and failed-save states.
+    s_quick_return_body = current == &app_book &&
         app_book_resume_context(s_quick_return_path, sizeof(s_quick_return_path),
                                 &s_quick_return_fullscreen);
 }

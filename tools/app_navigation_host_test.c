@@ -152,6 +152,13 @@ static void reader_returns(void) {
     assert(restores == before + 1);
     snapshot_ok = true; body_visible = false;
     app_navigation_capture_reader_return(current);
+    // 有效阅读会话被工具栏/设置遮住时，仍返回原书正文；恢复点只使用一次。
+    // A valid session behind tools/settings still returns to its book body, consuming the snapshot once.
+    before = restores;
+    apply(&settings, false, false); apply(NULL, true, false);
+    assert(current == &app_book && restores == before + 1);
+    apply(&settings, false, false); apply(NULL, true, false);
+    assert(restores == before + 1);
     // 四个主页面都清掉正文历史；正常主页切页仍保持普通刷新。
     // Clear reader history on all four roots while ordinary root transitions stay ordinary.
     for (unsigned i = 0; i < 4; ++i) {

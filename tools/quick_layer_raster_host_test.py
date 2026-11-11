@@ -75,7 +75,7 @@ header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
 code+=re.search(r'typedef enum \{\s*UI_QUICK_CTL_NONE.*?\} ui_quick_control_t;',header,re.S).group(0)+'\n'
 code+=re.search(r'typedef struct \{.*?\} ui_quick_menu_t;',header,re.S).group(0)+'\n'
-for name in ('ui_quick_menu_button_count', 'ui_quick_menu_landscape', 'ui_quick_menu_button_x',
+for name in ('ui_quick_menu_button_count', 'ui_quick_menu_haptics_button', 'ui_quick_menu_landscape', 'ui_quick_menu_button_x',
              'ui_quick_menu_row_offset', 'ui_quick_menu_button_y', 'ui_quick_menu_height',
              'ui_quick_menu_frontlight_track', 'ui_quick_menu_frontlight_hit'):
     code+=function('main/ui/ui_quick_menu.h',name)
@@ -103,11 +103,12 @@ int main(void){
   for(int policy=0;policy<3;++policy){
    // 三种层状态：无前光、开灯展开卡片、有前光但熄灯收起。
    // Three layer states: no frontlight, card expanded while on, collapsed while off.
-   for(int fl=0;fl<3;++fl){
-    ui_quick_menu_t menu={.rotation_available=policy>0,.rotation_enabled=policy==2};menu.frontlight=fl!=0;menu.fl_on=fl==1;menu.fl_bri=60;menu.fl_cct=30;
+   for(int fl=0;fl<3;++fl)for(int haptics=0;haptics<3;++haptics){
+    ui_quick_menu_t menu={.rotation_available=policy>0,.rotation_enabled=policy==2,
+     .haptics_available=haptics>0,.haptics_enabled=haptics==2};menu.frontlight=fl!=0;menu.fl_on=fl==1;menu.fl_bri=60;menu.fl_cct=30;
     const int layer_height=ui_quick_menu_height(&menu);
     assert(layer_height<=epd_rotated_display_height());
-    if(ui_quick_menu_landscape())assert(layer_height==(policy>0||fl==1?404:264));
+    if(ui_quick_menu_landscape())assert(layer_height==(policy>0||haptics>0||fl==1?404:264));
     patterned();int before=allocs;ui_quick_menu_draw(frame,&menu,true,false);
     assert(allocs==before&&!live);int grays=0;
     for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){
@@ -126,7 +127,7 @@ int main(void){
      assert(ui_quick_menu_draw_button(frame,&menu,key,false,true,&dirty));
      assert(dirty.x>=0&&dirty.x+dirty.width<=epd_rotated_display_width());
      assert(dirty.y>=0&&dirty.y+dirty.height<=layer_height);
-     if(key==4){
+     if(key>=4){
       assert(dirty.y>UI_QUICK_CIRCLE_Y+UI_QUICK_RADIUS);
       EpdRect track=ui_quick_menu_frontlight_track(&menu,UI_QUICK_CTL_BRIGHTNESS);
       if(ui_quick_menu_landscape())assert(dirty.x+dirty.width<track.x);

@@ -9,8 +9,8 @@
 #include "ui_kit.h"
 #include "ui_menu.h"
 
-// 滑杆命中编号位于最多五枚圆键之后。/ Slider hit ids follow the maximum of five circle keys.
-enum { HIT_BRIGHTNESS = 5, HIT_CCT = 6 };
+// 滑杆命中编号位于最多六枚圆键之后。/ Slider hit ids follow the maximum of six circle keys.
+enum { HIT_BRIGHTNESS = 6, HIT_CCT = 7 };
 
 // 层高随开灯或临时展开伸缩：熄灯且未下拉展开时胶囊收起，只剩圆钮区，与绘图侧
 // ui_quick_menu_rect 一致。
@@ -60,6 +60,7 @@ static uint8_t slider_value(const ui_quick_menu_t *menu, int hit, int x) {
 
 void ui_quick_menu_reset(ui_quick_menu_t *menu) {
     const bool rotation_available = menu->rotation_available, rotation_enabled = menu->rotation_enabled;
+    const bool haptics_available = menu->haptics_available, haptics_enabled = menu->haptics_enabled;
     const bool frontlight = menu->frontlight;
     const bool on = menu->fl_on;
     const uint8_t bri = menu->fl_bri ? menu->fl_bri : 40;
@@ -69,6 +70,8 @@ void ui_quick_menu_reset(ui_quick_menu_t *menu) {
     memset(menu, 0, sizeof(*menu));
     menu->rotation_available = rotation_available;
     menu->rotation_enabled = rotation_enabled;
+    menu->haptics_available = haptics_available;
+    menu->haptics_enabled = haptics_enabled;
     menu->frontlight = frontlight;
     menu->fl_on = on;
     menu->fl_bri = bri;
@@ -189,24 +192,25 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         return true;
     }
     if (abs(dx) > UI_TOUCH_SLOP_PX || abs(dy) > UI_TOUCH_SLOP_PX) menu->moved = true;
-    // WiFi / 蓝牙圆键按住 0.5 秒：关层并请求对应设置页，抬手不再触发点按。手指允许
+    // WiFi / 蓝牙 / 震动圆键按住 0.5 秒：关层并请求对应设置页，抬手不再触发点按。手指允许
     // 在圆键命中半径内轻微漂移；层状态先收起，由主循环在同轮末尾切页，swallow
     // 保证这条接触序列不落到新页面。
-    // Holding the WiFi / Bluetooth circle for 0.5 s closes the layer and requests
+    // Holding the WiFi / Bluetooth / haptics circle for 0.5 s closes the layer and requests
     // its settings page; the release no longer taps. The finger may drift inside
     // the circle's hit radius. The layer closes first and the loop switches pages
     // at the end of the tick; swallow keeps this contact stream from reaching the
     // new page.
     const int hx = x - (int)menu->x0, hy = y - (int)menu->y0;
-    if (menu->open && (menu->hit == 0 || menu->hit == 1) &&
+    const bool haptics_key = menu->haptics_available && menu->hit == ui_quick_menu_haptics_button(menu);
+    if (menu->open && (menu->hit == 0 || menu->hit == 1 || haptics_key) &&
         hx * hx + hy * hy <= UI_QUICK_HIT_RADIUS * UI_QUICK_HIT_RADIUS &&
         ctx->now_ms - menu->started_ms >= UI_QUICK_HOLD_SETTINGS_MS) {
         menu->open = menu->tracking = false;
         menu->swallow = true;
         menu->fl_pull = false;
         menu->drag = UI_QUICK_CTL_NONE;
-        event->action = menu->hit == 0 ? UI_QUICK_WIFI_SETTINGS
-                                       : UI_QUICK_BLUETOOTH_SETTINGS;
+        event->action = haptics_key ? UI_QUICK_HAPTICS_SETTINGS
+            : menu->hit == 0 ? UI_QUICK_WIFI_SETTINGS : UI_QUICK_BLUETOOTH_SETTINGS;
         return true;
     }
     // 滑杆按下即定位：不等拖动阈值，手指落在哪一档就应用到哪一档。
@@ -276,7 +280,7 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
                 static const ui_quick_action_t actions[] = {
                     UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK, UI_QUICK_ROTATION,
                 };
-                event->action = actions[menu->hit];
+                event->action = haptics_key ? UI_QUICK_HAPTICS : actions[menu->hit];
             } else if (menu->drag != UI_QUICK_CTL_NONE) {
                 event->control = menu->drag;
                 event->value = menu->drag == UI_QUICK_CTL_BRIGHTNESS

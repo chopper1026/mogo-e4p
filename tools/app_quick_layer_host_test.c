@@ -16,6 +16,9 @@ static void record(unsigned tag, unsigned value) {
     trace = (trace ^ value) * UINT64_C(1099511628211);
 }
 static bool available = true, saved_on = true, hw_on, ble, online, usb, hold_gray;
+static bool motor_available, saved_haptics = true;
+static unsigned haptics_writes, haptics_pulses, setup_haptics;
+static bool shown_haptics;
 static uint8_t saved_bri = 40, saved_cct = 50, hw_bri, hw_cct;
 static unsigned settings_writes, applies, rows, pushes, renders, fallback, failures;
 static unsigned wifi_starts, wifi_stops, captures, enters, exits, setup_wifi, setup_bt;
@@ -64,6 +67,10 @@ esp_err_t frontlight_apply(bool on, uint8_t bri, uint8_t cct) {
 }
 bool app_settings_ble_turner(void) {return ble;}
 void app_settings_set_ble_turner(bool on) {ble = on; record(10, on);}
+bool haptics_available(void) {return motor_available;}
+bool app_settings_touch_haptics(void) {return saved_haptics;}
+void app_settings_set_touch_haptics(bool on) {saved_haptics = on; ++haptics_writes;}
+void haptics_pulse(void) {assert(saved_haptics); ++haptics_pulses;}
 void ble_pt_sync(bool on) {record(11, on);}
 void ble_pt_reconnect_recent(void) {assert(ble); record(12, 1);}
 void ble_pt_cancel_recent(void) {assert(!ble); record(13, 0);}
@@ -82,6 +89,7 @@ bool wifi_transfer_try_stop_if_idle(void) {
 void app_navigation_capture_reader_return(const app_desc_t *p) {assert(p == current); ++captures; record(16, captures);}
 void app_transfer_request_wifi_setup(void) {++setup_wifi; record(17, setup_wifi);}
 void app_device_settings_request_bluetooth(bool origin) {expect_origin = origin; ++setup_bt; record(18, origin);}
+void app_device_settings_request_haptics(bool origin) {expect_origin = origin; ++setup_haptics;}
 void app_present(app_ctx_t *c, const app_desc_t *p, app_redraw_t redraw) {
     assert(c == &ctx && p == current);
     if (redraw == APP_REDRAW_FULL) ++fallback;
@@ -95,6 +103,7 @@ const EpdWaveform *display_normalize_waveform(bool hold) {
 }
 void ui_quick_menu_draw(uint8_t *buffer, const ui_quick_menu_t *m, bool wifi, bool bluetooth) {
     assert(buffer == fb); record(23, m->fl_on); record(24, wifi); record(25, bluetooth);
+    shown_haptics = m->haptics_enabled;
 }
 void ui_quick_menu_end(void) {record(26, 0);}
 void ui_quick_menu_draw_status(uint8_t *buffer) {assert(buffer == fb); record(27, 0);}
@@ -104,6 +113,7 @@ EpdRect ui_quick_menu_rect(const ui_quick_menu_t *m) {
 bool ui_quick_menu_draw_button(uint8_t *buffer, const ui_quick_menu_t *m,
                                int button, bool active, bool pressed, EpdRect *dirty) {
     assert(buffer == fb);
+    if (button == ui_quick_menu_haptics_button(m)) shown_haptics = active;
     record(28, button); record(29, active); record(30, pressed);
     *dirty = (EpdRect){ui_quick_menu_button_x(m,button,684) - 54,
         ui_quick_menu_button_y(m,button) - 54, 108, 108}; return true;
@@ -308,6 +318,33 @@ int main(void) {
         assert(rotate_toggles==(unsigned)i+1&&rotate_enabled==(i==0)&&app_quick_layer_is_open()&&!ctx.request_app);
     }
     app_quick_layer_reset();rotate_available=false;current=&page;
+    motor_available = true; saved_haptics = true; app_quick_layer_init(); open_layer();
+    assert(shown_haptics);
+    unsigned hwrites = haptics_writes, pulses = haptics_pulses;
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        (void)frame(true, true, false, 85, 296, 10, false);
+        app_quick_layer_present_buttons(&ctx, current);
+        (void)frame(false, false, true, 85, 296, 10, false);
+        app_quick_layer_sync_status(&ctx, current);
+        assert(saved_haptics == (bool)enabled && shown_haptics == (bool)enabled);
+        assert(haptics_writes == ++hwrites && app_quick_layer_is_open() && !ctx.request_app);
+        assert(haptics_pulses == pulses + (unsigned)enabled);
+    }
+    saved_haptics = false; app_quick_layer_sync_status(&ctx, current); assert(!shown_haptics);
+    app_quick_layer_present(&ctx, current, true); assert(!shown_haptics);
+    for (int source = 0; source < 3; ++source) {
+        open_layer(); current = source == 0 ? &page : source == 1 ? &app_device_settings : &reader_page;
+        rotate_available = source == 2;
+        int x = source == 2 ? 256 : 85;
+        unsigned c = captures, e = enters, h = setup_haptics;
+        (void)frame(true, true, false, x, 296, 10, false);
+        (void)frame(true, false, false, x, 296, 500, false);
+        assert(!app_quick_layer_is_open() && setup_haptics == h + 1 && !saved_haptics);
+        if (source == 1) assert(!expect_origin && enters == e + 1 && !ctx.request_app && captures == c);
+        else assert(expect_origin && captures == c + 1 && ctx.request_app == &app_device_settings);
+        release(); assert(setup_haptics == h + 1 && haptics_writes == hwrites);
+    }
+    puts("PASS: haptics toggles persist, enabling previews once, state syncs, and holds route from page/settings/reader without a release tap");
     printf("QUICK_TRACE %016" PRIx64 " applies=%u rows=%u pushes=%u failures=%u\n", trace, applies, rows, pushes, failures);
     return 0;
 }

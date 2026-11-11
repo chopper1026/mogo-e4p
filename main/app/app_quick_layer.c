@@ -14,6 +14,7 @@
 #include "display.h"
 #include "display_refresh.h"
 #include "frontlight.h"
+#include "haptics.h"
 #include "ota_online.h"
 #include "wifi_transfer.h"
 #include "settings.h"
@@ -66,7 +67,9 @@ static unsigned quick_status(void) {
     wifi_transfer_status_t status;
     wifi_transfer_get_status(&status);
     bool wifi = status.mode == WIFI_TRANSFER_MODE_STA && status.state != WIFI_TRANSFER_STOPPED;
-    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) | (status.network_ready ? 4u : 0u);
+    s_quick.haptics_enabled = s_quick.haptics_available && app_settings_touch_haptics();
+    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) |
+        (status.network_ready ? 4u : 0u) | (s_quick.haptics_enabled ? 8u : 0u);
 }
 
 static void quick_rotation_sync(app_ctx_t *ctx, const app_desc_t *current) {
@@ -90,8 +93,10 @@ void app_quick_layer_present(app_ctx_t *ctx, const app_desc_t *current, bool ful
         // Refresh the composed framebuffer directly, restoring only the pressed tile without underlay layout or glass regeneration.
         for(int i=0;i<ui_quick_menu_button_count(&s_quick);++i){
             bool active=i<2?(status&(1u<<i))!=0
+                :i==ui_quick_menu_haptics_button(&s_quick)?(status&8u)!=0
                 :i==3&&s_quick.frontlight&&s_quick.fl_on;
             bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+                :i==ui_quick_menu_haptics_button(&s_quick)?(s_quick_status&8u)!=0
                 :i==3&&s_quick.frontlight&&s_fl_shown_on;
             if(i==s_quick_pressed||active!=was_active){
                 EpdRect dirty;(void)ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,false,&dirty);
@@ -141,8 +146,10 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
     enum EpdDrawError error=EPD_DRAW_SUCCESS;
     for(int i=0;i<ui_quick_menu_button_count(&s_quick);++i){
         bool active=i<2?(status&(1u<<i))!=0
+            :i==ui_quick_menu_haptics_button(&s_quick)?(status&8u)!=0
             :i==3&&s_quick.frontlight&&s_quick.fl_on;
         bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+            :i==ui_quick_menu_haptics_button(&s_quick)?(s_quick_status&8u)!=0
             :i==3&&s_quick.frontlight&&s_fl_shown_on;
         if(active==was_active&&(pressed==i)==(s_quick_pressed==i))continue;
         EpdRect dirty;
@@ -301,6 +308,10 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
         app_settings_set_ble_turner(enable);
         if (enable) ble_pt_reconnect_recent();
         else { ble_pt_cancel_recent(); ble_pt_sync(false); }
+    } else if (event.action == UI_QUICK_HAPTICS && s_quick.haptics_available) {
+        bool enable = !app_settings_touch_haptics();
+        app_settings_set_touch_haptics(enable);
+        if (enable) haptics_pulse();
     } else if (event.action == UI_QUICK_WIFI_SETTINGS) {
         // 长按 WiFi 圆键：与设置页「WiFi」行同一入口，直接进入配网设置页。已在
         // 该页时重进一次，让 on_enter 重新消费配网请求。
@@ -326,6 +337,15 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
             app_device_settings_request_bluetooth(true);
             ctx->request_app = &app_device_settings;
         }
+    } else if (event.action == UI_QUICK_HAPTICS_SETTINGS && s_quick.haptics_available) {
+        if (current == &app_device_settings) {
+            app_device_settings_request_haptics(false);
+            quick_reenter_page(ctx, current);
+        } else {
+            app_navigation_capture_reader_return(current);
+            app_device_settings_request_haptics(true);
+            ctx->request_app = &app_device_settings;
+        }
     } else if (event.action == UI_QUICK_FULL) app_quick_layer_present(ctx, current, true);
     else if (event.action == UI_QUICK_LOCK) *lock_requested = true;
     else if (event.action == UI_QUICK_ROTATION && s_quick.rotation_available && current->on_rotation_toggle) {
@@ -345,6 +365,7 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
 
 void app_quick_layer_init(void) {
     app_quick_layer_reset();
+    s_quick.haptics_available = haptics_available();
     // 本板有没有前光决定层高和卡片；预览值来自已加载的设置，开机恢复由 app_main 写入硬件。
     // Board capability decides layer height and card presence; previews come from settings and app_main restored the hardware at boot.
     ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),

@@ -4,6 +4,8 @@
 
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool enabled);
+bool app_settings_touch_haptics(void);
+void app_settings_set_touch_haptics(bool enabled);
 
 bool app_settings_frontlight_on(void);
 void app_settings_set_frontlight_on(bool on);

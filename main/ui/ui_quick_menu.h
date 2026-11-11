@@ -36,6 +36,8 @@
  * User revision: landscape groups four keys in the first left row and rotation
  * in the second, with two right-side sliders aligned to those rows; the panel
  * stays two rows tall instead of stacking portrait sliders below the keys.
+ * 用户新增：触摸震动键放第二排，阅读时位于旋转键右侧；点按切换，长按进入震动设置。
+ * User addition: a second-row haptics key follows reader rotation; tap toggles it and hold opens its settings.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -53,8 +55,8 @@
 // natural swipe routinely spans 150px+, so a total-travel test chains opening and
 // expanding inside one flick (user report 2026-10-25).
 #define UI_QUICK_PULL_SETTLE_MS 300
-// WiFi / 蓝牙圆键按住这么久直接进对应设置页；阈值到了就关层，抬手不再算点按。
-// Holding the WiFi / Bluetooth circle this long opens its settings page; the
+// WiFi / 蓝牙 / 震动圆键按住这么久直接进对应设置页；阈值到了就关层，抬手不再算点按。
+// Holding the WiFi / Bluetooth / haptics circle this long opens its settings page; the
 // layer closes at the threshold and the release no longer counts as a tap.
 #define UI_QUICK_HOLD_SETTINGS_MS 500
 #define UI_QUICK_HEIGHT 264
@@ -97,6 +99,7 @@ typedef enum {
     UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
     UI_QUICK_WIFI_SETTINGS, UI_QUICK_BLUETOOTH_SETTINGS,
     UI_QUICK_ROTATION,
+    UI_QUICK_HAPTICS, UI_QUICK_HAPTICS_SETTINGS,
 } ui_quick_action_t;
 
 /// 前光控件；快捷层只产出事件，硬件和设置由主循环执行。
@@ -111,6 +114,7 @@ typedef enum {
 typedef struct {
     bool open, tracking, swallow, moved;
     bool rotation_available, rotation_enabled; ///< 只由当前页面提供，不落盘 / Supplied by the current page, never persisted
+    bool haptics_available, haptics_enabled; ///< 马达能力与已保存的开关状态 / Motor capability and saved switch state
     uint16_t x0, y0;
     int hit;
     int64_t started_ms;
@@ -148,28 +152,33 @@ typedef struct {
     ui_quick_control_t drag;
 } ui_quick_menu_t;
 
-/// 绘图与命中共享布局；阅读方向键位于第二排左侧。/ Drawing and hit tests share the layout; the reader orientation key sits at the left of row two.
+/// 绘图与命中共享布局；第二排依次为可选阅读方向键、震动键。/ Shared painting/hit geometry; row two holds optional reader rotation, then haptics.
 static inline int ui_quick_menu_button_count(const ui_quick_menu_t *menu) {
-    return menu && menu->rotation_available ? 5 : 4;
+    return 4 + (menu && menu->rotation_available ? 1 : 0) + (menu && menu->haptics_available ? 1 : 0);
+}
+/// 震动键排在可选的阅读旋转键之后；无马达时不显示。/ Haptics follows optional reader rotation and is absent without a motor.
+static inline int ui_quick_menu_haptics_button(const ui_quick_menu_t *menu) {
+    return menu && menu->haptics_available ? 4 + (menu->rotation_available ? 1 : 0) : -1;
 }
 static inline bool ui_quick_menu_landscape(void) {
     return epd_rotated_display_width() > epd_rotated_display_height();
 }
 static inline int ui_quick_menu_button_x(const ui_quick_menu_t *menu, int button, int width) {
     (void)menu;
+    const int column = button >= 4 ? button - 4 : button;
     if (ui_quick_menu_landscape())
-        return 48 + UI_QUICK_RADIUS + (button == 4 ? 0 : button) * UI_QUICK_LANDSCAPE_COLUMN_STEP;
-    return ((button == 4 ? 0 : button) * 2 + 1) * width / 8;
+        return 48 + UI_QUICK_RADIUS + column * UI_QUICK_LANDSCAPE_COLUMN_STEP;
+    return (column * 2 + 1) * width / 8;
 }
 static inline int ui_quick_menu_row_offset(const ui_quick_menu_t *menu) {
-    return menu && menu->rotation_available ? UI_QUICK_ROTATION_ROW_STEP : 0;
+    return menu && (menu->rotation_available || menu->haptics_available) ? UI_QUICK_ROTATION_ROW_STEP : 0;
 }
 static inline int ui_quick_menu_button_y(const ui_quick_menu_t *menu, int button) {
-    return UI_QUICK_CIRCLE_Y + (button == 4 ? ui_quick_menu_row_offset(menu) : 0);
+    return UI_QUICK_CIRCLE_Y + (button >= 4 ? ui_quick_menu_row_offset(menu) : 0);
 }
 static inline int ui_quick_menu_height(const ui_quick_menu_t *menu) {
     if (ui_quick_menu_landscape())
-        return menu && (menu->rotation_available || (menu->frontlight && (menu->fl_on || menu->fl_expanded)))
+        return menu && (menu->rotation_available || menu->haptics_available || (menu->frontlight && (menu->fl_on || menu->fl_expanded)))
             ? UI_QUICK_HEIGHT + UI_QUICK_ROTATION_ROW_STEP : UI_QUICK_HEIGHT;
     return (menu && menu->frontlight && (menu->fl_on || menu->fl_expanded)
         ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT) + ui_quick_menu_row_offset(menu);
@@ -208,7 +217,7 @@ typedef struct {
     bool commit;
 } ui_quick_event_t;
 
-/// 清除层和手势；保留本板前光能力与预览值。/ Clear layer and contact state while keeping frontlight capability and preview values.
+/// 清除层和手势；保留能力、震动状态与前光预览值。/ Clear layer/contact state while retaining capabilities, haptics state and light previews.
 void ui_quick_menu_reset(ui_quick_menu_t *menu);
 /// 设置本板前光能力并同步预览值；层高随开灯状态伸缩。
 /// Set frontlight capability and sync the preview values; the layer height follows the on state.

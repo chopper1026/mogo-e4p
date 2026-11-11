@@ -8,5 +8,7 @@
 // page switch; on_enter consumes it once. return_to_origin makes the sub-page's
 // top-left back return to the origin page instead of the settings main list.
 void app_device_settings_request_bluetooth(bool return_to_origin);
+/// 快捷栏直达触摸震动设置；返回来源页时复用阅读正文恢复。/ Open haptics from the quick bar, restoring the reader when returning to its origin.
+void app_device_settings_request_haptics(bool return_to_origin);
 /// 自动更新确认入口；已在设置页时只打断主列表或升级页。/ Automatic offer entry; within Settings, interrupt only the root or updater.
 bool app_device_settings_offer_update(bool already_in_settings);

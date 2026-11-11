@@ -40,8 +40,8 @@ void app_navigation_observe_contact(esp_err_t error, bool touched);
 bool app_navigation_contact_polled(void);
 /// 主循环已在首次单指报点时接管底栏。/ The loop claimed the root bar on initial single contact.
 void app_navigation_claim_contact(void);
-/// 快捷层离开正文前保存原有书名路径和全屏快照。
-/// Capture the existing book path and fullscreen snapshot before a quick-layer departure from the body.
+/// 快捷层离开阅读会话前保存书名路径和全屏快照，包括展开阅读弹层时。
+/// Capture book path and fullscreen before leaving a reading session through the quick layer, including open reader sheets.
 void app_navigation_capture_reader_return(const app_desc_t *current);
 /// 主循环完成请求快照、输入取消与门控后调用；同步修改页面/菜单和返回来源。
 /// Called after the loop snapshots requests, cancels input and applies gates; synchronously updates page/menu state and return history.

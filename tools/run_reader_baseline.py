@@ -114,6 +114,7 @@ SUITES = {
     "input": [sys.executable, "tools/app_input_host_test.py"],
     "routing": [sys.executable, "tools/app_navigation_host_test.py"],
     "quick": [sys.executable, "tools/app_quick_layer_host_test.py"],
+    "haptics_shortcut": [sys.executable, "tools/haptics_shortcut_host_test.py"],
     "book": ["bash", "tools/run_book_host_tests.sh"],
     "display": ["bash", "tools/run_display_host_test.sh"],
     "refresh": [sys.executable, "tools/display_refresh_host_test.py"],

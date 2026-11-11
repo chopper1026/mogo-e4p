@@ -119,14 +119,18 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT,
                SETTINGS_TICKET_BACKGROUND, SETTINGS_CALENDAR } settings_page_t;
 static settings_page_t s_page;
-// 快捷栏长按蓝牙圆键的待定子页；on_enter 消费一次后回到主列表。
-// Pending sub-page from the quick bar's Bluetooth hold; on_enter consumes it once and returns to the main list.
+// 快捷栏长按蓝牙或震动圆键的待定子页；on_enter 消费一次后回到主列表。
+// Pending sub-page from a quick-bar Bluetooth or haptics hold; on_enter consumes it once and returns to the main list.
 static settings_page_t s_enter_page;
 // 本次直达是否从其他页面进入（返回键回到来源页）；以及蓝牙子页当前是否仍按这次直达返回。
 // Whether this direct visit came from another page (back returns to the origin), and
 // whether the Bluetooth sub-page still uses that back target.
 static bool s_enter_ble_from_quick;
 static bool s_ble_shortcut_back;
+// 触摸震动直达有独立返回标记，设置页内重进时仍返回主列表。
+// Haptics keeps its own direct-visit back flag; re-entry within Settings still returns to the main list.
+static bool s_enter_haptics_from_quick;
+static bool s_haptics_shortcut_back;
 static ui_pinpad_t s_pinpad;
 static lock_pin_flow_t s_pinflow;
 static bool s_pin_pending;
@@ -1772,6 +1776,12 @@ static void settings_prepare_profile(void) {
 void app_device_settings_request_bluetooth(bool return_to_origin) {
     s_enter_page = SETTINGS_BLUETOOTH;
     s_enter_ble_from_quick = return_to_origin;
+    s_enter_haptics_from_quick = false;
+}
+void app_device_settings_request_haptics(bool return_to_origin) {
+    s_enter_page = SETTINGS_HAPTIC;
+    s_enter_haptics_from_quick = return_to_origin;
+    s_enter_ble_from_quick = false;
 }
 static void on_enter(app_ctx_t *ctx) {
     (void)ctx;
@@ -1798,6 +1808,7 @@ static void on_enter(app_ctx_t *ctx) {
     // Clear the previous direct-visit back target on every entry so a visit that
     // left without passing the main list cannot leave a stale target behind.
     s_ble_shortcut_back = false;
+    s_haptics_shortcut_back = false;
     // 快捷栏长按直达蓝牙子页：初始状态与主列表「蓝牙」行一致，消费后回到主列表。
     // Quick-bar shortcut straight to the Bluetooth sub-page: same initial state as
     // the main list's Bluetooth row, falling back to the main list after one use.
@@ -1812,6 +1823,10 @@ static void on_enter(app_ctx_t *ctx) {
         // re-entering from inside Settings keeps the main-list back.
         s_ble_shortcut_back = s_enter_ble_from_quick;
     }
+    if (s_enter_page == SETTINGS_HAPTIC) {
+        s_page = SETTINGS_HAPTIC;
+        s_haptics_shortcut_back = s_enter_haptics_from_quick;
+    }
     if (s_enter_page == SETTINGS_UPGRADE) {
         upgrade_open();
         s_upgrade_confirm = s_upgrade_online = s_update.state == PICO_UPDATE_AVAILABLE && !s_update.busy;
@@ -1819,6 +1834,7 @@ static void on_enter(app_ctx_t *ctx) {
     }
     s_enter_page = SETTINGS_MAIN;
     s_enter_ble_from_quick = false;
+    s_enter_haptics_from_quick = false;
 }
 
 // 主循环主动消费按键；识别不需要再触摸屏幕。/ Consume key edges on ticks without requiring another touch.
@@ -2088,10 +2104,11 @@ static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, in
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
-    // 快捷栏直达的蓝牙返回只属于这次访问：回到设置主列表后恢复普通返回。
-    // The quick-bar Bluetooth back belongs to this visit only: once the main list
+    // 快捷栏直达的返回只属于这次访问：回到设置主列表后恢复普通返回。
+    // Quick-bar back targets belong to this visit only: once the main list
     // is shown again the ordinary back returns.
     if (s_ble_shortcut_back && s_page == SETTINGS_MAIN) s_ble_shortcut_back = false;
+    if (s_haptics_shortcut_back && s_page == SETTINGS_MAIN) s_haptics_shortcut_back = false;
     if (s_page==SETTINGS_SYSTEM_FONT && s_font_sync_confirm) {
         if (ev->type!=UI_GESTURE_TAP) return APP_REDRAW_NONE;
         for (int i=0;i<2;++i) {
@@ -2354,13 +2371,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_BLE_SCAN && y < 190) {
         ble_pt_scan_stop(); s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE;
     }
-    if (s_page == SETTINGS_BLUETOOTH && s_ble_shortcut_back && y < 190) {
-        // 快捷栏直达蓝牙子页：左上角返回直接回到来源页；阅读正文由主循环按离开时
+    if (((s_page == SETTINGS_BLUETOOTH && s_ble_shortcut_back) ||
+         (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back)) && y < 190) {
+        // 快捷栏直达子页：左上角返回直接回到来源页；阅读正文由主循环按离开时
         // 的书与全屏状态重开。
-        // Direct quick-bar visit to the Bluetooth sub-page: the top-left back returns
+        // A direct quick-bar sub-page visit sends the top-left back
         // to the origin page; the loop reopens the reading body with the book and
         // full-screen state captured on the way out.
         s_ble_shortcut_back = false;
+        s_haptics_shortcut_back = false;
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
@@ -2767,6 +2786,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (s_ble_shortcut_back && s_page == SETTINGS_MAIN) s_ble_shortcut_back = false;
+    if (s_haptics_shortcut_back && s_page == SETTINGS_MAIN) s_haptics_shortcut_back = false;
     if(s_font_sync_confirm) {
         s_font_sync_confirm=false;s_notice[0]=0;
         if(key!=1)return APP_REDRAW_PAGE;
@@ -2783,6 +2803,11 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
     }
     if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back) {
+        s_haptics_shortcut_back = false;
+        ctx->request_return = true;
+        return APP_REDRAW_NONE;
+    }
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
         if (s_wallpaper_confirm) s_wallpaper_confirm = false;
         else { bookmark_preview_release(); s_page = SETTINGS_WALLPAPER; }

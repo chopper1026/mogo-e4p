@@ -43,6 +43,14 @@ const app_desc_t app_device_settings = {.title="settings",.on_tick=auto_update_r
 // Quick-bar holds only record their request; entering the page is counted by app_navigation_switch_to.
 static int wifi_setup_requests, bt_settings_requests;
 static bool bt_return_to_origin;
+static bool haptics_present, haptics_on, haptics_return_to_origin;
+static int haptics_settings_requests, haptics_settings_writes;
+bool haptics_available(void) {return haptics_present;}
+bool app_settings_touch_haptics(void) {return haptics_on;}
+void app_settings_set_touch_haptics(bool enabled) {haptics_on = enabled; ++haptics_settings_writes;}
+void app_device_settings_request_haptics(bool return_to_origin) {
+    ++haptics_settings_requests; haptics_return_to_origin = return_to_origin;
+}
 void app_transfer_request_wifi_setup(void) {++wifi_setup_requests;}
 void app_device_settings_request_bluetooth(bool return_to_origin) {
     ++bt_settings_requests;
@@ -196,7 +204,8 @@ const EpdWaveform *display_normalize_waveform(bool hold_gray) {
 }
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
-        assert(a.width==108&&a.y==102);
+        assert(a.y==UI_QUICK_CIRCLE_Y-UI_QUICK_RADIUS ||
+               (haptics_present&&a.y==UI_QUICK_CIRCLE_Y+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_RADIUS));
         if(m==MODE_GL16)++fl_key_gl;
         else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     }
@@ -270,8 +279,8 @@ bool ui_quick_menu_draw_control_white(uint8_t *fb,const ui_quick_menu_t *menu,
     return true;
 }
 bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
- (void)fb;(void)menu;(void)active;assert(button>=0&&button<4);++quick_button_draws;quick_press_draws+=pressed;
- *dirty=(EpdRect){(button*2+1)*684/8-54,102,108,108};return true;
+ (void)fb;(void)active;assert(button>=0&&button<ui_quick_menu_button_count(menu));++quick_button_draws;quick_press_draws+=pressed;
+ *dirty=(EpdRect){ui_quick_menu_button_x(menu,button,684)-54,ui_quick_menu_button_y(menu,button)-54,108,108};return true;
 }
 void ble_pt_reconnect_recent(void) {assert(ble_enabled);++quick_recent_requests;}
 void ble_pt_cancel_recent(void) {assert(!ble_enabled);}
@@ -428,6 +437,8 @@ static void reset(void) {
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
     wifi_setup_requests=bt_settings_requests=0;
     bt_return_to_origin=false;
+    haptics_present = haptics_on = haptics_return_to_origin = false;
+    haptics_settings_requests = haptics_settings_writes = 0;
     reader_body=reader_resume_ok=reader_resume_fullscreen=false;
     reader_resume_path[0]=0;
     reader_returns=0;reader_return_path[0]=0;reader_return_fullscreen=false;
@@ -1018,6 +1029,18 @@ int main(void) {
     assert(wifi_setup_requests==1&&reader_returns==1&&!strcmp(reader_return_path,"/sdcard/books/a.epub")&&
            reader_return_fullscreen&&enters==2);
     puts("quick layer return: leaving the reading body restores the same book and full-screen state");
+    for (int fullscreen = 0; fullscreen < 2; ++fullscreen) for (int body = 0; body < 2; ++body) {
+        reset(); start_book = reader_resume_ok = true; reader_body = body != 0;
+        reader_resume_fullscreen = fullscreen != 0;
+        haptics_present = haptics_on = true; auto_update_return = true; time_step = 1000000;
+        snprintf(reader_resume_path, sizeof(reader_resume_path), "%s", "/sdcard/books/haptics.epub");
+        add(300,20,1,0); add(300,110,1,0); add(0,0,0,0);
+        add(85,296,1,0); add(85,296,1,0); add(85,296,1,0); add(0,0,0,0); run();
+        assert(haptics_settings_requests == 1 && haptics_return_to_origin && haptics_on && !haptics_settings_writes);
+        assert(reader_returns == 1 && !strcmp(reader_return_path, "/sdcard/books/haptics.epub"));
+        assert(reader_return_fullscreen == (fullscreen != 0) && enters == 2);
+    }
+    puts("quick haptics return: real loop restores the reader path from body/sheets in both full-screen states without toggling or replaying release");
     // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
     // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
     // 整屏归一；开关点按不再单独重画圆钮。

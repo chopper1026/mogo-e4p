@@ -26,6 +26,8 @@
  * 用户修订：横屏左侧紧凑排按钮，右侧双滑杆对齐两行，快捷层不再占满屏高。
  * User revision: landscape packs keys on the left and aligns right-side sliders
  * to the two rows so the quick layer no longer fills the screen height.
+ * 用户新增：第二排增加触摸震动开关，阅读时紧邻旋转键。
+ * User addition: add a second-row haptics switch beside reader rotation.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -112,6 +114,7 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
     epd_draw_circle(cx,cy,UI_QUICK_RADIUS-1,UI_GRAY_BLACK,fb);
     if(button<3) ui_draw_icon(fb,cx,cy,44,s_icons[button],UI_GRAY_BLACK);
     else if(frontlight_key) ui_draw_icon(fb,cx,cy,44,UI_ICON_SUN,UI_GRAY_BLACK);
+    else if (button == ui_quick_menu_haptics_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_VIBRATE,UI_GRAY_BLACK);
     else if (button == 4) rotation_icon(fb,cx,cy,menu->rotation_enabled);
     else lock_icon(fb,cx,cy);
     if(pressed){
@@ -248,7 +251,8 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
     for (int i = 0; i < ui_quick_menu_button_count(menu); ++i) {
         bool active = (i == 0 && wifi) || (i == 1 && bluetooth) ||
             (i == 3 && menu != NULL && menu->frontlight && menu->fl_on) ||
-            (i == 4 && menu->rotation_enabled);
+            (i == 4 && menu->rotation_available && menu->rotation_enabled) ||
+            (i == ui_quick_menu_haptics_button(menu) && menu->haptics_enabled);
         draw_key(fb, i, menu, active, false);
         draw_badge(fb, menu, i, active);
     }

@@ -309,6 +309,38 @@ int main(void){
   menu.rotation_available=false;ui_quick_menu_reset(&menu);assert(ui_quick_menu_button_count(&menu)==4);
  }
  puts("PASS: responsive two-column landscape and stacked portrait keep controls, slider endpoints, holds and light expansion distinct");
+ // 震动键在普通页及阅读页、横竖屏中都独立命中；长按不补点按，滑杆编号不冲突。
+ // Haptics has its own hit in normal/reader and portrait/landscape layouts; holds swallow release and never alias a slider.
+ for(screen_width=684;screen_width<=1216;screen_width+=532)for(int reader=0;reader<2;++reader){
+  menu.haptics_available=menu.haptics_enabled=true;menu.rotation_available=reader!=0;
+  ui_quick_menu_set_frontlight(&menu,true,true,40,50);open();
+  const int key=4+reader;
+  const int x=ui_quick_menu_button_x(&menu,key,screen_width),y=296;
+  assert(ui_quick_menu_button_count(&menu)==5+reader);
+  assert(ui_quick_menu_height(&menu)==(screen_width==684?620:404));
+  assert(feed(x,y,1,true,false,true,true).action==UI_QUICK_NONE&&ui_quick_menu_pressed(&menu)==key);
+  e=feed(x,y,0,false,true,true,true);
+  assert(e.action==UI_QUICK_HAPTICS&&e.control==UI_QUICK_CTL_NONE&&menu.open);
+  feed(x,y,1,true,false,true,true);time_ms+=UI_QUICK_HOLD_SETTINGS_MS-1;
+  assert(feed(x,y,1,false,false,true,true).action==UI_QUICK_NONE);
+  ++time_ms;assert(feed(x+8,y+8,1,false,false,true,true).action==UI_QUICK_HAPTICS_SETTINGS&&!menu.open);
+  assert(feed(x+8,y+8,0,false,true,true,true).action==UI_QUICK_NONE);
+  open();feed(x,y,1,true,false,true,true);time_ms+=UI_QUICK_HOLD_SETTINGS_MS;
+  assert(feed(x,y,2,false,false,true,true).action==UI_QUICK_NONE);
+  assert(feed(x,y,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open);
+  feed(x,y,1,true,false,true,true);ui_quick_menu_cancel_input(&menu);
+  assert(feed(x,y,0,false,true,true,true).action==UI_QUICK_NONE);
+  feed(x,y,1,true,false,true,true);time_ms+=UI_QUICK_HOLD_SETTINGS_MS;
+  assert(feed(x+80,y,1,false,false,true,true).action==UI_QUICK_NONE&&menu.open);
+  assert(feed(x+80,y,0,false,true,true,true).action==UI_QUICK_NONE);
+  for(int ctl=UI_QUICK_CTL_BRIGHTNESS;ctl<=UI_QUICK_CTL_CCT;++ctl){
+   EpdRect track=ui_quick_menu_frontlight_track(&menu,(ui_quick_control_t)ctl);
+   int sx=track.x+track.width/2,sy=track.y+track.height/2;
+   e=feed(sx,sy,1,true,false,true,true);assert(e.control==(ui_quick_control_t)ctl&&e.action==UI_QUICK_NONE);
+   assert(feed(sx,sy,0,false,true,true,true).commit);
+  }
+ }
+ puts("PASS: haptics short/hold threshold, release swallowing, cancellation and disjoint sliders in normal/reader portrait/landscape layouts");
  return 0;
 }
 
