@@ -15,6 +15,7 @@ from zipfile import ZipFile
 import reader_title_style_preview as host
 from run_reader_baseline import toolchain
 from generate_weather_backgrounds import SCENES, host_definition
+from compress_builtin_images import pack_weather
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -99,7 +100,7 @@ static uint8_t ui_control_gray(uint8_t g){return g<0x80?0:g>=0xf0?255:0x90;}
 """
 unit += "\n".join(host.function(name, KIT) for name in (
     "clamp_radius", "draw_arc", "ui_draw_round_rect_raw", "ui_draw_round_rect",
-    "ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_inset_rect", "icon_nibble",
+    "ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_inset_rect", "icon_row_decode", "icon_nibble",
     "ui_draw_icon", "ui_read_pixel"))
 unit += r"""
 static unsigned temperature_labels;
@@ -184,6 +185,55 @@ static void outside(const uint8_t *f,const uint8_t *before,EpdRect region){
         if(x<region.x||x>=region.x+region.width||y<region.y||y>=region.y+region.height)
             assert(pixel_at(f,x,y)==pixel_at(before,x,y));
 }
+static void packed_backgrounds(uint8_t *f,uint8_t *reference){
+    const uint8_t *data=weather_backgrounds_packed,*cursor,*end;
+    size_t size=(size_t)(weather_backgrounds_end-data);
+    assert(size<90*1024);
+    uint8_t row[77];
+    for(int scene=WEATHER_SCENE_SUN;scene<WEATHER_SCENE_COUNT;++scene){
+        const uint8_t *raw=weather_backgrounds_asset+(scene-WEATHER_SCENE_SUN)*77*448;
+        assert(background_scene(data,size,(weather_scene_t)scene,&cursor,&end));
+        for(unsigned y=0;y<448;++y){
+            const uint8_t *start=cursor;
+            assert(background_row(&cursor,end,row));
+            assert(!memcmp(row,raw+y*77,77));
+            for(const uint8_t *truncated=start;truncated<cursor;++truncated){
+                const uint8_t *attempt=start;
+                assert(!background_row(&attempt,truncated,row));
+            }
+        }
+        assert(cursor==end);
+        for(int rotation=0;rotation<2;++rotation)for(int slot=0;slot<3;++slot){
+            display_rotation=rotation?EPD_ROT_INVERTED_PORTRAIT:EPD_ROT_PORTRAIT;
+            EpdRect region={0,slot==0?168:slot==1?640:236,684,472};
+            memset(f,0x99,684*1216/2);memset(reference,0x99,684*1216/2);
+            size_t before=live;
+            draw_background(f,region,(weather_scene_t)scene);
+            assert(live==before);
+            for(int y=0;y<region.height;++y)for(int x=0;x<region.width;++x){
+                int sx=x*612/region.width,sy=y*448/region.height;
+                if(raw[sy*77+sx/8]&(1u<<(sx%8)))epd_draw_pixel(x,region.y+y,0x50,reference);
+            }
+            assert(!memcmp(f,reference,684*1216/2));
+        }
+    }
+    for(size_t n=0;n<52;++n)assert(!background_scene(data,n,WEATHER_SCENE_SUN,&cursor,&end));
+    assert(!background_scene(NULL,size,WEATHER_SCENE_SUN,&cursor,&end));
+    assert(!background_scene(data,size,WEATHER_SCENE_NEUTRAL,&cursor,&end));
+    assert(!background_scene(data,size,WEATHER_SCENE_COUNT,&cursor,&end));
+    uint8_t *bad=malloc(size);assert(bad);
+    for(unsigned i=0;i<12;++i){
+        memcpy(bad,data,size);bad[i]^=1;
+        assert(!background_scene(bad,size,WEATHER_SCENE_SUN,&cursor,&end));
+    }
+    memcpy(bad,data,size);memset(bad+12,0,4);
+    assert(!background_scene(bad,size,WEATHER_SCENE_SUN,&cursor,&end));
+    memcpy(bad,data,size);memset(bad+16,255,4);
+    assert(!background_scene(bad,size,WEATHER_SCENE_SUN,&cursor,&end));
+    const uint8_t overflows[]={127,255,0};
+    for(unsigned i=0;i<2;++i){cursor=overflows+i;assert(!background_row(&cursor,overflows+3,row));}
+    free(bad);
+}
 static void perimeter(const uint8_t *f,EpdRect region,int code){
     weather_scene_t scene=weather_scene(code);
     const uint8_t *mask=scene>=WEATHER_SCENE_SUN&&scene<WEATHER_SCENE_COUNT?
@@ -218,6 +268,7 @@ int main(int argc,char **argv){
     assert(weather_forecast_parse(WEATHER_TEST_FORECAST,strlen(WEATHER_TEST_FORECAST),now,&view.city,&view.forecast));
     size_t old=live;assert(ui_weather_prepare()&&live-old==684u*472u/2u);
     assert(ui_weather_prepare()&&live-old==684u*472u/2u);
+    packed_backgrounds(f,before);
     equivalent_halo(f,before);
     const int codes[]={100,305,101,400,501,302,507,502,404,104,999};
     const int scene_codes[]={100,305,101,400,501,302,507,404,104};
@@ -295,11 +346,22 @@ int main(int argc,char **argv){
     ui_weather_release();free(f);free(before);
     assert(temperature_labels>=28);
     assert(loading_labels&&cached_labels&&failed_labels&&clock_labels&&city_labels&&!refresh_labels);
-    puts("PASS: full-width weather, nine backgrounds plus neutral, pixel-identical fog/haze backgrounds, two slots and detail, two rotations, rectangular perimeters, navigation isolation, exhaustive action boundaries, 161424-byte scratch and allocation fallback");
+    puts("PASS: lossless packed weather rows and full-frame equivalence, malformed/truncated row bounds, full-width weather, nine backgrounds plus neutral, pixel-identical fog/haze backgrounds, two slots and detail, two rotations, rectangular perimeters, navigation isolation, exhaustive action boundaries, unchanged 161424-byte scratch and allocation fallback");
 }
 """
 with tempfile.TemporaryDirectory(prefix="weather-raster-") as directory:
     work = Path(directory)
+    packed_path = work / "weather_backgrounds.wbr"
+    pack_command = [os.sys.executable, str(ROOT / "tools/compress_builtin_images.py"),
+                    "--source", str(ROOT / "main/assets"), "--output", str(work)]
+    subprocess.run(pack_command, check=True)
+    assert packed_path.read_bytes() == pack_weather(backgrounds)
+    stamp = packed_path.stat().st_mtime_ns
+    subprocess.run(pack_command, check=True)
+    assert packed_path.stat().st_mtime_ns == stamp
+    (work / "weather.S").write_text('.data\n.globl _binary_weather_backgrounds_wbr_start\n'
+        '_binary_weather_backgrounds_wbr_start:\n.incbin "' + str(packed_path) + '"\n'
+        '.globl _binary_weather_backgrounds_wbr_end\n_binary_weather_backgrounds_wbr_end:\n')
     env, compiler = toolchain(work)
     os.environ.update(env)
     host.write_shims(work)
@@ -313,7 +375,7 @@ with tempfile.TemporaryDirectory(prefix="weather-raster-") as directory:
                       ROOT / "main/services", ROOT / "tools", ROOT / "managed_components/espressif__cjson/cJSON"):
         flags += ["-I" + str(directory)]
     subprocess.run(flags + ["-c", str(ROOT / "main/font/ttf_font.c"), "-o", str(work / "ttf.o")], check=True)
-    sources = [work / "test.c", work / "assets.c", work / "ttf.o",
+    sources = [work / "test.c", work / "assets.c", work / "weather.S", work / "ttf.o",
         ROOT / "main/font/ttf_font_source.c", ROOT / "main/font/ttf_block_cache.c",
         ROOT / "main/font/ttf_glyph_cache.c", ROOT / "main/services/weather_model.c",
         ROOT / "managed_components/espressif__cjson/cJSON/cJSON.c"]

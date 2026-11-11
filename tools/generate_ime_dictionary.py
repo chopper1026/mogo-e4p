@@ -21,8 +21,12 @@ def array(name, kind, data):
 def main():
     component = ROOT / "components/book_search"
     source = (component / "search_table.h").read_text()
-    cps, groups, offsets, readings, syllables = [values(source, n) for n in (
-        "search_codepoints", "search_groups", "search_group_offsets", "search_readings", "search_syllable_offsets")]
+    pages, masks = values(source, "search_pages"), values(source, "search_page_masks")
+    cps = [(page << 8) + low for i, page in enumerate(pages) for low in range(256)
+           if masks[i * 8 + low // 32] & (1 << (low % 32))]
+    groups, offsets, readings, syllables = [values(source, n) for n in (
+        "search_groups", "search_group_offsets", "search_readings", "search_syllable_offsets")]
+    assert len(cps) == len(groups)
     common = "的一是不了人我在有他这中大来上国个到说们为子和你地出道也时年得就那要下以生会自着去之过家学对可她里后小心多天而能好都然没日于起还发成只如事把无明看本面知现所同手时方女新前想最太见被高用开么将行长身三间加由其从两情进已又些点样意力第话走实定才爱亲当问比很世书水名作每海边信安静远山慢读清晨章客花月风雨空云春夏秋冬你我他她它孩文字篇页故事"
     priority = {ord(ch): i for i, ch in reversed(list(enumerate(common)))}
     # GB2312 一级字排在常用字后，二级字再后；其余基本汉字仍可完整翻页。

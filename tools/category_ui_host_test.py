@@ -453,7 +453,7 @@ void ui_clear_page(uint8_t *f){memset(f,255,684*1216/2);}
     code += host.function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
     for name in ("clamp_radius", "draw_arc", "ui_draw_round_rect_raw", "ui_draw_round_rect",
                  "ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_inset_rect", "ui_draw_control_frame",
-                 "ui_draw_separator", "ui_hairline", "icon_nibble", "ui_draw_icon", "ui_read_pixel",
+                 "ui_draw_separator", "ui_hairline", "icon_row_decode", "icon_nibble", "ui_draw_icon", "ui_read_pixel",
                  "ui_text_effective_px", "ui_text_fixed_context_width_px", "ui_text_fixed_width_px",
                  "ui_text_fixed_context_vc", "ui_text_fixed_vc", "ui_text_fixed_ink_vc", "ui_text_vc", "ui_blit_mono_bitmap", "draw_frosted", "ui_draw_acrylic_guard",
                  "ui_rotate_rect_to_fb", "clip_refresh_rect", "ui_clear_rect_fast", "ui_rect_union"):

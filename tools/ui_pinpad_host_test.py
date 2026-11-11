@@ -65,7 +65,7 @@ typedef struct {uint16_t x,y;} Coord_xy;
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
  # 提取真实绘制原语：键盘的锁图标和删除键下划线走 ui_draw_icon / ui_fill_rect_fast。
  # Extract the real drawing primitives: the pad's lock icon and delete underline use ui_draw_icon / ui_fill_rect_fast.
- for n in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_draw_round_rect_raw','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
+ for n in ('ui_read_pixel','icon_row_decode', 'icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_draw_round_rect_raw','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=r'''
 int ui_font_title_px(int n,const char *v){(void)v;return n;}
 bool ui_font_title_uses_supplement(const char *v){(void)v;return false;}

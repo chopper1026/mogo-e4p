@@ -62,7 +62,7 @@ static void ui_clear_page(uint8_t *f){memset(f,255,684*1216/2);}
     code += host.function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
     code += "\n".join(host.function(name, KIT) for name in (
         "clamp_radius", "draw_arc", "ui_draw_round_rect_raw", "ui_draw_round_rect", "ui_fill_round_rect_raw", "ui_fill_round_rect", "ui_inset_rect",
-        "ui_draw_separator", "icon_nibble", "ui_draw_icon", "ui_read_pixel", "ui_text_fixed_context_width_px",
+        "ui_draw_separator", "icon_row_decode", "icon_nibble", "ui_draw_icon", "ui_read_pixel", "ui_text_fixed_context_width_px",
         "ui_text_fixed_width_px", "ui_text_fixed_context_vc", "ui_text_fixed_vc", "ui_text_fixed_context_aa_vc"))
     code += r'''
 static unsigned text_checks;

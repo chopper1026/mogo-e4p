@@ -100,14 +100,29 @@ static int number_width(int value,int height) {
     return width*height/256;
 }
 static void number(uint8_t *fb,int value,int x,int top,int height) {
+    if(!fb||value<0||value>99||height<=0)return;
     char digits[4];snprintf(digits,sizeof(digits),"%d",value);
     for(const char *p=digits;*p;++p){
-        unsigned d=(unsigned)(*p-'0');int source_width=calendar_digit_widths[d],stride=(source_width+7)/8;
+        unsigned d=(unsigned)(*p-'0');int source_width=calendar_digit_widths[d];
         int width=source_width*height/256;
-        const uint8_t *bits=calendar_digit_bits+calendar_digit_offsets[d];
-        for(int y=0;y<height;++y)for(int dx=0;dx<width;++dx){
-            int sx=dx*source_width/width,sy=y*256/height;
-            if(bits[sy*stride+sx/8]&(1u<<(7-sx%8)))epd_draw_pixel(x+dx,top+y,UI_GRAY_BLACK,fb);
+        unsigned begin=calendar_digit_offsets[d],finish=calendar_digit_offsets[d+1];
+        if(begin>=finish||finish>sizeof(calendar_digit_spans))return;
+        const uint8_t *next=calendar_digit_spans+begin,*end=calendar_digit_spans+finish,*row=NULL;
+        int decoded=-1;
+        for(int y=0;y<height;++y){
+            int sy=y*256/height;
+            while(decoded<sy){
+                if(next==end||(size_t)(end-next-1)<2u*next[0])return;
+                row=next;next+=1+2u*row[0];++decoded;
+            }
+            for(unsigned i=0;i<row[0];++i){
+                int start=row[1+2*i],length=row[2+2*i];
+                if(start+length>source_width)return;
+                // 保持原来的最近邻取样边界。/ Preserve the original nearest-neighbor sampling boundaries.
+                int first=(start*width+source_width-1)/source_width;
+                int last=((start+length)*width+source_width-1)/source_width;
+                for(int dx=first;dx<last;++dx)epd_draw_pixel(x+dx,top+y,UI_GRAY_BLACK,fb);
+            }
         }
         x+=width+8*height/256;
     }

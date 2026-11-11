@@ -82,7 +82,7 @@ for name in ('ui_quick_menu_button_count', 'ui_quick_menu_haptics_button', 'ui_q
 code+='static void epd_draw_vline(int x,int y,int n,uint8_t c,uint8_t *fb){for(int i=0;i<n;++i)epd_draw_pixel(x,y+i,c,fb);}'
 code+=function('components/epdiy/src/epdiy.c','epd_fill_circle_helper')
 code+=function('main/ui/ui_kit.h','ui_control_gray')
-for name in ('ui_read_pixel','ui_image_bw_rect','icon_nibble','ui_draw_icon','ui_inset_rect',
+for name in ('ui_read_pixel','ui_image_bw_rect','icon_row_decode', 'icon_nibble','ui_draw_icon','ui_inset_rect',
              'clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect',
              'ui_fill_round_rect_raw','ui_fill_round_rect'):
     code+=function('main/ui/ui_kit.c',name)

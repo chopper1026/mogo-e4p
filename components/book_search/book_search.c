@@ -60,14 +60,21 @@ static size_t stem_length(const char* name, size_t n) {
     return n;
 }
 static int lookup(uint32_t cp) {
-    size_t low = 0, high = sizeof(search_codepoints) / sizeof(search_codepoints[0]);
+    const size_t pages = sizeof(search_pages) / sizeof(search_pages[0]);
+    size_t low = 0, high = pages;
+    uint32_t page = cp >> 8;
     while (low < high) {
         size_t mid = low + (high - low) / 2;
-        if (search_codepoints[mid] < cp) low = mid + 1;
+        if (search_pages[mid] < page) low = mid + 1;
         else high = mid;
     }
-    return low < sizeof(search_codepoints) / sizeof(search_codepoints[0]) && search_codepoints[low] == cp
-        ? (int)search_groups[low] : -1;
+    if (low == pages || search_pages[low] != page) return -1;
+    size_t word = low * 8 + ((cp & 255u) >> 5);
+    uint32_t bit = UINT32_C(1) << (cp & 31u), mask = search_page_masks[word];
+    if (!(mask & bit)) return -1;
+    size_t index = search_page_starts[low] + search_page_ranks[word] +
+        (unsigned)__builtin_popcount(mask & (bit - 1u));
+    return search_groups[index];
 }
 // 位j表示已匹配查询前j字节；每步允许重新开始子串。/ Bit j means j matched query bytes; every step can start a new substring.
 static bool advance(uint64_t* state, unsigned char c, const uint64_t masks[128], uint64_t finish) {

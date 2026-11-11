@@ -22,6 +22,9 @@ The single packed NVS byte owns the coherent style/variant selection, with legac
 
 ## 数据与重生成 / Data and regeneration
 
+数字位图按行无损记录黑色区段的起点与长度，绘制沿用原最近邻取样边界，不分配解压缓存。`compact_assets` 回归核对原始位图摘要及不同尺寸、旋转和裁剪下的真实绘制像素。
+Numeral bitmaps losslessly store each row's black span starts and lengths, retaining nearest-neighbor sampling without a decompression buffer. The `compact_assets` regression checks the original bitmap digest and real rendered pixels across sizes, rotations and clipping.
+
 历法输入固定为 `tools/vendor/lunar-javascript/lunar.cjs` 1.7.7，MIT许可及来源在同目录。固件只编译生成的静态C表，不包含JavaScript运行时，也不在构建时下载文件。衬线数字输入是 `tools/vendor/libre-bodoni/digits.ttf` 的0–9子集（SIL OFL 1.1）；固件只包含单色数字位图。所有原有汉字记录保持逐字节不变，仅补充宜忌词条需要的「磑」。
 Pinned MIT calendar input generates static C tables, with no firmware JS runtime or build-time network access. Spirit lists use 12 month branches × 60 day cycles, guardian/officer tables use 12 × 12 month/day branches, and directions use 10 day stems; the oracle checks every date against the original getters. The OFL numeral subset generates monochrome digit bitmaps. The Han supplement retains all prior records and adds the rare mill-installation glyph.
 

@@ -115,6 +115,12 @@ After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier s
 
 ## 构建与验证 / Build and verification
 
+内嵌资源在构建目录生成压缩副本，源图片和 HTML 保留在源码树。开机/锁屏图使用 zlib；天气背景使用逐行游程编码，绘制只需77字节行缓冲；传书网页使用 gzip，由浏览器解码，设备发送原始压缩字节及 `Content-Encoding: gzip`。CMake 跟踪源资源与打包脚本，内容不变时不重写产物；压缩方式不改变 OTA 分区布局。
+Embedded assets are packed in the build directory while source images and HTML remain in the source tree. Splash/lock art uses zlib; weather masks use row-wise run-length encoding with a 77-byte row buffer; the transfer page is browser-decoded gzip sent with `Content-Encoding: gzip`. CMake tracks source assets and packers, avoids rewriting unchanged output and preserves the OTA partition layout.
+
+图标和日历数字的生成头文件直接保存无损编码：图标逐行 RLE，双线性取样只保留两行共72字节栈缓冲；日历数字逐行保存黑色区段，按原最近邻边界缩放。拼音字符索引按256码点分页，用位图、页起点和字内计数查找原读音组；字符及多音字范围、输入法候选顺序保持一致。三条路径均无新增堆分配。
+Generated icon and calendar headers store lossless streams: icon row RLE uses a 72-byte two-row stack buffer for bilinear sampling; numeral spans retain the original nearest-neighbor boundaries. Pinyin indexes 256-codepoint pages through bitmaps, page starts and word ranks into the original reading groups, preserving character/polyphonic coverage and IME ordering. None of these paths adds heap allocation.
+
 ```sh
 python3 tools/check_architecture.py
 python3 tools/run_reader_baseline.py

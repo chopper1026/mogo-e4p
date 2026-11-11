@@ -531,8 +531,8 @@ static void time_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) xEventGroupSetBits(s_time_events, TIME_DISCONNECTED);
 }
 static transfer_connection_t s_connection;
-extern const char upload_start[] asm("_binary_upload_html_start");
-extern const char upload_end[] asm("_binary_upload_html_end");
+extern const char upload_start[] asm("_binary_upload_html_gz_start");
+extern const char upload_end[] asm("_binary_upload_html_gz_end");
 
 void wifi_transfer_get_status(wifi_transfer_status_t *out) {
     if (!out) return;
@@ -1201,8 +1201,11 @@ static esp_err_t respond_error(httpd_req_t *req, int code) {
 }
 
 static esp_err_t index_handler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_send(req, upload_start, upload_end - upload_start - 1);
+    esp_err_t err = httpd_resp_set_type(req, "text/html; charset=utf-8");
+    if (err != ESP_OK) return err;
+    err = httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    if (err != ESP_OK) return err;
+    return httpd_resp_send(req, upload_start, upload_end - upload_start);
 }
 
 static esp_err_t info_handler(httpd_req_t *req) {

@@ -14,8 +14,8 @@
 #define WEATHER_REGION_HEIGHT 472
 #define WEATHER_BACKGROUND_INK 0x50
 #define WEATHER_BACKGROUND_ROW_BYTES ((WEATHER_WIDTH+7)/8)
-extern const uint8_t weather_backgrounds_asset[(WEATHER_SCENE_COUNT-1)*WEATHER_BACKGROUND_ROW_BYTES*WEATHER_HEIGHT]
-    asm("_binary_weather_backgrounds_bin_start");
+extern const uint8_t weather_backgrounds_packed[] asm("_binary_weather_backgrounds_wbr_start");
+extern const uint8_t weather_backgrounds_end[] asm("_binary_weather_backgrounds_wbr_end");
 static uint8_t *s_scratch;
 bool ui_weather_prepare(void) {
     if (!s_scratch) s_scratch = heap_caps_malloc(WEATHER_REGION_WIDTH * WEATHER_REGION_HEIGHT / 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -34,13 +34,57 @@ static void stroke(uint8_t *f,double ax,double ay,double bx,double by,int width,
         epd_fill_circle((int)round(ax+(bx-ax)*t),(int)round(ay+(by-ay)*t),width/2,gray,f);
     }
 }
+static uint32_t background_word(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
+}
+static bool background_scene(const uint8_t *data,size_t size,weather_scene_t scene,
+                             const uint8_t **cursor,const uint8_t **end) {
+    const unsigned header_size=12+WEATHER_SCENE_COUNT*4;
+    const uint8_t header[]={ 'W','B','R','1',WEATHER_WIDTH&255,WEATHER_WIDTH>>8,
+        WEATHER_HEIGHT&255,WEATHER_HEIGHT>>8,WEATHER_SCENE_COUNT-1,0,WEATHER_BACKGROUND_ROW_BYTES,0 };
+    if(!data||size<header_size||scene<WEATHER_SCENE_SUN||scene>=WEATHER_SCENE_COUNT||
+       memcmp(data,header,sizeof(header)))return false;
+    unsigned index=(unsigned)(scene-WEATHER_SCENE_SUN);
+    uint32_t start=background_word(data+12+index*4),stop=background_word(data+16+index*4);
+    if(start<header_size||start>=stop||stop>size)return false;
+    *cursor=data+start;*end=data+stop;
+    return true;
+}
+static bool background_row(const uint8_t **cursor,const uint8_t *end,uint8_t *row) {
+    const uint8_t *p=*cursor;
+    unsigned written=0;
+    while(written<WEATHER_BACKGROUND_ROW_BYTES){
+        if(p>=end)return false;
+        unsigned control=*p++,count=(control&127)+1;
+        if(count>WEATHER_BACKGROUND_ROW_BYTES-written)return false;
+        if(control&128){
+            if(p>=end)return false;
+            memset(row+written,*p++,count);
+        }else{
+            if((size_t)(end-p)<count)return false;
+            memcpy(row+written,p,count);p+=count;
+        }
+        written+=count;
+    }
+    *cursor=p;
+    return true;
+}
 static void draw_background(uint8_t *f,EpdRect region,weather_scene_t scene){
-    if(scene<WEATHER_SCENE_SUN||scene>=WEATHER_SCENE_COUNT)return;
-    const uint8_t *mask=weather_backgrounds_asset+(scene-WEATHER_SCENE_SUN)*WEATHER_BACKGROUND_ROW_BYTES*WEATHER_HEIGHT;
-    for(int y=0;y<region.height;++y)for(int x=0;x<region.width;++x){
-        int sx=x*WEATHER_WIDTH/region.width,sy=y*WEATHER_HEIGHT/region.height;
-        if(mask[sy*WEATHER_BACKGROUND_ROW_BYTES+sx/8]&(1u<<(sx%8)))
-            epd_draw_pixel(region.x+x,region.y+y,WEATHER_BACKGROUND_INK,f);
+    const uint8_t *cursor,*end;
+    if(!background_scene(weather_backgrounds_packed,(size_t)(weather_backgrounds_end-weather_backgrounds_packed),
+                         scene,&cursor,&end))return;
+    // 一行解码后复用到对应的显示行，不增加堆分配或常驻缓存。
+    // Reuse each decoded row for its display rows without heap allocations or a persistent cache.
+    uint8_t row[WEATHER_BACKGROUND_ROW_BYTES];
+    int source_y=-1;
+    for(int y=0;y<region.height;++y){
+        int sy=y*WEATHER_HEIGHT/region.height;
+        while(source_y<sy){if(!background_row(&cursor,end,row))return;++source_y;}
+        for(int x=0;x<region.width;++x){
+            int sx=x*WEATHER_WIDTH/region.width;
+            if(row[sx/8]&(1u<<(sx%8)))
+                epd_draw_pixel(region.x+x,region.y+y,WEATHER_BACKGROUND_INK,f);
+        }
     }
 }
 

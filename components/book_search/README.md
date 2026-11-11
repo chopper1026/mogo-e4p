@@ -8,9 +8,12 @@ The matcher is reentrant, allocation-free and performs no file access. Inputs ar
 
 Three independent channels match literal substrings (ASCII case-insensitive), toneless pinyin substrings and Chinese/English initials. Pinyin queries may have separating whitespace; `v` or `ü` means ü. English initials follow ASCII word boundaries; digits are retained individually. ASCII separators are skipped in pinyin channels. Unknown non-ASCII characters break those channels but remain searchable literally. Full pinyin substrings may begin inside syllables; full pinyin and initials are not mixed in one channel.
 
-逐字尝试全部字典读音，不做分词或上下文消歧。因此重庆可匹配`chongqing`和`zhongqing`。64位状态集合合并多音分支，不生成读音笛卡尔积。只读字表283,381字节，覆盖41,923字符、4,479读音组合及425音节。
+逐字尝试全部字典读音，不做分词或上下文消歧。因此重庆可匹配`chongqing`和`zhongqing`。64位状态集合合并多音分支，不生成读音笛卡尔积。只读字表131,793字节，覆盖41,923字符、4,479读音组合及425音节。
 
-All dictionary readings are considered per character, without segmentation or contextual disambiguation: 重庆 matches both `chongqing` and `zhongqing`. A 64-bit state set merges branches without generating a Cartesian product. Read-only tables use 283,381 bytes for 41,923 characters, 4,479 reading groups and 425 syllables.
+All dictionary readings are considered per character, without segmentation or contextual disambiguation: 重庆 matches both `chongqing` and `zhongqing`. A 64-bit state set merges branches without generating a Cartesian product. Read-only tables use 131,793 bytes for 41,923 characters, 4,479 reading groups and 425 syllables.
+
+字符索引使用366个Unicode页，每页256码点；二分查页后，位图判断字符存在，再用页起点、32位字的前缀计数及popcount定位原读音组。无需展开整表或动态分配；补充平面汉字仍完整保留。再生成输入法索引时从同一位图恢复码点顺序。
+The index uses 366 Unicode pages of 256 codepoints. Binary page lookup and membership bitmaps select the original reading group using a page start, a per-word rank and popcount. No decompression buffer or allocation is needed; supplementary-plane characters remain supported. IME regeneration reconstructs codepoint order from the same bitmaps.
 
 ## 数据来源与再生成 / Provenance and regeneration
 
@@ -24,7 +27,9 @@ All dictionary readings are considered per character, without segmentation or co
 ```sh
 python -m pip download --no-deps pypinyin==0.55.0 -d build/search-deps
 python tools/generate_search_table.py build/search-deps/pypinyin-0.55.0-py2.py3-none-any.whl
+python tools/generate_search_table.py build/search-deps/pypinyin-0.55.0-py2.py3-none-any.whl --check
 python tools/test_search.py build/search-deps/pypinyin-0.55.0-py2.py3-none-any.whl
+python tools/run_reader_baseline.py compact_assets search
 ```
 
 生成只使用Python标准库并校验wheel摘要。无需安装或执行第三方包。固件编译直接使用已生成字表，不联网、不依赖Python。

@@ -34,9 +34,25 @@ def array(name, ctype, values):
     return "\n".join(lines + ["};", ""])
 
 
+def page_index(chars):
+    pages, starts, masks, ranks = [], [], [], []
+    for index, cp in enumerate(chars):
+        page = cp >> 8
+        if not pages or pages[-1] != page:
+            pages.append(page); starts.append(index); masks.extend([0] * 8)
+        masks[(len(pages) - 1) * 8 + ((cp & 255) >> 5)] |= 1 << (cp & 31)
+    for offset in range(0, len(masks), 8):
+        count = 0
+        for mask in masks[offset:offset + 8]:
+            ranks.append(count); count += mask.bit_count()
+    assert max(pages + starts) < 65536 and max(ranks) < 256
+    return pages, starts, masks, ranks
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("wheel", type=Path)
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     digest = hashlib.sha256(args.wheel.read_bytes()).hexdigest()
     if digest != WHEEL_SHA256:
@@ -69,16 +85,25 @@ def main():
  * 数据源与原作者许可见LICENSE.pypinyin和README.md。/ Data provenance and original license: LICENSE.pypinyin and README.md.
  */
 """
-    output += array("search_codepoints", "uint32_t", chars)
+    pages, starts, masks, ranks = page_index(chars)
+    output += "// 256-codepoint pages; eight bitmap words with per-word ranks into search_groups.\n"
+    output += array("search_pages", "uint16_t", pages)
+    output += array("search_page_starts", "uint16_t", starts)
+    output += array("search_page_masks", "uint32_t", masks)
+    output += array("search_page_ranks", "uint8_t", ranks)
     output += array("search_groups", "uint16_t", [group_ids[pronunciations[cp]] for cp in chars])
     output += array("search_group_offsets", "uint16_t", offsets)
     output += array("search_readings", "uint16_t", readings)
     output += array("search_syllable_offsets", "uint16_t", syllable_offsets)
     output += array("search_syllables", "char", list(data))
     ROOT.mkdir(parents=True, exist_ok=True)
-    (ROOT / "search_table.h").write_text(output, encoding="utf-8", newline="\n")
-    (ROOT / "LICENSE.pypinyin").write_text(license_text, encoding="utf-8", newline="\n")
-    size = len(chars) * 6 + (len(offsets) + len(readings) + len(syllable_offsets)) * 2 + len(data)
+    for name, content in (("search_table.h", output), ("LICENSE.pypinyin", license_text)):
+        if args.check:
+            assert (ROOT / name).read_text(encoding="utf-8") == content, f"Stale {name}"
+        else:
+            (ROOT / name).write_text(content, encoding="utf-8", newline="\n")
+    size = (len(pages) + len(starts)) * 2 + len(masks) * 4 + len(ranks)
+    size += (len(chars) + len(offsets) + len(readings) + len(syllable_offsets)) * 2 + len(data)
     print(f"pypinyin {VERSION}; wheel sha256={digest}")
     print(f"{len(chars)} codepoints; {len(groups)} groups; {len(syllables)} syllables; const data {size} bytes")
 

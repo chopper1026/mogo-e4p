@@ -50,7 +50,7 @@ uint8_t ui_read_pixel(const uint8_t *fb,int x,int y);
     code += host.function('ui_control_gray', ROOT / 'main/ui/ui_kit.h') + '\n'
     for name in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect_raw', 'ui_draw_round_rect',
                  'ui_fill_round_rect_raw', 'ui_fill_round_rect', 'ui_inset_rect', 'ui_draw_control_frame',
-                 'ui_draw_separator', 'ui_hairline', 'icon_nibble', 'ui_draw_icon', 'ui_read_pixel',
+                 'ui_draw_separator', 'ui_hairline', 'icon_row_decode', 'icon_nibble', 'ui_draw_icon', 'ui_read_pixel',
                  'ui_text_effective_px', 'ui_text_fixed_context_width_px', 'ui_text_fixed_width_px',
                  'ui_text_fixed_context_vc', 'ui_text_fixed_vc'):
         code += host.function(name, KIT) + '\n'

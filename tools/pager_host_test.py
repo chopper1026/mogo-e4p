@@ -41,7 +41,7 @@ static void ui_fill_rect_fast(EpdRect r,int c,uint8_t *fb){assert(r.y>=1006&&r.y
 header=(root/'main/ui/ui_kit.h').read_text()
 unit+=function('ui_control_gray',root/'main/ui/ui_kit.h')+'\n'
 unit+=re.search(r'enum \{ UI_PAGER_NONE=[^}]+\};',header)[0]+'\n'
-for name in ('ui_rect_hit','icon_nibble','ui_draw_icon','ui_pager_area','ui_pager_rect','ui_pager_hit','ui_pager_target','ui_pager_draw'):
+for name in ('ui_rect_hit','icon_row_decode', 'icon_nibble','ui_draw_icon','ui_pager_area','ui_pager_rect','ui_pager_hit','ui_pager_target','ui_pager_draw'):
     unit+=function(name,kit)+'\n'
 for name in ('visible_rows','root_rows','file_pager_pages','draw_file_pager','file_pager_paint','file_pager_event'):
     unit+=function(name,files)+'\n'

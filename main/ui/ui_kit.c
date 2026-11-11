@@ -94,6 +94,28 @@ void ui_acrylic_bw_rect(uint8_t* fb, EpdRect rect) {
 
 /* ---- 图标 / Icons ---- */
 
+static bool icon_row_decode(const uint8_t **cursor, const uint8_t *end, uint8_t *row) {
+    const uint8_t *p = *cursor;
+    size_t filled = 0;
+    while (filled < UI_ICON_ROW_BYTES) {
+        if (p == end) return false;
+        uint8_t command = *p++;
+        size_t count = (command & 0x7f) + 1u;
+        if (count > UI_ICON_ROW_BYTES - filled) return false;
+        if (command & 0x80) {
+            if (p == end) return false;
+            memset(row + filled, *p++, count);
+        } else {
+            if ((size_t)(end - p) < count) return false;
+            memcpy(row + filled, p, count);
+            p += count;
+        }
+        filled += count;
+    }
+    *cursor = p;
+    return true;
+}
+
 // 越界钳到边缘，让双线性在掩模边界上也能取样。
 // Clamp to the edge so bilinear sampling stays valid at the mask border.
 static int icon_nibble(const uint8_t *mask, int x, int y) {
@@ -101,7 +123,7 @@ static int icon_nibble(const uint8_t *mask, int x, int y) {
     else if (x >= UI_ICON_MASK_SIZE) x = UI_ICON_MASK_SIZE - 1;
     if (y < 0) y = 0;
     else if (y >= UI_ICON_MASK_SIZE) y = UI_ICON_MASK_SIZE - 1;
-    const int pixel = y * UI_ICON_MASK_SIZE + x;
+    const int pixel = (y & 1) * UI_ICON_MASK_SIZE + x;
     const uint8_t byte = mask[pixel / 2];
     return pixel & 1 ? byte & 15 : byte >> 4;
 }
@@ -111,7 +133,11 @@ void ui_draw_icon(
 ) {
     if (framebuffer == NULL || size < 1 || icon < 0 || icon >= UI_ICON_COUNT) return;
     gray = ui_control_gray(gray);
-    const uint8_t *mask = ui_icon_masks[icon];
+    uint32_t begin = ui_icon_offsets[icon], finish = ui_icon_offsets[icon + 1];
+    if (begin >= finish || finish > sizeof(ui_icon_rle)) return;
+    const uint8_t *cursor = ui_icon_rle + begin, *end = ui_icon_rle + finish;
+    uint8_t mask[2 * UI_ICON_ROW_BYTES];
+    int decoded = -1;
     // Q16 定点：一个目标像素跨过多少源像素。掩模 72 像素，显示通常更小，所以是降采样。
     // Q16 fixed point: source pixels spanned by one target pixel. The 72 px mask is
     // normally drawn smaller, so this is a downscale.
@@ -123,6 +149,13 @@ void ui_draw_icon(
         const int32_t sy = (int32_t)y * step + half;
         const int y0 = sy >> 16;
         const int fy = sy & 0xffff;
+        int last = y0 + 1;
+        if (last < 0) last = 0;
+        if (last >= UI_ICON_MASK_SIZE) last = UI_ICON_MASK_SIZE - 1;
+        while (decoded < last) {
+            if (!icon_row_decode(&cursor, end, mask + ((decoded + 1) & 1) * UI_ICON_ROW_BYTES)) return;
+            ++decoded;
+        }
         for (int x = 0; x < size; ++x) {
             const int32_t sx = (int32_t)x * step + half;
             const int x0 = sx >> 16;

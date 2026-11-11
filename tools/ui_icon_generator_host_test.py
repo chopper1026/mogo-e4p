@@ -32,9 +32,24 @@ assert alpha(saved, 36, 9) >= 14  # 顶边保留。/ Retain the outer top edge.
 # 检查实际编译头文件，防止只改 SVG 却忘记更新成品。
 # Inspect the compiled header too, catching stale generated artwork.
 header = (ROOT / "main/assets/ui_icons.h").read_text()
-blocks = re.findall(r'\{([^{}]+)\}', header[header.index('static const uint8_t ui_icon_masks'):])
-assert len(blocks) == len(icons.ICONS)
-for name, block in zip(icons.ICONS, blocks):
-    actual = bytes.fromhex(''.join(re.findall(r'0x([0-9a-fA-F]{2})', block)))
+offsets = list(map(int, re.findall(r'\d+', re.search(r'ui_icon_offsets[^=]*=\s*\{([^}]+)', header)[1])))
+data = bytes.fromhex(''.join(re.findall(r'0x([0-9a-fA-F]{2})', header.split('ui_icon_rle[]', 1)[1])))
+assert len(offsets) == len(icons.ICONS) + 1 and offsets[-1] == len(data)
+for index, name in enumerate(icons.ICONS):
+    cursor, end = offsets[index:index + 2]
+    actual = bytearray()
+    for y in range(icons.MASK_SIZE):
+        row = bytearray()
+        while len(row) < icons.MASK_SIZE // 2:
+            assert cursor < end
+            command = data[cursor]; cursor += 1
+            count = (command & 127) + 1
+            assert len(row) + count <= icons.MASK_SIZE // 2
+            take = 1 if command & 128 else count
+            assert cursor + take <= end
+            row.extend(data[cursor:cursor + take] * (count if command & 128 else 1))
+            cursor += take
+        actual.extend(row)
+    assert cursor == end
     assert actual == bytes(icons.pack_4bpp(icons.render_icon(name))), name
-print(f"PASS: SVG numeric coordinates, visible bookmark plus, no corner dot, {len(blocks)} generated masks")
+print(f"PASS: SVG numeric coordinates, visible bookmark plus, no corner dot, {len(icons.ICONS)} lossless masks")

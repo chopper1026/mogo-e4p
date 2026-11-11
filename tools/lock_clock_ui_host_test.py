@@ -28,7 +28,7 @@ void lock_pin_wipe(void *p,unsigned n){memset(p,0,n);}
 '''+code[end:]
     code+='\n#undef UI_ICON_CHEVRON_RIGHT\n#undef UI_ICON_CHEVRON_LEFT\n#undef UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT\n#include "assets/ui_icons.h"\n#include "ui_lock_clock.h"\n'
     code+=host.epdiy_slices()+host.function('ui_control_gray',ROOT/'main/ui/ui_kit.h')+'\n'
-    for name in ('clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_read_pixel','icon_nibble','ui_draw_icon'):
+    for name in ('clamp_radius','draw_arc','ui_draw_round_rect_raw','ui_draw_round_rect','ui_fill_round_rect_raw','ui_fill_round_rect','ui_read_pixel','icon_row_decode', 'icon_nibble','ui_draw_icon'):
         code+=host.function(name,ROOT/'main/ui/ui_kit.c')+'\n'
     code+=r'''
 #define UI_NAV_BOLT_ICON_PX 26

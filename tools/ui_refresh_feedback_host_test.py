@@ -561,6 +561,7 @@ int main(void){
 
 navigation = r'''
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -592,7 +593,7 @@ static void epd_fill_rect(EpdRect area,int gray,uint8_t *fb){
 
 '''
 navigation += 'static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}'
-for path, name in (("main/ui/ui_kit.c", "icon_nibble"), ("main/ui/ui_kit.c", "ui_draw_icon"),
+for path, name in (("main/ui/ui_kit.c", "icon_row_decode"), ("main/ui/ui_kit.c", "icon_nibble"), ("main/ui/ui_kit.c", "ui_draw_icon"),
                    ("main/ui/ui_nav.c", "icon"), ("main/ui/ui_nav.c", "ui_nav_draw"), ("main/ui/ui_nav.c", "ui_nav_hit")):
     navigation += function(path, name) + "\n"
 navigation += r'''
