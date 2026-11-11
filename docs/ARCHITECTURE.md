@@ -22,6 +22,9 @@ Last statically checked on 2026-11-04 (Asia/Shanghai) for current build/page ent
 
 - 日历锁屏由 `main/time/calendar` 只读离线历法、`main/ui/ui_calendar` 纯绘制和 `main/lock/lock_calendar` 时间适配组成；`sleep` 负责系统字体借用与既有显示/认证出口。锁屏时读取北京时间，不额外唤醒或分配帧；密码图缓存身份包含绘制日期与子样式，保存使用已绘制身份以避开午夜竞争。数据及衬线数字由固定许可源生成，维护入口见 [CALENDAR](development/guides/CALENDAR.md)。/ Calendar locks separate the offline model, pure drawing and clock bridge; sleep retains font/display/auth ownership. Capture Beijing time on lock without another wake or frame; cache identity includes the drawn date/variant and avoids midnight write races. See the calendar contract for generated data and digits.
 
+蓝牙设置的子视图、可见设备快照与布局由 `main/apps/settings_bluetooth.c` 持有，`app_device_settings` 保留导航与页面回调。绘图与命中共用快照，异步采样和报告消费仅在交互／tick中进行；协议与持久化仍在 `ble_page_turner`，协议栈启停仍由 `app_loop` 协调。见[蓝牙设置契约](development/guides/BLUETOOTH.md)。
+The Bluetooth helper owns subviews, visible peer snapshots and layout; Device Settings retains navigation and page callbacks. Rendering/hits share snapshots, while actions/ticks sample state and consume reports. BLE retains protocol/storage and the app loop coordinates stack lifecycle.
+
 ## 存储与外部边界 / Storage And External Boundaries
 
 | 数据 / Data | 所有者与兼容要求 / Ownership And Compatibility |

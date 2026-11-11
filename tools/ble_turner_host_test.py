@@ -13,6 +13,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 BLE = ROOT / 'components/ble_page_turner/src/ble_page_turner.c'
 SETTINGS = ROOT / 'main/apps/app_device_settings.c'
+PAGE = ROOT / 'main/apps/settings_bluetooth.c'
 
 def function(path, name):
     source = path.read_text()
@@ -129,7 +130,7 @@ static int xTaskCreatePinnedToCore(void(*fn)(void*),const char*name,int stack,vo
 }
 void ble_pt_scan_stop(void){s_scanning=false;}
 void ble_pt_disconnect(void){s_connected=false;}
-static int s_ble_scroll,s_ble_learning;
+static int s_ble_learning;
 static char s_ble_feedback[64];
 void ble_pt_crumb(uint8_t id){(void)id;}
 bool ble_pt_connected(void){return s_connected;}
@@ -168,10 +169,9 @@ for name in ('addr_hash','bond_key','bindings_load','lifecycle_take','lifecycle_
              'ble_pt_device','ble_pt_action_for_frame','ble_pt_action_for_usage',
              'hint_key','hints_load','hints_save','hints_clear'):
     unit += '\n' + function(BLE, name)
-unit += '\n' + function(SETTINGS, 'ble_receive_feedback')
-unit += '\n' + function(SETTINGS, 'format_bound_key')
+unit += '\n' + function(PAGE, 'ble_receive_feedback')
 for name in ('ble_scan_visible','ble_scan_visible_count','ble_scan_visible_at'):
-    unit += '\n' + function(SETTINGS,name)
+    unit += '\n' + function(PAGE,name)
 unit += r'''
 static void reset_input(void){
  memset(&s_keys,0,sizeof(s_keys));memset(&s_raws,0,sizeof(s_raws));
@@ -181,7 +181,7 @@ static void reset_input(void){
  persisted_key[0]=0;
  s_rest_known=false;s_raw_down=false;s_raw_last_ms=0;s_has_consumer_page=false;
  s_held_usage=s_held_mods=s_emit_usage=0;s_emit_ms=0;s_connected=true;
- s_ble_feedback[0]=0;s_ble_learning=0;binding_error=0;s_ble_scroll=200;
+ s_ble_feedback[0]=0;s_ble_learning=0;binding_error=0;
  snprintf(s_bindings.addr,sizeof(s_bindings.addr),"AA:BB:CC:DD:EE:FF");
 }
 // 8 字节帧的键码在第 2 字节；9 字节帧首字节是报告号，键码在第 3 字节。
@@ -298,7 +298,6 @@ int main(void){
  assert(persisted[0].len==8&&persisted[0].bytes[1]==0xb1);
  const ble_pt_frame_t hw_next_frame={.len=8,.bytes={0x06,0xb2}};
  assert(ble_pt_action_for_frame(&hw_next_frame)==BLE_PT_ACTION_NONE);
- char label[48];format_bound_key(&bound,label,sizeof(label));assert(!strcmp(label,"06 B1"));
  // 遥控器一直不发松开报告：静默之后同一个键再按一次，仍是新的一次按下。
  // With no release report ever: after silence, the same key pressed again is a new press.
  wait_ms(200);ingest_report(hw_prev,8);
@@ -320,26 +319,15 @@ int main(void){
  ingest_report(hw_rest,8);
  assert(ble_pt_pop_raw(&raw)&&!raw.pressed&&raw.frame.bytes[1]==0xb1);
  assert(!ble_pt_pop_raw(&raw));
- // 学到的标识：帧里非零的字节照原样列出，同一个键每次都一样。
- // The learned identifier lists the frame's non-zero bytes and is identical on every press.
- const ble_pt_frame_t empty_tag={0},one_byte={.len=1,.bytes={0x4b}},two_bytes={.len=2,.bytes={0xaa,0xbb}};
- const ble_pt_frame_t four_bytes={.len=4,.bytes={1,2,3,4}};
- format_bound_key(&empty_tag,label,sizeof(label));assert(!label[0]);
- format_bound_key(&one_byte,label,sizeof(label));assert(!strcmp(label,"4B"));
- format_bound_key(&two_bytes,label,sizeof(label));assert(!strcmp(label,"AA BB"));
- format_bound_key(&four_bytes,label,sizeof(label));assert(!strcmp(label,"01 02 03 +"));
- char tiny[3];format_bound_key(&two_bytes,tiny,sizeof(tiny));assert(tiny[2]==0);
- char sentinel='x';format_bound_key(&two_bytes,&sentinel,0);assert(sentinel=='x');
  // 首次按下、重复帧、松开与报告号都不需要先点屏幕，一次按下就够学。
  // First presses, duplicate frames, releases and report ids need no touch, and one press is enough.
  for(int len=8;len<=9;len++){
   reset_input();s_has_keyboard_page=false;s_ble_learning=1;
   report(len,len==9?7:0,0x4b);
-  assert(ble_receive_feedback()&&!s_ble_learning&&s_ble_scroll==0);
+  assert(ble_receive_feedback()&&!s_ble_learning);
   ble_pt_frame_t learned={0};
   assert(ble_pt_binding(BLE_PT_ACTION_PREV,&learned)&&learned.len==len);
   assert(learned.bytes[len==9?3:2]==0x4b&&learned.bytes[0]==(len==9?7:0));
-  format_bound_key(&learned,label,sizeof(label));assert(!strcmp(label,len==9?"07 4B":"4B"));
   assert(strstr(s_ble_feedback,"识别成功")&&strstr(s_ble_feedback,"上一页"));
   report(len,len==9?7:0,0x4b);assert(!ble_receive_feedback());
   report(len,len==9?7:0,0);assert(!s_held_usage&&!ble_receive_feedback());
@@ -429,12 +417,13 @@ int main(void){
 }
 '''
 # Active tick dispatch must consume reports before a state-only redraw can return.
-assert 'ble_receive_feedback()' in function(SETTINGS, 'on_tick')
-assert 'while (ble_pt_pop_raw(&stale))' in function(SETTINGS, 'on_gesture')
+assert 'settings_bluetooth_tick(ctx->now_ms)' in function(SETTINGS, 'on_tick')
+assert 'ble_receive_feedback()' in function(PAGE, 'settings_bluetooth_tick')
+assert 'drain_keys(); ble_pt_learn_begin();' in function(PAGE, 'settings_bluetooth_gesture')
 # 进扫描页先断开当前链路，链路落下后由 tick 补起扫描。
 # Entering the scan page drops the current link; the tick starts the scan once it is down.
-assert 'ble_pt_disconnect()' in function(SETTINGS, 'on_gesture')
-assert 'ble_pt_scan_start(BLE_PT_SCAN_FOREVER)' in function(SETTINGS, 'on_tick')
+assert 'ble_pt_disconnect()' in function(PAGE, 'begin_scan')
+assert 'ble_pt_scan_start(BLE_PT_SCAN_FOREVER)' in function(PAGE, 'settings_bluetooth_tick')
 # 对时入口经 sync_time_run 落到持有 BLE 租约的 sync_time_impl；扫描与传输入口直接取租约。
 # The sync-time entry delegates through sync_time_run to the leased sync_time_impl; scan and
 # transfer start hold the lease directly.

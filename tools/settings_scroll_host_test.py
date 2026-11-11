@@ -41,7 +41,7 @@ def function(name):
 
 assert not any(word in source for word in ('ui_follow_', 'display_follow_', 's_scroll_cache', 'coasting', 'lighten_text'))
 assert 'scroll_gesture(' not in function('on_tick')
-start = source.index('if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {', source.index('static app_redraw_t on_gesture'))
+start = source.index('if (s_page == SETTINGS_MAIN) {', source.index('static app_redraw_t on_gesture'))
 event_block = block(source, start)
 unit = r'''
 #include <assert.h>
@@ -53,8 +53,8 @@ unit = r'''
 #include "app.h"
 #include "ui_gesture.h"
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
-enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
-      SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
+enum {SETTINGS_MAIN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
+      SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #include "ui_nav_layout.h"
 #define UI_LOCK_WIDTH 684
@@ -62,7 +62,7 @@ enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 typedef int EpdWaveform;
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static const int E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1,settings_soft=2;
-static int s_page,s_main_scroll,s_ble_scroll,selected_mode,paint_mode;
+static int s_page,s_main_scroll,selected_mode,paint_mode;
 static int app_settings_main_refresh_mode(void){return selected_mode;}
 static const EpdWaveform *display_main_normal_waveform(void){return &settings_soft;}
 static bool s_scroll_drag_consumed,s_scroll_present_pending,s_input_layout,s_input_settle;
@@ -82,9 +82,6 @@ static void guard_draw_result(void *hl,int status){(void)hl;assert(!status);}
 static void display_main_transition_cancel(void){}
 static EpdRect ui_pinpad_full(void){return(EpdRect){0,0,684,1216};}
 static EpdRect upgrade_progress_area(void){return(EpdRect){52,468,580,64};}
-typedef struct {int content_bottom;} layout_t;
-static layout_t ble_layout(void){return(layout_t){2000-s_ble_scroll};}
-static layout_t ble_scan_layout(void){return(layout_t){2000};}
 ''' + '\nenum EpdDrawError {EPD_DRAW_SUCCESS};\n' + area_boundary(root) + function('scroll_gesture') + '\n' + function('settings_present')
 unit += '\nstatic app_redraw_t event(app_ctx_t *ctx,const ui_gesture_event_t *ev){(void)ctx;'+event_block+'if(ev->type==UI_GESTURE_TAP)++row_taps;return APP_REDRAW_NONE;}\n'
 unit += r'''
@@ -101,7 +98,7 @@ static app_redraw_t feed(int x,int y,bool down,bool press,int64_t now){
  return redraw;
 }
 static void reset(int page,int offset){
- s_page=page;s_main_scroll=s_ble_scroll=offset;s_scroll_drag_consumed=s_scroll_present_pending=false;ui_gesture_reset(&recognizer);
+ s_page=page;s_main_scroll=offset;s_scroll_drag_consumed=s_scroll_present_pending=false;ui_gesture_reset(&recognizer);
 }
 int main(void){
  for(int mode=0;mode<3;++mode){
@@ -132,11 +129,7 @@ int main(void){
   reset(SETTINGS_MAIN,0);feed(300,800,true,true,0);touch.count=2;ctx.pressed=false;ui_gesture_event_t canceled;
   assert(ui_gesture_feed(&recognizer,&ctx,&canceled)&&canceled.type==UI_GESTURE_CANCEL);event(&ctx,&canceled);assert(!s_main_scroll);
   for(int i=0;i<80;++i){reset(SETTINGS_MAIN,400);before=pushes;feed(300,800,true,true,0);feed(300,680,true,false,20);feed(300,680,false,false,40);assert(pushes==before+1&&pushed_mode==MODE_GL16);}
-  for(int page=SETTINGS_BLUETOOTH;page<=SETTINGS_BLE_SCAN;++page){
-   reset(page,0);feed(300,800,true,true,0);assert(feed(300,680,true,false,20)==APP_REDRAW_AREA&&s_ble_scroll==204);
-   assert(pushed.y==190&&pushed.y+pushed.height==UI_NAV_TOP);feed(300,680,false,false,40);
-  }
-  const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
+  const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_AVATAR};
   for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
    s_page=pages[i];s_scroll_present_pending=true;assert(settings_present(&ctx,APP_REDRAW_AREA));
    assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==UI_NAV_TOP);

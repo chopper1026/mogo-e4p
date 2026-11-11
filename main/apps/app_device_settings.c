@@ -8,6 +8,8 @@
  * Device feedback: retain thumbnails and settle completed batches once to avoid faded text from repeated partial updates.
  * 用户新增：阅读票根提供透明或封面背景，独立记忆选择并在保存失败时保留原值。
  * User addition: tickets offer transparent/cover backgrounds with independent persistence and failed-save retention.
+ * 用户 2026-11-11 确认：蓝牙设置采用 WiFi 同款状态卡和分页列表，设备详情管理配对，按键学习留在动作行内。
+ * Approved revision: Bluetooth uses WiFi-style cards/paging, peer details and inline learning.
  * 中文：分组设置页；网络短时对时后 PMU 持续走时，开机恢复系统时钟。
  * English: Grouped settings; temporary WiFi sync seeds the PMU, whose RTC restores time at boot.
  * 用户修订：设置列表滑动仅差分刷新内容，滑动过程中不周期插入黑白清屏。
@@ -57,6 +59,7 @@
 #include "app.h"
 #include "app_content_open.h"
 #include "app_device_settings_mode.h"
+#include "settings_bluetooth.h"
 #include "app_components_mode.h"
 #include "app_registry.h"
 #include "app_transfer_mode.h"
@@ -117,7 +120,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
                SETTINGS_POWER_SLEEP, SETTINGS_AUTO_LOCK, SETTINGS_HAPTIC,
                SETTINGS_POWER_LOG,
                SETTINGS_PROFILE, SETTINGS_AVATAR,
-               SETTINGS_BLUETOOTH, SETTINGS_BLE_SCAN,
+               SETTINGS_BLUETOOTH,
                SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
 static settings_page_t s_page;
 // 快捷栏长按蓝牙或震动圆键的待定子页；on_enter 消费一次后回到主列表。
@@ -175,12 +178,6 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
 }
 static int s_style_scroll, s_main_scroll;
 static bool s_scroll_drag_consumed, s_scroll_present_pending;
-// 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
-// Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
-// and a notice line.
-static int s_ble_scroll, s_ble_learning;
-static char s_ble_notice[64];
-static char s_ble_feedback[64];
 static int s_font_page, s_wallpaper_page;
 static bool s_sync_pending;
 static bool s_font_sync_confirm;
@@ -665,161 +662,6 @@ static void time_auto_hint(char *out, size_t cap) {
     snprintf(out, cap, "自动对时每 6 小时一次。");
 }
 
-/* ---- 蓝牙翻页器子页的版式 / Layout of the Bluetooth sub-page ---- */
-
-// 行高比 setting_group 的 68 略大，因为这一页每行右侧常常要放一个按钮。
-// Rows are a little taller than setting_group's 68 because these rows often carry a button.
-#define BLE_ROW_H 84
-// 按钮右缘与 row() 的值右缘对齐；值文字右端再让出按钮宽度，两者不重叠。
-// The button's right edge aligns with row()'s value edge; the value text then stops short of the
-// button, so the two never overlap.
-#define BLE_BTN_W 118
-#define BLE_BTN_RIGHT 624
-#define BLE_VALUE_RIGHT (BLE_BTN_RIGHT - BLE_BTN_W - 17)
-
-// 渲染和命中测试都调这个函数，两边看到的是同一份坐标——否则会出现「按钮画在这儿、
-// 点在别处」，这一页之前就是这么坏的。
-// Rendering and hit testing both call this, so they see identical coordinates. Without it a
-// control ends up drawn in one place and tapped in another, which is exactly how this page was
-// broken before.
-typedef struct {
-    int toggle_top;                  // 开关卡片顶；-1 表示被学习提示取代 / switch card top, -1 when the learn prompt replaces it
-    int status_top;
-    int notice_top;                  // -1 表示没有提示 / -1 when absent
-    int bonds_title_top;
-    int bond_top[BLE_PT_MAX_BONDS];  // 已配对行顶；-1 表示该位不存在 / bonded row tops, -1 when absent
-    int bond_rows;
-    int scan_entry_top;              // 「扫描设备 ›」入口行顶 / the "scan devices" entry row
-    int learn_title_top;
-    int learn_top[2];
-    int footer_top;
-    int content_bottom;              // 内容底，用于滚动上限 / content bottom, for the scroll limit
-} ble_layout_t;
-
-static ble_layout_t ble_layout(void) {
-    ble_layout_t l;
-    memset(&l, 0, sizeof(l));
-    int y = 202 - s_ble_scroll;
-    l.toggle_top = s_ble_learning || s_ble_feedback[0] ? -1 : y;
-    y += 126 + 38;
-    l.status_top = y;
-    y += BLE_ROW_H + 20;
-    l.notice_top = s_ble_notice[0] ? y : -1;
-    if (s_ble_notice[0]) y += 38;
-    l.bonds_title_top = y;
-    y += 38;
-    l.bond_rows = (int)ble_pt_bond_count();
-    for (int i = 0; i < BLE_PT_MAX_BONDS; ++i)
-        l.bond_top[i] = i < l.bond_rows ? y + i * BLE_ROW_H : -1;
-    y += (l.bond_rows ? l.bond_rows : 1) * BLE_ROW_H;
-    l.scan_entry_top = y + 16;
-    y = l.scan_entry_top + BLE_ROW_H + 30;
-    l.learn_title_top = y;
-    l.learn_top[0] = y + 38;
-    l.learn_top[1] = l.learn_top[0] + BLE_ROW_H;
-    l.footer_top = l.learn_top[1] + BLE_ROW_H + 25;
-    l.content_bottom = l.footer_top + 66;
-    return l;
-}
-
-// 一行的左标签 + 让出按钮后的右值，外加分隔线。与 row() 同高，但右端不会压到按钮。
-// A row's left label plus a right value that stops short of the button, with the usual divider.
-// Same height as row(), but the value never runs under the button.
-// 学到的键按整帧显示：帧里非零的字节照原样列出来。同一个键每次按下发的字节一样，所以这串
-// 标识每次都一样；不同的键只要有一个字节不同，读出来就不同。
-// A learned key shows its whole frame: the non-zero bytes, in order. The same key sends the same
-// bytes every press, so this identifier never changes, and two keys that differ in any byte read
-// differently.
-static void format_bound_key(const ble_pt_frame_t *frame, char *out, size_t size) {
-    if (!frame || !frame->len) {
-        if (size) out[0] = 0;
-        return;
-    }
-    size_t used = 0;
-    unsigned shown = 0;
-    for (size_t i = 0; i < frame->len && used + 4 < size; ++i) {
-        if (!frame->bytes[i]) continue;
-        if (shown == 3) {  // 值列只有 140px：最多列 3 个字节，多的用 + 表示 / the value column holds three
-            snprintf(out + used, size - used, " +");
-            return;
-        }
-        const int written = snprintf(out + used, size - used, shown ? " %02X" : "%02X", frame->bytes[i]);
-        if (written <= 0) break;
-        used += (size_t)written;
-        ++shown;
-    }
-    if (!shown) snprintf(out, size, "00");  // 理论上到不了：全零帧不给绑 / unreachable: a zero frame is never bound
-}
-
-static void ble_row(uint8_t *fb, int y, const char *label, const char *value) {
-    if (y + BLE_ROW_H < 190 || y >= UI_NAV_TOP) return;
-    settings_card(fb, (EpdRect){36, y, 612, BLE_ROW_H - 8}, 18, UI_GRAY_WHITE, 0x70);
-    char name[96]; snprintf(name, sizeof(name), "%s", label);
-    fit_value(name, 290);
-    ui_text_vc(fb, 60, y + 38, 26, name, EPD_DRAW_ALIGN_LEFT, false);
-    if (value && value[0]) {
-        char shown[96]; snprintf(shown, sizeof(shown), "%s", value); fit_value(shown, 140);
-        settings_value(fb,BLE_VALUE_RIGHT,y+38,21,shown);
-    }
-}
-
-// 行右侧的按钮。竖直居中于该行，右缘与值文字对齐。
-// The button on a row's right: vertically centred in the row, right edge aligned with the value.
-static EpdRect ble_button_rect(int row_top) {
-    return (EpdRect){BLE_BTN_RIGHT - BLE_BTN_W, row_top + 10, BLE_BTN_W, 56};
-}
-
-// 三级页：进页即持续扫描，选中一台连上就退回二级页。列表长了也不影响二级页。
-// Third-level page: scanning starts on entry and runs continuously; picking a device connects
-// and returns to level two. A long list never affects the page above it.
-typedef struct {
-    int devices_top;
-    int device_rows;
-    int status_top;
-    int content_bottom;
-} ble_scan_layout_t;
-
-// 扫描列表只列真的广播了名字的设备。没有广播名时组件把地址回落成名字，那一行对用户
-// 认不出是什么设备，而且地址太长会把信号强度挤掉。
-// The scan list shows only devices that actually advertised a name. Without one the component
-// falls back to the address: nothing the user can recognise, and long enough to crowd the signal
-// strength off the row.
-static bool ble_scan_visible(const ble_pt_device_t *dev) {
-    return dev != NULL && dev->has_name;
-}
-
-static int ble_scan_visible_count(void) {
-    int visible = 0;
-    const uint8_t count = ble_pt_device_count();
-    for (uint8_t i = 0; i < count; ++i) {
-        if (ble_scan_visible(ble_pt_device(i))) ++visible;
-    }
-    return visible;
-}
-
-// 取第 row 台有名字的设备；遍历顺序仍是组件的原始顺序。
-// The row-th device that has a name; the walk keeps the component's order.
-static const ble_pt_device_t *ble_scan_visible_at(int row) {
-    if (row < 0) return NULL;
-    const uint8_t count = ble_pt_device_count();
-    int seen = 0;
-    for (uint8_t i = 0; i < count; ++i) {
-        const ble_pt_device_t *dev = ble_pt_device(i);
-        if (!ble_scan_visible(dev)) continue;
-        if (seen++ == row) return dev;
-    }
-    return NULL;
-}
-
-static ble_scan_layout_t ble_scan_layout(void) {
-    ble_scan_layout_t l;
-    memset(&l, 0, sizeof(l));
-    l.status_top = 200;
-    l.devices_top = 300;
-    l.device_rows = ble_scan_visible_count();
-    l.content_bottom = l.devices_top + (l.device_rows ? l.device_rows * BLE_ROW_H : 68) + 40;
-    return l;
-}
 static void back_header(uint8_t *fb, const char *title) {
     ui_nav_back(fb, 36, 79);
     ui_text_vc(fb, 342, 107, 34, title, EPD_DRAW_ALIGN_CENTER, false);
@@ -1417,120 +1259,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
-    if (s_page == SETTINGS_BLE_SCAN) {
-        ui_nav_back(fb, 36, 79);
-        ui_text_vc(fb, 342, 107, 34, "扫描设备", EPD_DRAW_ALIGN_CENTER, false);
-        const ble_scan_layout_t l = ble_scan_layout();
-        const int scroll = s_ble_scroll;
-        // 持续扫描中：告诉用户正在找，以及找到几台。
-        // Continuous scan: say that it is running and how many turned up.
-        char head[64];
-        if (ble_pt_scanning()) snprintf(head, sizeof(head), "正在搜索…已找到 %u 台", (unsigned)ble_scan_visible_count());
-        else snprintf(head, sizeof(head), "扫描已停止");
-        ui_text(fb, 44, l.status_top - scroll, 23, head, EPD_DRAW_ALIGN_LEFT, false);
-        for (int i = 0; i < l.device_rows; ++i) {
-            const ble_pt_device_t *dev = ble_scan_visible_at(i);
-            if (!dev) continue;
-            char label[48];
-            snprintf(label, sizeof(label), "%s", dev->name);
-            fit_value(label, 360);
-            char value[44];
-            snprintf(value, sizeof(value), "%d dBm%s%s", dev->rssi, dev->hid ? " · HID" : "",
-                     dev->bonded ? " · 已配对" : "");
-            int top = l.devices_top - scroll + i * BLE_ROW_H;
-            if (top + BLE_ROW_H >= 190 && top < UI_NAV_TOP) {
-                settings_card(fb, (EpdRect){36, top, 612, BLE_ROW_H - 8}, 18, UI_GRAY_WHITE, 0x70);
-                ui_text(fb, 60, top + 12, 25, label, EPD_DRAW_ALIGN_LEFT, false);
-                ui_text(fb, 60, top + 45, 19, value, EPD_DRAW_ALIGN_LEFT, false);
-                ui_draw_icon(fb,(624)-8,top + 38,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
-            }
-        }
-        if (!l.device_rows)
-            ui_text(fb, 44, l.devices_top - scroll + 18, 23, "附近还没有发现设备",
-                    EPD_DRAW_ALIGN_LEFT, false);
-        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
-        ui_nav_status(fb);
-        back_header(fb, "扫描设备");
-        ui_nav_draw(fb, 3);
-        return;
-    }
-    if (s_page == SETTINGS_BLUETOOTH) {
-        ui_nav_back(fb, 36, 79);
-        ui_text_vc(fb, 342, 107, 34, "蓝牙翻页器", EPD_DRAW_ALIGN_CENTER, false);
-        const ble_layout_t l = ble_layout();
-
-        // 学习按键时把提示顶到最上面，用户不用滚回去看。
-        // While learning, the prompt is pinned to the top so the user need not scroll back.
-        if (s_ble_learning || s_ble_feedback[0]) {
-            settings_card(fb, (EpdRect){36, 202 - s_ble_scroll, 612, 126}, 22, 0xd0, 0x58);
-            ui_text_vc(fb, 342, 265 - s_ble_scroll, 24,
-                       !s_ble_learning ? s_ble_feedback :
-                       s_ble_learning == 1 ? "请按翻页器上「上一页」要用的键"
-                                           : "请按翻页器上「下一页」要用的键",
-                       EPD_DRAW_ALIGN_CENTER, false);
-            if (!s_ble_learning)
-                ui_text_vc(fb, 342, 305 - s_ble_scroll, 19, "轻点此处返回蓝牙开关", EPD_DRAW_ALIGN_CENTER, false);
-        } else {
-            setting_toggle(fb, l.toggle_top, "启用蓝牙", "开启后可配对蓝牙翻页器；关闭会释放蓝牙内存",
-                           app_settings_ble_turner());
-        }
-
-        section(fb, l.status_top - 38, "状态");
-        char ble_status[80];
-        if (!app_settings_ble_turner()) snprintf(ble_status, sizeof(ble_status), "已关闭");
-        else if (!ble_pt_running()) {
-            wifi_transfer_status_t network;
-            wifi_transfer_get_status(&network);
-            snprintf(ble_status, sizeof(ble_status), network.state != WIFI_TRANSFER_STOPPED ? "WiFi 使用中，蓝牙暂停" : "启动中…");
-        }
-        else if (ble_pt_connected()) snprintf(ble_status, sizeof(ble_status), "已连接 %s", ble_pt_connected_name());
-        else if (ble_pt_connecting()) snprintf(ble_status, sizeof(ble_status), "连接中…");
-        else snprintf(ble_status, sizeof(ble_status), "未连接");
-        ble_row(fb, l.status_top, "当前", ble_status);
-        if (l.notice_top >= 0) ui_text(fb, 44, l.notice_top, 21, s_ble_notice, EPD_DRAW_ALIGN_LEFT, false);
-
-        // 已配对：点行连接，右侧按钮删除。/ Bonded peers: the row connects, the button forgets.
-        section(fb, l.bonds_title_top, "已配对");
-        if (!l.bond_rows)
-            ble_row(fb, l.bonds_title_top + 38, "暂无已配对设备", "");
-        for (int i = 0; i < l.bond_rows && i < BLE_PT_MAX_BONDS; ++i) {
-            const ble_pt_bond_t *bond = ble_pt_bond((uint8_t)i);
-            if (!bond) continue;
-            char label[40];
-            snprintf(label, sizeof(label), "%s", bond->name[0] ? bond->name : bond->addr);
-            fit_value(label, 300);
-            // 连接状态按地址判断：名字可能重复、也可能回落成 MAC，按名字比会认错行。
-            // Match by address: names can repeat or fall back to the MAC, so comparing names
-            // marks the wrong row.
-            const bool live = ble_pt_connected() && !strcasecmp(ble_pt_connected_addr(), bond->addr);
-            ble_row(fb, l.bond_top[i], label, live ? "已连接" : "连接  ›");
-            ui_draw_button(fb, ble_button_rect(l.bond_top[i]), "删除", false);
-        }
-
-        ble_row(fb, l.scan_entry_top, "添加翻页器", "扫描设备");
-        ui_draw_icon(fb,(624)-8,l.scan_entry_top + 38,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
-
-        section(fb, l.learn_title_top, "按键映射");
-        static const char *const learn_names[] = {"上一页", "下一页"};
-        static const ble_pt_action_t learn_actions[] = {BLE_PT_ACTION_PREV, BLE_PT_ACTION_NEXT};
-        for (int i = 0; i < 2; ++i) {
-            // 学到的键直接显示出来；没学过就走内置映射。
-            // Show the learned key itself; with none, the built-in map applies.
-            char bound_label[40];
-            ble_pt_frame_t bound;
-            if (ble_pt_binding(learn_actions[i], &bound)) format_bound_key(&bound, bound_label, sizeof(bound_label));
-            else snprintf(bound_label, sizeof(bound_label), "内置按键");
-            ble_row(fb, l.learn_top[i], learn_names[i], bound_label);
-            ui_draw_button(fb, ble_button_rect(l.learn_top[i]), "学习", false);
-        }
-        ui_text(fb, 48, l.footer_top, 20, "上下、左右及 PageUp / PageDown 均可翻页", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, l.footer_top + 34, 20, "仅支持 BLE 翻页器，按键只在阅读时生效", EPD_DRAW_ALIGN_LEFT, false);
-        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
-        ui_nav_status(fb);
-        back_header(fb, "蓝牙翻页器");
-        ui_nav_draw(fb, 3);
-        return;
-    }
+    if (s_page == SETTINGS_BLUETOOTH) { settings_bluetooth_render(fb); return; }
     const int profile_y=180-s_main_scroll, profile_h=settings_profile_height();
     if (profile_y+profile_h>160) {
         settings_card(fb,(EpdRect){36,profile_y,612,profile_h},24,UI_GRAY_WHITE,0x70);
@@ -1647,7 +1376,6 @@ static void on_enter(app_ctx_t *ctx) {
     (void)ctx;
     pin_setup_close();
     s_notice[0] = 0;
-    s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
     s_scroll_drag_consumed = s_scroll_present_pending = false;
@@ -1672,10 +1400,7 @@ static void on_enter(app_ctx_t *ctx) {
     // the main list's Bluetooth row, falling back to the main list after one use.
     if (s_enter_page == SETTINGS_BLUETOOTH) {
         s_page = SETTINGS_BLUETOOTH;
-        s_ble_scroll = s_ble_learning = 0;
-        s_ble_notice[0] = s_ble_feedback[0] = 0;
-        ble_pt_raw_t unused;
-        while (ble_pt_pop_raw(&unused)) {}
+        settings_bluetooth_open();
         // 从其他页面直达时，左上角返回回到来源页；设置页内部重进仍回主列表。
         // A direct visit from another page sends the top-left back to that origin;
         // re-entering from inside Settings keeps the main-list back.
@@ -1693,36 +1418,6 @@ static void on_enter(app_ctx_t *ctx) {
     s_enter_page = SETTINGS_MAIN;
     s_enter_ble_from_quick = false;
     s_enter_haptics_from_quick = false;
-}
-
-// 主循环主动消费按键；识别不需要再触摸屏幕。/ Consume key edges on ticks without requiring another touch.
-static bool ble_receive_feedback(void) {
-    ble_pt_event_t unused;
-    while (ble_pt_pop_key(&unused)) {}
-    bool changed = false;
-    ble_pt_raw_t raw;
-    while (ble_pt_pop_raw(&raw)) {
-        if (!raw.pressed || !ble_pt_connected()) continue;
-        if (s_ble_learning) {
-            const ble_pt_action_t action = s_ble_learning == 1 ? BLE_PT_ACTION_PREV : BLE_PT_ACTION_NEXT;
-            const esp_err_t error = ble_pt_bind(action, &raw.frame);
-            snprintf(s_ble_feedback, sizeof(s_ble_feedback), "%s",
-                     error == ESP_OK ? (action == BLE_PT_ACTION_PREV ? "识别成功 · 已绑定上一页" : "识别成功 · 已绑定下一页")
-                                     : "识别成功 · 绑定保存失败，请重试");
-            s_ble_learning = 0;
-            s_ble_scroll = 0;
-            changed = true;
-            // 同一帧的其余字节不得覆盖这次学习结果。/ Drain remaining bytes without overwriting this learned result.
-            while (ble_pt_pop_raw(&raw)) {}
-            break;
-        }
-        if (!s_ble_feedback[0]) {
-            snprintf(s_ble_feedback, sizeof(s_ble_feedback), "识别成功 · 已收到翻页器按键");
-            s_ble_scroll = 0;
-            changed = true;
-        }
-    }
-    return changed;
 }
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
@@ -1779,45 +1474,8 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         return ui_keyboard_idle_tick(ctx->touch && ctx->touch->touched, ctx->now_ms) == UI_KEYBOARD_CHANGED
             ? profile_editor_paint(ctx, false) : APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_BLUETOOTH && ble_receive_feedback()) return APP_REDRAW_PAGE;
-    // 扫描页保持扫描：进页时链路可能还没断干净（断开是异步事件），那次 start 会落空；
-    // 链路一落下就在下一轮补起。正在扫描时这里是空操作。
-    // Keep the scan page scanning: the link may still be tearing down when the page opens (the
-    // teardown is an asynchronous event) and that first start is dropped; once the link is down
-    // the next tick starts it. This is a no-op while already scanning.
-    if (s_page == SETTINGS_BLE_SCAN && ble_pt_running()) {
-        if (ble_pt_connected()) ble_pt_disconnect();
-        else if (!ble_pt_scanning()) ble_pt_scan_start(BLE_PT_SCAN_FOREVER);
-    }
-    // 蓝牙启动失败的原因转成提示。放在这里而不是 render()：render 必须是纯绘制，
-    // 而 take_* 会清空状态。
-    // Fold a Bluetooth start failure into the notice here rather than in render(), which must
-    // stay pure, and because take_* clears the state.
-    // 蓝牙页要跟着栈的状态重绘：开关拨开后栈是异步起来的，配对表、扫描结果和连接状态
-    // 都在页面画完以后才变。不重绘的话用户看到的永远是进页那一刻的快照，只能退出去再进来。
-    // The Bluetooth pages redraw with the stack: enabling it starts it asynchronously, and the
-    // bond list, scan results and link state all change after the page was painted. Without a
-    // poll the user only ever sees the snapshot from when they entered, and has to leave and
-    // come back.
-    if (s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {
-        static uint32_t ble_seen;
-        const uint32_t sig = (app_settings_ble_turner() ? 1u : 0u) | (ble_pt_running() ? 2u : 0u) |
-                             (ble_pt_connected() ? 4u : 0u) | (ble_pt_connecting() ? 8u : 0u) |
-                             (ble_pt_scanning() ? 16u : 0u) |
-                             ((uint32_t)ble_pt_bond_count() << 8) |
-                             ((uint32_t)ble_scan_visible_count() << 16);
-        if (sig != ble_seen) {
-            ble_seen = sig;
-            return APP_REDRAW_PAGE;
-        }
-    }
-    if (s_page == SETTINGS_BLUETOOTH && !s_ble_notice[0]) {
-        char why[64];
-        if (ble_pt_take_start_failure(why, sizeof(why))) {
-            snprintf(s_ble_notice, sizeof(s_ble_notice), "%s", why);
-            return APP_REDRAW_PAGE;
-        }
-    }
+    if (s_page == SETTINGS_BLUETOOTH && !(ctx->touch && ctx->touch->touched) &&
+        settings_bluetooth_tick(ctx->now_ms)) return APP_REDRAW_PAGE;
 
     (void)ctx;
     if (s_boot_pending) {
@@ -2050,16 +1708,25 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
-    if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {
-        int limit = SETTINGS_SCROLL_MAX;
-        int *offset = &s_main_scroll;
-        if (s_page != SETTINGS_MAIN) {
-            int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
-            limit = bottom - UI_NAV_REFRESH_END + 12;
-            offset = &s_ble_scroll;
+    if (s_page == SETTINGS_BLUETOOTH) {
+        if (ev->type == UI_GESTURE_TAP) {
+            int tab = ui_nav_hit(ev->x0, ev->y0);
+            if (tab >= 0) {
+                settings_bluetooth_close(); s_page = SETTINGS_MAIN; s_ble_shortcut_back = false;
+                ui_nav_request(ctx, tab); return APP_REDRAW_PAGE;
+            }
+            if (ev->x0 < 170 && ev->y0 < 140) {
+                if (settings_bluetooth_back()) return APP_REDRAW_PAGE;
+                settings_bluetooth_close();
+                if (s_ble_shortcut_back) { s_ble_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE; }
+                s_page = SETTINGS_MAIN; settings_prepare_profile(); return APP_REDRAW_PAGE;
+            }
         }
+        return settings_bluetooth_gesture(ev) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
+    }
+    if (s_page == SETTINGS_MAIN) {
         bool handled;
-        app_redraw_t redraw = scroll_gesture(ev, offset, limit, &handled);
+        app_redraw_t redraw = scroll_gesture(ev, &s_main_scroll, SETTINGS_SCROLL_MAX, &handled);
         if (handled) return redraw;
     }
 
@@ -2188,17 +1855,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_BLE_SCAN && y < 190) {
-        ble_pt_scan_stop(); s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE;
-    }
-    if (((s_page == SETTINGS_BLUETOOTH && s_ble_shortcut_back) ||
-         (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back)) && y < 190) {
+    if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back && y < 190) {
         // 快捷栏直达子页：左上角返回直接回到来源页；阅读正文由主循环按离开时
         // 的书与全屏状态重开。
         // A direct quick-bar sub-page visit sends the top-left back
         // to the origin page; the loop reopens the reading body with the book and
         // full-screen state captured on the way out.
-        s_ble_shortcut_back = false;
         s_haptics_shortcut_back = false;
         ctx->request_return = true;
         return APP_REDRAW_NONE;
@@ -2377,119 +2039,6 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         }
         return APP_REDRAW_NONE;
     }
-    if (s_page == SETTINGS_BLUETOOTH) {
-        const ble_layout_t l = ble_layout();
-        if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
-        // 版式给的是屏幕坐标（已减去滚动量），所以这里直接用 y 比，不再加 scroll。
-        // The layout yields screen coordinates (scroll already subtracted), so compare y directly.
-        const int ty = y;
-
-        // 学习时轻点取消；识别结果轻点后返回开关。/ Tap to cancel learning or dismiss the received-key result.
-        if (s_ble_learning) {
-            s_ble_learning = 0;
-            snprintf(s_ble_notice, sizeof(s_ble_notice), "已取消学习");
-            return APP_REDRAW_PAGE;
-        }
-        if (s_ble_feedback[0] && ty >= 202 - s_ble_scroll && ty < 328 - s_ble_scroll) {
-            s_ble_feedback[0] = 0;
-            return APP_REDRAW_PAGE;
-        }
-        if (ty < 160 || ty >= UI_NAV_TOP) return APP_REDRAW_NONE;
-
-        if (l.toggle_top >= 0 && ty >= l.toggle_top && ty < l.toggle_top + 126) {
-            app_settings_set_ble_turner(!app_settings_ble_turner());
-            // 明确关掉时把失败计数和原因一起清掉：否则自锁之后用户没有重试的途径。
-            // Switching it off explicitly clears the failure count and reason; without this a
-            // self-locked stack leaves the user no way to try again.
-            if (!app_settings_ble_turner()) ble_pt_reset_failure();
-            snprintf(s_ble_notice, sizeof(s_ble_notice), "%s",
-                     app_settings_ble_turner() ? "已开启，正在等待设备" : "已关闭，蓝牙内存已释放");
-            return APP_REDRAW_PAGE;
-        }
-        if (ty >= l.scan_entry_top && ty < l.scan_entry_top + BLE_ROW_H) {
-            if (!app_settings_ble_turner() || !ble_pt_running()) {
-                snprintf(s_ble_notice, sizeof(s_ble_notice), "请先开启蓝牙翻页器"); return APP_REDRAW_PAGE;
-            }
-            // 进扫描页先断开当前链路：扫描与连接抢同一个控制器，连着时 ble_pt_scan_start()
-            // 直接返回，用户只看到一张空列表。断开是异步的，真正的扫描由 on_tick 在链路
-            // 落下后补起。
-            // Entering the scan page drops the current link first: scanning and an active link
-            // compete for the controller, and ble_pt_scan_start() returns early while connected,
-            // which left the user staring at an empty list. The teardown is asynchronous, so
-            // on_tick starts the scan once the link is actually down.
-            if (ble_pt_connected() || ble_pt_connecting()) ble_pt_disconnect();
-            ble_pt_scan_start(BLE_PT_SCAN_FOREVER);
-            s_ble_scroll = 0;
-            s_ble_notice[0] = 0;
-            s_page = SETTINGS_BLE_SCAN;
-            return APP_REDRAW_PAGE;
-        }
-        for (int i = 0; i < 2; ++i) {
-            const EpdRect btn = ble_button_rect(l.learn_top[i]);
-            // 命中判定必须同时比 x：按钮的纵向范围几乎覆盖整行，只比 y 会让整行都算按钮。
-            // The hit test needs the horizontal test too: the button's vertical span covers almost
-            // the whole row, so comparing y alone makes the entire row count as the button.
-            if (ev->x0 >= btn.x && ev->x0 < btn.x + btn.width && ty >= btn.y && ty < btn.y + btn.height) {
-                if (!ble_pt_connected()) {
-                    snprintf(s_ble_notice, sizeof(s_ble_notice), "请先连接翻页器再学习按键");
-                    return APP_REDRAW_PAGE;
-                }
-                ble_pt_raw_t stale;
-                while (ble_pt_pop_raw(&stale)) {}
-                // 把此刻那一帧当基准：点「学习」时用户还没按键，外设发的就是静止帧。有些遥控器
-                // 的静止帧带着非零常量，不这样标一下，那串常量会被当成一次按下学进去。
-                // Pin the frame present now as the baseline: the user has not pressed yet, so what the
-                // remote sends is its resting frame. Some remotes keep non-zero constants there, and
-                // without this the constants get learned as if they were a press.
-                ble_pt_learn_begin();
-                s_ble_feedback[0] = s_ble_notice[0] = 0;
-                s_ble_learning = i + 1;
-                s_ble_scroll = 0;
-                return APP_REDRAW_PAGE;
-            }
-        }
-        // 已配对行：右侧按钮忘记，行本身连接。/ Bonded rows: the button forgets, the row connects.
-        for (int i = 0; i < l.bond_rows && i < BLE_PT_MAX_BONDS; ++i) {
-            const ble_pt_bond_t *bond = ble_pt_bond((uint8_t)i);
-            if (!bond) continue;
-            const EpdRect btn = ble_button_rect(l.bond_top[i]);
-            if (ev->x0 >= btn.x && ev->x0 < btn.x + btn.width && ty >= btn.y && ty < btn.y + btn.height) {
-                if (ble_pt_connected()) ble_pt_disconnect();
-                ble_pt_forget(bond->addr);
-                snprintf(s_ble_notice, sizeof(s_ble_notice), "已删除该配对");
-                return APP_REDRAW_PAGE;
-            }
-            if (ty >= l.bond_top[i] && ty < l.bond_top[i] + BLE_ROW_H) {
-                if (ble_pt_connected() || ble_pt_connecting()) ble_pt_disconnect();
-                snprintf(s_ble_notice, sizeof(s_ble_notice),
-                         ble_pt_connect(bond->addr) == ESP_OK ? "正在连接…" : "连接失败，请重试");
-                return APP_REDRAW_PAGE;
-            }
-        }
-        return APP_REDRAW_NONE;
-    }
-    if (s_page == SETTINGS_BLE_SCAN) {
-        const ble_scan_layout_t l = ble_scan_layout();
-        if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
-        if (y < 160 || y >= UI_NAV_TOP) return APP_REDRAW_NONE;
-        const int ty = y + s_ble_scroll;
-        // 选一台就连，连上后退回二级页。扫描在离页时停。
-        // Picking one connects, then returns to level two; scanning stops on the way out.
-        for (int i = 0; i < l.device_rows; ++i) {
-            const ble_pt_device_t *dev = ble_scan_visible_at(i);
-            if (!dev) continue;
-            const int top = l.devices_top + i * BLE_ROW_H;
-            if (ty < top || ty >= top + BLE_ROW_H) continue;
-            ble_pt_scan_stop();
-            if (ble_pt_connected() || ble_pt_connecting()) ble_pt_disconnect();
-            snprintf(s_ble_notice, sizeof(s_ble_notice),
-                     ble_pt_connect(dev->addr) == ESP_OK ? "正在连接…" : "连接失败，请重试");
-            s_page = SETTINGS_BLUETOOTH;
-            s_ble_scroll = 0;
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
     if (y<160 || y>=UI_NAV_TOP || ev->x0<36 || ev->x0>=648) return APP_REDRAW_NONE;
     y+=s_main_scroll;
     if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
@@ -2500,8 +2049,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             extern const app_desc_t app_transfer;app_transfer_request_wifi_setup();ctx->request_app=&app_transfer;return APP_REDRAW_NONE;
         }
         if(row==1) {
-            s_page=SETTINGS_BLUETOOTH;s_ble_scroll=s_ble_learning=0;s_ble_notice[0]=s_ble_feedback[0]=0;
-            ble_pt_raw_t unused;while(ble_pt_pop_raw(&unused)){}return APP_REDRAW_PAGE;
+            s_page=SETTINGS_BLUETOOTH;settings_bluetooth_open();return APP_REDRAW_PAGE;
         }
         s_page=SETTINGS_TIME;return APP_REDRAW_PAGE;
     }
@@ -2572,9 +2120,10 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         pico_online_cancel_join(); s_upgrade_confirm = false;
         if (s_upgrade_shortcut_back && key != 1) { ctx->request_return = true; return APP_REDRAW_NONE; }
     }
-    if (s_page == SETTINGS_BLE_SCAN) {
-        ble_pt_scan_stop();
-        if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_BLUETOOTH) {
+        if (key != 1 && settings_bluetooth_back()) return APP_REDRAW_PAGE;
+        settings_bluetooth_close();
+        if (key != 1 && s_ble_shortcut_back) { s_ble_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE; }
     }
     if (s_page==SETTINGS_LOCK_STYLE) {
         if(key!=1 && ui_lock_style_back())return APP_REDRAW_PAGE;
@@ -2610,7 +2159,7 @@ static void settings_exit(app_ctx_t *ctx) {
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
     s_upgrade_job = UPGRADE_JOB_NONE;
-    (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
+    (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); settings_bluetooth_close();
 }
 static void on_before_lock(app_ctx_t *ctx) {
     if(s_page==SETTINGS_LOCK_STYLE){ui_lock_style_close();s_page=SETTINGS_MAIN;}
@@ -2625,7 +2174,7 @@ static void on_before_lock(app_ctx_t *ctx) {
     }
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
     s_upgrade_job = UPGRADE_JOB_NONE;
-    (void)ctx; pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
+    (void)ctx; pico_online_cancel_join(); settings_bluetooth_close();
     (void)ble_pt_stop(2000);
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
@@ -2659,7 +2208,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         return true;
     }
     if (redraw == APP_REDRAW_AREA && s_scroll_present_pending &&
-        (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN ||
+        (s_page == SETTINGS_MAIN ||
          s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
          s_page == SETTINGS_AVATAR ||
          s_page == SETTINGS_READING_BG)) {

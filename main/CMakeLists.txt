@@ -155,6 +155,7 @@ idf_component_register(
         "apps/app_files.c"
         "apps/file_tree.c"
         "apps/app_device_settings.c"
+        "apps/settings_bluetooth.c"
         "apps/app_image.c"
         "apps/app_transfer.c"
         "services/usb_storage.c"

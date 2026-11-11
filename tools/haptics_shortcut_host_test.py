@@ -35,17 +35,15 @@ typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
 typedef struct {bool request_return,home;} app_ctx_t;
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int x0;} ui_gesture_event_t;
-typedef int ble_pt_raw_t;
-static bool ble_pt_pop_raw(ble_pt_raw_t *raw){(void)raw;return false;}
+static void settings_bluetooth_open(void){}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){assert(tab==0);ctx->home=true;}
-static char s_main_wifi[33],s_ble_notice[64],s_ble_feedback[64];
+static char s_main_wifi[33];
 static bool s_main_wifi_saved;
 static void wifi_transfer_get_saved_wifi(char *ssid,bool *saved){ssid[0]=0;*saved=false;}
 static void settings_prepare_profile(void){}
 static bool s_ble_shortcut_back,s_enter_ble_from_quick,s_haptics_shortcut_back,s_enter_haptics_from_quick;
 static bool s_upgrade_confirm,s_upgrade_online,s_upgrade_shortcut_back;
-static int s_ble_scroll,s_ble_learning;
 enum {PICO_UPDATE_AVAILABLE};
 static struct {int state;bool busy;} s_update;
 static void upgrade_open(void){}
@@ -69,7 +67,7 @@ gesture = function("on_gesture", SETTINGS)
 key = function("on_key", SETTINGS)
 stale = "if (s_haptics_shortcut_back && s_page == SETTINGS_MAIN)"
 unit += "static app_redraw_t tap(app_ctx_t *ctx,int x,int y){ui_gesture_event_t e={x};const ui_gesture_event_t *ev=&e;\n"
-for marker in (stale, "if (((s_page == SETTINGS_BLUETOOTH", "if (s_page != SETTINGS_MAIN && y < 190)", "if (s_page == SETTINGS_HAPTIC)"):
+for marker in (stale, "if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back && y < 190)", "if (s_page != SETTINGS_MAIN && y < 190)", "if (s_page == SETTINGS_HAPTIC)"):
     unit += branch(gesture, marker) + "\n"
 unit += "return APP_REDRAW_NONE;}\n"
 unit += "static app_redraw_t press(app_ctx_t *ctx,int key){\n"

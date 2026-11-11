@@ -52,7 +52,6 @@ typedef struct{const app_desc_t*request_app;uint8_t *fb;}app_ctx_t;
 const app_desc_t app_transfer={0};
 const app_desc_t app_components={0};
 static void app_components_open(app_ctx_t *ctx,bool city){assert(!city);ctx->request_app=&app_components;}
-typedef struct{int unused;}ble_pt_raw_t;
 typedef struct{const char *path;}ttf_font_item_t;
 static ttf_font_item_t fonts[513]={{"/sdcard/fonts/A.ttf"},{"/sdcard/fonts/B.ttf"},{"/sdcard/fonts/C.ttf"}};
 static int font_count=3;
@@ -71,18 +70,18 @@ static void app_settings_set_system_font_path(const char*p){if(!write_fail)snpri
 static void app_settings_set_font_path(const char*p){++reader_writes;if(!write_fail)snprintf(reader_path,sizeof(reader_path),"%s",p);}
 static void app_font_activate_system(void){++system_activations;}
 static void ui_text_set_system_scale(bool b){assert(b);}
-static int s_font_page,s_main_scroll,s_style_scroll,s_ble_scroll,s_ble_learning;
+static int s_font_page,s_main_scroll,s_style_scroll;
 static bool s_font_sync_confirm,s_config_confirm,s_panel_repair_pending;
 static bool s_reading_bg_confirm,s_reading_bg_ready,s_reading_bg_pending;
 static char s_reading_bg_notice[96];
 static void reading_bg_scan(void){}
 static void ui_lock_style_open(const uint8_t *fb){(void)fb;}
-static char s_font_sync_path[192],s_notice[96],s_ble_notice[96],s_ble_feedback[96];
+static char s_font_sync_path[192],s_notice[96];
 static int font_scans,profile_edits,wifi_requests;
 static bool home_full;
 static void ttf_font_scan(void){++font_scans;}
 static void app_transfer_request_wifi_setup(void){++wifi_requests;}
-static bool ble_pt_pop_raw(ble_pt_raw_t*p){(void)p;return false;}
+static void settings_bluetooth_open(void){}
 static bool app_settings_home_full_refresh(void){return home_full;}
 static void app_settings_set_home_full_refresh(bool v){home_full=v;}
 static void profile_editor_open(bool signature){assert(signature);++profile_edits;}

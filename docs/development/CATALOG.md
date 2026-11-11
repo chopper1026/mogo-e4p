@@ -26,6 +26,7 @@
 - [docs/README.md](../README.md)
 - [docs/development/FEATURES.md](FEATURES.md)
 - [docs/development/INDEX.md](INDEX.md)
+- [docs/development/guides/BLUETOOTH.md](guides/BLUETOOTH.md)
 - [docs/development/guides/CALENDAR.md](guides/CALENDAR.md)
 - [docs/development/guides/LOCK_CLOCK.md](guides/LOCK_CLOCK.md)
 - [docs/development/guides/LOCK_STYLE_PICKER.md](guides/LOCK_STYLE_PICKER.md)
