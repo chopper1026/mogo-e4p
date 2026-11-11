@@ -16,6 +16,7 @@ unit = r'''
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#define READER_WIDTH 684
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int64_t now_ms;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
@@ -31,7 +32,6 @@ static int reader_image_slots(int page){(void)page;return image_slots;}
 static int book_layout_link_at(size_t page,int x,int y){(void)page;(void)x;(void)y;return -1;}
 static bool note_open_link(int link){(void)link;return false;}
 static EpdRect book_layout_image_rect(void){return (EpdRect){0,0,684,1216};}
-static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static EpdRect ui_rect_union(EpdRect a,EpdRect b){
  int x0=a.x<b.x?a.x:b.x,y0=a.y<b.y?a.y:b.y;
  int x1=(a.x+a.width)>(b.x+b.width)?(a.x+a.width):(b.x+b.width);
@@ -81,7 +81,11 @@ int main(void){
  assert(reading_tap(&ctx,10,600)==APP_REDRAW_PAGE&&turn_calls==1&&last_turn==-1&&panel_calls==0);
  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;
  assert(reading_tap(&ctx,100,600)==APP_REDRAW_PAGE&&panel_calls==1&&turn_calls==0);
- reset();assert(reading_tap(&ctx,10,600)==APP_REDRAW_NONE&&panel_calls==0&&turn_calls==0);
+ reset();assert(reading_tap(&ctx,0,600)==APP_REDRAW_PAGE&&panel_calls==0&&turn_calls==1&&last_turn==-1);
+ reset();assert(reading_tap(&ctx,683,600)==APP_REDRAW_PAGE&&panel_calls==0&&turn_calls==1&&last_turn==1);
+ reset();assert(reading_tap(&ctx,0,159)==APP_REDRAW_NONE&&panel_calls==0&&turn_calls==0);
+ assert(reading_tap(&ctx,683,1060)==APP_REDRAW_NONE&&panel_calls==0&&turn_calls==0);
+ assert(reading_tap(&ctx,684,600)==APP_REDRAW_NONE&&panel_calls==0&&turn_calls==0);
  puts("PASS: reader taps turn only without a panel; tools and other panels dismiss without turning, including bar, header, margins and full-bleed image strips");
 }
 '''

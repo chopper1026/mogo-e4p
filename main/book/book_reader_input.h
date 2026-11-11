@@ -1,11 +1,23 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：正文点按分区与九宫格几何。用户2026-11-10新增九格自定义动作；点按在抬起时直接提交。
  * English: Body tap regions and grid geometry. The 2026-11-10 user revision adds nine custom actions, committed on release.
+ * 用户2026-11-11修复：左右留白归相邻正文边缘，不移动原有分区边界。
+ * User fix 2026-11-11: map side margins to the adjacent body edge without moving existing region boundaries.
  */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 #include "epdiy.h"
+
+/// 左右留白映射到最近的正文横坐标；屏外或正文上下之外返回 -1。
+/// Map side margins to the nearest body x; return -1 off-screen or above/below the body.
+static inline int book_reader_tap_x(EpdRect body, int screen_width, int x, int y) {
+    if (body.width <= 0 || body.height <= 0 || x < 0 || x >= screen_width ||
+        y < body.y || y >= body.y + body.height) return -1;
+    if (x < body.x) return body.x;
+    if (x >= body.x + body.width) return body.x + body.width - 1;
+    return x;
+}
 
 static inline EpdRect book_reader_grid_cell(EpdRect body, unsigned cell) {
     if (cell >= 9 || body.width <= 0 || body.height <= 0) return (EpdRect){0};

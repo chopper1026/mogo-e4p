@@ -31,6 +31,8 @@
  * cleanup for chapter/illustration footers, and keep body-first presentation.
  * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义八动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部全屏提示移除。
  * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body actions; the translucent editor activates only successfully saved drafts and removes the fullscreen footer hint.
+ * 用户2026-11-11修复：阅读点按与滑动接纳左右留白，九宫格留白归相邻边缘格；正文分区与上下热区不变，修复边缘有震动却无动作。
+ * User fix 2026-11-11: accept side margins for reader taps/swipes and map grid margins to adjacent edge cells, retaining body divisions and vertical bounds to fix vibrating edge taps with no action.
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
  * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
  * 用户 2026-10-21 修订：按键控制示意图按本板实体顺序摆成中、左、右（中键最左），中键双击下新增音量键翻页开关。
@@ -5706,7 +5708,10 @@ static app_redraw_t reader_tap_grid_action(app_ctx_t *ctx, uint16_t x, uint16_t 
         }
         if (s_tap_picker) return APP_REDRAW_NONE;
     } else if (y >= 106) {
-        int cell = book_reader_grid_hit(body_rect(), x, y);
+        EpdRect body = body_rect();
+        int tap_x = book_reader_tap_x(body, READER_WIDTH, x, y);
+        if (tap_x < 0) return APP_REDRAW_NONE;
+        int cell = book_reader_grid_hit(body, tap_x, y);
         if (cell < 0) return APP_REDRAW_NONE;
         s_tap_selected = cell;
         s_tap_picker = true;
@@ -6493,17 +6498,19 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // 页眉页脚槽位只显示内容，无控件；点信息条不翻页，落入下方正文热区判定。
         // The chrome slots show content only, no controls; bar taps do not turn pages and fall
         // through to the body hit test below.
-        // 通栏插图铺满整屏，点在图两侧的边条上同样要翻页；文字页仍按正文栏判定。
-        // A full-bleed illustration spans the panel, so taps on its side strips must turn pages
-        // too; text pages keep the body column.
+        // 左右留白投到最近的正文边缘，保留不对称边距下的原分区；插图沿用整图热区，九格保留正文上下界。
+        // Project side margins onto the nearest body edge, preserving asymmetric region splits;
+        // illustrations retain their image area, while the grid keeps the body's vertical bounds.
         EpdRect tap_area = body_rect();
-        if (reader_image_slots(s_reader_session.position.page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
-        if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
-        if (app_settings_reader_tap_mode() == APP_READER_TAP_GRID) {
-            int cell = book_reader_grid_hit(body_rect(), x, y);
+        bool grid_tap = app_settings_reader_tap_mode() == APP_READER_TAP_GRID;
+        if (!grid_tap && reader_image_slots(s_reader_session.position.page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
+        int tap_x = book_reader_tap_x(tap_area, READER_WIDTH, x, y);
+        if (tap_x < 0) return APP_REDRAW_NONE;
+        if (grid_tap) {
+            int cell = book_reader_grid_hit(tap_area, tap_x, y);
             return cell < 0 ? APP_REDRAW_NONE : reader_key_action(ctx, app_settings_reader_tap_action((unsigned)cell));
         }
-        int target = book_reader_tap_direction(tap_area, x, y,
+        int target = book_reader_tap_direction(tap_area, tap_x, y,
                                               app_settings_reader_vertical_turn(),
                                               app_settings_book_vertical());
 #if CONFIG_TOUCH_DIAG
@@ -7327,7 +7334,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     if (!s_clear_confirm && !s_scan_pending) {
         if (s_view == READING && (!s_toolbar || (s_reader_panel == READER_PANEL_TOOLS && ev->y0 < READER_BAR_TOP)) &&
-            ui_rect_hit(body_rect(), ev->x0, ev->y0)) {
+            book_reader_tap_x(body_rect(), READER_WIDTH, ev->x0, ev->y0) >= 0) {
             int direction = reader_swipe_direction(ev->type, app_settings_reader_vertical_turn());
             if (direction) { ctx->user_activity = true; return turn_page(ctx, direction); }
         } else if (s_view == SHELF && (ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R)) {

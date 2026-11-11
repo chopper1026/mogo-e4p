@@ -3,6 +3,10 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.1.0 · 本地测试 / Local testing · 2026-11-11
+
+- 修复阅读页左右边缘有触摸震动却不翻页：点按与滑动支持左右留白，九宫格留白归相邻边缘格，保留正文分区、页眉页脚与弹层规则。/ Accept reader taps and swipes in side margins, mapping grid margins to adjacent edge cells while retaining body divisions, header/footer bounds and panel behavior.
+
 ## v1.1.0 · 2026-11-10
 
 - 重新设计老黄历锁屏。

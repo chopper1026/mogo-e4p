@@ -23,14 +23,19 @@ unit = position_state(page=0) + r'''
 #include "book_reader_input.h"
 #include "settings.h"
 enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_TURN_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TAP_GRID};
-typedef struct {int64_t now_ms;} app_ctx_t;
+typedef struct {int64_t now_ms;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
+typedef enum {UI_GESTURE_TAP,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D} ui_gesture_type_t;
+typedef struct {ui_gesture_type_t type;uint16_t x0,y0;} ui_gesture_event_t;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static char s_reader_notice[128];
 static bool s_reader_tools_toggle;
 static struct {bool active;} s_dictionary_selection;
 static EpdRect current_body={36,96,612,1104};
+static int screen_width=684;
+#define READER_WIDTH screen_width
+#define READER_BAR_TOP 1096
 static EpdRect body_rect(void){return current_body;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static EpdRect reader_sheet_back_rect(int top){return (EpdRect){36,top+20,64,64};}
@@ -81,7 +86,7 @@ for name in ('ui_reader_tap_cancel_rect','ui_reader_tap_save_rect','ui_reader_ta
     unit += function(name,UI)+'\n'
 for name in ('ui_reader_turn_mode_rect','ui_reader_turn_shake_rect'):
     unit += function(name,ROOT/'main/ui/ui_reader_settings.c')+'\n'
-for name in ('reader_tap_grid_action','reader_turn_settings_action','toggle_reader_tools_panel','reader_key_action'):
+for name in ('reader_tap_grid_action','reader_turn_settings_action','toggle_reader_tools_panel','reader_key_action','reader_swipe_direction'):
     unit += function(name,BOOK)+'\n'
 unit += r'''
 static app_redraw_t reader_panel_action(app_ctx_t *ctx,uint16_t x,uint16_t y){
@@ -92,11 +97,52 @@ action = function('action_at',BOOK)
 a = action.index('    if (s_view == READING) {')
 b = action.index('    if (s_view == SHELF) {',a)
 unit += 'static app_redraw_t reading_tap(app_ctx_t *ctx,uint16_t x,uint16_t y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
+gesture = function('gesture_event', BOOK)
+a = gesture.index('        if (s_view == READING && (!s_toolbar')
+b = gesture.index(' else if (s_view == SHELF', a)
+unit += 'static app_redraw_t reading_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){\n'+gesture[a:b]+'return APP_REDRAW_NONE;}\n'
 unit += r'''
 static void tap(app_ctx_t *ctx,EpdRect r){assert(r.width>0&&r.height>0);reader_tap_grid_action(ctx,r.x+r.width/2,r.y+r.height/2);}
 static void enter(app_ctx_t *ctx){EpdRect r=ui_reader_turn_mode_rect(2);reader_turn_settings_action(ctx,r.x+10,r.y+10);assert(s_reader_panel==READER_PANEL_TAP_GRID&&!s_tap_picker&&s_tap_selected==-1);}
+static void test_reader_edges(app_ctx_t *ctx){
+ const int widths[]={684,1216},left[]={0,24,0,96,12,96},right[]={0,24,96,0,96,12};
+ unsigned checks=0;
+ image_slots=false;link_at=-1;s_dictionary_selection.active=false;
+ for(unsigned orientation=0;orientation<2;++orientation)for(unsigned margin=0;margin<6;++margin)for(unsigned fullscreen=0;fullscreen<2;++fullscreen){
+  screen_width=widths[orientation];int height=widths[1-orientation];
+  current_body=(EpdRect){left[margin],fullscreen?24:180,screen_width-left[margin]-right[margin],height-(fullscreen?36:300)};
+  EpdRect body=current_body;
+  for(unsigned cell=0;cell<9;++cell)configured[cell]=cell%2?APP_READER_KEY_NEXT:APP_READER_KEY_PREV;
+  for(unsigned mode=0;mode<3;++mode)for(unsigned writing=0;writing<2;++writing)for(unsigned row=0;row<3;++row){
+   configured_mode=(app_reader_tap_mode_t)mode;rtl=writing;
+   int y=body.y+body.height*(2*row+1)/6;
+   for(int x=0;x<screen_width;++x){
+    int projected=x<body.x?body.x:(x>=body.x+body.width?body.x+body.width-1:x);
+    int expected=book_reader_tap_direction(body,projected,y,mode==APP_READER_TAP_VERTICAL,rtl);
+    if(mode==APP_READER_TAP_GRID){int cell=book_reader_grid_hit(body,projected,y);expected=configured[cell]==APP_READER_KEY_PREV?-1:1;}
+    s_reader_panel=READER_PANEL_NONE;turns=0;
+    assert(reading_tap(ctx,x,y)==APP_REDRAW_PAGE&&turns==1&&last_direction==expected);++checks;
+   }
+   const int outside[][2]={{screen_width,y},{65535,y},{0,body.y-1},{screen_width-1,body.y+body.height}};
+   for(unsigned i=0;i<4;++i){turns=0;assert(reading_tap(ctx,outside[i][0],outside[i][1])==APP_REDRAW_NONE&&!turns);++checks;}
+   for(unsigned side=0;side<2;++side){
+    int x=side?screen_width-1:0;
+    ui_gesture_event_t ev={.type=UI_GESTURE_SWIPE_L,.x0=x,.y0=y};
+    turns=0;ctx->user_activity=false;
+    assert(reading_swipe(ctx,&ev)==APP_REDRAW_PAGE&&turns==1&&last_direction==((rtl&&mode!=APP_READER_TAP_VERTICAL)?-1:1)&&ctx->user_activity);++checks;
+   }
+  }
+  configured_mode=APP_READER_TAP_GRID;
+  for(unsigned row=0;row<3;++row)for(unsigned side=0;side<2;++side){
+   int x=side?screen_width-1:0,y=body.y+body.height*(2*row+1)/6;
+   s_reader_panel=READER_PANEL_TAP_GRID;s_tap_picker=false;
+   assert(reader_tap_grid_action(ctx,x,y)==APP_REDRAW_PAGE&&s_tap_picker&&s_tap_selected==(int)(row*3+(side?2:0)));++checks;
+  }
+ }
+ printf("PASS: %u edge/interior dispatch checks across both widths, asymmetric margins, window/fullscreen, three modes and RTL; edge swipes and grid editing\n",checks);
+}
 int main(void){
- app_ctx_t ctx={123};
+ app_ctx_t ctx={.now_ms=123};
  // Every pixel belongs to exactly one cell, with matching boundaries in each orientation and full-screen/margin geometry.
  const EpdRect bodies[]={{36,96,612,1104},{96,24,492,1178},{0,0,1216,684},{71,112,1067,524},{0,0,1,1},{0,0,2,2}};
  for(unsigned k=0;k<sizeof(bodies)/sizeof(*bodies);++k){
@@ -146,9 +192,11 @@ int main(void){
  }
  s_reader_panel=READER_PANEL_NONE;turns=0;configured[0]=APP_READER_KEY_PREV;rtl=true;
  assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&last_direction==-1); // Explicit actions do not mirror for vertical text.
- image_slots=true;assert(reading_tap(&ctx,0,200)==APP_REDRAW_NONE); // Grid remains tied to the displayed body, including on image pages.
+ image_slots=true;assert(reading_tap(&ctx,0,200)==APP_REDRAW_PAGE&&last_direction==-1); // 左右留白归边缘格，插图页同样适用。/ Side margins map to edge cells on image pages too.
+ assert(reading_tap(&ctx,0,20)==APP_REDRAW_NONE); // 九宫格不扩到正文上下之外。/ Grid taps do not extend above or below the body.
  link_at=0;turns=0;assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&links==1&&!turns);link_at=-1;
  enter(&ctx);turns=0;assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&s_tap_picker&&!turns);
+ test_reader_edges(&ctx);
  puts("PASS: exhaustive grid boundaries/rotation/margins, 72 draft edits and real body dispatches, gaps, Back/Cancel, failed saves, mode switches, footnotes and panel isolation");
 }
 '''
