@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：透明PNG/JPG书封直接叠加在当前画面上；保留原画布比例。PNG使用alpha，JPG用白底键控；解码后的图层按源文件身份缓存在TF卡，锁屏只做合成。
- * English: Composite a transparent PNG/JPG cover over the current frame, preserving canvas ratio. PNG keeps alpha while JPG uses white-key transparency; the decoded layer is cached on the SD card by source identity so a lock only composites.
+ * 中文：透明PNG/JPG书封直接叠加在当前画面上；支持裁切填满或完整显示。PNG使用alpha，JPG/不透明PNG从边缘估计纯色背景键控；解码后的图层按源文件身份和显示方式缓存在TF卡，锁屏只做合成。
+ * English: Composite a transparent PNG/JPG cover over the current frame with crop-to-fill or full-canvas fit. PNG keeps alpha; JPEG/opaque PNG estimates a flat edge background for keying. Decoded layers are cached on SD by source identity and fit mode so locking only composites.
  */
 #include "book_lock_bookmark.h"
 #include "book_cover.h"
@@ -84,8 +84,69 @@ static bool remove_white_background_threshold(uint8_t *gray,uint8_t *alpha,unsig
     for(size_t i=0;i<count;++i)if(f.visited[i>>3]&(1u<<(i&7)))gray[i]=alpha[i]=0;
     free(work);return true;
 }
+static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) __attribute__((unused));
 static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
     return remove_white_background_threshold(gray,alpha,w,h,250);
+}
+// 从画布边缘估计主色，处理黑色、灰色和彩色纯底；透明PNG跳过颜色键控。
+// Estimate the dominant edge tone for black, gray or colored flat backgrounds; real alpha skips keying.
+static bool remove_flat_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
+    size_t count=(size_t)w*h;
+    if(!gray||!alpha||!w||!h||w>684||h>1216)return false;
+    for(size_t i=0;i<count;++i)if(alpha[i]!=255)return true;
+    unsigned histogram[32]={0}; unsigned samples=0;
+    for(unsigned x=0;x<w;++x){
+        uint8_t a=gray[x],b=gray[(size_t)(h-1)*w+x];
+        ++histogram[a>>3];++histogram[b>>3];samples+=2;
+    }
+    for(unsigned y=1;y+1<h;++y){
+        uint8_t a=gray[(size_t)y*w],b=gray[(size_t)y*w+w-1];
+        ++histogram[a>>3];++histogram[b>>3];samples+=2;
+    }
+    if(!samples)return true;
+    unsigned bin=0;for(unsigned i=1;i<32;++i)if(histogram[i]>histogram[bin])bin=i;
+    unsigned background=bin*8u+4u;
+    // 白底沿用原先的单向阈值；其他底色只允许小幅JPEG边缘振铃，避免少量边缘图案把键控范围放大。
+    // Keep the original one-sided white rule; other tones allow only small JPEG edge ringing so art cannot widen the key range.
+    if(background>=248u)return remove_white_background_threshold(gray,alpha,w,h,245);
+    unsigned tolerance=background>=224u?8u:16u;
+    unsigned low=background>tolerance?background-tolerance:0;
+    unsigned high=background+tolerance<255u?background+tolerance:255u;
+    size_t bits=(count+7)/8,queue_offset=(bits+h+1)&~(size_t)1;
+    uint8_t *work=heap_caps_malloc(queue_offset+2*h,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!work)return false;
+    memset(work,0,queue_offset);
+    white_flood_t f={.visited=work,.pending=work+bits,.rows=(uint16_t *)(work+queue_offset),.height=h};
+#define FLAT_PIXEL(at) (gray[(at)]>=low&&gray[(at)]<=high)
+    for(unsigned x=0;x<w;++x){
+        if(FLAT_PIXEL(x))white_flood_mark(&f,x,0);
+        size_t at=(size_t)(h-1)*w+x;if(FLAT_PIXEL(at))white_flood_mark(&f,at,h-1);
+    }
+    for(unsigned y=1;y+1<h;++y){
+        size_t at=(size_t)y*w;if(FLAT_PIXEL(at))white_flood_mark(&f,at,y);
+        if(FLAT_PIXEL(at+w-1))white_flood_mark(&f,at+w-1,y);
+    }
+    while(f.count){
+        unsigned y=f.rows[f.head];f.head=(f.head+1)%h;--f.count;f.pending[y]=0;
+        size_t row=(size_t)y*w;
+        for(unsigned x=0;x<w;){
+            if(!FLAT_PIXEL(row+x)){++x;continue;}
+            unsigned left=x;bool reached=false;
+            while(x<w&&FLAT_PIXEL(row+x)){size_t at=row+x++;if(f.visited[at>>3]&(1u<<(at&7)))reached=true;}
+            if(!reached)continue;
+            for(unsigned xx=left;xx<x;++xx){
+                size_t at=row+xx;f.visited[at>>3]|=(uint8_t)(1u<<(at&7));
+                if(y&&FLAT_PIXEL(at-w))white_flood_mark(&f,at-w,y-1);
+                if(y+1<h&&FLAT_PIXEL(at+w))white_flood_mark(&f,at+w,y+1);
+            }
+        }
+    }
+    for(size_t i=0;i<count;++i)if(f.visited[i>>3]&(1u<<(i&7)))gray[i]=alpha[i]=0;
+#undef FLAT_PIXEL
+    free(work);return true;
+}
+static bool remove_cover_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
+    return remove_flat_background(gray,alpha,w,h);
 }
 static uint8_t pixel(const uint8_t *fb,int x,int y) {
     int px=x,py=y;
@@ -133,10 +194,10 @@ static void fb_put(uint8_t *fb,int x,int y,uint8_t gray) {
 #define LOCK_LAYER_DIR LOCK_LAYER_ROOT "/locks"
 #define LOCK_LAYER_PATH LOCK_LAYER_DIR "/bookmark-layer.bin"
 #define LOCK_LAYER_MAGIC UINT32_C(0x424b4c59)
-#define LOCK_LAYER_VERSION 3u
+#define LOCK_LAYER_VERSION 4u
 #define LOCK_LAYER_STAGE 32768u
 typedef struct {
-    uint32_t magic,version,rotation,width,height;
+    uint32_t magic,version,rotation,width,height,mode;
     uint32_t path_hash;
     uint64_t file_size,file_mtime;
     uint32_t payload,checksum;
@@ -199,7 +260,7 @@ static bool layer_decode(const uint8_t *src,size_t n,uint8_t *out,size_t out_n) 
     }
     return o==out_n&&i==n;
 }
-static bool layer_load(const char *path,unsigned w,unsigned h,uint8_t *dst) {
+static bool layer_load(const char *path,unsigned w,unsigned h,bool crop_to_fill,uint8_t *dst) {
     struct stat st;
     if(!path||!dst||stat(path,&st))return false;
     FILE *f=fopen(LOCK_LAYER_PATH,"rb");
@@ -207,6 +268,7 @@ static bool layer_load(const char *path,unsigned w,unsigned h,uint8_t *dst) {
     layer_header_t head;bool ok=fread(&head,1,sizeof(head),f)==sizeof(head)&&
         head.magic==LOCK_LAYER_MAGIC&&head.version==LOCK_LAYER_VERSION&&
         head.rotation==(uint32_t)epd_get_rotation()&&head.width==w&&head.height==h&&
+        head.mode==(uint32_t)crop_to_fill&&
         head.path_hash==layer_path_hash(path)&&
         head.file_size==(uint64_t)st.st_size&&head.file_mtime==(uint64_t)st.st_mtime&&
         head.payload>0&&head.payload<=2u*w*h;
@@ -217,14 +279,14 @@ static bool layer_load(const char *path,unsigned w,unsigned h,uint8_t *dst) {
     if(ok)ok=layer_decode(payload,head.payload,dst,(size_t)w*h*2u);
     free(payload);fclose(f);return ok;
 }
-static bool layer_store(const char *path,unsigned w,unsigned h,const uint8_t *src) {
+static bool layer_store(const char *path,unsigned w,unsigned h,bool crop_to_fill,const uint8_t *src) {
     struct stat st;
     if(!path||stat(path,&st))return false;
     (void)mkdir(LOCK_LAYER_ROOT,0775);(void)mkdir(LOCK_LAYER_DIR,0775);
     FILE *f=fopen(LOCK_LAYER_PATH ".tmp","wb");
     if(!f)return false;
     layer_header_t head={.magic=LOCK_LAYER_MAGIC,.version=LOCK_LAYER_VERSION,
-        .rotation=(uint32_t)epd_get_rotation(),.width=w,.height=h,
+        .rotation=(uint32_t)epd_get_rotation(),.width=w,.height=h,.mode=(uint32_t)crop_to_fill,
         .path_hash=layer_path_hash(path),
         .file_size=(uint64_t)st.st_size,.file_mtime=(uint64_t)st.st_mtime};
     bool ok=fwrite(&head,1,sizeof(head),f)==sizeof(head);
@@ -258,21 +320,22 @@ static bool decode_layer(const char *path,unsigned w,unsigned h,uint8_t *gray,ui
     memset(alpha,255,(size_t)w*h);
     return book_image_file_grayscale_cancel(path,false,w,h,gray,cancelled,context);
 }
-// 以整个PNG/JPG画布居中等比缩放，684x1216时逐像素对齐，不识别或裁剪主体。
-// Center-fit the entire PNG/JPG canvas; 684x1216 maps pixel-for-pixel, without subject detection or cropping.
-static bool canvas_for(const char *path,unsigned *w,unsigned *h) {
+// 按显示方式计算解码画布：完整显示保留原比例，裁切填满直接输出屏幕比例并由解码器居中裁源图。
+// Choose the decode canvas: fit preserves the source ratio; crop outputs panel ratio and lets the decoder center-crop.
+static bool canvas_for(const char *path,bool crop_to_fill,unsigned *w,unsigned *h) {
     unsigned sw,sh;
     const bool png=image_path_is_png(path);
     if(!image_path_supported(path)||!book_image_file_dimensions(path,png,&sw,&sh)||!sw||!sh)return false;
+    if(crop_to_fill){*w=684;*h=1216;return true;}
     unsigned cw=684,ch=(uint64_t)sh*cw/sw;
     if(ch>1216){ch=1216;cw=(uint64_t)sw*ch/sh;}
     if(!cw||!ch)return false;
     *w=cw;*h=ch;return true;
 }
-static bool lock_draw(uint8_t *fb,const char *path,bool store) {
+static bool lock_draw(uint8_t *fb,const char *path,bool store,bool crop_to_fill) {
     const int64_t lock_t0=LOCK_US();
     unsigned w,h;
-    if(!fb||!canvas_for(path,&w,&h))return false;
+    if(!fb||!canvas_for(path,crop_to_fill,&w,&h))return false;
     size_t count=(size_t)w*h;
     size_t psram_free=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(psram_free<2*count+512u*1024u)return false;
@@ -282,21 +345,19 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store) {
     uint8_t *alpha=layers+count;
     // 缓存命中直接得到图层，跳过解码与去白底；未命中按格式解码后顺手把缓存写出去。
     // A cache hit supplies the layers and skips decoding and white removal; a miss decodes by format and refreshes the cache.
-    bool cached=layer_load(path,w,h,layers);
+    bool cached=layer_load(path,w,h,crop_to_fill,layers);
     s_layer_cached=cached;
     const int64_t lock_t2=LOCK_US();
     int64_t lock_t3=lock_t2,lock_t4=lock_t2,lock_t5=lock_t2,lock_t6=lock_t2,lock_t7=lock_t2;
     bool ok=true;
     if(!cached) {
-        const bool png=image_path_is_png(path);
         // JPEG没有alpha：先全部设为不透明，再把连通白底转成透明；复用已有流式JPEG解码器，
         // 不引入JPEG→PNG转换器或第二份源图缓冲。
         // JPEG has no alpha: start opaque, then key connected white background transparent.
         // Reuse the existing streaming JPEG decoder without a JPEG-to-PNG converter or source-sized buffer.
         ok=decode_layer(path,w,h,layers,alpha,NULL,NULL);
         lock_t3=LOCK_US();
-        if(ok)ok=png?remove_white_background(layers,alpha,w,h):
-            remove_white_background_threshold(layers,alpha,w,h,245);
+        if(ok)ok=remove_cover_background(layers,alpha,w,h);
         lock_t4=LOCK_US();
     }
     int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
@@ -322,7 +383,7 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store) {
             fb_put(fb,xx,yy,ui_image_dither_gray(value,xx,yy));
         }
         lock_t6=LOCK_US();
-        if(!cached&&store) {layer_store(path,w,h,layers);lock_t7=LOCK_US();}
+        if(!cached&&store) {layer_store(path,w,h,crop_to_fill,layers);lock_t7=LOCK_US();}
         else lock_t7=lock_t6;
     }
     // 缓存命中时 decode/white 为 0，load 是读SD+解RLE的耗时；未命中时 store 是首次写缓存。
@@ -335,29 +396,28 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store) {
         (long long)LOCK_MS(lock_t0,lock_t7));
     free(layers);return ok;
 }
-bool book_lock_bookmark_draw(uint8_t *fb,const char *png) { return lock_draw(fb,png,true); }
+bool book_lock_bookmark_draw_mode(uint8_t *fb,const char *png,bool crop_to_fill) { return lock_draw(fb,png,true,crop_to_fill); }
+bool book_lock_bookmark_draw(uint8_t *fb,const char *png) { return book_lock_bookmark_draw_mode(fb,png,false); }
 // 设置页逐张预览只读缓存、不回写：翻图不该每滑一次就写200KB。
 // The settings picker only reads the cache: browsing images must not write 200 KB per swipe.
-bool book_lock_bookmark_preview(uint8_t *fb,const char *png) { return lock_draw(fb,png,false); }
+bool book_lock_bookmark_preview_mode(uint8_t *fb,const char *png,bool crop_to_fill) { return lock_draw(fb,png,false,crop_to_fill); }
+bool book_lock_bookmark_preview(uint8_t *fb,const char *png) { return book_lock_bookmark_preview_mode(fb,png,false); }
 // 选图确认时预建图层缓存：换图后第一次锁屏不再等解码和去白底。
 // Build the layer cache when an image is picked, so the first lock after a change never decodes.
 void book_lock_bookmark_prepare(const char *png) {
     const int64_t t0=LOCK_US();
     unsigned w,h;
-    if(!canvas_for(png,&w,&h))return;
+    if(!canvas_for(png,false,&w,&h))return;
     size_t count=(size_t)w*h;
     if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<2*count+512u*1024u)return;
     uint8_t *layers=heap_caps_malloc(2*count,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!layers)return;
-    bool cached=layer_load(png,w,h,layers);
+    bool cached=layer_load(png,w,h,false,layers);
     const int64_t t1=LOCK_US();
     if(!cached) {
         uint8_t *alpha=layers+count;
-        const bool is_png=image_path_is_png(png);
-        if(decode_layer(png,w,h,layers,alpha,NULL,NULL)&&
-           (is_png?remove_white_background(layers,alpha,w,h):
-            remove_white_background_threshold(layers,alpha,w,h,245)))
-            layer_store(png,w,h,layers);
+        if(decode_layer(png,w,h,layers,alpha,NULL,NULL)&&remove_cover_background(layers,alpha,w,h))
+            layer_store(png,w,h,false,layers);
     }
     const int64_t t2=LOCK_US();
     LOCK_LOG("bookmark prepare %ux%u hit=%d load=%lld build=%lld total=%lld ms",
@@ -384,8 +444,7 @@ bool book_lock_bookmark_thumbnail(const char *path,unsigned width,unsigned heigh
     if(!layer)return false;
     bool ok=decode_layer(path,w,h,layer,layer+count,cancelled,context);
     if(ok&&(!cancelled||!cancelled(context)))
-        ok=png?remove_white_background(layer,layer+count,w,h):
-            remove_white_background_threshold(layer,layer+count,w,h,245);
+        ok=remove_cover_background(layer,layer+count,w,h);
     else ok=false;
     if(ok){
         // 淡棋盘仅表示透明区域，不冒充当前阅读页；完整画布居中而不裁切。

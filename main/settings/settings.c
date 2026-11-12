@@ -89,6 +89,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_WALLPAPER "wallpaper"
 #define NVS_KEY_WALLPAPER_MODE "wall_mode"
 #define NVS_KEY_BOOKMARK "lock_png"
+#define NVS_KEY_BOOKMARK_MODE "lock_png_mode"
 #define NVS_KEY_WAKE "lwake"
 #define NVS_KEY_BOOT "lboot"
 #define NVS_KEY_PICKUP "pickup"
@@ -188,6 +189,7 @@ static app_ticket_background_t s_ticket_background = APP_TICKET_BACKGROUND_TRANS
 static char s_wallpaper[288];
 static app_wallpaper_mode_t s_wallpaper_mode = APP_WALLPAPER_MODE_CROP;
 static char s_bookmark[288];
+static app_bookmark_mode_t s_bookmark_mode = APP_BOOKMARK_MODE_FIT;
 static uint8_t s_last_wake;
 static uint8_t s_last_boot;
 static bool s_pickup_wake;
@@ -458,6 +460,10 @@ void app_settings_init(void) {
         ? (app_wallpaper_mode_t)wallpaper_mode : APP_WALLPAPER_MODE_CROP;
     size_t bookmark_len = sizeof(s_bookmark);
     if (nvs_get_str(h,NVS_KEY_BOOKMARK,s_bookmark,&bookmark_len)!=ESP_OK || strncmp(s_bookmark,"/sdcard/",8)) s_bookmark[0]=0;
+    uint8_t bookmark_mode = APP_BOOKMARK_MODE_FIT;
+    s_bookmark_mode = nvs_get_u8(h, NVS_KEY_BOOKMARK_MODE, &bookmark_mode) == ESP_OK &&
+                      bookmark_mode <= APP_BOOKMARK_MODE_FIT
+        ? (app_bookmark_mode_t)bookmark_mode : APP_BOOKMARK_MODE_FIT;
     uint8_t wake = 0;
     if (nvs_get_u8(h, NVS_KEY_WAKE, &wake) == ESP_OK) s_last_wake = wake;
     uint8_t boot = 0;
@@ -931,6 +937,19 @@ void app_settings_set_wallpaper_path(const char* path) {
     settings_write_close(h);
     if(err==ESP_OK)strlcpy(s_wallpaper,path,sizeof(s_wallpaper));
 }
+app_bookmark_mode_t app_settings_bookmark_mode(void) { return s_bookmark_mode; }
+bool app_settings_set_bookmark_mode(app_bookmark_mode_t mode) {
+    if (mode != APP_BOOKMARK_MODE_CROP && mode != APP_BOOKMARK_MODE_FIT) return false;
+    if (mode == s_bookmark_mode) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_BOOKMARK_MODE, (uint8_t)mode);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err != ESP_OK) return false;
+    s_bookmark_mode = mode;
+    return true;
+}
 app_wallpaper_mode_t app_settings_wallpaper_mode(void) { return s_wallpaper_mode; }
 bool app_settings_set_wallpaper_mode(app_wallpaper_mode_t mode) {
     if (mode != APP_WALLPAPER_MODE_CROP && mode != APP_WALLPAPER_MODE_FIT) return false;
@@ -945,7 +964,9 @@ bool app_settings_set_wallpaper_mode(app_wallpaper_mode_t mode) {
     return true;
 }
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
-    if(style>APP_LOCK_STYLE_CLOCK || (style == 1 ? option > APP_WALLPAPER_MODE_FIT : option > 1)) return false;
+    if(style>APP_LOCK_STYLE_CLOCK ||
+       (style == 1 ? option > APP_WALLPAPER_MODE_FIT :
+        style == 3 ? option > APP_BOOKMARK_MODE_FIT : option > 1)) return false;
     if(style==1||style==3){
         const char *ext=image?strrchr(image,'.'):NULL;
         if(!image||strncmp(image,"/sdcard/",8)||strnlen(image,sizeof(s_wallpaper))>=sizeof(s_wallpaper)||!ext||
@@ -953,9 +974,11 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     }
     unsigned calendar=style==4?option:(unsigned)s_calendar_style;
     unsigned wallpaper_mode=style==1?option:(unsigned)s_wallpaper_mode;
+    unsigned bookmark_mode=style==3?option:(unsigned)s_bookmark_mode;
     bool same=style==s_lock_style && (style!=0||option==(unsigned)s_ticket_background) &&
         (style!=4||option==(unsigned)s_calendar_style) && (style!=1||!strcmp(image,s_wallpaper)) &&
         (style!=1||wallpaper_mode==(unsigned)s_wallpaper_mode) &&
+        (style!=3||bookmark_mode==(unsigned)s_bookmark_mode) &&
         (style!=3||!strcmp(image,s_bookmark));
     if(same)return true;
     nvs_handle_t h;
@@ -963,6 +986,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     esp_err_t err=ESP_OK;
     if(style==1||style==3)err=nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,image);
     if(err==ESP_OK&&style==1)err=nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)wallpaper_mode);
+    if(err==ESP_OK&&style==3)err=nvs_set_u8(h,NVS_KEY_BOOKMARK_MODE,(uint8_t)bookmark_mode);
     if(style==0)err=nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,option);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,style*2+calendar);
     if(err==ESP_OK)err=nvs_commit(h);
@@ -971,6 +995,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
         // NVS writes items immediately; restore secondary fields on a later failure and retain live state.
         if(style==1||style==3)(void)nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,style==1?s_wallpaper:s_bookmark);
         if(style==1)(void)nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)s_wallpaper_mode);
+        if(style==3)(void)nvs_set_u8(h,NVS_KEY_BOOKMARK_MODE,(uint8_t)s_bookmark_mode);
         if(style==0)(void)nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,s_ticket_background);
         (void)nvs_set_u8(h,NVS_KEY_LOCK_FACE,s_lock_style*2+s_calendar_style);
         (void)nvs_commit(h);
@@ -980,7 +1005,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     s_lock_style=style;s_calendar_style=(app_calendar_style_t)calendar;
     if(style==0)s_ticket_background=(app_ticket_background_t)option;
     if(style==1){strlcpy(s_wallpaper,image,sizeof(s_wallpaper));s_wallpaper_mode=(app_wallpaper_mode_t)wallpaper_mode;}
-    if(style==3)strlcpy(s_bookmark,image,sizeof(s_bookmark));
+    if(style==3){strlcpy(s_bookmark,image,sizeof(s_bookmark));s_bookmark_mode=(app_bookmark_mode_t)bookmark_mode;}
     return true;
 }
 

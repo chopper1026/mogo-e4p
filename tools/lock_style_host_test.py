@@ -68,7 +68,13 @@ static bool ui_wallpaper_prepare_lock_mode(uint8_t *fb,const char *path,int mode
 static void ui_wallpaper_cache_commit(const uint8_t *fb){assert(style==1&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
 static bool book_ticket_draw(uint8_t *fb,bool background){assert(background==reader);return draw(0,fb);}
 static const char *app_settings_bookmark_path(void){return "/sdcard/overlay.png";}
-static bool book_lock_bookmark_draw(uint8_t *fb,const char *p){assert(!strcmp(p,app_settings_bookmark_path()));return draw(3,fb);}
+#define APP_BOOKMARK_MODE_CROP 0
+#define APP_BOOKMARK_MODE_FIT 1
+static unsigned bookmark_mode;
+static unsigned app_settings_bookmark_mode(void){return bookmark_mode;}
+static bool book_lock_bookmark_draw_mode(uint8_t *fb,const char *p,bool crop_to_fill){
+ assert(!strcmp(p,app_settings_bookmark_path()));assert(crop_to_fill==(bookmark_mode==APP_BOOKMARK_MODE_CROP));return draw(3,fb);
+}
 static bool lock_calendar_draw(uint8_t *fb){return draw(4,fb);}
 static bool lock_clock_draw(uint8_t *fb){return draw(5,fb);}
 static void lock_clock_presented(bool success){assert(style==5&&success);}
@@ -116,7 +122,7 @@ unit += function('app_lifecycle_pause_for_lock', ROOT/'main/app/app_lifecycle.c'
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/power/sleep.c') + '\n'
 unit += r'''
-static void reset(void){key_sampling=true;key_consumes=0;current_background=0x32;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;reader=boot_cache=cache_ok=false;}
+static void reset(void){key_sampling=true;key_consumes=0;current_background=0x32;bookmark_mode=APP_BOOKMARK_MODE_FIT;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;reader=boot_cache=cache_ok=false;}
 int main(void){
  EpdiyHighlevelState hl={0};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.

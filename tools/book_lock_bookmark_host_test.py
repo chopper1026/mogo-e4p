@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-# 中文：编译真实PNG行解码与透明书封，验证PNG alpha、JPG白底键控、任意当前底图和原画布比例。
-# English: Compile the real PNG row decoder and cover compositor; verify PNG alpha, JPG white-key transparency, arbitrary current backgrounds and canvas fit.
+# 中文：编译真实PNG行解码与透明书封，验证PNG alpha、JPG纯色边缘键控、任意当前底图和两种取景方式。
+# English: Compile the real PNG row decoder and cover compositor; verify PNG alpha, solid-edge JPEG keying, arbitrary current backgrounds and both framing modes.
 from pathlib import Path
 import os,re,struct,subprocess,tempfile,zlib
 from home_cover_cache_host_test import function
@@ -63,14 +63,16 @@ for n in ('png_read_mem','png_gray_input_cancel','png_gray_input','book_png_file
 u+=r'''
 static bool book_image_file_dimensions(const char *path,bool png,unsigned *w,unsigned *h){
  FILE *jpg=!png?fopen(path,"rb"):NULL;
- if(jpg){fclose(jpg);*w=32;*h=32;return true;}
+ if(jpg){fclose(jpg);*w=strstr(path,"wide")?64:32;*h=32;return true;}
  uint8_t b[24];FILE *f=fopen(path,"rb");if(!f)return false;bool ok=fread(b,1,24,f)==24&&!memcmp(b,"\211PNG\r\n\032\n",8);fclose(f);
  *w=(uint32_t)b[16]<<24|(uint32_t)b[17]<<16|(uint32_t)b[18]<<8|b[19];*h=(uint32_t)b[20]<<24|(uint32_t)b[21]<<16|(uint32_t)b[22]<<8|b[23];return ok;
 }
 static bool book_image_file_grayscale_cancel(const char *path,bool png,unsigned w,unsigned h,uint8_t *out,
                                               image_cancel_fn cancelled,void *context){
- (void)path;(void)context;if(png||!out||(cancelled&&cancelled(context)))return false;
- for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){bool body=x>=w/4&&x<3*w/4&&y>=h/4&&y<3*h/4;out[y*w+x]=body?0:255;}
+ (void)context;if(png||!out||(cancelled&&cancelled(context)))return false;
+ unsigned edge=strstr(path,"dark")?16:strstr(path,"coral")?96:255;
+ unsigned ink=strstr(path,"dark")?240:0;
+ for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){bool body=x>=w/4&&x<3*w/4&&y>=h/4&&y<3*h/4;out[y*w+x]=(uint8_t)(body?ink:edge);}
  return true;
 }
 '''
@@ -124,10 +126,10 @@ int main(int argc,char **argv){
  assert(pixel(fb,300,100)==170&&pixel(fb,300,1150)==170);
  assert(pixel(fb,80,350)==170);assert(pixel(fb,520,350)==0);
  assert(pixel(fb,80,800)>=187&&pixel(fb,80,800)<=221);assert(pixel(fb,520,800)==255);
- if(argc>=7){
-  FILE *bg=fopen(argv[5],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
+ if(argc>=10){
+  FILE *bg=fopen(argv[8],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
   memcpy(fb,original,BYTES);
-  assert(book_lock_bookmark_draw(fb,argv[6]));
+  assert(book_lock_bookmark_draw(fb,argv[9]));
   FILE *out=fopen("preview.pgm","wb");assert(out);fprintf(out,"P5\n684 1216\n255\n");
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x)fputc(pixel(fb,x,y),out);fclose(out);
  }
@@ -141,10 +143,26 @@ int main(int argc,char **argv){
  // Opaque white-background PNG: reveal the current page at the edges, retaining the black border and enclosed white artwork.
  memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[3]));
  assert(pixel(fb,10,300)==170&&pixel(fb,100,400)==0&&pixel(fb,342,600)==255);
- // JPG无alpha，连通近白画布透明；中心主体覆盖底图。
- // JPEG has no alpha: connected near-white canvas becomes transparent while the center subject covers the page.
+ // JPG无alpha，连通纯色画布透明；中心主体覆盖底图。
+ // JPEG has no alpha: connected flat canvas becomes transparent while the center subject covers the page.
  memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[4]));
  assert(pixel(fb,10,300)==170&&pixel(fb,342,608)==0);
+ // 深色与彩色（转灰后的中灰）纯底也按边缘主色键控，中心主体保留。
+ // Dark and colored (mid-gray after conversion) flat backgrounds use the edge tone too, preserving the subject.
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[5]));
+ assert(pixel(fb,10,300)==170&&pixel(fb,342,608)>=221&&pixel(fb,342,608)<=255);
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[6]));
+ assert(pixel(fb,10,300)==170&&pixel(fb,342,608)==0);
+ // 显示方式参与缓存键：宽图完整显示留上下边，裁切填满在同一位置显示主体。
+ // The fit mode participates in the cache key: a wide image has top/bottom margins in fit mode, while crop fills that position.
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw_mode(fb,argv[7],true));
+ assert(pixel(fb,342,400)==0&&!book_lock_bookmark_cached());
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw_mode(fb,argv[7],true));
+ assert(pixel(fb,342,400)==0&&book_lock_bookmark_cached());
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw_mode(fb,argv[7],false));
+ assert(pixel(fb,342,400)==170&&!book_lock_bookmark_cached());
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw_mode(fb,argv[7],true));
+ assert(pixel(fb,342,400)==0&&!book_lock_bookmark_cached());
  memcpy(original,fb,BYTES);budget=0;
  assert(!book_lock_bookmark_draw(fb,argv[2])&&!memcmp(fb,original,BYTES));budget=8u*1024u*1024u;
  assert(!book_lock_bookmark_draw(fb,"file.jpg")&&!memcmp(fb,original,BYTES));
@@ -182,7 +200,7 @@ int main(int argc,char **argv){
  assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
  free(first);
  free(fb);free(original);
- puts("PASS: PNG alpha/premultiplication, JPG white-key transparency, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
+ puts("PASS: PNG alpha/premultiplication, white/dark/colored flat-background keying, opaque black, fit/crop framing and mode-keyed cache, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
 }
 '''
 def chunk(k,b):return struct.pack('>I',len(b))+k+b+struct.pack('>I',zlib.crc32(k+b))
@@ -191,6 +209,9 @@ png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,6,0,0,0))+
 with tempfile.TemporaryDirectory() as d:
  d=Path(d);(d/'test.c').write_text(u);(d/'fixture.png').write_bytes(png)
  (d/'fixture.jpg').write_bytes(b'\xff\xd8\xff\xd9')
+ (d/'dark.jpg').write_bytes(b'\xff\xd8\xff\xd9')
+ (d/'coral.jpg').write_bytes(b'\xff\xd8\xff\xd9')
+ (d/'wide.jpg').write_bytes(b'\xff\xd8\xff\xd9')
  white_raw=b''.join(b'\0'+b''.join(bytes((0,0,0)) if 3<=x<=28 and 3<=y<=28 and not (9<=x<=22 and 9<=y<=22) else bytes((255,255,255)) for x in range(32)) for y in range(32))
  (d/'white.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(white_raw))+chunk(b'IEND',b''))
  vendor=r/'managed_components/espressif__libpng/libpng'
@@ -205,7 +226,7 @@ with tempfile.TemporaryDirectory() as d:
  for variant,extra in (('generic',[]),('mirror',['-DMIRROR'])):
   exe=str(d/('test_'+variant))
   subprocess.run(base+extra+['-o',exe],check=True)
-  args=[exe,str(d),str(d/'fixture.png'),str(d/'white.png'),str(d/'fixture.jpg')]
+  args=[exe,str(d),str(d/'fixture.png'),str(d/'white.png'),str(d/'fixture.jpg'),str(d/'dark.jpg'),str(d/'coral.jpg'),str(d/'wide.jpg')]
   if os.environ.get('BOOKMARK_SAMPLE') and os.environ.get('BOOKMARK_BACKGROUND'):args += [os.environ['BOOKMARK_BACKGROUND'],os.environ['BOOKMARK_SAMPLE']]
   subprocess.run(args,check=True)
   print(variant,'ok')

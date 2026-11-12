@@ -7,8 +7,12 @@
 #include <stdint.h>
 #include "epdiy.h"
 bool book_lock_bookmark_draw(uint8_t *fb,const char *png);
+/// 按显示方式叠加书封；裁切填满覆盖整屏，完整显示保留原画布比例。
+/// Composite with an explicit fit mode; crop fills the screen, fit preserves the full canvas.
+bool book_lock_bookmark_draw_mode(uint8_t *fb,const char *png,bool crop_to_fill);
 /// 设置页预览：可命中缓存但不回写 / Settings preview: may hit the cache but never rewrites it
 bool book_lock_bookmark_preview(uint8_t *fb,const char *png);
+bool book_lock_bookmark_preview_mode(uint8_t *fb,const char *png,bool crop_to_fill);
 /// 选图确认后预建图层缓存，第一次锁屏不再解码 / Prebuild the layer cache after a pick so the first lock never decodes
 void book_lock_bookmark_prepare(const char *png);
 /// 最近一次绘制是否命中TF卡图层缓存 / Whether the last draw hit the SD-card layer cache

@@ -139,6 +139,13 @@ app_calendar_style_t app_settings_calendar_style(void);
 bool app_settings_set_calendar_style(app_calendar_style_t style);
 const char* app_settings_bookmark_path(void);
 void app_settings_set_bookmark_path(const char *path);
+/// 透明书封显示方式：裁切填满或保持完整画布；默认完整显示。/ Transparent-cover fit: crop to fill or preserve the full canvas; fit by default.
+typedef enum {
+    APP_BOOKMARK_MODE_CROP = 0,
+    APP_BOOKMARK_MODE_FIT = 1,
+} app_bookmark_mode_t;
+app_bookmark_mode_t app_settings_bookmark_mode(void);
+bool app_settings_set_bookmark_mode(app_bookmark_mode_t mode);
 const char* app_settings_wallpaper_path(void);
 void app_settings_set_wallpaper_path(const char* path);
 /// 壁纸显示方式：裁剪填满或保持原比例完整显示；默认裁剪填满。/ Wallpaper fit: crop to fill or preserve the full image; crop to fill by default.

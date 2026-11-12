@@ -745,7 +745,8 @@ void enter_lock_and_sleep(
     bool lock_drawn = ticket
         ? book_ticket_draw(framebuffer, reader_background)
         : lock_style == 2 ? book_lock_collage_prepare(framebuffer) :
-          lock_style == 3 ? book_lock_bookmark_draw(framebuffer,app_settings_bookmark_path()) :
+          lock_style == 3 ? book_lock_bookmark_draw_mode(framebuffer,app_settings_bookmark_path(),
+              app_settings_bookmark_mode() == APP_BOOKMARK_MODE_CROP) :
           lock_style == 4 ? lock_calendar_draw(framebuffer) :
           lock_style == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(framebuffer) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
@@ -856,7 +857,8 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             memset(fb,255,(size_t)epd_width()*epd_height()/2);
         bool drawn = app_settings_lock_style() == 0 ? book_ticket_draw(fb, false) :
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) :
-            app_settings_lock_style() == 3 ? book_lock_bookmark_draw(fb,app_settings_bookmark_path()) :
+            app_settings_lock_style() == 3 ? book_lock_bookmark_draw_mode(fb,app_settings_bookmark_path(),
+                app_settings_bookmark_mode() == APP_BOOKMARK_MODE_CROP) :
             app_settings_lock_style() == 4 ? lock_calendar_draw(fb) :
             app_settings_lock_style() == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(fb) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); (void)ui_builtin_image_draw(fb, UI_BUILTIN_IMAGE_LOCK); }

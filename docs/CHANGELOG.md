@@ -11,6 +11,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 锁屏样式改为六类缩略图及同页选择，壁纸/透明书封支持三图分页、点选应用与长按放大；新增可取消的后台图片加载、跨页面内存/TF缩略缓存和下一页预读，预览就绪后统一整屏清刷，保存失败保留原选择。/ Redesign lock styles with six previews and inline choices; add three-image paging, apply-on-tap, hold preview, cancellable background loading, thumbnails reused across visits and next-page prefetch; settle completed previews with one full refresh and retain the choice on failed saves.
 - 透明书封支持 JPG/JPEG：直接流式解码到灰阶图层，以连通近白背景键控透明，不生成中间 PNG；PNG 继续保留原 alpha，图层缓存格式同步升级。/ Transparent covers now accept JPG/JPEG via direct streaming grayscale decode and connected near-white keying without an intermediate PNG; PNG keeps its alpha and the layer-cache format is bumped.
+- 优化透明书封：JPG/JPEG及不透明PNG从边缘估计黑、灰或彩色纯底并只移除连通区域；新增「裁剪填满 / 完整显示」选择，默认完整显示，模式随重启保存并独立缓存。渐变和复杂纹理仍需预处理。/ Improve transparent covers by estimating dark, gray or colored flat backgrounds from the edge and removing only connected regions; add crop-to-fill/full-display selection with fit as the default, persisted across reboot and cached separately. Gradients and complex textures still need preprocessing.
 
 - 完善电量校准日志：增加区间统计、低电提前点、判满/恢复原因与跨重启检查点；保留写卡失败记录并明确丢失情况，合并充电阶段重复事件，不增加睡眠唤醒或等待日志后才欠压保护。/ Add interval statistics, low-voltage milestones, full/restore diagnostics and cross-boot checkpoints; retain failed writes, report losses and coalesce charger chatter without extra sleep wakeups or delaying undervoltage protection.
 
