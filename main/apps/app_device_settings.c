@@ -102,6 +102,8 @@
 #include "soc/rtc_cntl_reg.h"
 #endif
 #include "time_service.h"
+#include "network_service.h"
+#include "cellular_service.h"
 
 static void fit_value(char *value, int width);
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge);
@@ -112,7 +114,7 @@ static const app_main_refresh_mode_t s_main_refresh_choices[] = {
     APP_MAIN_REFRESH_NORMAL, APP_MAIN_REFRESH_WATER,
 };
 #define MAIN_REFRESH_CHOICE_COUNT ((int)(sizeof(s_main_refresh_choices) / sizeof(s_main_refresh_choices[0])))
-typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_TIME,
+typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_NETWORK, SETTINGS_TIME,
                SETTINGS_TIME_EDIT, SETTINGS_SHELF_STYLE, SETTINGS_SYSTEM_FONT,
                SETTINGS_SYSTEM_SIZE, SETTINGS_SYSTEM_CONTRAST, SETTINGS_MAIN_REFRESH, SETTINGS_LOCK_STYLE,
                SETTINGS_READING_BG, SETTINGS_READING_BG_PREVIEW,
@@ -135,6 +137,8 @@ static bool s_ble_shortcut_back;
 // Haptics keeps its own direct-visit back flag; re-entry within Settings still returns to the main list.
 static bool s_enter_haptics_from_quick;
 static bool s_haptics_shortcut_back;
+static bool s_enter_network_from_quick;
+static bool s_network_shortcut_back;
 static ui_pinpad_t s_pinpad;
 static lock_pin_flow_t s_pinflow;
 static bool s_pin_pending;
@@ -359,14 +363,18 @@ static int settings_main_row_height(void) {
     return 82;
 }
 #define SETTINGS_ROW_H settings_main_row_height()
-#define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
 #define SETTINGS_PERSONAL_ROWS 7
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
 #define SETTINGS_MAINTENANCE_ROWS 3
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
-#define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
+static int settings_wireless_rows(void) {
+    network_status_t network = {0};
+    network_service_get_status(&network);
+    return network.cellular_capable ? 4 : 3;
+}
+#define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + settings_wireless_rows() * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_MAINTENANCE_Y (SETTINGS_PERSONAL_Y + SETTINGS_PERSONAL_ROWS * SETTINGS_ROW_H + 78)
 // 电源管理排在最后，放调试类开关，不挤占常规设置。
@@ -653,10 +661,15 @@ static void time_auto_hint(char *out, size_t cap) {
         snprintf(out, cap, "自动对时已关闭，只能按上面的按钮手动对时。");
         return;
     }
+    network_status_t network = {0};
+    network_service_get_status(&network);
     char ssid[33];
-    bool configured = false;
-    if (wifi_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) {
-        snprintf(out, cap, "自动对时需要先在 WiFi 设置里连接网络。");
+    bool saved_wifi = false;
+    (void)wifi_transfer_get_saved_wifi(ssid, &saved_wifi);
+    const bool wifi_configured = saved_wifi || network.wifi_enabled || network.wifi_ready;
+    const bool cellular_available = network.cellular_capable && network.cellular_enabled;
+    if (!wifi_configured && !cellular_available) {
+        snprintf(out, cap, "自动对时需要先启用 Wi-Fi 或 4G 网络。");
         return;
     }
     snprintf(out, cap, "自动对时每 6 小时一次。");
@@ -702,6 +715,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
         UI_ICON_ZAP,               // 20 电源管理 / power management
         UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
+        UI_ICON_RADIO_TOWER,       // 22 移动网络
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -933,7 +947,36 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         section(fb, 253, "已保存网络");
         row(fb, 296, s_main_wifi_saved ? s_main_wifi : "尚未配置", s_main_wifi_saved ? "已保存" : "");
         row(fb, 408, "连接或更改网络", "前往传输  ›");
-        ui_text(fb, 54, 529, 21, "配网后可在日期与时间中进行 WiFi 对时。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 529, 21, "配网后可在日期与时间中进行网络对时。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_nav_draw(fb, 3);
+        return;
+    }
+    if (s_page == SETTINGS_NETWORK) {
+        network_status_t network;
+        network_service_get_status(&network);
+        back_header(fb, "移动网络");
+        section(fb, 232, "无线开关");
+        setting_toggle(fb, 272, "Wi-Fi", network.wifi_ready ? "已连接" : network.wifi_enabled ? "连接中" : "已关闭",
+                       network.wifi_enabled);
+        if (network.cellular_capable) {
+            setting_toggle(fb, 424, "4G 移动网络", network.cellular_ready ? "已连接" : network.cellular_enabled ? "连接中" : "已关闭",
+                           network.cellular_enabled);
+            section(fb, 606, "业务联网方式");
+            row(fb, 646, "日期、天气、OTA", network_route_name(network.route));
+            char detail[96];
+            snprintf(detail, sizeof(detail), "4G 状态：%s · 信号 %d",
+                     network.cellular_ready ? "已注册" :
+                     network.cellular_state == CELLULAR_SERVICE_NO_SIM ? "未插卡" :
+                     network.cellular_state == CELLULAR_SERVICE_NO_REGISTRATION ? "未注册" : "未连接",
+                     network.cellular_signal == 99 ? 0 : network.cellular_signal);
+            ui_text(fb, 48, 780, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 48, 824, 21, "点按开关只改变对应无线；联网方式在上方单独选择。", EPD_DRAW_ALIGN_LEFT, false);
+        } else {
+            ui_text(fb, 48, 492, 21, network.cellular_capability_known
+                    ? "当前硬件未检测到移动网络模块。"
+                    : "正在检测移动网络硬件，请稍候。",
+                    EPD_DRAW_ALIGN_LEFT, false);
+        }
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1108,7 +1151,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         section(fb, 253, "当前时间 · 北京时间");
         row(fb, TIME_ROW_CURRENT_Y, shown, "");
         row(fb, TIME_ROW_AUTO_Y, "自动对时", app_settings_auto_time_sync() ? "开  ›" : "关  ›");
-        row(fb, TIME_ROW_WIFI_Y, "通过 WiFi 对时", "立即同步  ›");
+        row(fb, TIME_ROW_WIFI_Y, "通过网络对时", "立即同步  ›");
         row(fb, TIME_ROW_MANUAL_Y, "手动设置", "编辑  ›");
         char line[96];
         time_last_sync_text(line, sizeof(line));
@@ -1227,7 +1270,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             settings_card(fb, (EpdRect){36, 356, 612, 278}, 22, UI_GRAY_WHITE, 0x70);
             ui_text(fb, 60, 383, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
             char detail[96];
-            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "连接 WiFi，检查官网发布的新版本");
+            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "连接网络，检查官网发布的新版本");
             fit_value(detail, 540);
             ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_AVAILABLE)
@@ -1280,11 +1323,29 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_draw_icon(fb,625,profile_y+profile_h/2,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
     }
     char wifi[56];snprintf(wifi,sizeof(wifi),"%s",s_main_wifi_saved?s_main_wifi:"未配置");
-    const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
-    const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
-    const int connection_icons[]={0,1,6};
+    network_status_t network;
+    network_service_get_status(&network);
+    const char *connection_labels[4];
+    const char *connection_values[4];
+    int connection_icons[4];
+    int connection_rows = 0;
+    connection_labels[connection_rows] = "WiFi";
+    connection_values[connection_rows] = wifi;
+    connection_icons[connection_rows++] = 0;
+    if (network.cellular_capable) {
+        connection_labels[connection_rows] = "移动网络";
+        connection_values[connection_rows] = network.route == NETWORK_ROUTE_CELLULAR ? "4G" :
+            network.route == NETWORK_ROUTE_AUTO ? "自动" : "Wi-Fi";
+        connection_icons[connection_rows++] = 22;
+    }
+    connection_labels[connection_rows] = "蓝牙翻页器";
+    connection_values[connection_rows] = app_settings_ble_turner() ? "已开启" : "已关闭";
+    connection_icons[connection_rows++] = 1;
+    connection_labels[connection_rows] = "日期与时间";
+    connection_values[connection_rows] = "设置";
+    connection_icons[connection_rows++] = 6;
     setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
-                  connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
+                  connection_icons,connection_labels,connection_values,connection_rows);
     char font_name[96],contrast[24],idle[24],signature[96],standby[48];
     snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
@@ -1371,6 +1432,12 @@ void app_device_settings_request_haptics(bool return_to_origin) {
     s_enter_haptics_from_quick = return_to_origin;
     s_enter_ble_from_quick = false;
 }
+void app_device_settings_request_network(bool return_to_origin) {
+    s_enter_page = SETTINGS_NETWORK;
+    s_enter_network_from_quick = return_to_origin;
+    s_enter_ble_from_quick = false;
+    s_enter_haptics_from_quick = false;
+}
 static void on_enter(app_ctx_t *ctx) {
     ui_lock_style_close();
     (void)ctx;
@@ -1395,6 +1462,7 @@ static void on_enter(app_ctx_t *ctx) {
     // left without passing the main list cannot leave a stale target behind.
     s_ble_shortcut_back = false;
     s_haptics_shortcut_back = false;
+    s_network_shortcut_back = false;
     // 快捷栏长按直达蓝牙子页：初始状态与主列表「蓝牙」行一致，消费后回到主列表。
     // Quick-bar shortcut straight to the Bluetooth sub-page: same initial state as
     // the main list's Bluetooth row, falling back to the main list after one use.
@@ -1410,6 +1478,10 @@ static void on_enter(app_ctx_t *ctx) {
         s_page = SETTINGS_HAPTIC;
         s_haptics_shortcut_back = s_enter_haptics_from_quick;
     }
+    if (s_enter_page == SETTINGS_NETWORK) {
+        s_page = SETTINGS_NETWORK;
+        s_network_shortcut_back = s_enter_network_from_quick;
+    }
     if (s_enter_page == SETTINGS_UPGRADE) {
         upgrade_open();
         s_upgrade_confirm = s_upgrade_online = s_update.state == PICO_UPDATE_AVAILABLE && !s_update.busy;
@@ -1418,6 +1490,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_enter_page = SETTINGS_MAIN;
     s_enter_ble_from_quick = false;
     s_enter_haptics_from_quick = false;
+    s_enter_network_from_quick = false;
 }
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
@@ -1515,10 +1588,10 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     app_time_sync_result_t result = app_time_service_sync_manual();
     esp_err_t err = result.error;
     bool network_time_received = result.network_time_received;
-    const char *notice = err == ESP_OK ? "WiFi 对时完成，内部时钟已接管" :
+    const char *notice = err == ESP_OK ? "网络对时完成，内部时钟已接管" :
         network_time_received ? "已获取网络时间，内部时钟写入失败" :
-        err == ESP_ERR_NOT_FOUND ? "请先在 WiFi 设置中配置网络" :
-        err == ESP_ERR_INVALID_STATE ? "WiFi 尚未连接，请稍后再试" :
+        err == ESP_ERR_NOT_FOUND ? "请先启用可用的网络方式" :
+        err == ESP_ERR_INVALID_STATE ? "网络尚未连接，请稍后再试" :
         err == ESP_ERR_TIMEOUT ? "网络对时超时，请检查网络后重试" :
         "网络对时失败，请检查网络后重试";
     snprintf(s_notice, sizeof(s_notice), "%s", notice);
@@ -1865,6 +1938,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         ctx->request_return = true;
         return APP_REDRAW_NONE;
     }
+    if (s_page == SETTINGS_NETWORK && s_network_shortcut_back && y < 190) {
+        s_network_shortcut_back = false;
+        ctx->request_return = true;
+        return APP_REDRAW_NONE;
+    }
 
     if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
@@ -1889,6 +1967,26 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         for (int i = 0; i < 3; ++i) if (ui_rect_hit((EpdRect){36, 482 + i * 112, 612, 92}, ev->x0, y)) {
             app_settings_set_haptic_intensity((uint8_t)i);
             haptics_pulse();
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
+    if (s_page == SETTINGS_NETWORK) {
+        network_status_t network;
+        network_service_get_status(&network);
+        if (y >= 272 && y < 398) {
+            (void)network_service_set_enabled(NETWORK_BEARER_WIFI, !network.wifi_enabled);
+            return APP_REDRAW_PAGE;
+        }
+        if (network.cellular_capable && y >= 424 && y < 550) {
+            (void)network_service_set_enabled(NETWORK_BEARER_CELLULAR, !network.cellular_enabled);
+            return APP_REDRAW_PAGE;
+        }
+        if (network.cellular_capable && y >= 646 && y < 716) {
+            network_route_t next = network.route == NETWORK_ROUTE_WIFI ? NETWORK_ROUTE_CELLULAR :
+                network.route == NETWORK_ROUTE_CELLULAR ? NETWORK_ROUTE_AUTO : NETWORK_ROUTE_WIFI;
+            if (next != NETWORK_ROUTE_CELLULAR || network.cellular_capable)
+                (void)network_service_set_route(next, network.auto_priority);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -2043,12 +2141,19 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     y+=s_main_scroll;
     if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
     int row;
-    if (y>=SETTINGS_WIRELESS_Y && y<SETTINGS_WIRELESS_Y+SETTINGS_WIRELESS_ROWS*SETTINGS_ROW_H) {
+    const int wireless_rows = settings_wireless_rows();
+    if (y>=SETTINGS_WIRELESS_Y && y<SETTINGS_WIRELESS_Y+wireless_rows*SETTINGS_ROW_H) {
         row=(y-SETTINGS_WIRELESS_Y)/SETTINGS_ROW_H;
         if(row==0) {
             extern const app_desc_t app_transfer;app_transfer_request_wifi_setup();ctx->request_app=&app_transfer;return APP_REDRAW_NONE;
         }
-        if(row==1) {
+        network_status_t network;
+        network_service_get_status(&network);
+        if(network.cellular_capable && row==1) {
+            s_page=SETTINGS_NETWORK;return APP_REDRAW_PAGE;
+        }
+        const int bluetooth_row = network.cellular_capable ? 2 : 1;
+        if(row==bluetooth_row) {
             s_page=SETTINGS_BLUETOOTH;settings_bluetooth_open();return APP_REDRAW_PAGE;
         }
         s_page=SETTINGS_TIME;return APP_REDRAW_PAGE;

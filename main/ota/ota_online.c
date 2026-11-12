@@ -17,6 +17,9 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "wifi_transfer.h"
+#ifdef ESP_PLATFORM
+#include "network_service.h"
+#endif
 #include "time_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,6 +36,10 @@ static pico_update_status_t *s_status;
 static atomic_bool s_cancel;
 static bool s_joinable, s_download;
 static const esp_partition_t *s_verified;
+#ifdef ESP_PLATFORM
+static network_lease_t s_network_lease;
+static bool s_network_lease_active;
+#endif
 
 static bool initialize(void) {
     if (!s_status) s_status = heap_caps_calloc(1, sizeof(*s_status), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -126,6 +133,33 @@ static bool layout_valid(void) {
 #endif
 }
 static bool online(bool *owned) {
+#ifdef ESP_PLATFORM
+    (void)owned;
+    // OTA owns one route for the complete check/download, including range retries.
+    // The selected route is never silently replaced by the other bearer.
+    app_time_service_cancel();
+    memset(&s_network_lease, 0, sizeof(s_network_lease));
+    if (network_service_acquire(NETWORK_USE_OTA, &s_network_lease) != ESP_OK) {
+        state(PICO_UPDATE_FAILED, "当前联网方式不可用，请检查网络设置");
+        return false;
+    }
+    s_network_lease_active = true;
+    if (!network_service_wait_ready(&s_network_lease, 30000)) {
+        network_service_release(&s_network_lease);
+        s_network_lease_active = false;
+        state(PICO_UPDATE_FAILED, "网络连接超时，请重试");
+        return false;
+    }
+    if (time(NULL) < 1704067200) {
+        uint32_t utc = 0;
+        if (network_service_sync_time_on_lease(&s_network_lease, &utc) != ESP_OK) {
+            state(PICO_UPDATE_FAILED, "网络对时失败，请对时后重试");
+            return false;
+        }
+        app_time_service_note_success(utc);
+    }
+    return !atomic_load(&s_cancel);
+#else
     // 升级独占无线：在途的后台对时先取消，下面停服/起服才不会被它拖住。
     // The updater owns the radio: an in-flight background sync cancels first, so the stop/start
     // below is never held up by it.
@@ -135,7 +169,7 @@ static bool online(bool *owned) {
     if (!(status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready)) {
         char ssid[33]; bool saved = false;
         if (wifi_transfer_get_saved_wifi(ssid, &saved) != ESP_OK || !saved) {
-            state(PICO_UPDATE_FAILED, "请先在 WiFi 设置中连接网络"); return false;
+            state(PICO_UPDATE_FAILED, "请先在网络设置中启用可用的联网方式"); return false;
         }
         wifi_transfer_stop();
         wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
@@ -166,6 +200,7 @@ static bool online(bool *owned) {
     }
     if (!atomic_load(&s_cancel)) state(PICO_UPDATE_FAILED, "网络连接超时，请重试");
     return false;
+#endif
 }
 typedef struct {
     uint32_t start, end, size;
@@ -216,6 +251,10 @@ static esp_http_client_handle_t open_http(const char *url, int *status, int64_t 
 // 复用连接管理器等待短暂断网恢复，允许取消，不重启整个无线服务。
 // Wait for the connection manager to recover a short outage, with cancellation and no radio restart.
 static bool wait_network(void) {
+#ifdef ESP_PLATFORM
+    if (!s_network_lease_active || atomic_load(&s_cancel)) return false;
+    return network_service_wait_ready(&s_network_lease, 30000);
+#else
     int64_t deadline = esp_timer_get_time() + 30000000;
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < deadline) {
         wifi_transfer_service_poll();
@@ -226,12 +265,17 @@ static bool wait_network(void) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return false;
+#endif
 }
 // 读超时可重试；每次收到数据续期，避免慢速网络被总时长截断。
 // Retry temporary read timeouts and renew the idle deadline after each chunk.
 static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap, int64_t *idle) {
     while (!atomic_load(&s_cancel) && esp_timer_get_time() < *idle) {
+#ifdef ESP_PLATFORM
+        network_service_poll();
+#else
         wifi_transfer_service_poll();
+#endif
         int n = esp_http_client_read(client, (char *)buffer, cap);
         if (n > 0) { *idle = esp_timer_get_time() + 30000000; return n; }
         if (!n && esp_http_client_is_complete_data_received(client)) return 0;
@@ -409,7 +453,14 @@ static void worker(void *unused) {
         else if (s_download) (void)download(); else (void)check_feed();
     }
     if (restore_ps) (void)esp_wifi_set_ps(previous_ps);
+#ifdef ESP_PLATFORM
+    if (s_network_lease_active) {
+        network_service_release(&s_network_lease);
+        s_network_lease_active = false;
+    }
+#else
     if (owned) wifi_transfer_stop();
+#endif
     if (atomic_load(&s_cancel)) state(PICO_UPDATE_CANCELLED, "已取消，当前版本保持不变");
     xSemaphoreTake(s_mutex, portMAX_DELAY); s_status->busy = false; ++s_status->revision; xSemaphoreGive(s_mutex);
     xSemaphoreGive(s_done);

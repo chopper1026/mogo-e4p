@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
- * 开关。灯灭时层高只有圆钮区；点按开灯后圆钮下方才展开两条横向胶囊滑杆：直接
+ * 中文：全宽浅顶部层，下圆角与基础四个无文字圆钮；运行时确认的移动网络、旋转和
+ * 震动入口按能力追加到第二排；有前光的板把第四枚圆钮画成太阳开关。灯灭时层高
+ * 只有圆钮区；点按开灯后圆钮下方才展开两条横向胶囊滑杆：直接
  * 浮在遮罩上，无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长，
  * 无极滑动；再次熄灯即收起。灯灭时开层后停顿再继续下拉也可临时展开胶囊滑杆，
  * 只属本次开层：收层或再开层即回到只有圆钮区，熄灯点按同样收起；一次连续快滑
  * 只开层不展开。
  * English: A shallow full-width top layer with rounded bottom corners and four
- * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
+ * base unlabeled circles; runtime cellular, rotation and haptics entries append
+ * to the second row, while boards with a frontlight draw a sun switch in the fourth
  * circle. While the light is off the layer keeps only the circle band; switching
  * it on expands two horizontal capsule sliders below the circles: they float on
  * the shade with no card, text or knob, the icon sits inside the left end, a
@@ -96,8 +98,8 @@
 
 typedef enum {
     UI_QUICK_NONE, UI_QUICK_OPEN, UI_QUICK_CLOSE, UI_QUICK_EXPAND,
-    UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK,
-    UI_QUICK_WIFI_SETTINGS, UI_QUICK_BLUETOOTH_SETTINGS,
+    UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_CELLULAR, UI_QUICK_FULL, UI_QUICK_LOCK,
+    UI_QUICK_WIFI_SETTINGS, UI_QUICK_BLUETOOTH_SETTINGS, UI_QUICK_CELLULAR_SETTINGS,
     UI_QUICK_ROTATION,
     UI_QUICK_HAPTICS, UI_QUICK_HAPTICS_SETTINGS,
 } ui_quick_action_t;
@@ -115,6 +117,7 @@ typedef struct {
     bool open, tracking, swallow, moved;
     bool rotation_available, rotation_enabled; ///< 只由当前页面提供，不落盘 / Supplied by the current page, never persisted
     bool haptics_available, haptics_enabled; ///< 马达能力与已保存的开关状态 / Motor capability and saved switch state
+    bool cellular_available, cellular_enabled, cellular_ready; ///< Runtime capability and state; absent hardware hides the entry
     uint16_t x0, y0;
     int hit;
     int64_t started_ms;
@@ -152,13 +155,21 @@ typedef struct {
     ui_quick_control_t drag;
 } ui_quick_menu_t;
 
-/// 绘图与命中共享布局；第二排依次为可选阅读方向键、震动键。/ Shared painting/hit geometry; row two holds optional reader rotation, then haptics.
+/// 绘图与命中共享布局；第二排依次为移动网络、阅读方向、震动键。/ Shared painting/hit geometry; row two holds mobile network, reader rotation, then haptics.
 static inline int ui_quick_menu_button_count(const ui_quick_menu_t *menu) {
-    return 4 + (menu && menu->rotation_available ? 1 : 0) + (menu && menu->haptics_available ? 1 : 0);
+    return 4 + (menu && menu->cellular_available ? 1 : 0) +
+        (menu && menu->rotation_available ? 1 : 0) + (menu && menu->haptics_available ? 1 : 0);
+}
+static inline int ui_quick_menu_cellular_button(const ui_quick_menu_t *menu) {
+    return menu && menu->cellular_available ? 4 : -1;
+}
+static inline int ui_quick_menu_rotation_button(const ui_quick_menu_t *menu) {
+    return menu && menu->rotation_available ? 4 + (menu->cellular_available ? 1 : 0) : -1;
 }
 /// 震动键排在可选的阅读旋转键之后；无马达时不显示。/ Haptics follows optional reader rotation and is absent without a motor.
 static inline int ui_quick_menu_haptics_button(const ui_quick_menu_t *menu) {
-    return menu && menu->haptics_available ? 4 + (menu->rotation_available ? 1 : 0) : -1;
+    return menu && menu->haptics_available ? 4 + (menu->cellular_available ? 1 : 0) +
+        (menu->rotation_available ? 1 : 0) : -1;
 }
 static inline bool ui_quick_menu_landscape(void) {
     return epd_rotated_display_width() > epd_rotated_display_height();
@@ -171,14 +182,16 @@ static inline int ui_quick_menu_button_x(const ui_quick_menu_t *menu, int button
     return (column * 2 + 1) * width / 8;
 }
 static inline int ui_quick_menu_row_offset(const ui_quick_menu_t *menu) {
-    return menu && (menu->rotation_available || menu->haptics_available) ? UI_QUICK_ROTATION_ROW_STEP : 0;
+    return menu && (menu->cellular_available || menu->rotation_available || menu->haptics_available)
+        ? UI_QUICK_ROTATION_ROW_STEP : 0;
 }
 static inline int ui_quick_menu_button_y(const ui_quick_menu_t *menu, int button) {
     return UI_QUICK_CIRCLE_Y + (button >= 4 ? ui_quick_menu_row_offset(menu) : 0);
 }
 static inline int ui_quick_menu_height(const ui_quick_menu_t *menu) {
     if (ui_quick_menu_landscape())
-        return menu && (menu->rotation_available || menu->haptics_available || (menu->frontlight && (menu->fl_on || menu->fl_expanded)))
+        return menu && (menu->cellular_available || menu->rotation_available || menu->haptics_available ||
+                        (menu->frontlight && (menu->fl_on || menu->fl_expanded)))
             ? UI_QUICK_HEIGHT + UI_QUICK_ROTATION_ROW_STEP : UI_QUICK_HEIGHT;
     return (menu && menu->frontlight && (menu->fl_on || menu->fl_expanded)
         ? UI_QUICK_FRONTLIGHT_HEIGHT : UI_QUICK_HEIGHT) + ui_quick_menu_row_offset(menu);

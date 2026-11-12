@@ -12,6 +12,7 @@
 #include "ota_online.h"
 #include "ota_auto.h"
 #include "wifi_transfer.h"
+#include "cellular_service.h"
 #include "ble_page_turner.h"
 
 void app_lifecycle_checkpoint(app_ctx_t *ctx, const app_desc_t *current) {
@@ -30,7 +31,12 @@ bool app_lifecycle_pause_for_lock(void) {
     app_weather_cancel_join();
     pico_ota_auto_cancel();
     app_time_service_cancel();
-    return wifi_transfer_pause_for_sleep();
+    if (!wifi_transfer_pause_for_sleep()) return false;
+    if (!cellular_service_pause_for_sleep()) {
+        wifi_transfer_resume_after_sleep();
+        return false;
+    }
+    return true;
 }
 
 bool app_lifecycle_prepare_poweroff(void) {
@@ -38,11 +44,25 @@ bool app_lifecycle_prepare_poweroff(void) {
     pico_ota_auto_cancel();
     app_time_service_cancel();
     if (pico_online_busy() || !storage_jobs_quiesce(2000) || !wifi_transfer_pause_for_sleep()) return false;
+    if (!cellular_service_pause_for_sleep()) {
+        wifi_transfer_resume_after_sleep();
+        return false;
+    }
     (void)ble_pt_stop(2000);
     return true;
 }
 
 app_lifecycle_light_t app_lifecycle_prepare_light(void) {
     if (!storage_jobs_quiesce(2000)) return (app_lifecycle_light_t){0};
-    return (app_lifecycle_light_t){.jobs_ready = true, .ble_stopped = ble_pt_stop_for_sleep(2000) == ESP_OK};
+    if (!wifi_transfer_pause_for_sleep()) return (app_lifecycle_light_t){0};
+    if (!cellular_service_pause_for_sleep()) {
+        wifi_transfer_resume_after_sleep();
+        return (app_lifecycle_light_t){0};
+    }
+    const bool ble_stopped = ble_pt_stop_for_sleep(2000) == ESP_OK;
+    if (!ble_stopped) {
+        cellular_service_resume_after_sleep();
+        wifi_transfer_resume_after_sleep();
+    }
+    return (app_lifecycle_light_t){.jobs_ready = true, .ble_stopped = ble_stopped};
 }

@@ -82,6 +82,9 @@ bool wifi_transfer_pause_for_sleep(void);
 void wifi_transfer_resume_after_sleep(void);
 /// 跨任务复制一致状态快照。/ Copy a consistent snapshot across tasks.
 void wifi_transfer_get_status(wifi_transfer_status_t *out);
+/// 返回当前 STA/AP netif；指针仅在会话运行期间有效，不转移所有权。
+/// Return the current STA/AP netif; valid only while the session runs, ownership stays here.
+void *wifi_transfer_netif(void);
 /// 控制任务每500ms驱动有界连接重试与15秒超时。/ Owner task polls every 500 ms for bounded retries and a 15 s timeout.
 void wifi_transfer_service_poll(void);
 /// 只读已保存SSID；未配置仍返回ESP_OK。/ Read only the saved SSID; unconfigured still returns ESP_OK.

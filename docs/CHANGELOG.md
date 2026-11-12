@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-11
 
+- 统一固件兼容带 NT26 的 4G 版硬件：运行时探测移动网络能力，Wi-Fi 版隐藏移动网络入口；4G 版保留 Wi-Fi，快捷栏提供独立的移动网络开关和长按设置入口，日期对时、天气与联网 OTA 可按用户选择使用 Wi-Fi、4G 或自动路由。OTA 继续使用同一 `METALIO-EINK4P` 清单身份。/ Keep one firmware image for boards with or without NT26: detect cellular capability at runtime and hide the mobile entry on Wi-Fi hardware; retain Wi-Fi on 4G hardware, add an independent mobile toggle and long-press settings entry, and route time, weather and online OTA through Wi-Fi, cellular or Auto according to the user setting. OTA keeps the shared `METALIO-EINK4P` identity.
+
 - 蓝牙翻页器设置改为 WiFi 同款状态卡、设备详情与行内按键学习；附近设备每页六台，搜索前确认断开现有连接，遗忘设备需确认，连接变化时取消学习。/ Restyle Bluetooth settings with WiFi-style status cards, peer details and inline key learning; use six-row discovery pages, confirm disconnect/forget actions and cancel learning when the peer changes.
 
 - 锁屏壁纸设置新增「裁剪填满 / 完整显示」选择；完整显示保持原图比例并在四周留白，显示方式随重启和设置备份保存，切换后自动重建对应缓存。/ Add a wallpaper fit choice between crop-to-fill and full-image display; the latter preserves the source aspect ratio with white margins, persists across reboot and settings backup, and rebuilds the matching cache after a switch.

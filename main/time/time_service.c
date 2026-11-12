@@ -1,17 +1,15 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：S3 RTC 离线走时；每六小时自动对时一次，已联网就复用现有连接，否则短连已保存 WiFi。
+ * 中文：S3 RTC 离线走时；每六小时自动对时一次，已联网就复用现有承载，否则按网络设置短时联网。
  * 准入在 rc93 有界后台校准上补齐产品守卫：设置开关、电量门与失败冷却/开机上限
  * （判定复用 time_sync_policy.h，无硬件依赖，host 测试覆盖）。
- * English: S3 RTC keeps offline time; auto-calibrate every six hours, reusing an existing link
- * when online and briefly dialing the saved WiFi when offline.
+ * English: S3 RTC keeps offline time; auto-calibrate every six hours, reusing an existing bearer
+ * when online and briefly dialing through the selected network route when offline.
  * rc93's bounded background calibration gains the product guards: the settings switch, a battery
  * floor and failure cooldown/attempt caps (decisions reuse time_sync_policy.h, hardware-free and
  * covered by the host test).
  *
- * 冻结：会话所有权在 wifi_transfer 内部；主循环独占 PMU 与 NVS 交接；手动对时经
- * 组件内抢占，本文件不再管理无线会话。
- * Frozen: session ownership lives inside wifi_transfer; the main loop alone hands time to
- * PMU/NVS; manual syncs preempt inside the component, so this file never manages radio sessions.
+ * 冻结：外网承载由 network_service 统一选择，主循环独占 PMU 与 NVS 交接。
+ * Frozen: network_service selects the external bearer; the main loop alone hands time to PMU/NVS.
  */
 #include "time_service.h"
 #include <stdatomic.h>
@@ -23,7 +21,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "device_power.h"
-#include "wifi_transfer.h"
+#include "network_service.h"
 #include "settings.h"
 #include "sleep.h"
 #include "time_sync_policy.h"
@@ -47,7 +45,7 @@ static unsigned s_boot_attempts;
 static void clock_worker(void *arg) {
     (void)arg;
     uint32_t utc = 0;
-    esp_err_t err = wifi_transfer_sync_time_auto(&utc);
+    esp_err_t err = network_service_sync_time(&utc, true);
     ESP_LOGI("clock", "background calibration: %s", esp_err_to_name(err));
     atomic_store(&s_running, false);
     vTaskDelete(NULL);
@@ -57,7 +55,7 @@ void app_time_service_cancel(void) {
     if (atomic_load(&s_running)) {
         // 让组件内 100 ms 分片的 SNTP 等待感知取消；worker 收尾后自行清 running。
         // The component's 100 ms sliced SNTP wait notices the cancel; the worker clears running.
-        wifi_transfer_cancel_time_sync();
+        network_service_cancel_time_sync();
     }
 }
 
@@ -81,15 +79,15 @@ void app_time_service_note_success(uint32_t utc_seconds) {
 
 app_time_sync_result_t app_time_service_sync_manual(void) {
     uint32_t utc = 0;
-    wifi_transfer_status_t network = {0};
-    wifi_transfer_get_status(&network);
-    // 手动对时优先：组件内的准入会在同一次调用里自动抢占后台对时。
-    // A manual sync goes first: the component's admission preempts an automatic run for us.
-    esp_err_t err = wifi_transfer_sync_time(&utc);
+    network_status_t network = {0};
+    network_service_get_status(&network);
+    // 手动对时优先：网络服务先取消自动任务，再按用户路由取得承载。
+    // Manual sync goes first: the network service cancels automatic work before acquiring the selected bearer.
+    esp_err_t err = network_service_sync_time(&utc, false);
     bool network_time_received = err == ESP_OK;
     if (network_time_received) {
-        // 临时 WiFi 收尾可能耗时；写入 PMU 时取当前 S3 时间，避免回写旧秒数。
-        // Temporary WiFi teardown takes time; seed the PMU from the current S3 clock.
+        // 临时网络承载收尾可能耗时；写入 PMU 时取当前 S3 时间，避免回写旧秒数。
+        // Temporary bearer teardown takes time; seed the PMU from the current S3 clock.
         utc = (uint32_t)time(NULL);
         uint8_t payload[4] = {(uint8_t)utc, (uint8_t)(utc >> 8), (uint8_t)(utc >> 16), (uint8_t)(utc >> 24)};
         err = device_power_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
@@ -104,7 +102,8 @@ app_time_sync_result_t app_time_service_sync_manual(void) {
         if (err == ESP_OK) app_time_service_note_success(utc);
     }
     ESP_LOGI("device_settings", "time sync network=%d ready=%d utc=%lu result=%s",
-             network.mode, network.network_ready, (unsigned long)utc, esp_err_to_name(err));
+             network.active_bearer, network.wifi_ready || network.cellular_ready,
+             (unsigned long)utc, esp_err_to_name(err));
     return (app_time_sync_result_t){.error = err, .network_time_received = network_time_received};
 }
 
@@ -120,7 +119,7 @@ void app_time_service_poll(bool idle) {
         s_loaded = true;
     }
     uint32_t received;
-    if (wifi_transfer_take_time_sync(&received)) {
+    if (network_service_take_time_sync(&received)) {
         // 只有真实网络成功才持久化；普通重启/手动设时间不能伪装成网络校准。
         // Persist only a real network success; reboot/manual edits do not count as calibration.
         s_last_sync = received;
@@ -140,14 +139,9 @@ void app_time_service_poll(bool idle) {
     // 用户开关优先；关着就不做任何后台联网，也不推进尝试预算。
     // The user switch wins: while off there is no background networking and no attempt budgeting.
     if (!app_settings_auto_time_sync()) return;
-    wifi_transfer_status_t status;
-    wifi_transfer_get_status(&status);
-    bool online = status.state == WIFI_TRANSFER_READY &&
-                  status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready;
-    if (!online && status.state != WIFI_TRANSFER_STOPPED) return;
     time_t now = time(NULL);
-    // 节奏固定 6 小时：已联网就复用现有连接，不额外开射频；离线才短连已保存 WiFi。
-    // A flat six-hour cadence: reuse an existing link when online, otherwise dial the saved WiFi.
+    // 节奏固定 6 小时：network_service 会复用当前承载，或按路由短时建立它。
+    // Keep the six-hour cadence; network_service reuses the active bearer or starts the selected one.
     uint64_t interval = CLOCK_INTERVAL;
     // 记录比时钟超前（时钟被调回）按刚校准处理，避免追赶式联网；时钟无效只允许开机首试。
     // 重试节奏由 next_attempt_us（5 分钟，单调时钟）与开机上限承担；持久化的 tsync_try
@@ -169,10 +163,6 @@ void app_time_service_poll(bool idle) {
     int percent = pmu_battery_percent(pmu);
     if (percent >= 0 && percent < CLOCK_MIN_BATTERY_PERCENT && !pmu_battery_charging(pmu)) return;
     s_next_attempt_us = monotonic + CLOCK_RETRY_US;
-    if (!online) {
-        char ssid[33]; bool configured = false;
-        if (wifi_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) return;
-    }
     atomic_store(&s_running, true);
     // 仅对时期间保留任务栈；不创建常驻无线任务或页面缓存。
     // Keep a task stack only during calibration; no permanent radio task or page cache.

@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：全宽浅顶部层，下圆角与四个无文字圆钮；有前光的板把第四枚圆钮画成太阳
+ * 中文：全宽浅顶部层，下圆角与基础四个无文字圆钮；运行时确认的移动网络、旋转和
+ * 震动入口按能力追加到第二排；有前光的板把第四枚圆钮画成太阳
  * 开关。灯灭时层高只有圆钮区；开灯后圆钮下方展开两条横向胶囊滑杆，直接浮在遮
  * 罩上：无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长。灯灭时
  * 开层后停顿再继续下拉可临时展开胶囊，只属本次开层；一次连续快滑只开层。
  * English: A shallow full-width top layer with rounded bottom corners and four
- * unlabeled circles; boards with a frontlight draw a sun switch in the fourth
- * circle. While the light is off the layer keeps only the circle band; switching
+ * base unlabeled circles; runtime cellular, rotation and haptics entries append
+ * to the second row, while boards with a frontlight draw a sun switch in the
+ * fourth circle. While the light is off the layer keeps only the circle band; switching
  * it on expands two horizontal capsule sliders below the circles, floating on
  * the shade: no card, text or knob, the icon inside the left end and a white
  * fill growing from the left edge. With the light off, pausing after the open
@@ -97,10 +99,11 @@ static void rotation_icon(uint8_t *fb, int cx, int cy, bool unlocked) {
 /* ---- 圆键 / Circle keys ---- */
 
 static void draw_badge(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active) {
-    if(button>1||!active)return;
+    if((button > 1 && button != ui_quick_menu_cellular_button(menu)) || !active)return;
     int cx=center_x(menu,button);
-    epd_fill_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,UI_GRAY_WHITE,fb);
-    epd_draw_circle(cx+30,UI_QUICK_CIRCLE_Y-30,5,UI_GRAY_BLACK,fb);
+    const int cy = ui_quick_menu_button_y(menu, button);
+    epd_fill_circle(cx+30,cy-30,5,UI_GRAY_WHITE,fb);
+    epd_draw_circle(cx+30,cy-30,5,UI_GRAY_BLACK,fb);
 }
 
 // 圆键只用固定灰活动态和白色普通态，按压增加黑色内圈。
@@ -113,9 +116,10 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
     epd_draw_circle(cx,cy,UI_QUICK_RADIUS,UI_GRAY_BLACK,fb);
     epd_draw_circle(cx,cy,UI_QUICK_RADIUS-1,UI_GRAY_BLACK,fb);
     if(button<3) ui_draw_icon(fb,cx,cy,44,s_icons[button],UI_GRAY_BLACK);
+    else if (button == ui_quick_menu_cellular_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_RADIO_TOWER,UI_GRAY_BLACK);
     else if(frontlight_key) ui_draw_icon(fb,cx,cy,44,UI_ICON_SUN,UI_GRAY_BLACK);
     else if (button == ui_quick_menu_haptics_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_VIBRATE,UI_GRAY_BLACK);
-    else if (button == 4) rotation_icon(fb,cx,cy,menu->rotation_enabled);
+    else if (button == ui_quick_menu_rotation_button(menu)) rotation_icon(fb,cx,cy,menu->rotation_enabled);
     else lock_icon(fb,cx,cy);
     if(pressed){
         epd_draw_circle(cx,cy,UI_QUICK_RADIUS-7,UI_GRAY_BLACK,fb);
@@ -196,7 +200,7 @@ void ui_quick_menu_end(void) {}
 bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
     if(!fb||!dirty||button<0||button>=ui_quick_menu_button_count(menu)||epd_rotated_display_width()<UI_LOCK_WIDTH||epd_rotated_display_height()<ui_quick_menu_height(menu))return false;
     if(menu!=NULL&&menu->frontlight&&button==3)active=menu->fl_on;
-    if(menu!=NULL&&button==4)active=menu->rotation_enabled;
+    if(menu!=NULL&&button==ui_quick_menu_rotation_button(menu))active=menu->rotation_enabled;
     draw_key(fb,button,menu,active,pressed);
     draw_badge(fb,menu,button,active);
     *dirty=key_rect(menu,button);
@@ -250,8 +254,9 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
     ui_quick_menu_draw_status(fb);
     for (int i = 0; i < ui_quick_menu_button_count(menu); ++i) {
         bool active = (i == 0 && wifi) || (i == 1 && bluetooth) ||
+            (i == ui_quick_menu_cellular_button(menu) && menu->cellular_enabled) ||
             (i == 3 && menu != NULL && menu->frontlight && menu->fl_on) ||
-            (i == 4 && menu->rotation_available && menu->rotation_enabled) ||
+            (i == ui_quick_menu_rotation_button(menu) && menu->rotation_enabled) ||
             (i == ui_quick_menu_haptics_button(menu) && menu->haptics_enabled);
         draw_key(fb, i, menu, active, false);
         draw_badge(fb, menu, i, active);

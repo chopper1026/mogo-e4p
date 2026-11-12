@@ -84,6 +84,7 @@
 #include "ble_page_turner.h"
 #include "device_power.h"
 #include "wifi_transfer.h"
+#include "cellular_service.h"
 #include "sc7a20h_lab.h"
 #include "settings.h"
 #include "ui_kit.h"
@@ -601,6 +602,8 @@ static app_wake_source_t light_sleep_wait_until(sc7a20h_handle_t acc, int64_t de
         sc7a20h_int1_begin(acc);
     }
     periph_resume();
+    cellular_service_resume_after_sleep();
+    wifi_transfer_resume_after_sleep();
     app_settings_set_last_wake((uint8_t)(wake == APP_WAKE_TIMEOUT ? APP_WAKE_NONE : wake));
     (void)device_power_key_sampler_enable(key_sampling);
     sleep_trace_finish(&trace, exit, wake);
@@ -672,6 +675,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     // 失败不复位重试；恢复外设，交还锁屏/密码层，阅读恢复检查点仍由原入口处理。
     // Do not reset/retry on failure; restore peripherals to the lock/PIN caller, which retains checkpoint ownership.
     periph_resume();
+    cellular_service_resume_after_sleep();
     wifi_transfer_resume_after_sleep();
     (void)device_power_key_sampler_enable(key_sampling);
     return err;
@@ -814,6 +818,7 @@ void enter_lock_and_sleep(
     }
     pico_boot_clear_resume();
     if (system_lock) app_font_end_lock(&lock_font);
+    cellular_service_resume_after_sleep();
     wifi_transfer_resume_after_sleep();
 
     // 锁屏出图成功时面板和back都停在锁屏画面上：让当前页做一次完整48相整屏全像素GC16，擦回原页面。

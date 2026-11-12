@@ -17,6 +17,8 @@
 #include "haptics.h"
 #include "ota_online.h"
 #include "wifi_transfer.h"
+#include "network_service.h"
+#include "cellular_service.h"
 #include "settings.h"
 #include "ui_click_feedback.h"
 #include "ui_kit.h"
@@ -64,12 +66,15 @@ void app_quick_layer_reset(void) {
     s_fl_shown_on=s_quick.fl_on;
 }
 static unsigned quick_status(void) {
-    wifi_transfer_status_t status;
-    wifi_transfer_get_status(&status);
-    bool wifi = status.mode == WIFI_TRANSFER_MODE_STA && status.state != WIFI_TRANSFER_STOPPED;
+    network_status_t status;
+    network_service_get_status(&status);
+    s_quick.cellular_available = status.cellular_capable;
+    s_quick.cellular_enabled = status.cellular_enabled;
+    s_quick.cellular_ready = status.cellular_ready;
     s_quick.haptics_enabled = s_quick.haptics_available && app_settings_touch_haptics();
-    return (wifi ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) |
-        (status.network_ready ? 4u : 0u) | (s_quick.haptics_enabled ? 8u : 0u);
+    return (status.wifi_enabled ? 1u : 0u) | (app_settings_ble_turner() ? 2u : 0u) |
+        (status.wifi_ready ? 4u : 0u) | (s_quick.haptics_enabled ? 8u : 0u) |
+        (status.cellular_enabled ? 16u : 0u) | (status.cellular_ready ? 32u : 0u);
 }
 
 static void quick_rotation_sync(app_ctx_t *ctx, const app_desc_t *current) {
@@ -92,17 +97,21 @@ void app_quick_layer_present(app_ctx_t *ctx, const app_desc_t *current, bool ful
         // 已合成的页面直接全刷，只还原圆键按压，不重排底页或重算玻璃。
         // Refresh the composed framebuffer directly, restoring only the pressed tile without underlay layout or glass regeneration.
         for(int i=0;i<ui_quick_menu_button_count(&s_quick);++i){
-            bool active=i<2?(status&(1u<<i))!=0
+            bool active=i==0?(status&1u)!=0
+                :i==1?(status&2u)!=0
+                :i==ui_quick_menu_cellular_button(&s_quick)?(status&16u)!=0
                 :i==ui_quick_menu_haptics_button(&s_quick)?(status&8u)!=0
                 :i==3&&s_quick.frontlight&&s_quick.fl_on;
-            bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+            bool was_active=i==0?(s_quick_status&1u)!=0
+                :i==1?(s_quick_status&2u)!=0
+                :i==ui_quick_menu_cellular_button(&s_quick)?(s_quick_status&16u)!=0
                 :i==ui_quick_menu_haptics_button(&s_quick)?(s_quick_status&8u)!=0
                 :i==3&&s_quick.frontlight&&s_fl_shown_on;
             if(i==s_quick_pressed||active!=was_active){
                 EpdRect dirty;(void)ui_quick_menu_draw_button(ctx->fb,&s_quick,i,active,false,&dirty);
             }
         }
-        if((status^s_quick_status)&6u)ui_quick_menu_draw_status(ctx->fb);
+        if((status^s_quick_status)&(2u|4u|32u))ui_quick_menu_draw_status(ctx->fb);
     }else{
         if (current->render) current->render(ctx, ctx->fb);
         if(!s_quick.open)ui_quick_menu_end();
@@ -145,10 +154,14 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
     int pressed=ui_quick_menu_pressed(&s_quick);
     enum EpdDrawError error=EPD_DRAW_SUCCESS;
     for(int i=0;i<ui_quick_menu_button_count(&s_quick);++i){
-        bool active=i<2?(status&(1u<<i))!=0
+        bool active=i==0?(status&1u)!=0
+            :i==1?(status&2u)!=0
+            :i==ui_quick_menu_cellular_button(&s_quick)?(status&16u)!=0
             :i==ui_quick_menu_haptics_button(&s_quick)?(status&8u)!=0
             :i==3&&s_quick.frontlight&&s_quick.fl_on;
-        bool was_active=i<2?(s_quick_status&(1u<<i))!=0
+        bool was_active=i==0?(s_quick_status&1u)!=0
+            :i==1?(s_quick_status&2u)!=0
+            :i==ui_quick_menu_cellular_button(&s_quick)?(s_quick_status&16u)!=0
             :i==ui_quick_menu_haptics_button(&s_quick)?(s_quick_status&8u)!=0
             :i==3&&s_quick.frontlight&&s_fl_shown_on;
         if(active==was_active&&(pressed==i)==(s_quick_pressed==i))continue;
@@ -159,8 +172,7 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
             if(error!=EPD_DRAW_SUCCESS)break;
         }
     }
-    bool network_changed=(status&5u)==5u,was_network=(s_quick_status&5u)==5u;
-    if(error==EPD_DRAW_SUCCESS&&(((status^s_quick_status)&2u)||network_changed!=was_network)){
+    if(error==EPD_DRAW_SUCCESS&&((status^s_quick_status)&(2u|4u|32u))){
         ui_quick_menu_draw_status(ctx->fb);
         error=display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, (EpdRect){0,0,epd_rotated_display_width(),76}, DISPLAY_REFRESH_DEFAULT);
         guard_draw_result(ctx->hl,error);
@@ -173,22 +185,22 @@ void app_quick_layer_present_buttons(app_ctx_t *ctx,const app_desc_t *current) {
 
 static void quick_toggle_wifi(void) {
     app_weather_cancel_join();
-    wifi_transfer_status_t status;
-    wifi_transfer_get_status(&status);
-    if (status.state != WIFI_TRANSFER_STOPPED) {
-        // 上传期间拒绝断开，复用存储任务已有的原子准入保护。
-        // Refuse disconnecting during upload using the storage owner's atomic admission guard.
-        (void)wifi_transfer_try_stop_if_idle();
+    network_status_t status;
+    network_service_get_status(&status);
+    if (!status.wifi_enabled) {
+        ble_pt_sync(false);
+        (void)network_service_set_enabled(NETWORK_BEARER_WIFI, true);
     } else {
-        char ssid[33] = {0}; bool configured = false;
-        if (wifi_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && configured) {
-            // 先释放蓝牙占用，再用既有异步连接/重试流程；不新开上传服务器或改写凭据。
-            // Release Bluetooth resources first, then reuse connection/retry handling without starting uploads or rewriting credentials.
-            ble_pt_sync(false);
-            const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
-            (void)wifi_transfer_start(&cfg);
-        }
+        (void)network_service_set_enabled(NETWORK_BEARER_WIFI, false);
     }
+}
+
+static void quick_toggle_cellular(void) {
+    app_weather_cancel_join();
+    network_status_t status;
+    network_service_get_status(&status);
+    if (status.cellular_capable)
+        (void)network_service_set_enabled(NETWORK_BEARER_CELLULAR, !status.cellular_enabled);
 }
 
 // 前光开关改变层高时整层重绘；黑白滑杆拖动与松手共用完整 DU 差分，不追加定稿。
@@ -303,6 +315,7 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
     // union with GL16, which carries the 264→480 growth.
     else if (event.action == UI_QUICK_EXPAND) app_quick_layer_present(ctx, current, false);
     else if (event.action == UI_QUICK_WIFI) quick_toggle_wifi();
+    else if (event.action == UI_QUICK_CELLULAR) quick_toggle_cellular();
     else if (event.action == UI_QUICK_BLUETOOTH) {
         bool enable = !app_settings_ble_turner();
         app_settings_set_ble_turner(enable);
@@ -322,6 +335,15 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
         else {
             app_navigation_capture_reader_return(current);
             ctx->request_app = &app_transfer;
+        }
+    } else if (event.action == UI_QUICK_CELLULAR_SETTINGS) {
+        if (current == &app_device_settings) {
+            app_device_settings_request_network(false);
+            quick_reenter_page(ctx, current);
+        } else {
+            app_navigation_capture_reader_return(current);
+            app_device_settings_request_network(true);
+            ctx->request_app = &app_device_settings;
         }
     } else if (event.action == UI_QUICK_BLUETOOTH_SETTINGS) {
         // 长按蓝牙圆键：直接进入设置页的蓝牙翻页器子页；已在设置页时同上。从其他
@@ -352,7 +374,7 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
         current->on_rotation_toggle(ctx);
         quick_rotation_sync(ctx, current);
         EpdRect dirty;
-        if (ui_quick_menu_draw_button(ctx->fb, &s_quick, 4, s_quick.rotation_enabled, false, &dirty)) {
+        if (ui_quick_menu_draw_button(ctx->fb, &s_quick, ui_quick_menu_rotation_button(&s_quick), s_quick.rotation_enabled, false, &dirty)) {
             enum EpdDrawError error = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
             guard_draw_result(ctx->hl, error);
             if (error != EPD_DRAW_SUCCESS) { app_quick_layer_reset(); app_present(ctx,current,APP_REDRAW_FULL); }
@@ -366,6 +388,7 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
 void app_quick_layer_init(void) {
     app_quick_layer_reset();
     s_quick.haptics_available = haptics_available();
+    s_quick.cellular_available = cellular_service_capable();
     // 本板有没有前光决定层高和卡片；预览值来自已加载的设置，开机恢复由 app_main 写入硬件。
     // Board capability decides layer height and card presence; previews come from settings and app_main restored the hardware at boot.
     ui_quick_menu_set_frontlight(&s_quick, frontlight_ready(), app_settings_frontlight_on(),
@@ -392,5 +415,14 @@ bool app_quick_layer_cancel_input(void) {
 }
 
 void app_quick_layer_sync_status(app_ctx_t *ctx, const app_desc_t *current) {
-    if (s_quick.open && quick_status() != s_quick_status) app_quick_layer_present_buttons(ctx,current);
+    const bool was_available = s_quick.cellular_available;
+    const unsigned before = s_quick_status;
+    const unsigned after = quick_status();
+    if (was_available != s_quick.cellular_available) {
+        // Capability discovery changes the button count and geometry, so
+        // recompose the layer instead of trying to patch a stale hit layout.
+        if (s_quick.open) app_quick_layer_present(ctx, current, false);
+        return;
+    }
+    if (s_quick.open && after != before) app_quick_layer_present_buttons(ctx,current);
 }

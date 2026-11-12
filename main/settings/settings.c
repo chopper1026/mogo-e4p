@@ -70,6 +70,9 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_AUTO_LOCK "idle_lock"
 #define NVS_KEY_AUTO_TIME "auto_time"
 #define NVS_KEY_AUTO_OTA "auto_ota"
+#define NVS_KEY_CELLULAR "cell_en"
+#define NVS_KEY_NETWORK_ROUTE "net_route"
+#define NVS_KEY_NETWORK_PRIORITY "net_prio"
 #define NVS_KEY_TSYNC_AT "tsync_at"
 #define NVS_KEY_TSYNC_TRY "tsync_try"
 #define NVS_KEY_DEVICE_NAME "dev_name"
@@ -312,6 +315,9 @@ static uint8_t s_auto_lock_minutes = 5;
 // Auto sync defaults on and shares one runtime copy with the settings page and time_sync.
 static bool s_auto_time_sync = true;
 static bool s_auto_ota = true;
+static bool s_cellular_enabled;
+static network_route_t s_network_route = NETWORK_ROUTE_AUTO;
+static network_auto_priority_t s_network_priority = NETWORK_AUTO_WIFI_FIRST;
 static uint32_t s_time_sync_last;
 static uint32_t s_time_sync_try;
 static uint8_t s_shelf_style = 2;
@@ -394,6 +400,14 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_AUTO_TIME, &raw) == ESP_OK) s_auto_time_sync = raw != 0;
     else s_auto_time_sync = true;
     s_auto_ota = nvs_get_u8(h, NVS_KEY_AUTO_OTA, &raw) != ESP_OK || raw != 0;
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_CELLULAR, &raw) == ESP_OK) s_cellular_enabled = raw != 0;
+    raw = NETWORK_ROUTE_AUTO;
+    if (nvs_get_u8(h, NVS_KEY_NETWORK_ROUTE, &raw) == ESP_OK && network_route_valid((network_route_t)raw))
+        s_network_route = (network_route_t)raw;
+    raw = NETWORK_AUTO_WIFI_FIRST;
+    if (nvs_get_u8(h, NVS_KEY_NETWORK_PRIORITY, &raw) == ESP_OK && network_auto_priority_valid((network_auto_priority_t)raw))
+        s_network_priority = (network_auto_priority_t)raw;
     if (nvs_get_u32(h, NVS_KEY_TSYNC_AT, &s_time_sync_last) != ESP_OK) s_time_sync_last = 0;
     if (nvs_get_u32(h, NVS_KEY_TSYNC_TRY, &s_time_sync_try) != ESP_OK) s_time_sync_try = 0;
     size_t value_len = sizeof(s_device_name);
@@ -760,6 +774,24 @@ void app_settings_set_auto_ota(bool on) {
     if (s_auto_ota == on) return;
     s_auto_ota = on;
     nvs_put_u8(NVS_KEY_AUTO_OTA, on ? 1 : 0);
+}
+
+bool app_settings_cellular_enabled(void) { return s_cellular_enabled; }
+void app_settings_set_cellular_enabled(bool enabled) {
+    s_cellular_enabled = enabled;
+    nvs_put_u8(NVS_KEY_CELLULAR, enabled ? 1 : 0);
+}
+network_route_t app_settings_network_route(void) { return s_network_route; }
+void app_settings_set_network_route(network_route_t route) {
+    if (!network_route_valid(route) || route == s_network_route) return;
+    s_network_route = route;
+    nvs_put_u8(NVS_KEY_NETWORK_ROUTE, (uint8_t)route);
+}
+network_auto_priority_t app_settings_network_auto_priority(void) { return s_network_priority; }
+void app_settings_set_network_auto_priority(network_auto_priority_t priority) {
+    if (!network_auto_priority_valid(priority) || priority == s_network_priority) return;
+    s_network_priority = priority;
+    nvs_put_u8(NVS_KEY_NETWORK_PRIORITY, (uint8_t)priority);
 }
 void app_settings_set_auto_time_sync(bool on) {
     if (s_auto_time_sync == on) return;

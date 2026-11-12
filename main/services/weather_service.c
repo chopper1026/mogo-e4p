@@ -19,6 +19,7 @@
 #include "ble_page_turner.h"
 #include "time_service.h"
 #include "wifi_transfer.h"
+#include "network_service.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -269,29 +270,15 @@ static bool search_show_page(unsigned page) {
     return true;
 }
 static void weather_worker(void *arg) {
-    (void)arg; bool owned = false;
+    (void)arg;
+    network_lease_t lease = {0};
     char *body = heap_caps_malloc(WEATHER_BODY_LIMIT + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     result_notice(APP_WEATHER_FAILED, "天气更新失败，可稍后重试");
     if (!body || cancelled()) goto done;
-    wifi_transfer_status_t status; wifi_transfer_get_status(&status);
-    bool borrowed = status.state == WIFI_TRANSFER_READY && status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready;
-    if (!borrowed && status.state != WIFI_TRANSFER_STOPPED) {
-        result_notice(APP_WEATHER_UNAVAILABLE, "网络正在使用，请稍后重试"); goto done;
-    }
-    if (!borrowed) {
-        char ssid[33]; bool saved = false;
-        if (wifi_transfer_get_saved_wifi(ssid, &saved) != ESP_OK || !saved) {
-            result_notice(APP_WEATHER_UNAVAILABLE, "请先在设置中保存 WiFi"); goto done;
-        }
-        const wifi_transfer_cfg_t config = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
-        if (wifi_transfer_start(&config) != ESP_OK) goto done;
-        owned = true;
-    }
-    while (!cancelled()) {
-        wifi_transfer_get_status(&status);
-        if (status.state == WIFI_TRANSFER_READY && status.network_ready) break;
-        if (status.state == WIFI_TRANSFER_ERROR || status.state == WIFI_TRANSFER_STOPPED) goto done;
-        vTaskDelay(pdMS_TO_TICKS(100));
+    if (network_service_acquire(NETWORK_USE_WEATHER, &lease) != ESP_OK ||
+        !network_service_wait_ready(&lease, 30000)) {
+        result_notice(APP_WEATHER_UNAVAILABLE, "当前联网方式不可用，请检查网络设置");
+        goto done;
     }
     if (cancelled() || !http_get("/components", body, NULL)) goto done;
     bool enabled, available;
@@ -343,7 +330,7 @@ static void weather_worker(void *arg) {
     s_result.clock = clock;
     s_result.has_forecast = true; result_notice(APP_WEATHER_READY, "");
 done:
-    if (owned) wifi_transfer_stop();
+    network_service_release(&lease);
     heap_caps_free(body);
     if (cancelled() && s_result.state == APP_WEATHER_READY) {
         s_result.has_forecast = false;
