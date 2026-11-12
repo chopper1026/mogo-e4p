@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-# 中文：编译真实PNG行解码与透明书封，验证任意当前底图、alpha、黑色主体和原画布比例。
-# English: Compile the real PNG row decoder and cover compositor; verify arbitrary current backgrounds, alpha, black subjects and canvas fit.
+# 中文：编译真实PNG行解码与透明书封，验证PNG alpha、JPG白底键控、任意当前底图和原画布比例。
+# English: Compile the real PNG row decoder and cover compositor; verify PNG alpha, JPG white-key transparency, arbitrary current backgrounds and canvas fit.
 from pathlib import Path
 import os,re,struct,subprocess,tempfile,zlib
 from home_cover_cache_host_test import function
+from run_reader_baseline import toolchain
 r=Path(__file__).resolve().parents[1]
 c=r/'main/image/image_decode.c'
 u=r'''
@@ -61,8 +62,16 @@ u+='typedef bool (*image_cancel_fn)(void *);\ntypedef struct{const uint8_t *data
 for n in ('png_read_mem','png_gray_input_cancel','png_gray_input','book_png_file_layer_cancel','book_png_file_layer'):u+=function(n,c)+'\n'
 u+=r'''
 static bool book_image_file_dimensions(const char *path,bool png,unsigned *w,unsigned *h){
- (void)png;uint8_t b[24];FILE *f=fopen(path,"rb");if(!f)return false;bool ok=fread(b,1,24,f)==24&&!memcmp(b,"\211PNG\r\n\032\n",8);fclose(f);
+ FILE *jpg=!png?fopen(path,"rb"):NULL;
+ if(jpg){fclose(jpg);*w=32;*h=32;return true;}
+ uint8_t b[24];FILE *f=fopen(path,"rb");if(!f)return false;bool ok=fread(b,1,24,f)==24&&!memcmp(b,"\211PNG\r\n\032\n",8);fclose(f);
  *w=(uint32_t)b[16]<<24|(uint32_t)b[17]<<16|(uint32_t)b[18]<<8|b[19];*h=(uint32_t)b[20]<<24|(uint32_t)b[21]<<16|(uint32_t)b[22]<<8|b[23];return ok;
+}
+static bool book_image_file_grayscale_cancel(const char *path,bool png,unsigned w,unsigned h,uint8_t *out,
+                                              image_cancel_fn cancelled,void *context){
+ (void)path;(void)context;if(png||!out||(cancelled&&cancelled(context)))return false;
+ for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){bool body=x>=w/4&&x<3*w/4&&y>=h/4&&y<3*h/4;out[y*w+x]=body?0:255;}
+ return true;
 }
 '''
 source=(r/'main/book/book_lock_bookmark.c').read_text()
@@ -104,6 +113,7 @@ int main(int argc,char **argv){
  assert(thumbnail[15*160+15]>=238&&thumbnail[90*160+120]==0);
  for(unsigned i=160*284;i<sizeof(thumbnail);++i)assert(thumbnail[i]==0xaa);
  assert(!book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,thumb_cancel,NULL));
+ assert(book_lock_bookmark_thumbnail(argv[4],160,284,thumbnail,NULL,NULL));
  budget=0;assert(!book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,NULL,NULL));budget=8u*1024u*1024u;
 
  uint8_t *fb=malloc(BYTES),*original=malloc(BYTES);assert(fb&&original);memset(original,0xaa,BYTES);
@@ -114,10 +124,10 @@ int main(int argc,char **argv){
  assert(pixel(fb,300,100)==170&&pixel(fb,300,1150)==170);
  assert(pixel(fb,80,350)==170);assert(pixel(fb,520,350)==0);
  assert(pixel(fb,80,800)>=187&&pixel(fb,80,800)<=221);assert(pixel(fb,520,800)==255);
- if(argc>=6){
-  FILE *bg=fopen(argv[4],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
+ if(argc>=7){
+  FILE *bg=fopen(argv[5],"rb");assert(bg&&fread(original,1,BYTES,bg)==BYTES);fclose(bg);
   memcpy(fb,original,BYTES);
-  assert(book_lock_bookmark_draw(fb,argv[5]));
+  assert(book_lock_bookmark_draw(fb,argv[6]));
   FILE *out=fopen("preview.pgm","wb");assert(out);fprintf(out,"P5\n684 1216\n255\n");
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x)fputc(pixel(fb,x,y),out);fclose(out);
  }
@@ -131,6 +141,10 @@ int main(int argc,char **argv){
  // Opaque white-background PNG: reveal the current page at the edges, retaining the black border and enclosed white artwork.
  memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[3]));
  assert(pixel(fb,10,300)==170&&pixel(fb,100,400)==0&&pixel(fb,342,600)==255);
+ // JPG无alpha，连通近白画布透明；中心主体覆盖底图。
+ // JPEG has no alpha: connected near-white canvas becomes transparent while the center subject covers the page.
+ memset(fb,0xaa,BYTES);assert(book_lock_bookmark_draw(fb,argv[4]));
+ assert(pixel(fb,10,300)==170&&pixel(fb,342,608)==0);
  memcpy(original,fb,BYTES);budget=0;
  assert(!book_lock_bookmark_draw(fb,argv[2])&&!memcmp(fb,original,BYTES));budget=8u*1024u*1024u;
  assert(!book_lock_bookmark_draw(fb,"file.jpg")&&!memcmp(fb,original,BYTES));
@@ -168,7 +182,7 @@ int main(int argc,char **argv){
  assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
  free(first);
  free(fb);free(original);
- puts("PASS: real PNG alpha/premultiplication, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
+ puts("PASS: PNG alpha/premultiplication, JPG white-key transparency, opaque black, aspect-fit canvas, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
 }
 '''
 def chunk(k,b):return struct.pack('>I',len(b))+k+b+struct.pack('>I',zlib.crc32(k+b))
@@ -176,19 +190,22 @@ raw=b''.join(b'\0'+b''.join(bytes((255,255,255,0)) if x<16 and y<16 else bytes((
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
 with tempfile.TemporaryDirectory() as d:
  d=Path(d);(d/'test.c').write_text(u);(d/'fixture.png').write_bytes(png)
+ (d/'fixture.jpg').write_bytes(b'\xff\xd8\xff\xd9')
  white_raw=b''.join(b'\0'+b''.join(bytes((0,0,0)) if 3<=x<=28 and 3<=y<=28 and not (9<=x<=22 and 9<=y<=22) else bytes((255,255,255)) for x in range(32)) for y in range(32))
  (d/'white.png').write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',32,32,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(white_raw))+chunk(b'IEND',b''))
  vendor=r/'managed_components/espressif__libpng/libpng'
  if not vendor.exists():vendor=Path('/private/tmp/kiikoread-rc90-lock-build-20261011/managed_components/espressif__libpng/libpng')
+ if not vendor.exists():vendor=Path('/private/tmp/kiikoread-rc90-lock-build-20261011/managed_components/espressif__libpng/libpng')
  (d/'pnglibconf.h').write_bytes((vendor/'scripts/pnglibconf.h.prebuilt').read_bytes())
  names='png pngerror pngget pngmem pngpread pngread pngrio pngrtran pngrutil pngset pngtrans pngwrite pngwio pngwtran pngwutil'.split()
- base=['cc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-DLOCK_LAYER_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm']
+ env,compiler=toolchain(d)
+ base=[str(d/'cc'),'-std=gnu11','-O2','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-misleading-indentation','-fsanitize=address,undefined','-DPNG_ARM_NEON_OPT=0','-DPNG_INTEL_SSE_OPT=0','-DCACHE_ROOT="'+str(d/'cache')+'"','-DLOCK_LAYER_ROOT="'+str(d/'cache')+'"','-I'+str(d),'-I'+str(vendor),str(d/'test.c')]+[str(vendor/(n+'.c')) for n in names]+['-lz','-lm']
  # 同一套断言跑两遍：通用几何(rotation 0)走 pixel()/epd_draw_pixel，产品几何走直写快速路径。
  # The same assertions run twice: generic geometry (rotation 0) uses pixel()/epd_draw_pixel, product geometry uses the direct fast path.
  for variant,extra in (('generic',[]),('mirror',['-DMIRROR'])):
   exe=str(d/('test_'+variant))
   subprocess.run(base+extra+['-o',exe],check=True)
-  args=[exe,str(d),str(d/'fixture.png'),str(d/'white.png')]
+  args=[exe,str(d),str(d/'fixture.png'),str(d/'white.png'),str(d/'fixture.jpg')]
   if os.environ.get('BOOKMARK_SAMPLE') and os.environ.get('BOOKMARK_BACKGROUND'):args += [os.environ['BOOKMARK_BACKGROUND'],os.environ['BOOKMARK_SAMPLE']]
   subprocess.run(args,check=True)
   print(variant,'ok')

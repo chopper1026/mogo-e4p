@@ -52,14 +52,18 @@ static EpdRect option_rect(int i){return (EpdRect){36+i*316,762,296,278};}
 static EpdRect image_rect(int i){return (EpdRect){36+i*210,758,192,330};}
 static EpdRect wallpaper_mode_rect(int i){return (EpdRect){398+i*130,86,122,50};}
 static bool images_tab(void){return s_tab==0||s_tab==3;}
+static bool bookmark_image_path(const char *path){
+    const char *ext=path?strrchr(path,'.'):NULL;
+    return ext&&(!strcasecmp(ext,".png")||!strcasecmp(ext,".jpg")||!strcasecmp(ext,".jpeg"));
+}
 static const char *selected_path(void){return s_tab==3?app_settings_bookmark_path():app_settings_wallpaper_path();}
 static const char *grid_path(bool bookmark){
     const char *selected=bookmark?app_settings_bookmark_path():app_settings_wallpaper_path();
     if(selected[0])return selected;
-    for(int i=0;i<s_count;++i){const char *ext=strrchr(s_items[i].path,'.');if(!bookmark||(ext&&!strcasecmp(ext,".png")))return s_items[i].path;}
+    for(int i=0;i<s_count;++i)if(!bookmark||bookmark_image_path(s_items[i].path))return s_items[i].path;
     return "";
 }
-static bool matches(int i){const char *ext=strrchr(s_items[i].path,'.');return s_tab!=3||(ext&&!strcasecmp(ext,".png"));}
+static bool matches(int i){return s_tab!=3||bookmark_image_path(s_items[i].path);}
 static int image_count(void){int n=0;for(int i=0;i<s_count;++i)if(matches(i))++n;return n;}
 static int image_index(int at){for(int i=0;i<s_count;++i)if(matches(i)&&at--==0)return i;return -1;}
 static int page(void){return s_pages[s_tab==3];}
@@ -114,10 +118,9 @@ void ui_lock_style_open(const uint8_t *background){
     validate_faces();
     s_pages[0]=s_pages[1]=0;s_tab=1;
     for(int i=0;i<6;++i)if(values[i]==app_settings_lock_style())s_tab=i;
-    for(int i=0,png=0;i<s_count;++i){
+    for(int i=0,bookmark=0;i<s_count;++i){
         if(!strcmp(s_items[i].path,app_settings_wallpaper_path()))s_pages[0]=i/3;
-        const char *ext=strrchr(s_items[i].path,'.');
-        if(ext&&!strcasecmp(ext,".png")){if(!strcmp(s_items[i].path,app_settings_bookmark_path()))s_pages[1]=png/3;++png;}
+        if(bookmark_image_path(s_items[i].path)){if(!strcmp(s_items[i].path,app_settings_bookmark_path()))s_pages[1]=bookmark/3;++bookmark;}
     }
     if(!s_face_done[0]||!s_face_done[1])s_background=heap_caps_malloc(684u*1216u/2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(s_background){if(background)memcpy(s_background,background,684u*1216u/2);else memset(s_background,255,684u*1216u/2);}
@@ -231,7 +234,7 @@ void ui_lock_style_render(uint8_t *fb){
         label(fb,(EpdRect){518,686,64,58},23,position,true);
         if(!count){
             label(fb,(EpdRect){36,826,612,52},30,!s_catalogue_ready?"正在查找图片":s_offline?"请插入 TF 卡":"暂无可选图片",true);
-            label(fb,(EpdRect){36,890,612,46},24,s_tab==3?"将 PNG 书封放入 pictures 文件夹":"将 JPG / PNG 放入 pictures 文件夹",true);
+            label(fb,(EpdRect){36,890,612,46},24,s_tab==3?"将 PNG / JPG 书封放入 pictures 文件夹":"将 JPG / PNG 放入 pictures 文件夹",true);
         }
         for(int i=0;i<3;++i){
             int at=image_index(page()*3+i);if(at<0)break;EpdRect r=image_rect(i);
@@ -339,10 +342,9 @@ bool ui_lock_style_tick(int64_t now_ms){
             s_catalogue_ready=true;s_scan_pending=false;
             if(changed){
             s_pages[0]=s_pages[1]=0;
-            for(int i=0,png=0;i<s_count;++i){
+            for(int i=0,bookmark=0;i<s_count;++i){
                 if(!strcmp(s_items[i].path,app_settings_wallpaper_path()))s_pages[0]=i/3;
-                const char *ext=strrchr(s_items[i].path,'.');
-                if(ext&&!strcasecmp(ext,".png")){if(!strcmp(s_items[i].path,app_settings_bookmark_path()))s_pages[1]=png/3;++png;}
+                if(bookmark_image_path(s_items[i].path)){if(!strcmp(s_items[i].path,app_settings_bookmark_path()))s_pages[1]=bookmark/3;++bookmark;}
             }
             }
             // 旧像素可能刚因源身份变化退休；和上次状态比较后才替换快照。

@@ -66,7 +66,7 @@ static bool identity(const char *path, bool bookmark, bool large, cache_header_t
     struct stat st;
     const char *ext = strrchr(path, '.');
     if (strncmp(path,"/sdcard/",8) || !ext ||
-        (strcasecmp(ext,".png") && (bookmark || (strcasecmp(ext,".jpg") && strcasecmp(ext,".jpeg")))) ||
+        (strcasecmp(ext,".png") && strcasecmp(ext,".jpg") && strcasecmp(ext,".jpeg")) ||
         stat(path,&st) || !S_ISREG(st.st_mode) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) return false;
     uint64_t key=source_key(path,&st);
     *h=(cache_header_t){.magic=CACHE_MAGIC,.version=CACHE_VERSION,.width=large?342:160,

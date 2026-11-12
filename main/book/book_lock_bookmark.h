@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：当前页面上的透明PNG书封；输入framebuffer即底图，不加载书籍。
- * English: Transparent PNG cover over the current framebuffer; never load a book for its background.
+ * 中文：当前页面上的透明PNG/JPG书封；输入framebuffer即底图，不加载书籍。
+ * English: Transparent PNG/JPG cover over the current framebuffer; never load a book for its background.
  */
 #pragma once
 #include <stdbool.h>
@@ -15,7 +15,7 @@ void book_lock_bookmark_prepare(const char *png);
 bool book_lock_bookmark_cached(void);
 void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect area);
 
-/// 选图用的小画布，保持完整PNG比例、alpha与去白规则；仅文件/像素，不调用字库。
+/// 选图用的小画布，保持完整PNG/JPG比例、alpha与去白规则；仅文件/像素，不调用字库。
 /// Picker thumbnail preserving canvas ratio, alpha and white removal; file/pixel work only.
 #include "image_decode.h"
 bool book_lock_bookmark_thumbnail(const char *path,unsigned width,unsigned height,uint8_t *gray,

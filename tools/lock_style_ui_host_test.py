@@ -152,7 +152,7 @@ int main(int argc,char **argv){
   assert(tap(246,758)&&s_pending==-1&&strstr(wallpaper,"04.png"));before=writes;ui_lock_style_tick(3500);assert(writes==before);
   images_fail=true;assert(tap(36,758)&&strstr(s_notice,"无法加载")&&writes==before);images_fail=false;
   images_ready=false;assert(tap(36,758)&&s_pending==3);images_ready=true;ui_lock_style_tick(4000);assert(selected_style==1&&strstr(wallpaper,"03.png"));
-  assert(tap(36,440)&&s_tab==3);assert(image_count()==4);assert(tap(36,758)&&selected_style==3);
+  assert(tap(36,440)&&s_tab==3);assert(image_count()==7);assert(tap(36,758)&&selected_style==3);
   for(int i=0;i<8;++i)ui_lock_style_tick(5000+i*200);
   ++revision;assert(!ui_lock_style_tick(7000)); // 不可见预读完成不得刷新。 / Completed invisible prefetch must not refresh.
   assert(tap(36,202));images_ready=false;complete_during_state=true;

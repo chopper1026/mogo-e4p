@@ -911,7 +911,8 @@ bool app_settings_set_calendar_style(app_calendar_style_t style) {
 const char* app_settings_bookmark_path(void) { return s_bookmark; }
 void app_settings_set_bookmark_path(const char *path) {
     const char *ext=path?strrchr(path,'.'):NULL;
-    if(!path || (path[0] && (strncmp(path,"/sdcard/",8)||!ext||strcasecmp(ext,".png"))) ||
+    if(!path || (path[0] && (strncmp(path,"/sdcard/",8)||!ext||
+        (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))) ||
         strnlen(path,sizeof(s_bookmark))>=sizeof(s_bookmark)) return;
     nvs_handle_t h;
     if(settings_write_open(&h)!=ESP_OK)return;
@@ -948,7 +949,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     if(style==1||style==3){
         const char *ext=image?strrchr(image,'.'):NULL;
         if(!image||strncmp(image,"/sdcard/",8)||strnlen(image,sizeof(s_wallpaper))>=sizeof(s_wallpaper)||!ext||
-           (strcasecmp(ext,".png")&&(style==3||(strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))))return false;
+           (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))return false;
     }
     unsigned calendar=style==4?option:(unsigned)s_calendar_style;
     unsigned wallpaper_mode=style==1?option:(unsigned)s_wallpaper_mode;

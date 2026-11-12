@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：透明PNG书封直接叠加在当前画面上；保留原画布比例。解码后的图层按PNG的mtime/尺寸缓存在TF卡，锁屏只做合成。
- * English: Composite a transparent PNG cover over the current frame, preserving canvas ratio. The decoded layer is cached on the SD card keyed by PNG mtime/size so a lock only composites.
+ * 中文：透明PNG/JPG书封直接叠加在当前画面上；保留原画布比例。PNG使用alpha，JPG用白底键控；解码后的图层按源文件身份缓存在TF卡，锁屏只做合成。
+ * English: Composite a transparent PNG/JPG cover over the current frame, preserving canvas ratio. PNG keeps alpha while JPG uses white-key transparency; the decoded layer is cached on the SD card by source identity so a lock only composites.
  */
 #include "book_lock_bookmark.h"
 #include "book_cover.h"
@@ -40,17 +40,18 @@ static void white_flood_mark(white_flood_t *f,size_t at,unsigned y) {
     f->pending[y]=1;f->rows[f->tail]=(uint16_t)y;
     f->tail=(f->tail+1)%f->height;++f->count;
 }
-// 不透明白底PNG才自动去白：四邻接连通到画布边缘，封闭白色图案保留。
-// Remove only near-white regions connected to an opaque PNG's canvas edges by four-neighbor paths; preserve enclosed whites.
+// 不透明白底图片才自动去白：四邻接连通到画布边缘，封闭白色图案保留。
+// Remove only near-white regions connected to an opaque image's canvas edges by four-neighbor paths; preserve enclosed whites.
 // 原始alpha优先，避免透明素材的白色主体被误删；工作区仅一位/像素和有界行队列。
 // Original alpha takes priority, protecting white artwork in transparent assets; workspace is one bit/pixel plus a bounded row queue.
-static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
+static bool remove_white_background_threshold(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h,
+                                              uint8_t threshold) {
     size_t count=(size_t)w*h;
     if(!gray||!alpha||!w||!h||w>684||h>1216)return false;
     for(size_t i=0;i<count;++i)if(alpha[i]!=255)return true;
     bool border=false;
-    for(unsigned x=0;x<w;++x)if(gray[x]>=250||gray[(h-1)*w+x]>=250){border=true;break;}
-    if(!border)for(unsigned y=0;y<h;++y)if(gray[(size_t)y*w]>=250||gray[(size_t)y*w+w-1]>=250){border=true;break;}
+    for(unsigned x=0;x<w;++x)if(gray[x]>=threshold||gray[(h-1)*w+x]>=threshold){border=true;break;}
+    if(!border)for(unsigned y=0;y<h;++y)if(gray[(size_t)y*w]>=threshold||gray[(size_t)y*w+w-1]>=threshold){border=true;break;}
     if(!border)return true;
     size_t bits=(count+7)/8,queue_offset=(bits+h+1)&~(size_t)1;
     uint8_t *work=heap_caps_malloc(queue_offset+2*h,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -58,30 +59,33 @@ static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsi
     memset(work,0,queue_offset);
     white_flood_t f={.visited=work,.pending=work+bits,.rows=(uint16_t *)(work+queue_offset),.height=h};
     for(unsigned x=0;x<w;++x){
-        if(gray[x]>=250)white_flood_mark(&f,x,0);
-        size_t at=(size_t)(h-1)*w+x;if(gray[at]>=250)white_flood_mark(&f,at,h-1);
+        if(gray[x]>=threshold)white_flood_mark(&f,x,0);
+        size_t at=(size_t)(h-1)*w+x;if(gray[at]>=threshold)white_flood_mark(&f,at,h-1);
     }
     for(unsigned y=1;y+1<h;++y){
-        size_t at=(size_t)y*w;if(gray[at]>=250)white_flood_mark(&f,at,y);
-        if(gray[at+w-1]>=250)white_flood_mark(&f,at+w-1,y);
+        size_t at=(size_t)y*w;if(gray[at]>=threshold)white_flood_mark(&f,at,y);
+        if(gray[at+w-1]>=threshold)white_flood_mark(&f,at+w-1,y);
     }
     while(f.count){
         unsigned y=f.rows[f.head];f.head=(f.head+1)%h;--f.count;f.pending[y]=0;
         size_t row=(size_t)y*w;
         for(unsigned x=0;x<w;){
-            if(gray[row+x]<250){++x;continue;}
+            if(gray[row+x]<threshold){++x;continue;}
             unsigned left=x;bool reached=false;
-            while(x<w&&gray[row+x]>=250){size_t at=row+x++;if(f.visited[at>>3]&(1u<<(at&7)))reached=true;}
+            while(x<w&&gray[row+x]>=threshold){size_t at=row+x++;if(f.visited[at>>3]&(1u<<(at&7)))reached=true;}
             if(!reached)continue;
             for(unsigned xx=left;xx<x;++xx){
                 size_t at=row+xx;f.visited[at>>3]|=(uint8_t)(1u<<(at&7));
-                if(y&&gray[at-w]>=250)white_flood_mark(&f,at-w,y-1);
-                if(y+1<h&&gray[at+w]>=250)white_flood_mark(&f,at+w,y+1);
+                if(y&&gray[at-w]>=threshold)white_flood_mark(&f,at-w,y-1);
+                if(y+1<h&&gray[at+w]>=threshold)white_flood_mark(&f,at+w,y+1);
             }
         }
     }
     for(size_t i=0;i<count;++i)if(f.visited[i>>3]&(1u<<(i&7)))gray[i]=alpha[i]=0;
     free(work);return true;
+}
+static bool remove_white_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h) {
+    return remove_white_background_threshold(gray,alpha,w,h,250);
 }
 static uint8_t pixel(const uint8_t *fb,int x,int y) {
     int px=x,py=y;
@@ -119,8 +123,8 @@ static void fb_put(uint8_t *fb,int x,int y,uint8_t gray) {
 }
 
 /* ---- 解码图层缓存 / Decoded layer cache ---- */
-// 只缓存预乘灰阶+alpha两段平面的RLE，不缓存整帧；头部按路径、PNG的mtime/尺寸/旋转失效。
-// Only the RLE of the two planes (premultiplied gray + alpha) is cached, never a frame; the header invalidates on path, PNG mtime/size/rotation.
+// 只缓存预乘灰阶+alpha两段平面的RLE，不缓存整帧；头部按路径、源文件mtime/尺寸/旋转失效。
+// Only the RLE of the two planes (premultiplied gray + alpha) is cached, never a frame; the header invalidates on path, source mtime/size/rotation.
 // 路径也参与键：FatFs 时间戳只有2秒精度，同尺寸的批量导出可能同mtime，不能只看文件属性。
 // The path takes part in the key: FatFs timestamps have two-second resolution, so same-size batch exports can share an mtime.
 #ifndef LOCK_LAYER_ROOT
@@ -129,7 +133,7 @@ static void fb_put(uint8_t *fb,int x,int y,uint8_t gray) {
 #define LOCK_LAYER_DIR LOCK_LAYER_ROOT "/locks"
 #define LOCK_LAYER_PATH LOCK_LAYER_DIR "/bookmark-layer.bin"
 #define LOCK_LAYER_MAGIC UINT32_C(0x424b4c59)
-#define LOCK_LAYER_VERSION 2u
+#define LOCK_LAYER_VERSION 3u
 #define LOCK_LAYER_STAGE 32768u
 typedef struct {
     uint32_t magic,version,rotation,width,height;
@@ -239,12 +243,27 @@ static bool layer_store(const char *path,unsigned w,unsigned h,const uint8_t *sr
     if(!ok)LOCK_LOG("layer cache store failed");
     return ok;
 }
-// 以整个PNG画布居中等比缩放，684x1216时逐像素对齐，不识别或裁剪主体。
-// Center-fit the entire PNG canvas; 684x1216 maps pixel-for-pixel, without subject detection or cropping.
+static bool image_path_is_png(const char *path) {
+    const char *ext=path?strrchr(path,'.'):NULL;
+    return ext&&!strcasecmp(ext,".png");
+}
+static bool image_path_supported(const char *path) {
+    const char *ext=path?strrchr(path,'.'):NULL;
+    return ext&&(!strcasecmp(ext,".png")||!strcasecmp(ext,".jpg")||!strcasecmp(ext,".jpeg"));
+}
+static bool decode_layer(const char *path,unsigned w,unsigned h,uint8_t *gray,uint8_t *alpha,
+                         image_cancel_fn cancelled,void *context) {
+    if(!path||!gray||!alpha||!w||!h)return false;
+    if(image_path_is_png(path))return book_png_file_layer_cancel(path,w,h,gray,alpha,cancelled,context);
+    memset(alpha,255,(size_t)w*h);
+    return book_image_file_grayscale_cancel(path,false,w,h,gray,cancelled,context);
+}
+// 以整个PNG/JPG画布居中等比缩放，684x1216时逐像素对齐，不识别或裁剪主体。
+// Center-fit the entire PNG/JPG canvas; 684x1216 maps pixel-for-pixel, without subject detection or cropping.
 static bool canvas_for(const char *path,unsigned *w,unsigned *h) {
     unsigned sw,sh;
-    const char *ext=path?strrchr(path,'.'):NULL;
-    if(!ext||strcasecmp(ext,".png")||!book_image_file_dimensions(path,true,&sw,&sh)||!sw||!sh)return false;
+    const bool png=image_path_is_png(path);
+    if(!image_path_supported(path)||!book_image_file_dimensions(path,png,&sw,&sh)||!sw||!sh)return false;
     unsigned cw=684,ch=(uint64_t)sh*cw/sw;
     if(ch>1216){ch=1216;cw=(uint64_t)sw*ch/sh;}
     if(!cw||!ch)return false;
@@ -261,17 +280,23 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store) {
     if(!layers)return false;
     const int64_t lock_t1=LOCK_US();
     uint8_t *alpha=layers+count;
-    // 缓存命中直接得到图层，跳过解码PNG与去白底；未命中解码后顺手把缓存写出去。
-    // A cache hit supplies the layers and skips the PNG decode and white removal; a miss decodes and then refreshes the cache.
+    // 缓存命中直接得到图层，跳过解码与去白底；未命中按格式解码后顺手把缓存写出去。
+    // A cache hit supplies the layers and skips decoding and white removal; a miss decodes by format and refreshes the cache.
     bool cached=layer_load(path,w,h,layers);
     s_layer_cached=cached;
     const int64_t lock_t2=LOCK_US();
     int64_t lock_t3=lock_t2,lock_t4=lock_t2,lock_t5=lock_t2,lock_t6=lock_t2,lock_t7=lock_t2;
     bool ok=true;
     if(!cached) {
-        ok=book_png_file_layer(path,w,h,layers,alpha);
+        const bool png=image_path_is_png(path);
+        // JPEG没有alpha：先全部设为不透明，再把连通白底转成透明；复用已有流式JPEG解码器，
+        // 不引入JPEG→PNG转换器或第二份源图缓冲。
+        // JPEG has no alpha: start opaque, then key connected white background transparent.
+        // Reuse the existing streaming JPEG decoder without a JPEG-to-PNG converter or source-sized buffer.
+        ok=decode_layer(path,w,h,layers,alpha,NULL,NULL);
         lock_t3=LOCK_US();
-        if(ok)ok=remove_white_background(layers,alpha,w,h);
+        if(ok)ok=png?remove_white_background(layers,alpha,w,h):
+            remove_white_background_threshold(layers,alpha,w,h,245);
         lock_t4=LOCK_US();
     }
     int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
@@ -300,8 +325,8 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store) {
         if(!cached&&store) {layer_store(path,w,h,layers);lock_t7=LOCK_US();}
         else lock_t7=lock_t6;
     }
-    // 缓存命中时 png/white 为 0，load 是读SD+解RLE的耗时；未命中时 store 是首次写缓存。
-    // On a hit png/white are zero and load is SD read plus RLE decode; on a miss store is the one-off cache write.
+    // 缓存命中时 decode/white 为 0，load 是读SD+解RLE的耗时；未命中时 store 是首次写缓存。
+    // On a hit decode/white are zero and load is SD read plus RLE decode; on a miss store is the one-off cache write.
     LOCK_LOG("bookmark %ux%u ok=%d hit=%d psram=%uKB probe=%lld load=%lld png=%lld white=%lld shadow=%lld blend=%lld store=%lld total=%lld ms",
         w,h,(int)ok,(int)cached,(unsigned)(psram_free/1024),(long long)LOCK_MS(lock_t0,lock_t1),
         (long long)LOCK_MS(lock_t1,lock_t2),(long long)LOCK_MS(lock_t2,lock_t3),
@@ -328,7 +353,10 @@ void book_lock_bookmark_prepare(const char *png) {
     const int64_t t1=LOCK_US();
     if(!cached) {
         uint8_t *alpha=layers+count;
-        if(book_png_file_layer(png,w,h,layers,alpha)&&remove_white_background(layers,alpha,w,h))
+        const bool is_png=image_path_is_png(png);
+        if(decode_layer(png,w,h,layers,alpha,NULL,NULL)&&
+           (is_png?remove_white_background(layers,alpha,w,h):
+            remove_white_background_threshold(layers,alpha,w,h,245)))
             layer_store(png,w,h,layers);
     }
     const int64_t t2=LOCK_US();
@@ -345,15 +373,19 @@ void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect 
 bool book_lock_bookmark_thumbnail(const char *path,unsigned width,unsigned height,uint8_t *out,
                                   image_cancel_fn cancelled,void *context) {
     unsigned sw,sh;
-    if(!out||!width||!height||width>342||height>608||!book_image_file_dimensions(path,true,&sw,&sh)||!sw||!sh)return false;
+    const bool png=image_path_is_png(path);
+    if(!out||!width||!height||width>342||height>608||!image_path_supported(path)||
+       !book_image_file_dimensions(path,png,&sw,&sh)||!sw||!sh)return false;
     unsigned w=width,h=(uint64_t)sh*w/sw;
     if(h>height){h=height;w=(uint64_t)sw*h/sh;}
     if(!w||!h)return false;
     size_t count=(size_t)w*h;
     uint8_t *layer=heap_caps_malloc(count*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!layer)return false;
-    bool ok=book_png_file_layer_cancel(path,w,h,layer,layer+count,cancelled,context);
-    if(ok&&(!cancelled||!cancelled(context)))ok=remove_white_background(layer,layer+count,w,h);
+    bool ok=decode_layer(path,w,h,layer,layer+count,cancelled,context);
+    if(ok&&(!cancelled||!cancelled(context)))
+        ok=png?remove_white_background(layer,layer+count,w,h):
+            remove_white_background_threshold(layer,layer+count,w,h,245);
     else ok=false;
     if(ok){
         // 淡棋盘仅表示透明区域，不冒充当前阅读页；完整画布居中而不裁切。

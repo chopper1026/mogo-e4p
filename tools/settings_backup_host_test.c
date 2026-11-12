@@ -919,7 +919,7 @@ static void test_inline_lock_selection(void) {
         if(fault>0){app_settings_set_wallpaper_path(next);assert(!strcmp(app_settings_wallpaper_path(),old));}
     }
     face_write_fails=face_open_fails=commit_fails=flash_failure=false;
-    assert(!app_settings_select_lock(1,NULL,0)&&!app_settings_select_lock(3,next,0));
+    assert(!app_settings_select_lock(1,NULL,0)&&!app_settings_select_lock(3,"/sdcard/pictures/next.gif",0));
     assert(!app_settings_select_lock(6,NULL,0)&&!app_settings_select_lock(4,NULL,2));
     assert(app_settings_select_lock(1,next,0)&&!strcmp(app_settings_wallpaper_path(),next));
     assert(app_settings_select_lock(1,next,APP_WALLPAPER_MODE_FIT)&&app_settings_wallpaper_mode()==APP_WALLPAPER_MODE_FIT);
@@ -1985,11 +1985,15 @@ int main(void) {
     }
     assert(app_settings_book_paragraph_value(APP_BOOK_PARAGRAPH_COUNT/2)==25);
     has_tracking=false;s_book_tracking=-APP_BOOK_TRACK_MIN;
-    // PNG书签独立于壁纸保存；恢复缺失PNG时退票根，不能留无效锁屏入口。
-    // PNG bookmarks persist independently of wallpapers; a missing restored PNG falls back to a usable ticket.
+    // PNG/JPG书签独立于壁纸保存；恢复缺失图片时退票根，不能留无效锁屏入口。
+    // PNG/JPG bookmarks persist independently of wallpapers; a missing restored image falls back to a usable ticket.
+    app_settings_set_bookmark_path("/sdcard/pictures/cover.jpg");
+    assert(!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/cover.jpg"));
+    app_settings_set_bookmark_path("/sdcard/pictures/not-image.gif");
+    assert(!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/cover.jpg"));
     app_settings_set_bookmark_path("/sdcard/pictures/marker.png");app_settings_set_lock_style(3);
     assert(app_settings_lock_style()==3&&!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/marker.png"));
-    app_settings_set_bookmark_path("/sdcard/pictures/not-png.jpg");
+    app_settings_set_bookmark_path("/sdcard/pictures/not-image.gif");
     assert(!strcmp(app_settings_bookmark_path(),"/sdcard/pictures/marker.png"));
     assert(app_settings_backup_save()==ESP_OK);s_bookmark[0]=0;s_lock_style=0;
     assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_style()==0&&!app_settings_bookmark_path()[0]);

@@ -67,6 +67,7 @@ static void run(void){assert(scheduled);void (*fn)(void *)=scheduled;scheduled=N
 static void create(const char *path,int size){FILE *f=fopen(path,"wb");assert(f);for(int i=0;i<size;++i)fputc(i,f);assert(!fclose(f));}
 static const char *a="/sdcard/pictures/a.jpg",*b="/sdcard/pictures/b.png",*c="/sdcard/pictures/c.jpg";
 static void ask(const char *path){lock_image_request_t r={path,false,false};lock_images_request(&r,1);}
+static void ask_bookmark(const char *path){lock_image_request_t r={path,true,false};lock_images_request(&r,1);}
 static void mutation(void){
  int saved=mode;mode=0;
  if(saved==1){ask(b);assert(s_running);}
@@ -75,6 +76,7 @@ static void mutation(void){
  if(saved==3)create("card/pictures/a.jpg",19);
 }
 static const uint8_t *ready(const char *path){lock_image_state_t s;const uint8_t *p=lock_images_pixels(path,false,false,&s);assert(p&&s==LOCK_IMAGE_READY);return p;}
+static const uint8_t *ready_bookmark(const char *path){lock_image_state_t s;const uint8_t *p=lock_images_pixels(path,true,false,&s);assert(p&&s==LOCK_IMAGE_READY);return p;}
 static void open_picker(void){lock_images_open();run();int count;bool done;lock_image_item_t *items=lock_images_catalogue(&count,&done);assert(done&&items&&count==3&&!strcmp(items[0].name,"a.jpg"));free(items);}
 int main(void){
  mkdir("card",0700);mkdir("card/pictures",0700);create("card/pictures/a.jpg",10);create("card/pictures/b.png",11);create("card/pictures/c.jpg",12);
@@ -82,6 +84,7 @@ int main(void){
  open_picker();assert(!decodes);
  lock_image_request_t r[]={{a,false,false},{a,false,false},{b,false,false},{c,false,false}};
  lock_images_request(r,4);assert(s_count==3&&decodes==0);run();assert(decodes==3);const uint8_t *p=ready(a);uint8_t expected[LOCK_THUMB_BYTES];memcpy(expected,p,sizeof(expected));
+ ask_bookmark(a);run();assert(ready_bookmark(a)&&decodes==4);
  int before=decodes,io=reads;ask(a);assert(ready(a)==p&&reads==io&&decodes==before);run();assert(decodes==before&&reads==io);
  // 普通离页再进入立即复用像素，无需等异步扫描结束。 / Ordinary leave/reentry reuses pixels immediately, including before the async scan returns.
  unsigned epoch=lock_images_epoch();lock_images_pause();assert(ready(a)==p&&live>0&&lock_images_epoch()==epoch);
