@@ -55,6 +55,10 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  size_t n=(size_t)y*684+x;unsigned shift=(n&1)*4;
  fb[n/2]=(fb[n/2]&~(15u<<shift))|((gray>>4)<<shift);
 }
+static void epd_fill_rect(EpdRect rect,uint8_t gray,uint8_t *fb){
+ for(int y=rect.y;y<rect.y+rect.height;++y)
+  for(int x=rect.x;x<rect.x+rect.width;++x) epd_draw_pixel(x,y,gray,fb);
+}
 '''
 for name in ('inside_rounded','avatar_content_crop','image_pixels','ui_wallpaper_draw_mode','ui_wallpaper_draw','ui_wallpaper_draw_rounded','ui_wallpaper_draw_avatar'):
  unit+=function(name,source)+'\n'

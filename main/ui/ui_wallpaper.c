@@ -129,8 +129,14 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
         draw_x = area.x + (area.width - draw_w) / 2;
         draw_y = area.y + (area.height - draw_h) / 2;
         if (pixels) memset(pixels, 255, (size_t)area.width * area.height);
-        else for (int y = area.y; y < area.y + area.height; ++y)
-            for (int x = area.x; x < area.x + area.width; ++x) epd_draw_pixel(x, y, 255, fb);
+        else {
+            if (draw_y > area.y) epd_fill_rect((EpdRect){area.x, area.y, area.width, draw_y - area.y}, 255, fb);
+            int bottom = draw_y + draw_h, area_bottom = area.y + area.height;
+            if (bottom < area_bottom) epd_fill_rect((EpdRect){area.x, bottom, area.width, area_bottom - bottom}, 255, fb);
+            if (draw_x > area.x) epd_fill_rect((EpdRect){area.x, draw_y, draw_x - area.x, draw_h}, 255, fb);
+            int right = draw_x + draw_w, area_right = area.x + area.width;
+            if (right < area_right) epd_fill_rect((EpdRect){right, draw_y, area_right - right, draw_h}, 255, fb);
+        }
     } else {
         ui_wallpaper_crop_t center = ui_wallpaper_center_crop(width, height,
                                                                (unsigned)area.width, (unsigned)area.height);
@@ -140,15 +146,40 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
                                             &crop_x, &crop_y, &crop_w, &crop_h);
     }
 
-    for (int y = draw_y; y < draw_y + draw_h; ++y)
+    // 显示到目标 framebuffer 时，横纵映射各算一次；分配失败回退原公式。
+    // For framebuffer output, compute each axis map once; allocation failure keeps the original formula.
+    const bool direct_mapping = crop_w == draw_w && crop_h == draw_h;
+    uint16_t *source_x_map = NULL, *source_y_map = NULL;
+    if (!pixels && !direct_mapping && draw_w > 1 && draw_h > 1) {
+        source_x_map = heap_caps_malloc(
+            (size_t)draw_w * sizeof(*source_x_map), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        source_y_map = heap_caps_malloc(
+            (size_t)draw_h * sizeof(*source_y_map), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (source_x_map && source_y_map) {
+            for (int x = 0; x < draw_w; ++x)
+                source_x_map[x] = (uint16_t)(crop_x + (int)((int64_t)x * crop_w / draw_w));
+            for (int y = 0; y < draw_h; ++y)
+                source_y_map[y] = (uint16_t)(crop_y + (int)((int64_t)y * crop_h / draw_h));
+        }
+    }
+
+    for (int y = draw_y; y < draw_y + draw_h; ++y) {
+        int source_y = direct_mapping ? crop_y + y - draw_y :
+            source_y_map ? (int)source_y_map[y - draw_y] :
+            crop_y + (int)((int64_t)(y - draw_y) * crop_h / draw_h);
+        const uint8_t *source_row = gray + (size_t)source_y * width;
         for (int x = draw_x; x < draw_x + draw_w; ++x) {
             if (!pixels && !inside_rounded(area, radius, x, y)) continue;
-            int source_x = crop_x + (int)((int64_t)(x - draw_x) * crop_w / draw_w);
-            int source_y = crop_y + (int)((int64_t)(y - draw_y) * crop_h / draw_h);
-            uint8_t value = gray[(size_t)source_y * width + source_x];
+            int source_x = direct_mapping ? crop_x + x - draw_x :
+                source_x_map && source_y_map ? (int)source_x_map[x - draw_x] :
+                crop_x + (int)((int64_t)(x - draw_x) * crop_w / draw_w);
+            uint8_t value = source_row[source_x];
             if (pixels) pixels[(size_t)(y-area.y)*area.width + x-area.x] = value;
-            else epd_draw_pixel(x,y,ui_image_dither_gray(value,x,y),fb);
+            else epd_draw_pixel(x, y, ui_image_dither_gray(value, x, y), fb);
         }
+    }
+    free(source_x_map);
+    free(source_y_map);
     free(gray);
     return true;
 }
