@@ -63,6 +63,7 @@ static uint64_t lock_calendar_key(void){return calendar_key;}
 static uint64_t lock_calendar_frame_key(void){return calendar_key;}
 static unsigned app_settings_ticket_background(void){return ticket_background;}
 static const char *wallpaper="";
+static unsigned app_settings_wallpaper_mode(void){return 0;}
 uint8_t app_settings_lock_style(void){return selected_style;}
 const char *app_settings_wallpaper_path(void){return wallpaper;}
 const char *app_settings_bookmark_path(void){return wallpaper;}

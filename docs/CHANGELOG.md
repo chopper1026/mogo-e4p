@@ -7,6 +7,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 蓝牙翻页器设置改为 WiFi 同款状态卡、设备详情与行内按键学习；附近设备每页六台，搜索前确认断开现有连接，遗忘设备需确认，连接变化时取消学习。/ Restyle Bluetooth settings with WiFi-style status cards, peer details and inline key learning; use six-row discovery pages, confirm disconnect/forget actions and cancel learning when the peer changes.
 
+- 锁屏壁纸设置新增「裁剪填满 / 完整显示」选择；完整显示保持原图比例并在四周留白，显示方式随重启和设置备份保存，切换后自动重建对应缓存。/ Add a wallpaper fit choice between crop-to-fill and full-image display; the latter preserves the source aspect ratio with white margins, persists across reboot and settings backup, and rebuilds the matching cache after a switch.
+
 - 锁屏样式改为六类缩略图及同页选择，壁纸/透明书封支持三图分页、点选应用与长按放大；新增可取消的后台图片加载、跨页面内存/TF缩略缓存和下一页预读，预览就绪后统一整屏清刷，保存失败保留原选择。/ Redesign lock styles with six previews and inline choices; add three-image paging, apply-on-tap, hold preview, cancellable background loading, thumbnails reused across visits and next-page prefetch; settle completed previews with one full refresh and retain the choice on failed saves.
 
 - 完善电量校准日志：增加区间统计、低电提前点、判满/恢复原因与跨重启检查点；保留写卡失败记录并明确丢失情况，合并充电阶段重复事件，不增加睡眠唤醒或等待日志后才欠压保护。/ Add interval statistics, low-voltage milestones, full/restore diagnostics and cross-boot checkpoints; retain failed writes, report losses and coalesce charger chatter without extra sleep wakeups or delaying undervoltage protection.

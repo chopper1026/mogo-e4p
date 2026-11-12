@@ -26,6 +26,9 @@ unit=r'''
 #define MALLOC_CAP_8BIT 2
 #define UI_WALLPAPER_CACHE_PARENT "cache"
 typedef struct {int x,y,width,height;} EpdRect;
+typedef enum { UI_WALLPAPER_MODE_CROP=0, UI_WALLPAPER_MODE_FIT=1 } ui_wallpaper_mode_t;
+bool ui_wallpaper_draw_mode(uint8_t *fb,const char *path,EpdRect area,ui_wallpaper_mode_t mode);
+bool ui_wallpaper_prepare_lock_mode(uint8_t *fb,const char *path,ui_wallpaper_mode_t mode);
 static unsigned source_w=684,source_h=1216,loads,rotation,variant;
 static bool alloc_fail,decode_fail,source_mutates;
 static char source_file[128]="source.jpg";
@@ -53,7 +56,7 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  fb[n/2]=(fb[n/2]&~(15u<<shift))|((gray>>4)<<shift);
 }
 '''
-for name in ('inside_rounded','avatar_content_crop','image_pixels','ui_wallpaper_draw','ui_wallpaper_draw_rounded','ui_wallpaper_draw_avatar'):
+for name in ('inside_rounded','avatar_content_crop','image_pixels','ui_wallpaper_draw_mode','ui_wallpaper_draw','ui_wallpaper_draw_rounded','ui_wallpaper_draw_avatar'):
  unit+=function(name,source)+'\n'
 unit+=source.read_text()[source.read_text().index('#ifndef UI_WALLPAPER_CACHE_PARENT'):]
 unit+=r'''
@@ -66,6 +69,15 @@ static void damage(size_t offset){FILE *f=fopen(WALL_LOCK_CACHE,"r+b");assert(f&
 int main(void){
  set_source("source.jpg",5000);clean_expected();
  cache_miss();ui_wallpaper_cache_commit(frame);
+ // 完整显示必须留下上下白边，且切换模式不能命中裁剪缓存。
+ source_w=1600;source_h=900;variant=0;set_source("source.jpg",5001);
+ memset(frame,0,sizeof(frame));assert(ui_wallpaper_prepare_lock_mode(frame,"/sdcard/wallpaper.jpg",UI_WALLPAPER_MODE_FIT));
+ assert(frame[0]==0xff && frame[WALL_LOCK_BYTES-1]==0xff);
+ ui_wallpaper_cache_commit(frame);unsigned fit_loads=loads;
+ assert(ui_wallpaper_prepare_lock_mode(frame,"/sdcard/wallpaper.jpg",UI_WALLPAPER_MODE_FIT));assert(loads==fit_loads);
+ assert(ui_wallpaper_prepare_lock(frame,"/sdcard/wallpaper.jpg"));assert(loads==fit_loads+1);
+ source_w=684;source_h=1216;variant=0;set_source("source.jpg",5002);clean_expected();
+ cache_miss();ui_wallpaper_cache_commit(frame);cache_hit();
  struct stat cached;assert(!stat("/sdcard/source.jpg",&cached));
  #undef stat
  assert(!stat(WALL_LOCK_CACHE,&cached)&&cached.st_size==sizeof(wallpaper_cache_t)+WALL_LOCK_BYTES);

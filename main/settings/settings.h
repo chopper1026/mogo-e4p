@@ -141,6 +141,13 @@ const char* app_settings_bookmark_path(void);
 void app_settings_set_bookmark_path(const char *path);
 const char* app_settings_wallpaper_path(void);
 void app_settings_set_wallpaper_path(const char* path);
+/// 壁纸显示方式：裁剪填满或保持原比例完整显示；默认裁剪填满。/ Wallpaper fit: crop to fill or preserve the full image; crop to fill by default.
+typedef enum {
+    APP_WALLPAPER_MODE_CROP = 0,
+    APP_WALLPAPER_MODE_FIT = 1,
+} app_wallpaper_mode_t;
+app_wallpaper_mode_t app_settings_wallpaper_mode(void);
+bool app_settings_set_wallpaper_mode(app_wallpaper_mode_t mode);
 /// 上次浅睡唤醒源（app_wake_source_t），掉电也保留。/ Last light-sleep wake source (app_wake_source_t); kept across power loss.
 uint8_t app_settings_last_wake(void);
 void app_settings_set_last_wake(uint8_t src);
@@ -416,5 +423,5 @@ esp_err_t app_settings_backup_save(void);
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);
 
-/// 同页选择保存成功后才发布；失败保留原样式、路径和子选项。/ Publish the inline selection only after saving; retain old state on failure.
+/// 同页选择保存成功后才发布；壁纸样式的 option 是显示方式。/ Publish the inline selection only after saving; wallpaper style uses option for its fit mode.
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option);

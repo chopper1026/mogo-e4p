@@ -50,6 +50,10 @@ static uint64_t wallpaper_key(void){
         const unsigned char *bytes=(const unsigned char*)info;
         for(unsigned i=0;i<sizeof(info);++i)key=(key^bytes[i])*UINT64_C(1099511628211);
     }
+    if (app_settings_lock_style() == 1) {
+        uint8_t mode = (uint8_t)app_settings_wallpaper_mode();
+        key = (key ^ mode) * UINT64_C(1099511628211);
+    }
     return key;
 }
 bool lock_screen_restore(uint8_t *frame){

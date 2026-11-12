@@ -5,9 +5,15 @@
 #include <stdint.h>
 #include "epd_highlevel.h"
 
+typedef enum {
+    UI_WALLPAPER_MODE_CROP = 0,
+    UI_WALLPAPER_MODE_FIT = 1,
+} ui_wallpaper_mode_t;
+
 /// 按原比例居中裁切并铺满区域；预览与锁屏共用。
 /// Center-crop an SD image at its original aspect ratio to cover preview and lock screen.
 bool ui_wallpaper_draw(uint8_t *framebuffer, const char *path, EpdRect area);
+bool ui_wallpaper_draw_mode(uint8_t *framebuffer, const char *path, EpdRect area, ui_wallpaper_mode_t mode);
 
 /// 居中填满圆角区域并裁切四角，用于设置页头像。
 /// Center-crop into a rounded area for the settings avatar.
@@ -24,6 +30,7 @@ void ui_wallpaper_draw_avatar(uint8_t *framebuffer, const uint8_t *pixels, EpdRe
 /// 锁屏专用TF成品缓存，源文件/尺寸/方向/算法版本变化或缓存损坏时重建。
 /// SD cache for lock artwork; changed source, geometry, rotation, algorithm revision or corruption rebuilds it.
 bool ui_wallpaper_prepare_lock(uint8_t *framebuffer,const char *path);
+bool ui_wallpaper_prepare_lock_mode(uint8_t *framebuffer,const char *path,ui_wallpaper_mode_t mode);
 /// 在最终画面显示成功后、密码层覆盖前调用；复用调用者画布，不新增整帧。
 /// Persist after successful presentation, before the PIN overlay, using the caller's unchanged canvas.
 void ui_wallpaper_cache_commit(const uint8_t *framebuffer);

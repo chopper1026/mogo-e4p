@@ -50,6 +50,7 @@ static void dirty(EpdRect r){
 static EpdRect card_rect(int i){return (EpdRect){36+(i%3)*210,202+(i/3)*238,192,222};}
 static EpdRect option_rect(int i){return (EpdRect){36+i*316,762,296,278};}
 static EpdRect image_rect(int i){return (EpdRect){36+i*210,758,192,330};}
+static EpdRect wallpaper_mode_rect(int i){return (EpdRect){398+i*130,86,122,50};}
 static bool images_tab(void){return s_tab==0||s_tab==3;}
 static const char *selected_path(void){return s_tab==3?app_settings_bookmark_path():app_settings_wallpaper_path();}
 static const char *grid_path(bool bookmark){
@@ -195,13 +196,22 @@ static bool visible_ready(void){
 void ui_lock_style_render(uint8_t *fb){
     ui_clear_page(fb);ui_nav_status(fb);
     ui_draw_icon(fb,57,115,44,UI_ICON_CHEVRON_LEFT,0);
-    label(fb,(EpdRect){96,80,500,64},44,s_preview>=0?"图片预览":"锁屏样式",false);
+    label(fb,(EpdRect){96,80,s_preview>=0?500:282,64},44,s_preview>=0?"图片预览":"锁屏样式",false);
+    if(s_preview<0&&s_tab==0){
+        for(int i=0;i<2;++i){
+            EpdRect r=wallpaper_mode_rect(i);
+            bool active=(unsigned)app_settings_wallpaper_mode()==(unsigned)i;
+            outline(fb,r,9,active?3:1,active?0:0xb0);
+            label(fb,(EpdRect){r.x+4,r.y+2,r.width-8,r.height-4},21,i==0?"裁剪填满":"完整显示",true);
+        }
+    }
     if(s_preview>=0){
         paint_image(fb,s_items[s_preview].path,s_tab==3,true,(EpdRect){90,184,504,896});
         label(fb,(EpdRect){36,142,612,36},24,s_items[s_preview].name,true);
         ui_nav_draw(fb,3);return;
     }
-    label(fb,(EpdRect){36,148,612,38},24,s_notice[0]?s_notice:"点选即用 · 长按图片预览",false);
+    label(fb,(EpdRect){36,148,612,38},24,s_notice[0]?s_notice:
+        (s_tab==0?"裁剪填满铺满屏幕，完整显示保留原图比例":"点选即用 · 长按图片预览"),false);
     for(int i=0;i<6;++i){
         EpdRect r=card_rect(i);bool active=app_settings_lock_style()==values[i];
         outline(fb,r,12,s_tab==i?3:1,s_tab==i?0:0xb0);
@@ -303,8 +313,14 @@ static void prepare_face(int face){
     if(face==1){free(s_background);s_background=NULL;}
 }
 static bool save_choice(const char *path,unsigned option){
+    if(s_tab==0)option=(unsigned)app_settings_wallpaper_mode();
     bool ok=app_settings_select_lock(values[s_tab],path,option);
     snprintf(s_notice,sizeof(s_notice),"%s",ok?"已保存":"保存失败，请重试");
+    return ok;
+}
+static bool save_wallpaper_mode(unsigned mode){
+    bool ok=app_settings_set_wallpaper_mode((app_wallpaper_mode_t)mode);
+    snprintf(s_notice,sizeof(s_notice),"%s",ok?"显示方式已保存":"保存失败，请重试");
     return ok;
 }
 bool ui_lock_style_tick(int64_t now_ms){
@@ -374,6 +390,9 @@ bool ui_lock_style_back(void){if(s_preview<0)return false;s_preview=-1;s_notice[
 bool ui_lock_style_gesture(const ui_gesture_event_t *ev){
     if(s_preview>=0){if(ev->type==UI_GESTURE_TAP&&ev->y0<190)return ui_lock_style_back();return false;}
     bool tap=ev->type==UI_GESTURE_TAP,hold=ev->type==UI_GESTURE_LONG_PRESS;
+    if(tap&&s_tab==0)for(int i=0;i<2;++i)if(ui_rect_hit(wallpaper_mode_rect(i),ev->x0,ev->y0)){
+        save_wallpaper_mode((unsigned)i);return true;
+    }
     if(tap)for(int i=0;i<6;++i)if(ui_rect_hit(card_rect(i),ev->x0,ev->y0)){
         s_tab=i;s_pending=-1;s_notice[0]=0;
         if(i==1)save_choice(NULL,app_settings_ticket_background());

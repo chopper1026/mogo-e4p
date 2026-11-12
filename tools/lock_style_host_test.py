@@ -53,6 +53,10 @@ static bool device_power_key_sampler_enable(bool enabled){bool previous=key_samp
 static unsigned cached_style;
 static jmp_buf deep;
 static const char *app_settings_wallpaper_path(void){return "/sdcard/wallpaper.jpg";}
+static unsigned app_settings_wallpaper_mode(void){return 0;}
+#define APP_WALLPAPER_MODE_FIT 1
+#define UI_WALLPAPER_MODE_CROP 0
+#define UI_WALLPAPER_MODE_FIT 1
 static uint8_t app_settings_lock_style(void){return style;}
 enum {APP_TICKET_BACKGROUND_TRANSPARENT,APP_TICKET_BACKGROUND_COVER};
 static unsigned ticket_background;
@@ -60,7 +64,7 @@ static unsigned app_settings_ticket_background(void){return ticket_background;}
 static bool overlay(void){return (style==0&&!ticket_background)||style==3;}
 static bool lock_pin_enabled(void){return pin;}
 static bool draw(unsigned chosen,uint8_t *fb){assert((boot_cache||!key_sampling)&&chosen==style&&panel[0]==(feedback_seen?0xff:current_background));if(overlay())assert(fb[0]==(boot_cache?0xff:current_background));else if(!boot_cache||chosen==0)assert(fb[0]==0xff);++draws[chosen];memset(fb,0x10+chosen,FRAME_BYTES);frame_ready=draw_ok;return draw_ok;}
-static bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path){assert(!strcmp(path,app_settings_wallpaper_path()));return draw(1,fb);}
+static bool ui_wallpaper_prepare_lock_mode(uint8_t *fb,const char *path,int mode){assert(!strcmp(path,app_settings_wallpaper_path()));assert(mode==UI_WALLPAPER_MODE_CROP);return draw(1,fb);}
 static void ui_wallpaper_cache_commit(const uint8_t *fb){assert(style==1&&draw_ok&&presents==1&&fb==pixels&&!memcmp(panel,pixels,FRAME_BYTES));}
 static bool book_ticket_draw(uint8_t *fb,bool background){assert(background==reader);return draw(0,fb);}
 static const char *app_settings_bookmark_path(void){return "/sdcard/overlay.png";}

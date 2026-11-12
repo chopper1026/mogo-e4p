@@ -71,7 +71,8 @@ static bool avatar_content_crop(const uint8_t *gray, unsigned width, unsigned he
     return true;
 }
 
-static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect area, int radius) {
+static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect area, int radius,
+                         ui_wallpaper_mode_t mode) {
     if ((!fb && !pixels) || !path || strncmp(path, "/sdcard/", 8) ||
         area.width <= 0 || area.height <= 0 ||
         area.x < 0 || area.y < 0 ||
@@ -101,8 +102,8 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
     }
     if (!width) width = 1;
     if (!height) height = 1;
-    // 缓冲区最多一屏像素；最终从原比例灰阶图居中裁切到目标区域。
-    // Cap the buffer to one screen and center-crop the aspect-preserved gray image to the target.
+    // 缓冲区最多一屏像素；最终按显示方式裁切铺满或完整缩放到目标区域。
+    // Cap the buffer to one screen, then crop-to-fill or contain it according to the fit mode.
     while (ok && (width > 1216u || height > 1216u ||
                   (uint64_t)width * height > 684u * 1216u)) {
         width = (width * 3u + 3u) / 4u;
@@ -112,18 +113,38 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
     if (!gray) ok = false;
     if (ok) ok = book_image_file_grayscale(path, png, width, height, gray);
     if (!ok) { free(gray); return false; }
-    ui_wallpaper_crop_t center = ui_wallpaper_center_crop(width, height,
-                                                           (unsigned)area.width, (unsigned)area.height);
-    int crop_x = (int)center.x, crop_y = (int)center.y;
-    int crop_w = (int)center.width, crop_h = (int)center.height;
-    if (radius > 0) avatar_content_crop(gray, width, height, area,
-                                        &crop_x, &crop_y, &crop_w, &crop_h);
+    bool fit = mode == UI_WALLPAPER_MODE_FIT && radius <= 0 && ok;
+    int crop_x = 0, crop_y = 0, crop_w = (int)width, crop_h = (int)height;
+    int draw_x = area.x, draw_y = area.y, draw_w = area.width, draw_h = area.height;
+    if (fit) {
+        // 保留图片完整内容，按比例缩到目标区域内，剩余区域用白色填充。
+        // Preserve the whole image, contain it in the target and fill the margins white.
+        if ((uint64_t)width * (unsigned)area.height >= (uint64_t)height * (unsigned)area.width) {
+            draw_h = (int)((uint64_t)height * (unsigned)area.width / width);
+        } else {
+            draw_w = (int)((uint64_t)width * (unsigned)area.height / height);
+        }
+        if (draw_w < 1) draw_w = 1;
+        if (draw_h < 1) draw_h = 1;
+        draw_x = area.x + (area.width - draw_w) / 2;
+        draw_y = area.y + (area.height - draw_h) / 2;
+        if (pixels) memset(pixels, 255, (size_t)area.width * area.height);
+        else for (int y = area.y; y < area.y + area.height; ++y)
+            for (int x = area.x; x < area.x + area.width; ++x) epd_draw_pixel(x, y, 255, fb);
+    } else {
+        ui_wallpaper_crop_t center = ui_wallpaper_center_crop(width, height,
+                                                               (unsigned)area.width, (unsigned)area.height);
+        crop_x = (int)center.x; crop_y = (int)center.y;
+        crop_w = (int)center.width; crop_h = (int)center.height;
+        if (radius > 0) avatar_content_crop(gray, width, height, area,
+                                            &crop_x, &crop_y, &crop_w, &crop_h);
+    }
 
-    for (int y = area.y; y < area.y + area.height; ++y)
-        for (int x = area.x; x < area.x + area.width; ++x) {
+    for (int y = draw_y; y < draw_y + draw_h; ++y)
+        for (int x = draw_x; x < draw_x + draw_w; ++x) {
             if (!pixels && !inside_rounded(area, radius, x, y)) continue;
-            int source_x = crop_x + (int)((int64_t)(x - area.x) * crop_w / area.width);
-            int source_y = crop_y + (int)((int64_t)(y - area.y) * crop_h / area.height);
+            int source_x = crop_x + (int)((int64_t)(x - draw_x) * crop_w / draw_w);
+            int source_y = crop_y + (int)((int64_t)(y - draw_y) * crop_h / draw_h);
             uint8_t value = gray[(size_t)source_y * width + source_x];
             if (pixels) pixels[(size_t)(y-area.y)*area.width + x-area.x] = value;
             else epd_draw_pixel(x,y,ui_image_dither_gray(value,x,y),fb);
@@ -133,12 +154,16 @@ static bool image_pixels(uint8_t *fb, uint8_t *pixels, const char *path, EpdRect
 }
 
 bool ui_wallpaper_draw(uint8_t *fb, const char *path, EpdRect area) {
-    return image_pixels(fb, NULL, path, area, 0);
+    return ui_wallpaper_draw_mode(fb, path, area, UI_WALLPAPER_MODE_CROP);
+}
+
+bool ui_wallpaper_draw_mode(uint8_t *fb, const char *path, EpdRect area, ui_wallpaper_mode_t mode) {
+    return image_pixels(fb, NULL, path, area, 0, mode);
 }
 
 bool ui_wallpaper_draw_rounded(uint8_t *fb, const char *path, EpdRect area, int radius) {
     if (radius < 0 || radius > area.width / 2 || radius > area.height / 2) return false;
-    return image_pixels(fb, NULL, path, area, radius);
+    return image_pixels(fb, NULL, path, area, radius, UI_WALLPAPER_MODE_CROP);
 }
 
 void ui_wallpaper_draw_avatar(uint8_t *fb, const uint8_t *pixels, EpdRect area, int radius) {
@@ -155,7 +180,8 @@ void ui_wallpaper_draw_avatar(uint8_t *fb, const uint8_t *pixels, EpdRect area, 
 #define WALL_LOCK_CACHE UI_WALLPAPER_CACHE_PARENT "/locks/wallpaper.bin"
 #define WALL_LOCK_BYTES (684u*1216u/2u)
 #define WALL_LOCK_MAGIC UINT32_C(0x574c4b31)
-#define WALL_LOCK_VERSION 1u
+#define WALL_LOCK_VERSION 2u
+bool ui_wallpaper_prepare_lock_mode(uint8_t *fb,const char *path,ui_wallpaper_mode_t mode);
 // 只缓存最终16级抖动画布到卡；借用锁屏画布，不常驻第二份整帧。
 // Persist final 16-level dithered art on SD, borrowing the lock canvas instead of retaining another frame.
 typedef struct {
@@ -169,19 +195,23 @@ static uint64_t wallpaper_hash(uint64_t h,const void *data,size_t size) {
     while (size--) h=(h^*p++)*UINT64_C(1099511628211);
     return h;
 }
-static uint64_t wallpaper_key(const char *path,const struct stat *st) {
+static uint64_t wallpaper_key(const char *path,const struct stat *st,ui_wallpaper_mode_t mode) {
     uint64_t h=wallpaper_hash(UINT64_C(14695981039346656037),path,strlen(path)+1);
     int64_t size=st->st_size,modified=st->st_mtime;
     h=wallpaper_hash(h,&size,sizeof(size));
-    return wallpaper_hash(h,&modified,sizeof(modified));
+    h=wallpaper_hash(h,&modified,sizeof(modified));
+    return wallpaper_hash(h,&mode,sizeof(mode));
 }
 bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path) {
+    return ui_wallpaper_prepare_lock_mode(fb, path, UI_WALLPAPER_MODE_CROP);
+}
+bool ui_wallpaper_prepare_lock_mode(uint8_t *fb,const char *path,ui_wallpaper_mode_t mode) {
     s_wall_pending_fb=NULL;
     struct stat st;
     if (!fb || !path || strncmp(path,"/sdcard/",8) || stat(path,&st) || !S_ISREG(st.st_mode) || st.st_size<=0) return false;
     wallpaper_cache_t wanted={.magic=WALL_LOCK_MAGIC,.version=WALL_LOCK_VERSION,
         .width=UI_LOCK_WIDTH,.height=UI_LOCK_HEIGHT,.rotation=epd_get_rotation(),
-        .bytes=WALL_LOCK_BYTES,.key=wallpaper_key(path,&st)};
+        .bytes=WALL_LOCK_BYTES,.key=wallpaper_key(path,&st,mode)};
     FILE *file=fopen(WALL_LOCK_CACHE,"rb");
     if (file) {
         wallpaper_cache_t h;
@@ -192,7 +222,7 @@ bool ui_wallpaper_prepare_lock(uint8_t *fb,const char *path) {
         fclose(file);
         if (good) return true;
     }
-    if (!ui_wallpaper_draw(fb,path,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})) return false;
+    if (!ui_wallpaper_draw_mode(fb,path,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},mode)) return false;
     struct stat after;
     if (!stat(path,&after) && after.st_size==st.st_size && after.st_mtime==st.st_mtime) {
         s_wall_pending=wanted; s_wall_pending_fb=fb;
@@ -226,7 +256,7 @@ static bool avatar_cache_header(const char *path,int side,wallpaper_cache_t *hea
     if(!path||strncmp(path,"/sdcard/",8)||side<1||side>128||!ext||
        (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg"))||
        stat(path,&st)||!S_ISREG(st.st_mode)||st.st_size<=0||(uint64_t)st.st_size>BOOK_IMAGE_FILE_MAX)return false;
-    *header=(wallpaper_cache_t){.magic=AVATAR_CACHE_MAGIC,.version=1,.width=side,.height=side,.bytes=(uint32_t)side*side,.key=wallpaper_key(path,&st)};
+    *header=(wallpaper_cache_t){.magic=AVATAR_CACHE_MAGIC,.version=1,.width=side,.height=side,.bytes=(uint32_t)side*side,.key=wallpaper_key(path,&st,UI_WALLPAPER_MODE_CROP)};
     snprintf(cache_path,160,UI_WALLPAPER_CACHE_PARENT "/avatars/avatar-%d.bin",side);
     return true;
 }
@@ -244,7 +274,7 @@ bool ui_wallpaper_prepare_avatar(const char *path,uint8_t *pixels,int side) {
     wallpaper_cache_t h,after;char cache_path[160],after_path[160];
     if(!pixels||!avatar_cache_header(path,side,&h,cache_path))return false;
     if(ui_wallpaper_avatar_cached(path,pixels,side))return true;
-    if(!image_pixels(NULL,pixels,path,(EpdRect){0,0,side,side},1))return false;
+    if(!image_pixels(NULL,pixels,path,(EpdRect){0,0,side,side},1,UI_WALLPAPER_MODE_CROP))return false;
     // 文件在解码期间变化或卡不可写时直接使用当前像素，不存过期/半写的文件。
     // Use decoded pixels without saving stale or partial files if the source changes or storage is unwritable.
     if(!avatar_cache_header(path,side,&after,after_path)||after.key!=h.key||

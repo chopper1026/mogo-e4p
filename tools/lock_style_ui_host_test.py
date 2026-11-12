@@ -48,12 +48,16 @@ static void fixture_frame(uint8_t *fb,const char *name,int gray){
 static int app_settings_ticket_background(void){return ticket_choice;}
 static int app_settings_calendar_style(void){return calendar_choice;}
 static uint8_t app_settings_lock_style(void){return selected_style;}
+static unsigned wallpaper_mode;
+typedef int app_wallpaper_mode_t;
 static const char *app_settings_wallpaper_path(void){return wallpaper;}
+static int app_settings_wallpaper_mode(void){return (int)wallpaper_mode;}
+static bool app_settings_set_wallpaper_mode(int mode){if(mode>1||failed_save)return false;wallpaper_mode=(unsigned)mode;return true;}
 static const char *app_settings_bookmark_path(void){return bookmark;}
 static bool app_settings_select_lock(uint8_t style,const char *path,unsigned option){
  ++writes;if(failed_save)return false;selected_style=style;
  if(style==0)ticket_choice=option;if(style==4)calendar_choice=option;
- if(style==1)snprintf(wallpaper,sizeof(wallpaper),"%s",path);
+ if(style==1){snprintf(wallpaper,sizeof(wallpaper),"%s",path);wallpaper_mode=option;}
  if(style==3)snprintf(bookmark,sizeof(bookmark),"%s",path);
  return true;
 }
@@ -135,7 +139,9 @@ int main(int argc,char **argv){
   assert(tap(352,762)&&selected_style==4&&calendar_choice==1);
   failed_save=true;assert(tap(36,762)&&calendar_choice==1&&strstr(s_notice,"保存失败"));failed_save=false;
   assert(tap(246,202)&&s_tab==1);assert(tap(352,762)&&selected_style==0&&ticket_choice==1);
-  assert(tap(36,202)&&s_tab==0);assert(tap(36,758)&&selected_style==1);
+  assert(tap(36,202)&&s_tab==0);assert(tap(528,110)&&wallpaper_mode==1);
+  failed_save=true;assert(tap(398,110)&&wallpaper_mode==1&&strstr(s_notice,"保存失败"));failed_save=false;
+  assert(tap(398,110)&&wallpaper_mode==0);assert(tap(36,758)&&selected_style==1);
   before=writes;assert(hold(36,758)&&s_preview==0&&writes==before);ui_lock_style_render(fb);
   assert(ui_lock_style_back()&&page()==0&&writes==before);
   assert(tap(584,683)&&page()==1);assert(tap(452,683)&&page()==0);assert(!tap(452,683));

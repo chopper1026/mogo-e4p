@@ -87,6 +87,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_TICKET_BACKGROUND "ticket_bg"
 #define NVS_KEY_LOCK_FACE "lock_face"
 #define NVS_KEY_WALLPAPER "wallpaper"
+#define NVS_KEY_WALLPAPER_MODE "wall_mode"
 #define NVS_KEY_BOOKMARK "lock_png"
 #define NVS_KEY_WAKE "lwake"
 #define NVS_KEY_BOOT "lboot"
@@ -185,6 +186,7 @@ static uint8_t s_lock_style;
 static app_calendar_style_t s_calendar_style = APP_CALENDAR_ALMANAC;
 static app_ticket_background_t s_ticket_background = APP_TICKET_BACKGROUND_TRANSPARENT;
 static char s_wallpaper[288];
+static app_wallpaper_mode_t s_wallpaper_mode = APP_WALLPAPER_MODE_CROP;
 static char s_bookmark[288];
 static uint8_t s_last_wake;
 static uint8_t s_last_boot;
@@ -450,6 +452,10 @@ void app_settings_init(void) {
     size_t wallpaper_len = sizeof(s_wallpaper);
     if (nvs_get_str(h, NVS_KEY_WALLPAPER, s_wallpaper, &wallpaper_len) != ESP_OK ||
         strncmp(s_wallpaper, "/sdcard/", 8)) s_wallpaper[0] = 0;
+    uint8_t wallpaper_mode = APP_WALLPAPER_MODE_CROP;
+    s_wallpaper_mode = nvs_get_u8(h, NVS_KEY_WALLPAPER_MODE, &wallpaper_mode) == ESP_OK &&
+                       wallpaper_mode <= APP_WALLPAPER_MODE_FIT
+        ? (app_wallpaper_mode_t)wallpaper_mode : APP_WALLPAPER_MODE_CROP;
     size_t bookmark_len = sizeof(s_bookmark);
     if (nvs_get_str(h,NVS_KEY_BOOKMARK,s_bookmark,&bookmark_len)!=ESP_OK || strncmp(s_bookmark,"/sdcard/",8)) s_bookmark[0]=0;
     uint8_t wake = 0;
@@ -924,22 +930,38 @@ void app_settings_set_wallpaper_path(const char* path) {
     settings_write_close(h);
     if(err==ESP_OK)strlcpy(s_wallpaper,path,sizeof(s_wallpaper));
 }
+app_wallpaper_mode_t app_settings_wallpaper_mode(void) { return s_wallpaper_mode; }
+bool app_settings_set_wallpaper_mode(app_wallpaper_mode_t mode) {
+    if (mode != APP_WALLPAPER_MODE_CROP && mode != APP_WALLPAPER_MODE_FIT) return false;
+    if (mode == s_wallpaper_mode) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_WALLPAPER_MODE, (uint8_t)mode);
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err != ESP_OK) return false;
+    s_wallpaper_mode = mode;
+    return true;
+}
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
-    if(style>APP_LOCK_STYLE_CLOCK||option>1)return false;
+    if(style>APP_LOCK_STYLE_CLOCK || (style == 1 ? option > APP_WALLPAPER_MODE_FIT : option > 1)) return false;
     if(style==1||style==3){
         const char *ext=image?strrchr(image,'.'):NULL;
         if(!image||strncmp(image,"/sdcard/",8)||strnlen(image,sizeof(s_wallpaper))>=sizeof(s_wallpaper)||!ext||
            (strcasecmp(ext,".png")&&(style==3||(strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))))return false;
     }
     unsigned calendar=style==4?option:(unsigned)s_calendar_style;
+    unsigned wallpaper_mode=style==1?option:(unsigned)s_wallpaper_mode;
     bool same=style==s_lock_style && (style!=0||option==(unsigned)s_ticket_background) &&
         (style!=4||option==(unsigned)s_calendar_style) && (style!=1||!strcmp(image,s_wallpaper)) &&
+        (style!=1||wallpaper_mode==(unsigned)s_wallpaper_mode) &&
         (style!=3||!strcmp(image,s_bookmark));
     if(same)return true;
     nvs_handle_t h;
     if(settings_write_open(&h)!=ESP_OK)return false;
     esp_err_t err=ESP_OK;
     if(style==1||style==3)err=nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,image);
+    if(err==ESP_OK&&style==1)err=nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)wallpaper_mode);
     if(style==0)err=nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,option);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,style*2+calendar);
     if(err==ESP_OK)err=nvs_commit(h);
@@ -947,6 +969,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
         // NVS逐项立即写入；后续字段失败时尽力恢复已写副项，运行态始终保持旧值。
         // NVS writes items immediately; restore secondary fields on a later failure and retain live state.
         if(style==1||style==3)(void)nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,style==1?s_wallpaper:s_bookmark);
+        if(style==1)(void)nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)s_wallpaper_mode);
         if(style==0)(void)nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,s_ticket_background);
         (void)nvs_set_u8(h,NVS_KEY_LOCK_FACE,s_lock_style*2+s_calendar_style);
         (void)nvs_commit(h);
@@ -955,7 +978,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     if(err!=ESP_OK)return false;
     s_lock_style=style;s_calendar_style=(app_calendar_style_t)calendar;
     if(style==0)s_ticket_background=(app_ticket_background_t)option;
-    if(style==1)strlcpy(s_wallpaper,image,sizeof(s_wallpaper));
+    if(style==1){strlcpy(s_wallpaper,image,sizeof(s_wallpaper));s_wallpaper_mode=(app_wallpaper_mode_t)wallpaper_mode;}
     if(style==3)strlcpy(s_bookmark,image,sizeof(s_bookmark));
     return true;
 }
@@ -1956,14 +1979,16 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(profile.device_name, s_device_name, sizeof(profile.device_name));
     strlcpy(profile.avatar, s_avatar, sizeof(profile.avatar));
     strlcpy(profile.status_signature, s_status_signature, sizeof(profile.status_signature));
-    // v5 及之后复用此字段的预留位；v7 在其后追加 WiFi 与阅读资料。
-    // V5+ use reserved bits here; v7 appends WiFi/reading records, and v9 stores main mode in the extension.
+    // v5 及之后复用此字段的预留位；bit6 记录壁纸显示方式，旧固件会忽略它。
+    // V5+ reuse reserved bits here; bit 6 stores wallpaper fit and older firmware ignores it.
     profile.home_full_refresh = (s_home_full_refresh ? 1 : 0) |
                                 (s_reader_hide_images ? 2 : 0) |
                                 (s_shelf_recent_sort ? 4 : 0) |
                                 (s_ble_turner ? 8 : 0) |
                                 (s_reader_hold_refresh ? 16 : 0) |
                                 (s_reader_vertical_turn ? 32 : 0) |
+                                // v41 profile bit6 stores wallpaper fit; it was unused in older backups.
+                                (s_wallpaper_mode == APP_WALLPAPER_MODE_FIT ? 64 : 0) |
                                 (app_settings_main_fast_refresh() ? 128 : 0);
     uint32_t profile_hash = backup_profile_checksum(&backup, extension[0], extension[1], extension[2], &profile);
     for (int i = 0; i < 4; ++i) profile.checksum[i] = (uint8_t)(profile_hash >> (i * 8));
@@ -2257,7 +2282,7 @@ esp_err_t app_settings_backup_restore(void) {
                      strnlen(profile.device_name, sizeof(profile.device_name)) < sizeof(profile.device_name) &&
                      profile.device_name[0] &&
                      strnlen(profile.status_signature, sizeof(profile.status_signature)) < sizeof(profile.status_signature) &&
-                     // 位6仍忽略旧实验模式；v9 在校验扩展内保存主页刷新模式，快刷值回落普通。/ Bit 6 still ignores the retired experiment; v9 stores the main mode in its checked extension, with fast values falling back to ordinary.
+                     // 位6由当前版本保存壁纸显示方式；旧版本会忽略，v9 在校验扩展内保存主页刷新模式。/ Bit 6 stores wallpaper fit for this version; older versions ignore it, while v9 stores main mode in its checked extension.
                      backup_path_valid(profile.avatar, sizeof(profile.avatar));
             }
         }
@@ -2417,6 +2442,11 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
+    // v41 才定义 profile bit6 为壁纸显示方式；更早版本的同一位属于已撤下实验，必须回落裁剪。
+    // v41 defines profile bit 6 as wallpaper fit; earlier backups used it for a retired experiment and must crop.
+    app_wallpaper_mode_t restored_wallpaper_mode = version >= 41 && (profile.home_full_refresh & 64)
+        ? APP_WALLPAPER_MODE_FIT : APP_WALLPAPER_MODE_CROP;
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_WALLPAPER_MODE, restored_wallpaper_mode);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
@@ -2510,6 +2540,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_vertical_turn = s_reader_tap_mode == APP_READER_TAP_VERTICAL;
     memcpy(s_reader_tap_actions, tap.actions, sizeof(s_reader_tap_actions));
     s_home_full_refresh = (profile.home_full_refresh & 1) != 0;
+    s_wallpaper_mode = restored_wallpaper_mode;
     s_main_refresh = main_refresh;
     s_reader_hide_images = (profile.home_full_refresh & 2) != 0;
     s_shelf_recent_sort = (profile.home_full_refresh & 4) != 0;

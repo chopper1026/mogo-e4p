@@ -120,7 +120,9 @@ void app_lock_feedback(EpdiyHighlevelState *hl) {
 static bool draw_wallpaper(uint8_t *framebuffer) {
     const char *path = app_settings_wallpaper_path();
     return app_settings_lock_style() == 1 &&
-        ui_wallpaper_prepare_lock(framebuffer,path);
+        ui_wallpaper_prepare_lock_mode(framebuffer,path,
+            app_settings_wallpaper_mode() == APP_WALLPAPER_MODE_FIT
+                ? UI_WALLPAPER_MODE_FIT : UI_WALLPAPER_MODE_CROP);
 }
 
 static cst836u_handle_t s_tp;
