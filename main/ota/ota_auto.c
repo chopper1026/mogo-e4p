@@ -6,7 +6,11 @@
 #include "ota_online.h"
 #include "settings.h"
 #include "device_power.h"
+#ifdef ESP_PLATFORM
+#include "network_service.h"
+#else
 #include "wifi_transfer.h"
+#endif
 #include "esp_timer.h"
 #include "nvs.h"
 #include <time.h>
@@ -82,6 +86,7 @@ void pico_ota_auto_poll(bool idle) {
         if (s_last_attempt > (uint64_t)now) { save_attempt((uint64_t)now); return; }
         if (s_last_attempt && (uint64_t)now - s_last_attempt < AUTO_INTERVAL_S) return;
     }
+#ifndef ESP_PLATFORM
     wifi_transfer_status_t network;
     wifi_transfer_get_status(&network);
     bool online = network.mode == WIFI_TRANSFER_MODE_STA && network.network_ready &&
@@ -91,6 +96,7 @@ void pico_ota_auto_poll(bool idle) {
         char ssid[33]; bool saved = false;
         if (wifi_transfer_get_saved_wifi(ssid, &saved) != ESP_OK || !saved) return;
     }
+#endif
     const pmu_snapshot_t *pmu = device_power_get();
     int percent = pmu_battery_percent(pmu);
     if (percent >= 0 && percent < 10 && !pmu_battery_charging(pmu)) return;

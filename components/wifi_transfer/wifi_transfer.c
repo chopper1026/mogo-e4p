@@ -539,6 +539,10 @@ void wifi_transfer_get_status(wifi_transfer_status_t *out) {
     portENTER_CRITICAL(&s_lock); *out = s_status; portEXIT_CRITICAL(&s_lock);
 }
 
+void *wifi_transfer_netif(void) {
+    return (void *)s_netif;
+}
+
 static bool claim_config(void) {
     portENTER_CRITICAL(&s_lock);
     bool available = !s_config_busy;

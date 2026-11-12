@@ -94,7 +94,7 @@ int main(void) {
         app_lifecycle_light_t handoff = app_lifecycle_prepare_light();
         assert(handoff.jobs_ready == (cover_ok && avatar_ok));
         assert(handoff.ble_stopped == (cover_ok && avatar_ok && ble_error == ESP_OK));
-        if (!cover_ok) expect("GC"); else if (!avatar_ok) expect("GCA"); else expect("GCAL");
+        if (!cover_ok) expect("GC"); else if (!avatar_ok) expect("GCA"); else expect("GCAWL");
     }
     reset();images_ok=false;assert(!app_lifecycle_prepare_poweroff());expect("UTOG");
     reset();images_ok=false;assert(!app_lifecycle_prepare_light().jobs_ready);expect("G");

@@ -39,7 +39,7 @@ def fixtures():
             raw.extend(row)
         assert start == end
     # These digests pin the original artwork, independent of the new encoders/decoders.
-    assert hashlib.sha256(raw).hexdigest() == '3c2db9a17f6d543a24c9c12523a8d1edb9f70ee5e37cfdec0e19e6c1cda9c93b'
+    assert hashlib.sha256(raw).hexdigest() == '21747b01c3fbf7c8fee06c518d856e7cc6495031fa760f7f80dd3d904141f547'
     result = array('reference_icons', 'uint8_t', raw)
     digits = ROOT / 'main/assets/calendar_digits.h'
     widths, offsets, data = [values(digits, n) for n in (
@@ -200,7 +200,7 @@ int main(void){
     for(unsigned n=0;n<20;++n)for(unsigned i=0;i<41923;++i)sum+=old_lookup(reference_codepoints[i]);
     double old_seconds=(double)(clock()-start)/CLOCKS_PER_SEC;start=clock();
     for(unsigned n=0;n<20;++n)for(unsigned i=0;i<41923;++i)sum+=lookup(reference_codepoints[i]);
-    printf("PASS: 50 icons across scales/rotations/backgrounds/clipping; 100 numbers; malformed rows; all Unicode mappings; ASan/UBSan\n");
+    printf("PASS: %u icons across scales/rotations/backgrounds/clipping; 100 numbers; malformed rows; all Unicode mappings; ASan/UBSan\n", (unsigned)UI_ICON_COUNT);
     printf("Host lookup benchmark (not S31): original %.4fs, compact %.4fs, checksum %u\n",old_seconds,(double)(clock()-start)/CLOCKS_PER_SEC,sum);
 }
 '''

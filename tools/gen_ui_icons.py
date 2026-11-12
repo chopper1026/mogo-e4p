@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 mindreset
 # SPDX-License-Identifier: Apache-2.0
-"""从 vendor 的 Lucide SVG 生成固件图标掩模。
+"""从 SVG 源文件生成固件图标掩模。
 
 中文：界面图标统一经此生成器输出。tools/icons/lucide/*.svg 是 Lucide 原图（ISC），
 本脚本把它们的描边光栅化成 4bpp alpha 掩模，输出 main/assets/ui_icons.h。
+tools/icons/mogo/ 保存按用户参考重新绘制的项目图标，同样通过此管线生成。
 不依赖 cairosvg / svglib：路径解析、圆弧转三次贝塞尔、超采样描边都在这里实现，
 所以任何机器上跑出来的字节完全一致。
 
@@ -13,6 +14,7 @@ are upstream Lucide artworks (ISC); this script strokes and rasterizes them into
 4bpp alpha masks for main/assets/ui_icons.h. No cairosvg or svglib dependency:
 path parsing, arc-to-cubic conversion and supersampled stroking all live here, so
 the output bytes are identical on every machine.
+Original project icons in tools/icons/mogo/ use the same pipeline.
 
 冻结：不要手改 main/assets/ui_icons.h。加图标只改下面的 ICONS 清单并重跑。
 Frozen: never hand-edit main/assets/ui_icons.h. Add an icon by extending ICONS and
@@ -29,8 +31,11 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "tools/icons/lucide"
 ANIMATE_DIR = ROOT / "tools/icons/animateicons"
+MOGO_DIR = ROOT / "tools/icons/mogo"
 
 def icon_source(name: str) -> Path:
+    if name.startswith("mogo-"):
+        return MOGO_DIR / f"{name}.svg"
     return (ANIMATE_DIR if name.startswith(("pager-", "animate-")) else SOURCE_DIR) / f"{name}.svg"
 HEADER = ROOT / "main/assets/ui_icons.h"
 PREVIEW = ROOT / "docs/local/ui-icons-preview.png"
@@ -102,6 +107,7 @@ ICONS = (
     "folder-input",      # 移入分类 / move into category
     "search",            # 书架搜索 / shelf search
     "undo-2",            # 撤销归类 / undo classification
+    "mogo-cellular-signal", # 移动网络·四根圆角信号柱 / cellular, four rounded bars
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")
@@ -488,7 +494,7 @@ def parse_svg(text: str) -> tuple[float, list[tuple[str, dict[str, str]]]]:
 # ---------------------------------------------------------------- 光栅化 / Rasterizing
 
 def render_icon(name: str) -> Image.Image:
-    """把一个 Lucide 图标描边光栅化成 MASK_SIZE 见方的 8 位 alpha 图。"""
+    """把 SVG 图标描边光栅化成 MASK_SIZE 见方的 8 位 alpha 图。"""
     text = icon_source(name).read_text(encoding="utf-8")
     stroke_width, elements = parse_svg(text)
 
@@ -554,8 +560,12 @@ def emit_header(masks: dict[str, list[int]]) -> None:
         " * and 15 = solid, high nibble first, compressed independently per row.",
         " * RLE: low 7 bits + 1 bytes; high bit repeats the next byte, otherwise literal bytes.",
         " *",
-        " * 冻结：图标来自 Lucide（ISC）与 AnimateIcons（MIT/ISC），署名见 THIRD_PARTY_NOTICES.md。",
-        " * Frozen: icons come from Lucide (ISC) and AnimateIcons (MIT/ISC); see THIRD_PARTY_NOTICES.md.",
+        " * 用户修订：移动网络采用四柱圆角信号，项目 SVG 与上游图标共用生成管线。",
+        " * User revision: use an original four-bar cellular SVG in the shared generation pipeline.",
+        " * 冻结：上游图标来自 Lucide（ISC）与 AnimateIcons（MIT/ISC），署名见 THIRD_PARTY_NOTICES.md；",
+        " * tools/icons/mogo/ 为项目原创图标。",
+        " * Frozen: upstream icons come from Lucide (ISC) and AnimateIcons (MIT/ISC), see THIRD_PARTY_NOTICES.md;",
+        " * tools/icons/mogo/ contains original project icons.",
         " */",
         "#pragma once",
         "#include <stdint.h>",
@@ -567,7 +577,7 @@ def emit_header(masks: dict[str, list[int]]) -> None:
         "typedef enum {",
     ]
     for name in masks:
-        origin = "animateicons" if name.startswith(("pager-", "animate-")) else "lucide"
+        origin = icon_source(name).parent.name
         lines.append(f"    UI_ICON_{name.replace('-', '_').upper()},  // {origin}/{name}")
     lines += [
         "    UI_ICON_COUNT,",

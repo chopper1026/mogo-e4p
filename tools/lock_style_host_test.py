@@ -46,6 +46,8 @@ static uint8_t pixels[FRAME_BYTES],panel[FRAME_BYTES],style,current_background=0
 static bool frame_ready, s_lock_feedback_visible, feedback_seen, final_ok=true;
 static unsigned full_presents, entry_clears;
 static unsigned draws[6],fallback,presents,auths,font_begin,font_end,pause,resume,clear_resume;
+static unsigned cellular_pause,cellular_resume;
+static bool cellular_ok=true;
 static bool pin,draw_ok=true,transfer_ok=true,reader,boot_cache,cache_ok,deep_fail;
 static bool key_sampling=true;
 static unsigned key_consumes;
@@ -96,7 +98,9 @@ static enum EpdDrawError epd_hl_update_screen_from_white(void *h,int mode,int te
 static void app_font_begin_lock(app_lock_font_t *s){assert(panel[0]==(feedback_seen?0xff:current_background));s->active=true;++font_begin;}
 static void app_font_end_lock(app_lock_font_t *s){assert(s->active);++font_end;}
 static bool wifi_transfer_pause_for_sleep(void){++pause;return transfer_ok;}
-static void wifi_transfer_resume_after_sleep(void){++resume;}
+static bool cellular_service_pause_for_sleep(void){assert(pause==1&&!resume&&!presents);++cellular_pause;return cellular_ok;}
+static void cellular_service_resume_after_sleep(void){assert(cellular_pause==1&&!resume);++cellular_resume;}
+static void wifi_transfer_resume_after_sleep(void){assert(cellular_pause==1&&cellular_resume==(cellular_ok?1u:0u));++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
 static app_wake_source_t app_light_sleep_wait(void *acc){(void)acc;assert(!key_sampling);return APP_WAKE_KEY;}
@@ -122,7 +126,7 @@ unit += function('app_lifecycle_pause_for_lock', ROOT/'main/app/app_lifecycle.c'
 for name in ('draw_wallpaper', 'enter_lock_and_sleep', 'app_lock_boot_gate'):
     unit += function(name, ROOT/'main/power/sleep.c') + '\n'
 unit += r'''
-static void reset(void){key_sampling=true;key_consumes=0;current_background=0x32;bookmark_mode=APP_BOOKMARK_MODE_FIT;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;reader=boot_cache=cache_ok=false;}
+static void reset(void){key_sampling=true;key_consumes=0;current_background=0x32;bookmark_mode=APP_BOOKMARK_MODE_FIT;memset(draws,0,sizeof(draws));fallback=presents=auths=font_begin=font_end=pause=resume=clear_resume=0;cellular_pause=cellular_resume=0;cellular_ok=true;memset(pixels,0x32,FRAME_BYTES);memset(panel,0x32,FRAME_BYTES);frame_ready=s_lock_feedback_visible=feedback_seen=false;full_presents=entry_clears=0;final_ok=true;draw_ok=transfer_ok=true;deep_fail=false;reader=boot_cache=cache_ok=false;}
 int main(void){
  EpdiyHighlevelState hl={0};int64_t ignore=0;
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.
@@ -134,6 +138,7 @@ int main(void){
   // Transparent tickets and covers use differential full GC16 without epd_clear; other styles keep the clear.
   assert(entry_clears==(overlay()?0u:1u));
   assert(auths==password&&pause==1&&resume==1&&clear_resume==1&&ignore==4000);
+  assert(cellular_pause==1&&cellular_resume==1);
   assert(key_sampling&&key_consumes==1);
   assert(font_begin==(s==0||s==2||s==4||s==5||password)&&font_end==font_begin&&app_settings_lock_style()==s);
  }
@@ -149,6 +154,10 @@ int main(void){
  ticket_background=0;
  reset();transfer_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(!presents&&!auths&&!font_begin&&clear_resume==1&&!resume);
  assert(key_sampling&&!key_consumes);
+ assert(!cellular_pause&&!cellular_resume);
+ reset();cellular_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);
+ assert(pause==1&&cellular_pause==1&&resume==1&&!cellular_resume);
+ assert(!presents&&!auths&&!font_begin&&!entry_clears&&clear_resume==1&&key_sampling&&!key_consumes);
  reset();key_sampling=false;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,true);assert(!key_sampling&&key_consumes==1&&ignore==4000);
  // 彻底关机：锁屏出图后立即断电交接，保留已选择的实际画面，不重绘拼贴。
  // Full off: the immediate power-down handoff after the lock art retains the selected art without redrawing a collage.

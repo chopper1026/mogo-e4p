@@ -54,16 +54,29 @@ static bool sd_ready(void) {
     return info.present && info.mounted;
 }
 
+static esp_err_t mount_flash(bool format_if_failed) {
+    const esp_vfs_fat_mount_config_t config = {
+        .format_if_mount_failed = format_if_failed,
+        .max_files = 4,
+        .allocation_unit_size = 4096,
+    };
+    wl_handle_t handle = WL_INVALID_HANDLE;
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &handle);
+    if (err == ESP_OK) {
+        s_wl = handle;
+    } else if (handle != WL_INVALID_HANDLE) {
+        // IDF 6.1 can acquire WL before a failed FAT mount; release that partial mount.
+        // IDF 6.1 在 FAT 挂载失败时可能仍持有 WL；释放这部分已取得的资源。
+        esp_err_t cleanup = wl_unmount(handle);
+        if (cleanup != ESP_OK) ESP_LOGW(TAG, "failed mount cleanup: %s", esp_err_to_name(cleanup));
+    }
+    return err;
+}
+
 static esp_err_t flash_root(book_store_root_t* out) {
     if (!book_store_flash_ready()) {
-        const esp_vfs_fat_mount_config_t config = {
-            .format_if_mount_failed = true,
-            .max_files = 4,
-            .allocation_unit_size = 4096,
-        };
-        esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
+        esp_err_t err = mount_flash(true);
         if (err != ESP_OK) {
-            s_wl = WL_INVALID_HANDLE;
             ESP_LOGW(TAG, "flash mount: %s", esp_err_to_name(err));
             return err;
         }
@@ -136,12 +149,7 @@ bool book_store_flash_ready(void) {
 
 esp_err_t book_store_prepare_data(void) {
     if (book_store_flash_ready()) return ESP_OK;
-    const esp_vfs_fat_mount_config_t config = {
-        .format_if_mount_failed = false, .max_files = 4, .allocation_unit_size = 4096,
-    };
-    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
-    if (err != ESP_OK) s_wl = WL_INVALID_HANDLE;
-    return err;
+    return mount_flash(false);
 }
 
 esp_err_t book_store_delete(const char* path, bool* removed) {

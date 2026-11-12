@@ -23,6 +23,7 @@
 #include "device_power.h"
 #include "pmu_protocol.h"
 #include "wifi_transfer.h"
+#include "network_service.h"
 #include "ui_kit.h"
 #include "settings.h"
 #include "ui_click_feedback.h"
@@ -227,9 +228,10 @@ void ui_nav_status(uint8_t *fb) {
     // 固定状态栏字号，让系统字体缩放时文字仍与图标共用中心线。
     // Keep status type fixed so text and glyphs share one centerline at every system font scale.
     ui_text_fixed_vc(fb, 36, status_center_y, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_LEFT, false);
-    wifi_transfer_status_t network = {0};
-    wifi_transfer_get_status(&network);
-    const bool wifi_visible = network.network_ready && network.mode == WIFI_TRANSFER_MODE_STA;
+    network_status_t bearer = {0};
+    network_service_get_status(&bearer);
+    const bool wifi_visible = bearer.wifi_ready;
+    const bool cellular_visible = bearer.cellular_ready;
     const bool bluetooth_visible = app_settings_ble_turner();
     char percent[8] = "--%";
     int gauge_percent = pmu_battery_percent(pmu);
@@ -239,14 +241,15 @@ void ui_nav_status(uint8_t *fb) {
     const int percent_left = width - 89 - status_number_width(percent);
     const int network_right = percent_left - 10;
     const int wifi_center = network_right - UI_NAV_NETWORK_ICON_PX / 2;
-    const int bluetooth_center = wifi_center - (wifi_visible ? UI_NAV_NETWORK_ICON_PX + 8 : 0);
+    const int cellular_center = wifi_center - (wifi_visible ? UI_NAV_NETWORK_ICON_PX + 8 : 0);
+    const int bluetooth_center = cellular_center - (cellular_visible ? UI_NAV_NETWORK_ICON_PX + 8 : 0);
     int signature_width = 280;
     const int clock_right = 36 + status_number_width(clock);
     int available = 2 * (width / 2 - clock_right - 12);
     if (available < signature_width) signature_width = available > 0 ? available : 0;
     int group_left = percent_left;
-    if (wifi_visible || bluetooth_visible) {
-        group_left = (bluetooth_visible ? bluetooth_center : wifi_center) - UI_NAV_NETWORK_ICON_PX / 2;
+    if (wifi_visible || cellular_visible || bluetooth_visible) {
+        group_left = (bluetooth_visible ? bluetooth_center : cellular_visible ? cellular_center : wifi_center) - UI_NAV_NETWORK_ICON_PX / 2;
     }
     available = 2 * (group_left - 12 - width / 2);
     if (available < signature_width) signature_width = available > 0 ? available : 0;
@@ -256,6 +259,9 @@ void ui_nav_status(uint8_t *fb) {
     if (signature[0]) ui_text_fixed_vc(fb, width / 2, status_center_y, UI_STATUS_SIGNATURE_PX,
                                       signature, EPD_DRAW_ALIGN_CENTER, false);
     if (wifi_visible) ui_nav_wifi_icon(fb, wifi_center, status_center_y, UI_NAV_NETWORK_ICON_PX, UI_GRAY_BLACK);
+    if (cellular_visible)
+        ui_draw_icon(fb, cellular_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
+                     UI_ICON_MOGO_CELLULAR_SIGNAL, UI_GRAY_BLACK);
     if (bluetooth_visible)
         ui_draw_icon(fb, bluetooth_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
                      UI_ICON_BLUETOOTH, UI_GRAY_BLACK);

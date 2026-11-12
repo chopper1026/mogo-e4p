@@ -9,8 +9,9 @@
 #include "ui_kit.h"
 #include "ui_menu.h"
 
-// 滑杆命中编号位于最多六枚圆键之后。/ Slider hit ids follow the maximum of six circle keys.
-enum { HIT_BRIGHTNESS = 6, HIT_CCT = 7 };
+// 滑杆命中编号紧跟当前能力决定的圆键数量。/ Slider hit ids follow the capability-derived circle count.
+static int brightness_hit(const ui_quick_menu_t *menu) { return ui_quick_menu_button_count(menu); }
+static int cct_hit(const ui_quick_menu_t *menu) { return brightness_hit(menu) + 1; }
 
 // 层高随开灯或临时展开伸缩：熄灯且未下拉展开时胶囊收起，只剩圆钮区，与绘图侧
 // ui_quick_menu_rect 一致。
@@ -42,25 +43,27 @@ static int hit_test(const ui_quick_menu_t *menu, int x, int y) {
     for (int control = UI_QUICK_CTL_BRIGHTNESS; control <= UI_QUICK_CTL_CCT; ++control) {
         const EpdRect hit = ui_quick_menu_frontlight_hit(menu, (ui_quick_control_t)control);
         if (x >= hit.x && x < hit.x + hit.width && y >= hit.y && y < hit.y + hit.height)
-            return control == UI_QUICK_CTL_BRIGHTNESS ? HIT_BRIGHTNESS : HIT_CCT;
+            return control == UI_QUICK_CTL_BRIGHTNESS ? brightness_hit(menu) : cct_hit(menu);
     }
     return -1;
 }
 
 static uint8_t slider_value(const ui_quick_menu_t *menu, int hit, int x) {
     const EpdRect track = ui_quick_menu_frontlight_track(menu,
-        hit == HIT_BRIGHTNESS ? UI_QUICK_CTL_BRIGHTNESS : UI_QUICK_CTL_CCT);
+        hit == brightness_hit(menu) ? UI_QUICK_CTL_BRIGHTNESS : UI_QUICK_CTL_CCT);
     if (x < track.x) x = track.x;
     const int right = track.x + track.width;
     if (x > right) x = right;
     int value = (x - track.x) * 100 / track.width;
-    if (hit == HIT_BRIGHTNESS && value < 1) value = 1;
+    if (hit == brightness_hit(menu) && value < 1) value = 1;
     return (uint8_t)value;
 }
 
 void ui_quick_menu_reset(ui_quick_menu_t *menu) {
     const bool rotation_available = menu->rotation_available, rotation_enabled = menu->rotation_enabled;
     const bool haptics_available = menu->haptics_available, haptics_enabled = menu->haptics_enabled;
+    const bool cellular_available = menu->cellular_available, cellular_enabled = menu->cellular_enabled;
+    const bool cellular_ready = menu->cellular_ready;
     const bool frontlight = menu->frontlight;
     const bool on = menu->fl_on;
     const uint8_t bri = menu->fl_bri ? menu->fl_bri : 40;
@@ -72,6 +75,9 @@ void ui_quick_menu_reset(ui_quick_menu_t *menu) {
     menu->rotation_enabled = rotation_enabled;
     menu->haptics_available = haptics_available;
     menu->haptics_enabled = haptics_enabled;
+    menu->cellular_available = cellular_available;
+    menu->cellular_enabled = cellular_enabled;
+    menu->cellular_ready = cellular_ready;
     menu->frontlight = frontlight;
     menu->fl_on = on;
     menu->fl_bri = bri;
@@ -202,7 +208,8 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
     // new page.
     const int hx = x - (int)menu->x0, hy = y - (int)menu->y0;
     const bool haptics_key = menu->haptics_available && menu->hit == ui_quick_menu_haptics_button(menu);
-    if (menu->open && (menu->hit == 0 || menu->hit == 1 || haptics_key) &&
+    const bool cellular_key = menu->cellular_available && menu->hit == ui_quick_menu_cellular_button(menu);
+    if (menu->open && (menu->hit == 0 || menu->hit == 1 || cellular_key || haptics_key) &&
         hx * hx + hy * hy <= UI_QUICK_HIT_RADIUS * UI_QUICK_HIT_RADIUS &&
         ctx->now_ms - menu->started_ms >= UI_QUICK_HOLD_SETTINGS_MS) {
         menu->open = menu->tracking = false;
@@ -210,16 +217,17 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         menu->fl_pull = false;
         menu->drag = UI_QUICK_CTL_NONE;
         event->action = haptics_key ? UI_QUICK_HAPTICS_SETTINGS
+            : cellular_key ? UI_QUICK_CELLULAR_SETTINGS
             : menu->hit == 0 ? UI_QUICK_WIFI_SETTINGS : UI_QUICK_BLUETOOTH_SETTINGS;
         return true;
     }
     // 滑杆按下即定位：不等拖动阈值，手指落在哪一档就应用到哪一档。
     // A slider positions itself on touch: apply the tapped step before the drag threshold.
-    if (menu->open && (menu->hit == HIT_BRIGHTNESS || menu->hit == HIT_CCT)) {
+    if (menu->open && (menu->hit == brightness_hit(menu) || menu->hit == cct_hit(menu))) {
         const uint8_t value = slider_value(menu, menu->hit, x);
         // 脏范围只增不减：记录本次定稿以来达到的最大档位，松手据此洗白。
         // The dirty extent only grows: track the highest level since the last settle for the whitening stage.
-        if (menu->hit == HIT_BRIGHTNESS) {
+        if (menu->hit == brightness_hit(menu)) {
             menu->fl_bri = value;
             if (value > menu->fl_bri_dirty) menu->fl_bri_dirty = value;
         } else {
@@ -228,7 +236,7 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         }
         // 滑杆只记录数值，不替开关开灯；灯灭时拖动只更新下次点亮要用的档位。
         // A slider only records the value and never acts as the switch; with the light off it queues the level for the next on.
-        menu->drag = menu->hit == HIT_BRIGHTNESS
+        menu->drag = menu->hit == brightness_hit(menu)
             ? UI_QUICK_CTL_BRIGHTNESS : UI_QUICK_CTL_CCT;
         event->control = menu->drag;
         event->value = value;
@@ -277,10 +285,13 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
                 event->value = menu->fl_on ? 1 : 0;
                 event->commit = true;
             } else if (menu->hit >= 0 && menu->hit < ui_quick_menu_button_count(menu) && circle_hit(menu, x, y) == menu->hit) {
-                static const ui_quick_action_t actions[] = {
-                    UI_QUICK_WIFI, UI_QUICK_BLUETOOTH, UI_QUICK_FULL, UI_QUICK_LOCK, UI_QUICK_ROTATION,
-                };
-                event->action = haptics_key ? UI_QUICK_HAPTICS : actions[menu->hit];
+                if (haptics_key) event->action = UI_QUICK_HAPTICS;
+                else if (menu->hit == 0) event->action = UI_QUICK_WIFI;
+                else if (menu->hit == 1) event->action = UI_QUICK_BLUETOOTH;
+                else if (menu->hit == ui_quick_menu_cellular_button(menu)) event->action = UI_QUICK_CELLULAR;
+                else if (menu->hit == 2) event->action = UI_QUICK_FULL;
+                else if (menu->hit == 3) event->action = UI_QUICK_LOCK;
+                else if (menu->hit == ui_quick_menu_rotation_button(menu)) event->action = UI_QUICK_ROTATION;
             } else if (menu->drag != UI_QUICK_CTL_NONE) {
                 event->control = menu->drag;
                 event->value = menu->drag == UI_QUICK_CTL_BRIGHTNESS

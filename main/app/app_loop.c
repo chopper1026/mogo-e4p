@@ -42,6 +42,7 @@
 
 #include "../diagnostics/reader_perf.h"
 #include "app_loop.h"
+#include "network_service.h"
 #if CONFIG_APP_LOCK_SLEEP_TRACE
 #include "../diagnostics/lock_sleep_trace.h"
 #endif
@@ -771,6 +772,7 @@ void app_loop_run(const app_loop_config_t* config) {
         app_navigation_observe_contact(err, touch.touched);
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
+            network_service_poll();
             TD_TIME("transfer_poll", wifi_transfer_service_poll());
             pico_ota_auto_poll(!app_weather_busy() && !touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !ble_pt_connected() &&

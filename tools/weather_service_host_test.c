@@ -15,6 +15,7 @@ static time_t weather_test_time(time_t *out) {if(out)*out=wall_time;return wall_
 #include "../main/services/weather_service.c"
 #undef time
 static void (*pending)(void *);
+bool weather_test_cellular;
 static bool done,worker,flash,saved=true,fail_flash,fail_task,fail_alloc,cancel_read,cancel_connect,ota_busy,ble_connected;
 static unsigned starts,stops,requests,auto_calls,forecast_calls,search_calls,ns_writes,time_cancels;
 static int network_state,scenario;
@@ -29,6 +30,7 @@ static int64_t body_progress_us;
 static int io_timeout_ms;
 static char *alphanumeric_forecast;
 static bool stall_http_connect,cancel_http_connect;
+static unsigned failed_opens,open_calls;
 static const char *forecast_date,*catalog_date,*forecast_override;
 static bool duplicate_date,cancel_forecast_read,incomplete_forecast;
 static int64_t forecast_progress_us;
@@ -95,7 +97,8 @@ esp_err_t wifi_transfer_start(const wifi_transfer_cfg_t *cfg){
 void wifi_transfer_stop(void){assert(worker);++stops;network_state=WIFI_TRANSFER_STOPPED;}
 int esp_crt_bundle_attach(void *p){(void)p;return 0;}
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c){
-    assert(worker&&c->disable_auto_redirect&&c->crt_bundle_attach&&c->timeout_ms==6000&&c->is_async);
+    assert(worker&&c->disable_auto_redirect&&c->crt_bundle_attach&&
+        c->timeout_ms==(weather_test_cellular?20000:6000)&&c->is_async);
     assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
     struct FakeHttp *h=calloc(1,sizeof(*h));h->status=200;++requests;
     h->event_handler=c->event_handler;h->user_data=c->user_data;
@@ -132,8 +135,9 @@ esp_err_t esp_http_client_set_header(esp_http_client_handle_t h,const char*k,con
     (void)h;assert((!strcmp(k,"Accept")&&!strcmp(v,"application/json"))||(!strcmp(k,"Accept-Encoding")&&!strcmp(v,"identity")));return ESP_OK;
 }
 esp_err_t esp_http_client_open(esp_http_client_handle_t h,int n){
-    (void)h;assert(n==0);
+    (void)h;assert(n==0);++open_calls;
     if(cancel_http_connect){atomic_store(&s_cancel,true);return ESP_ERR_HTTP_EAGAIN;}
+    if(failed_opens){--failed_opens;return ESP_FAIL;}
     if(stall_http_connect)return ESP_ERR_HTTP_EAGAIN;
     if(pending_opens){--pending_opens;return ESP_ERR_HTTP_EAGAIN;}
     return ESP_OK;
@@ -403,6 +407,45 @@ int main(void) {
     pending_opens=80;int64_t connect_started=monotonic;
     request(APP_WEATHER_FETCH,NULL);
     assert(!pending_opens&&monotonic-connect_started>=1600000&&s_view.has_forecast&&s_view.state==APP_WEATHER_READY);
+    pending_opens=400;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(pending_opens&&s_view.state==APP_WEATHER_FAILED&&monotonic-connect_started==WEATHER_CONNECT_US);
+    pending_opens=400;weather_test_cellular=true;connect_started=monotonic;
+    unsigned wifi_starts=starts,wifi_stops=stops;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(!pending_opens&&s_view.state==APP_WEATHER_READY&&monotonic-connect_started>=8000000);
+    assert(starts==wifi_starts&&stops==wifi_stops);
+    // Cellular transient failures retry once with a fresh handle on the same bearer.
+    unsigned requests_before=requests,opens_before=open_calls;
+    failed_opens=1;request(APP_WEATHER_FETCH,NULL);
+    assert(!failed_opens&&s_view.state==APP_WEATHER_READY&&requests==requests_before+3&&open_calls==opens_before+3);
+    assert(starts==wifi_starts&&stops==wifi_stops);
+    failed_opens=3;requests_before=requests;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(failed_opens==1&&s_view.state==APP_WEATHER_FAILED&&requests==requests_before+2);
+    failed_opens=0;
+    scenario=5;requests_before=requests;request(APP_WEATHER_FETCH,NULL);scenario=0;
+    assert(s_view.state==APP_WEATHER_UNAVAILABLE&&requests==requests_before+2);
+    header_eagain=35;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(!header_eagain&&s_view.state==APP_WEATHER_READY&&monotonic-connect_started>=7000000);
+    cancel_http_connect=true;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);cancel_http_connect=false;
+    assert(monotonic-connect_started<=20000&&starts==wifi_starts&&stops==wifi_stops);
+    stall_http_connect=true;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);stall_http_connect=false;
+    assert(s_view.state==APP_WEATHER_FAILED&&
+        monotonic-connect_started==2*WEATHER_CELLULAR_CONNECT_US+200000&&
+        monotonic-connect_started<WEATHER_SESSION_US);
+    // Retry never extends the shared 45s deadline when prior work used the budget.
+    assert(app_weather_request(APP_WEATHER_FETCH,NULL));
+    requests_before=requests;monotonic+=30000000;stall_http_connect=true;
+    run_worker();stall_http_connect=false;
+    assert(app_weather_poll(false)&&s_view.state==APP_WEATHER_FAILED&&requests==requests_before+1);
+    assert(monotonic==s_deadline);
+    weather_test_cellular=false;
+    failed_opens=1;requests_before=requests;request(APP_WEATHER_FETCH,NULL);
+    assert(!failed_opens&&s_view.state==APP_WEATHER_FAILED&&requests==requests_before+1);
     stall_http_connect=true;connect_started=monotonic;unsigned headers_before=header_calls;
     request(APP_WEATHER_FETCH,NULL);stall_http_connect=false;
     assert(monotonic-connect_started==WEATHER_CONNECT_US&&headers_before==header_calls&&starts==stops);

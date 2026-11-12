@@ -21,7 +21,7 @@ static unsigned haptics_writes, haptics_pulses, setup_haptics;
 static bool shown_haptics;
 static uint8_t saved_bri = 40, saved_cct = 50, hw_bri, hw_cct;
 static unsigned settings_writes, applies, rows, pushes, renders, fallback, failures;
-static unsigned wifi_starts, wifi_stops, captures, enters, exits, setup_wifi, setup_bt;
+static unsigned wifi_starts, wifi_stops, captures, enters, exits, setup_wifi, setup_bt, setup_network;
 static bool configured = true, can_stop = true, expect_origin;
 static int error_once;
 static wifi_transfer_status_t network;
@@ -89,6 +89,7 @@ bool wifi_transfer_try_stop_if_idle(void) {
 void app_navigation_capture_reader_return(const app_desc_t *p) {assert(p == current); ++captures; record(16, captures);}
 void app_transfer_request_wifi_setup(void) {++setup_wifi; record(17, setup_wifi);}
 void app_device_settings_request_bluetooth(bool origin) {expect_origin = origin; ++setup_bt; record(18, origin);}
+void app_device_settings_request_network(bool origin) {expect_origin = origin; ++setup_network; record(181, origin);}
 void app_device_settings_request_haptics(bool origin) {expect_origin = origin; ++setup_haptics;}
 void app_present(app_ctx_t *c, const app_desc_t *p, app_redraw_t redraw) {
     assert(c == &ctx && p == current);

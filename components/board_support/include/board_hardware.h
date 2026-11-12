@@ -31,6 +31,16 @@ extern "C" {
 /// / FT6336U INT, GPIO5 by default on the S31 product, active low.
 #define BOARD_TP_INT_GPIO CONFIG_BOARD_TP_INT_GPIO
 
+/// 统一镜像在两种板型都携带 NT26 传输层；这些是固定连接器引脚，移动网络能力由
+/// 运行时 AT 探测决定，不从这个编译期头文件推断。
+/// / The unified image carries the NT26 transport on both board variants. These
+/// are fixed connector pins; cellular capability is determined by the runtime
+/// AT probe and is never inferred from this compile-time header.
+#define BOARD_CELLULAR_UART_TX_GPIO 58
+#define BOARD_CELLULAR_UART_RX_GPIO 59
+#define BOARD_CELLULAR_MRDY_GPIO 60
+#define BOARD_CELLULAR_SRDY_GPIO 3
+
 #define BOARD_PRODUCT_NAME "mogo"
 #define BOARD_DEVICE_NAME "mogo"
 /// 芯片平放实测 -5,-119,-1005；转到设备坐标后屏幕朝上约为 +Z。

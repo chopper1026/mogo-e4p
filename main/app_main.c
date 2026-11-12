@@ -60,6 +60,8 @@
 #include "app_font_context.h"
 #include "ui_kit.h"
 #include "vcom_setup.h"
+#include "cellular_service.h"
+#include "network_service.h"
 
 static const char* TAG = "read_pico";
 extern const app_desc_t app_boot_recovery;
@@ -174,6 +176,8 @@ void app_main(void) {
 
     board_handle_t hw;
     if (board_init(&hw) != ESP_OK) return;
+    cellular_service_init();
+    network_service_init();
     // 马达能力与定时器在板级就绪后建立；开关/强度已由设置初始化写入。
     // / Set up the motor timer once the board is ready; settings init already applied switch and intensity.
     haptics_init();

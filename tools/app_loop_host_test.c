@@ -44,7 +44,7 @@ const app_desc_t app_device_settings = {.title="settings",.on_tick=auto_update_r
 static int wifi_setup_requests, bt_settings_requests;
 static bool bt_return_to_origin;
 static bool haptics_present, haptics_on, haptics_return_to_origin;
-static int haptics_settings_requests, haptics_settings_writes;
+static int haptics_settings_requests, haptics_settings_writes, network_settings_requests;
 bool haptics_available(void) {return haptics_present;}
 bool app_settings_touch_haptics(void) {return haptics_on;}
 void app_settings_set_touch_haptics(bool enabled) {haptics_on = enabled; ++haptics_settings_writes;}
@@ -55,6 +55,9 @@ void app_transfer_request_wifi_setup(void) {++wifi_setup_requests;}
 void app_device_settings_request_bluetooth(bool return_to_origin) {
     ++bt_settings_requests;
     bt_return_to_origin = return_to_origin;
+}
+void app_device_settings_request_network(bool return_to_origin) {
+    (void)return_to_origin; ++network_settings_requests;
 }
 // 阅读正文返回：正文可见且恢复点可用时由主循环记下，返回时重开同一本书。
 // Reader-body return: the loop captures the resume point when the body is visible

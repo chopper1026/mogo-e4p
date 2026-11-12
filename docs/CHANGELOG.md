@@ -3,7 +3,17 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.1.0 · 本地测试 / Local testing · 2026-11-13
+
+- 业务联网方式默认自动、Wi-Fi 优先；缺失或无效设置恢复默认，模块探测不再将用户联网偏好自动改写成 Wi-Fi，保留已保存的有效选择。/ Default business networking to Auto with Wi-Fi first, restore defaults for missing/invalid settings and preserve valid user choices across cellular capability probes.
+- 移动网络设置移除 Wi-Fi 开关并上移 4G 与联网方式选项；快捷栏、设置入口和状态栏统一改用四柱圆角信号图标。/ Remove the Wi-Fi toggle from mobile settings, move the remaining controls up and use a shared four-bar cellular icon in quick controls, Settings and the status bar.
+- 移动网络固定使用内置 SIM，删除卡槽选择和旧偏好；启动时确认内置卡配置，并清理联网排查时加入的临时诊断日志。/ Use the internal SIM exclusively, remove slot selection and its saved preference, enforce the internal slot at startup and remove temporary network diagnostics.
+- 修复 Wi-Fi 认证报文因片内内存不足而连接失败：调整 Wi-Fi IRAM 配置释放内存，保留已保存网络和收发缓冲数量；同一已保存网络已真机重连成功，峰值传输速度及 Wi-Fi/4G 同时开启仍待验证。/ Free internal RAM through Wi-Fi IRAM configuration to fix authentication-frame allocation failures, retaining saved networks and buffer counts; reconnection to the same saved network passed on-device, while peak throughput and simultaneous Wi-Fi/cellular operation remain unverified.
+
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-11
+
+- 统一固件兼容带 NT26 的 4G 版硬件：运行时探测移动网络能力，Wi-Fi 版隐藏移动网络入口；4G 版保留 Wi-Fi，快捷栏提供独立的移动网络开关和长按设置入口，日期对时、天气与联网 OTA 可按用户选择使用 Wi-Fi、4G 或自动路由。OTA 继续使用同一 `METALIO-EINK4P` 清单身份。/ Keep one firmware image for boards with or without NT26: detect cellular capability at runtime and hide the mobile entry on Wi-Fi hardware; retain Wi-Fi on 4G hardware, add an independent mobile toggle and long-press settings entry, and route time, weather and online OTA through Wi-Fi, cellular or Auto according to the user setting. OTA keeps the shared `METALIO-EINK4P` identity.
+- 修复注册失败仍显示连接中、AT 分帧丢失查询结果的问题，未取得 IP 不再显示已连接；启动时等待 SIM 就绪，区分无卡、PIN/PUK 与查询故障，主动关闭不再误报注册超时。/ Preserve registration/query failures and require an IP for a connection; wait for SIM readiness, distinguish card/PIN/PUK/query errors and avoid timeout reports on cancellation.
 
 - 蓝牙翻页器设置改为 WiFi 同款状态卡、设备详情与行内按键学习；附近设备每页六台，搜索前确认断开现有连接，遗忘设备需确认，连接变化时取消学习。/ Restyle Bluetooth settings with WiFi-style status cards, peer details and inline key learning; use six-row discovery pages, confirm disconnect/forget actions and cancel learning when the peer changes.
 

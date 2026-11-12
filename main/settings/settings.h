@@ -13,6 +13,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "../services/network_policy.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /// 默认深睡。浅睡：按键回原页；拿起唤醒默认关。软睡：SOFT_SLEEP 拉低 EN，再短按开机。关机：EN=0，长按开机。
 /// Default is deep. Light: key returns to the page; pickup-wake defaults off. Soft sleep: SOFT_SLEEP drops EN, then a short press boots. Off: EN=0, long-press to boot.
@@ -93,6 +98,18 @@ void app_settings_set_auto_time_sync(bool on);
 /// 自动 OTA 检查默认开启；设备本地保存，不随配置备份迁移。/ Automatic OTA checks default on; device-local, excluded from config backups.
 bool app_settings_auto_ota(void);
 void app_settings_set_auto_ota(bool on);
+/// 4G 模组开关；统一固件按运行时能力决定是否生效，Wi-Fi 仍可独立使用。
+/// Cellular modem switch; effective only after runtime capability detection, with Wi-Fi independent.
+bool app_settings_cellular_enabled(void);
+void app_settings_set_cellular_enabled(bool enabled);
+
+/// 业务联网路由；Wi-Fi 与 4G 开关独立于此选择。
+/// Business bearer preference; independent from the Wi-Fi and cellular radio switches.
+network_route_t app_settings_network_route(void);
+void app_settings_set_network_route(network_route_t route);
+network_auto_priority_t app_settings_network_auto_priority(void);
+void app_settings_set_network_auto_priority(network_auto_priority_t priority);
+
 /// 上次成功对时的 UTC 秒与上次尝试的 UTC 秒（0 = 从未）。设备本地运行记录，不随设置备份迁移。
 /// Last successful and last attempted sync in UTC seconds (zero means never). Device-local runtime
 /// records; they deliberately stay out of the settings backup.
@@ -432,3 +449,7 @@ esp_err_t app_settings_backup_restore(void);
 
 /// 同页选择保存成功后才发布；壁纸样式的 option 是显示方式。/ Publish the inline selection only after saving; wallpaper style uses option for its fit mode.
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option);
+
+#ifdef __cplusplus
+}
+#endif

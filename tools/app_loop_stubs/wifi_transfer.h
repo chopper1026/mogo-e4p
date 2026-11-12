@@ -13,3 +13,4 @@ int wifi_transfer_get_saved_wifi(char *ssid,bool *configured);
 int wifi_transfer_start(const wifi_transfer_cfg_t *cfg);
 bool wifi_transfer_try_stop_if_idle(void);
 bool wifi_transfer_pause_for_sleep(void);
+static inline void wifi_transfer_resume_after_sleep(void) {}

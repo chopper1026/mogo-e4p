@@ -45,7 +45,15 @@ set(main_requires
     esp_http_client
     mbedtls
     espressif__cjson
+    78__uart-uhci
+    espressif__iot_eth
 )
+
+# One OTA image carries the modem transport on both hardware variants. The
+# service performs an asynchronous AT probe and hides cellular when absent.
+set(cellular_sources
+    "services/cellular/cellular_service.cc"
+    "services/cellular/uart_eth_modem.cc")
 # 原始位图保留在源码中，只把可复现的压缩资源嵌入 app。/ Retain source bitmaps and embed only reproducible compressed resources in the app.
 idf_build_get_property(image_python PYTHON)
 set(builtin_image_dir "${CMAKE_CURRENT_BINARY_DIR}/builtin_images")
@@ -88,6 +96,9 @@ idf_component_register(
         "power/cache_wake_restore.c"
         "power/s31_sleep_compat.c"
         "services/storage_jobs.c"
+        "services/network_policy.c"
+        "services/network_service.c"
+        ${cellular_sources}
         "services/lock_style_images.c"
         "services/weather_model.c"
         "services/weather_service.c"
@@ -219,7 +230,7 @@ idf_component_register(
     REQUIRES ${main_requires}
     LDFRAGMENTS "platform/s31_cache_safe.lf"
     PRIV_INCLUDE_DIRS
-        "." "app" "apps" "book" "image" "font" "ui" "services" "platform" "factory"
+        "." "app" "apps" "book" "image" "font" "ui" "services" "services/cellular" "platform" "factory"
         "boot" "display" "lock" "power" "ota" "settings" "time" "diagnostics"
     EMBED_FILES
         "${builtin_image_dir}/lock_4bpp.kbz"
