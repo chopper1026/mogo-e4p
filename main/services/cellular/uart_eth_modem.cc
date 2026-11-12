@@ -273,11 +273,14 @@ esp_err_t UartEthModem::SendAt(const std::string& cmd, std::string& response, ui
         return ESP_ERR_INVALID_STATE;
     }
 
-    at_command_response_.clear();
-    at_collect_until_done_ = false;
-    at_until_marker_.clear();
-    waiting_for_at_response_ = true;
-    xEventGroupClearBits(event_group_, kEventAtResponse);  // Clear any pending
+    {
+        std::lock_guard<std::mutex> response_lock(at_response_mutex_);
+        at_command_response_.clear();
+        at_collect_until_done_ = false;
+        at_until_marker_.clear();
+        waiting_for_at_response_ = true;
+        xEventGroupClearBits(event_group_, kEventAtResponse);  // Clear any pending
+    }
 
     // Add \r if not present
     std::string cmd_with_cr = cmd;
@@ -288,6 +291,7 @@ esp_err_t UartEthModem::SendAt(const std::string& cmd, std::string& response, ui
     // Send AT command frame
     esp_err_t ret = SendFrame(reinterpret_cast<const uint8_t*>(cmd_with_cr.c_str()), cmd_with_cr.size(), FrameType::kAtCommand);
     if (ret != ESP_OK) {
+        std::lock_guard<std::mutex> response_lock(at_response_mutex_);
         waiting_for_at_response_ = false;
         at_collect_until_done_ = false;
         at_until_marker_.clear();
@@ -302,6 +306,7 @@ esp_err_t UartEthModem::SendAt(const std::string& cmd, std::string& response, ui
         pdFALSE,  // Wait for any bit
         pdMS_TO_TICKS(timeout_ms)
     );
+    std::lock_guard<std::mutex> response_lock(at_response_mutex_);
     if (bits & kEventStop) {
         waiting_for_at_response_ = false;
         at_collect_until_done_ = false;
@@ -349,11 +354,14 @@ esp_err_t UartEthModem::SendAtCollectUntil(const std::string& cmd,
         return ESP_ERR_INVALID_ARG;
     }
 
-    at_command_response_.clear();
-    at_collect_until_done_ = true;
-    at_until_marker_ = done_marker;
-    waiting_for_at_response_ = true;
-    xEventGroupClearBits(event_group_, kEventAtResponse);
+    {
+        std::lock_guard<std::mutex> response_lock(at_response_mutex_);
+        at_command_response_.clear();
+        at_collect_until_done_ = true;
+        at_until_marker_ = done_marker;
+        waiting_for_at_response_ = true;
+        xEventGroupClearBits(event_group_, kEventAtResponse);
+    }
 
     std::string cmd_with_cr = cmd;
     if (cmd_with_cr.empty() || cmd_with_cr.back() != '\r') {
@@ -364,6 +372,7 @@ esp_err_t UartEthModem::SendAtCollectUntil(const std::string& cmd,
         reinterpret_cast<const uint8_t*>(cmd_with_cr.c_str()),
         cmd_with_cr.size(), FrameType::kAtCommand);
     if (ret != ESP_OK) {
+        std::lock_guard<std::mutex> response_lock(at_response_mutex_);
         waiting_for_at_response_ = false;
         at_collect_until_done_ = false;
         at_until_marker_.clear();
@@ -373,6 +382,7 @@ esp_err_t UartEthModem::SendAtCollectUntil(const std::string& cmd,
     EventBits_t bits = xEventGroupWaitBits(
         event_group_, kEventAtResponse | kEventStop, pdTRUE, pdFALSE,
         pdMS_TO_TICKS(timeout_ms));
+    std::lock_guard<std::mutex> response_lock(at_response_mutex_);
     if (bits & kEventStop) {
         waiting_for_at_response_ = false;
         at_collect_until_done_ = false;
@@ -392,8 +402,7 @@ esp_err_t UartEthModem::SendAtCollectUntil(const std::string& cmd,
 
     if (response.find("+CME ERROR") != std::string::npos ||
         response.find("+CMS ERROR") != std::string::npos ||
-        (response.find("ERROR") != std::string::npos &&
-         response.find("OK") == std::string::npos)) {
+        response.find("ERROR") != std::string::npos) {
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -517,6 +526,7 @@ const char* UartEthModem::GetNetworkEventName(UartEthModemEvent event) {
         case UartEthModemEvent::ErrorNoSim: return "ErrorNoSim";
         case UartEthModemEvent::ErrorRegistrationDenied: return "ErrorRegistrationDenied";
         case UartEthModemEvent::ErrorInitFailed: return "ErrorInitFailed";
+        case UartEthModemEvent::ErrorSimNotReady: return "ErrorSimNotReady";
         default: return "Unknown";
     }
 }
@@ -574,6 +584,13 @@ esp_err_t UartEthModem::InitGpio() {
     ESP_RETURN_ON_ERROR(ret, kTag, "Failed to enable GPIO wakeup");
 
     srdy_pin_isr_ = config_.srdy_pin;
+
+    // The service is shared with the accelerometer, which may start later.
+    // Keep the shared service installed when this modem stops.
+    ret = gpio_install_isr_service(0);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_RETURN_ON_ERROR(ret, kTag, "Failed to install GPIO ISR service");
+    }
 
     // Install ISR handler
     ret = gpio_isr_handler_add(config_.srdy_pin, SrdyIsrHandler, this);
@@ -1245,15 +1262,25 @@ void UartEthModem::InitTaskRun() {
     {
         const esp_err_t init_ret = RunNormalModeInitSequence();
         if (init_ret != ESP_OK) {
-            ESP_LOGE(kTag, "Initialization sequence failed");
+            if (stop_flag_.load()) ESP_LOGI(kTag, "Initialization cancelled");
+            else ESP_LOGE(kTag, "Initialization sequence failed");
             stop_flag_ = true;
             initializing_ = false;
             xEventGroupSetBits(event_group_, kEventStop);
             goto exit;
         }
 
+        // No-SIM and denied-registration paths deliberately retain AT access.
+        // They have no data link, so must not announce an Ethernet link-up.
+        if (!handshake_done_.load()) {
+            ESP_LOGI(kTag, "AT channel available; data link is not ready");
+            initializing_ = false;
+            goto exit;
+        }
+
         if (InitIotEth() != ESP_OK) {
             ESP_LOGE(kTag, "Failed to initialize iot_eth");
+            SetNetworkEvent(UartEthModemEvent::ErrorInitFailed, "Failed to initialize network interface");
             stop_flag_ = true;
             initializing_ = false;
             xEventGroupSetBits(event_group_, kEventStop);
@@ -1426,29 +1453,38 @@ void UartEthModem::HandleAtResponse(const char* data, size_t length) {
     // Parse URC or response
     ParseAtResponse(response);
 
+    std::lock_guard<std::mutex> response_lock(at_response_mutex_);
     if (!waiting_for_at_response_) {
+        return;
+    }
+
+    if (at_command_response_.size() + length > 8192) {
+        at_command_response_ = "ERROR: response too large";
+        waiting_for_at_response_ = false;
+        xEventGroupSetBits(event_group_, kEventAtResponse);
         return;
     }
 
     // Local SendAtCollectUntil: keep accumulating until done_marker / ERROR
     if (at_collect_until_done_ && !at_until_marker_.empty()) {
         at_command_response_ += response;
-        if (response.find("+CME ERROR") != std::string::npos ||
-            response.find("+CMS ERROR") != std::string::npos ||
-            (response.find("ERROR") != std::string::npos &&
-             response.find("OK") == std::string::npos)) {
+        if (at_command_response_.find("ERROR") != std::string::npos) {
+            waiting_for_at_response_ = false;
             xEventGroupSetBits(event_group_, kEventAtResponse);
             return;
         }
         if (at_command_response_.find(at_until_marker_) != std::string::npos) {
+            waiting_for_at_response_ = false;
             xEventGroupSetBits(event_group_, kEventAtResponse);
         }
         return;
     }
 
-    // Only signal completion for final AT responses (OK/ERROR), not for URCs like ECRDY
-    if (response.find("OK") != std::string::npos || response.find("ERROR") != std::string::npos) {
-        at_command_response_ = response;
+    // Data and final OK may arrive in different UART frames.
+    at_command_response_ += response;
+    if (at_command_response_.find("\r\nOK\r\n") != std::string::npos ||
+        at_command_response_.find("ERROR") != std::string::npos) {
+        waiting_for_at_response_ = false;
         xEventGroupSetBits(event_group_, kEventAtResponse);
     }
 }
@@ -1502,16 +1538,12 @@ void UartEthModem::ParseAtResponse(const std::string& response) {
             cell_info_.stat = stat;
         }
 
-        // Check registration status (mirrored from at_modem.cc HandleUrc logic)
-        bool new_network_ready = cell_info_.stat == 1 || cell_info_.stat == 5;
-        if (cell_info_.stat == 2) {
+        // Registration alone does not prove the UART data link or IP lease.
+        // Only IpEventHandler may publish Connected after DHCP succeeds.
+        if (cell_info_.stat == 2 && (initializing_.load() || handshake_done_.load())) {
             SetNetworkEvent(UartEthModemEvent::Connecting);
         } else if (cell_info_.stat == 3) {
             SetNetworkEvent(UartEthModemEvent::ErrorRegistrationDenied);
-        } else if (new_network_ready) {
-            if (initialized_.load()) {
-                SetNetworkEvent(UartEthModemEvent::Connected);
-            }
         }
     } else if (response.find("+ECNETDEVCTL: 1") != std::string::npos) {
         // Network device ready (link up)
@@ -1540,6 +1572,39 @@ esp_err_t UartEthModem::AtDetect() {
         }
     }
     return ESP_FAIL;
+}
+
+int UartEthModem::ParseSimSlot(const std::string& response) {
+    const auto pos = response.find("\"SimSlot\"");
+    int slot = -1;
+    char trailing = 0;
+    if (pos == std::string::npos ||
+        sscanf(response.c_str() + pos, "\"SimSlot\" , %d%c", &slot, &trailing) != 2 ||
+        (trailing != '\r' && trailing != '\n' && trailing != ' ' && trailing != '\t') ||
+        (slot != 0 && slot != 1)) return -1;
+    return slot;
+}
+
+esp_err_t UartEthModem::ConfigureInternalSim() {
+    std::string response;
+    if (SendAt("AT+ECSIMCFG?", response, 3000) == ESP_OK && ParseSimSlot(response) == 1)
+        return ESP_OK;
+
+    // Enforce the internal SIM even if a previous firmware selected another slot.
+    esp_err_t result = SendAt("AT+CFUN=0", response, 8000);
+    if (result == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        result = SendAt("AT+ECSIMCFG=SimSlot,1", response, 5000);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    // Restore radio functionality even if SIM configuration was rejected.
+    const esp_err_t recovery = SendAt("AT+CFUN=1", response, 15000);
+    int slot = -1;
+    if (SendAt("AT+ECSIMCFG?", response, 3000) == ESP_OK)
+        slot = ParseSimSlot(response);
+    if (result != ESP_OK) return result;
+    if (recovery != ESP_OK) return recovery;
+    return slot == 1 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
 esp_err_t UartEthModem::RunNormalModeInitSequence() {
@@ -1593,6 +1658,12 @@ esp_err_t UartEthModem::RunNormalModeInitSequence() {
         }
     }
 
+    ret = ConfigureInternalSim();
+    if (ret != ESP_OK) {
+        SetNetworkEvent(UartEthModemEvent::ErrorInitFailed, "内置 SIM 初始化失败，请重试");
+        return ret;
+    }
+
     // Enter full functionality mode (CFUN=1)
     ret = SendAt("AT+CFUN=1", resp, 3000);
     if (ret != ESP_OK) {
@@ -1602,12 +1673,27 @@ esp_err_t UartEthModem::RunNormalModeInitSequence() {
     }
 
     ESP_LOGI(kTag, "Checking SIM card...");
-    if (!CheckSimCard()) {
-        // Local: keep AT channel alive for SIM slot switching (see flight mode).
+    const SimCardState sim_state = CheckSimCard();
+    if (sim_state == SimCardState::Cancelled || stop_flag_.load())
+        return ESP_ERR_INVALID_STATE;
+    if (sim_state != SimCardState::Ready) {
+        if (stop_flag_.load()) return ESP_ERR_INVALID_STATE;
         ESP_LOGW(kTag, "SIM not ready, keep AT channel alive (no network)");
-        QueryModemInfo();
         initialized_ = true;
-        SetNetworkEvent(UartEthModemEvent::ErrorNoSim);
+        if (sim_state == SimCardState::Absent) {
+            SetNetworkEvent(UartEthModemEvent::ErrorNoSim);
+        } else {
+            const char* reason = "SIM 查询失败";
+            switch (sim_state) {
+                case SimCardState::PinRequired: reason = "SIM 需要 PIN 解锁"; break;
+                case SimCardState::PukRequired: reason = "SIM 需要 PUK 解锁"; break;
+                case SimCardState::Locked: reason = "SIM 卡已锁定"; break;
+                case SimCardState::Busy: reason = "SIM 卡忙，请重试"; break;
+                case SimCardState::Failure: reason = "SIM 卡读取故障"; break;
+                default: break;
+            }
+            SetNetworkEvent(UartEthModemEvent::ErrorSimNotReady, reason);
+        }
         return ESP_OK;
     }
 
@@ -1620,6 +1706,7 @@ esp_err_t UartEthModem::RunNormalModeInitSequence() {
     // Enable CEREG URC
     SendAt("AT+CEREG=2", resp);
     if (!WaitForRegistration(60000)) {
+        if (stop_flag_.load()) return ESP_ERR_INVALID_STATE;
         if (cell_info_.stat == 3) {
             ESP_LOGE(kTag, "Registration denied");
             SetNetworkEvent(UartEthModemEvent::ErrorRegistrationDenied);
@@ -1628,7 +1715,7 @@ esp_err_t UartEthModem::RunNormalModeInitSequence() {
             SetNetworkEvent(UartEthModemEvent::ErrorInitFailed, "Network registration timeout");
         }
         // Local: keep AT channel alive after reg failure (align with NoSim path).
-        ESP_LOGW(kTag, "Registration failed, keep AT channel alive for SIM switching");
+        ESP_LOGW(kTag, "Registration failed, keep AT channel alive");
         initialized_ = true;
         return ESP_OK;
     }
@@ -1686,26 +1773,87 @@ esp_err_t UartEthModem::RunNormalModeInitSequence() {
     return ESP_OK;
 }
 
-bool UartEthModem::CheckSimCard() {
-    std::string resp;
-    for (int i = 0; i < 10; i++) {
-        // Check stop flag before each iteration
-        if (stop_flag_.load()) {
-            ESP_LOGW(kTag, "CheckSimCard aborted due to stop flag");
-            return false;
+UartEthModem::SimCardState UartEthModem::ParseSimCardState(
+        const std::string& response, esp_err_t result) {
+    const auto cme = response.find("+CME ERROR:");
+    if (cme != std::string::npos) {
+        auto value = response.substr(cme + strlen("+CME ERROR:"));
+        const auto begin = value.find_first_not_of(" \t");
+        value = begin == std::string::npos ? "" : value.substr(begin);
+        value = value.substr(0, value.find_first_of("\r\n"));
+        const auto end = value.find_last_not_of(" \t");
+        if (end != std::string::npos) value.resize(end + 1);
+        int code = 0;
+        bool numeric = !value.empty();
+        for (char digit : value) {
+            if (digit < '0' || digit > '9' || code > 999) {
+                numeric = false;
+                break;
+            }
+            code = code * 10 + (digit - '0');
         }
-        if (SendAt("AT+CPIN?", resp, 1000) == ESP_OK) {
-            if (resp.find("+CPIN: READY") != std::string::npos) {
-                return true;
+        if (numeric) {
+            switch (code) {
+                case 10: return SimCardState::Absent;
+                case 11: return SimCardState::PinRequired;
+                case 12: return SimCardState::PukRequired;
+                case 13: case 15: return SimCardState::Failure;
+                case 14: return SimCardState::Busy;
+                case 17: return SimCardState::PinRequired;
+                case 18: return SimCardState::PukRequired;
+                default: return SimCardState::QueryFailed;
             }
         }
-        if (resp.find("+CME ERROR: 10") != std::string::npos) {
-            // SIM not inserted
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (value == "SIM not inserted") return SimCardState::Absent;
+        if (value == "SIM PIN required" || value == "SIM PIN2 required")
+            return SimCardState::PinRequired;
+        if (value == "SIM PUK required" || value == "SIM PUK2 required")
+            return SimCardState::PukRequired;
+        if (value == "SIM busy") return SimCardState::Busy;
+        if (value == "SIM failure" || value == "SIM wrong") return SimCardState::Failure;
+        return SimCardState::QueryFailed;
     }
-    return false;
+    if (result != ESP_OK) return SimCardState::QueryFailed;
+    const auto cpin = response.find("+CPIN:");
+    if (cpin == std::string::npos) return SimCardState::QueryFailed;
+    auto value = response.substr(cpin + strlen("+CPIN:"));
+    const auto begin = value.find_first_not_of(" \t");
+    value = begin == std::string::npos ? "" : value.substr(begin);
+    value = value.substr(0, value.find_first_of("\r\n"));
+    const auto end = value.find_last_not_of(" \t");
+    if (end != std::string::npos) value.resize(end + 1);
+    if (value == "READY") return SimCardState::Ready;
+    if (value == "SIM PIN" || value == "SIM PIN2") return SimCardState::PinRequired;
+    if (value == "SIM PUK" || value == "SIM PUK2") return SimCardState::PukRequired;
+    if (value.find("PH-") == 0) return SimCardState::Locked;
+    return SimCardState::QueryFailed;
+}
+
+UartEthModem::SimCardState UartEthModem::CheckSimCard() {
+    constexpr uint32_t timeout_ms = 10000;
+    const uint32_t start = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    SimCardState state = SimCardState::QueryFailed;
+    for (;;) {
+        if (stop_flag_.load()) return SimCardState::Cancelled;
+        uint32_t elapsed = xTaskGetTickCount() * portTICK_PERIOD_MS - start;
+        if (elapsed >= timeout_ms) return state;
+        const uint32_t remaining = timeout_ms - elapsed;
+        std::string resp;
+        const auto result = SendAt("AT+CPIN?", resp, remaining < 1000 ? remaining : 1000);
+        if (stop_flag_.load()) return SimCardState::Cancelled;
+        state = ParseSimCardState(resp, result);
+        if (state == SimCardState::Ready || state == SimCardState::PinRequired ||
+            state == SimCardState::PukRequired || state == SimCardState::Locked) {
+            return state;
+        }
+        // CFUN=1 acknowledges before SIM initialization necessarily completes.
+        // Even an initial "not inserted" is retried within the bounded window.
+        elapsed = xTaskGetTickCount() * portTICK_PERIOD_MS - start;
+        if (elapsed >= timeout_ms) return state;
+        const uint32_t wait_ms = timeout_ms - elapsed;
+        xEventGroupWaitBits(event_group_, kEventStop, pdFALSE, pdFALSE,
+                           pdMS_TO_TICKS(wait_ms < 1000 ? wait_ms : 1000));
+    }
 }
 
 bool UartEthModem::WaitForRegistration(uint32_t timeout_ms) {
@@ -1714,6 +1862,7 @@ bool UartEthModem::WaitForRegistration(uint32_t timeout_ms) {
 
     while (!stop_flag_.load()) {
         if (SendAt("AT+CEREG?", resp, 1000) == ESP_OK) {
+            if (stop_flag_.load()) return false;
             ParseAtResponse(resp);
             if (cell_info_.stat == 1 || cell_info_.stat == 5) {
                 return true;
@@ -1743,8 +1892,6 @@ void UartEthModem::QueryModemInfo() {
     GetIccid();
     GetModuleRevision();
     GetImsi();
-    ESP_LOGI(kTag, "Modem Info - IMEI: %s, ICCID: %s, IMSI: %s, Rev: %s",
-             imei_.c_str(), iccid_.c_str(), imsi_.c_str(), module_revision_.c_str());
 }
 
 // Set MRDY level
@@ -1830,7 +1977,11 @@ void UartEthModem::IpEventHandler(void* arg, esp_event_base_t event_base,
                                   int32_t event_id, void* event_data) {
     auto* self = static_cast<UartEthModem*>(arg);
 
-    if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
+    const auto* got_ip = static_cast<const ip_event_got_ip_t*>(event_data);
+    if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP &&
+        got_ip && got_ip->esp_netif == self->eth_netif_ &&
+        self->handshake_done_.load() && !self->stop_flag_.load() &&
+        got_ip->ip_info.ip.addr != 0) {
         // Network is ready now
         self->SetNetworkEvent(UartEthModemEvent::Connected);
     }

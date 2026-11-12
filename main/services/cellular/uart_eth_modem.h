@@ -81,6 +81,7 @@ public:
         ErrorNoSim,              // No SIM card detected
         ErrorRegistrationDenied, // Network registration denied (CEREG=3)
         ErrorInitFailed,         // Modem initialization failed (general error)
+        ErrorSimNotReady,        // SIM locked, busy, failed or query unavailable
 
     };
 
@@ -310,7 +311,12 @@ private:
 
     // Initialization sequence
     esp_err_t RunNormalModeInitSequence();
-    bool CheckSimCard();
+    esp_err_t ConfigureInternalSim();
+    static int ParseSimSlot(const std::string& response);
+    enum class SimCardState { Ready, Absent, PinRequired, PukRequired, Locked,
+                              Busy, Failure, QueryFailed, Cancelled };
+    static SimCardState ParseSimCardState(const std::string& response, esp_err_t result);
+    SimCardState CheckSimCard();
     bool WaitForRegistration(uint32_t timeout_ms);
     void QueryModemInfo();
     esp_err_t AtDetect();
@@ -349,6 +355,7 @@ private:
     // Synchronization primitives
     QueueHandle_t event_queue_ = nullptr;
     std::mutex at_mutex_;
+    std::mutex at_response_mutex_;
     EventGroupHandle_t event_group_ = nullptr;
 
     // UHCI DMA

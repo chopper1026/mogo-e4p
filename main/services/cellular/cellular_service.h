@@ -21,6 +21,7 @@ typedef enum {
     CELLULAR_SERVICE_NO_SIM,
     CELLULAR_SERVICE_NO_REGISTRATION,
     CELLULAR_SERVICE_ERROR,
+    CELLULAR_SERVICE_SIM_NOT_READY,
 } cellular_service_state_t;
 
 typedef struct {

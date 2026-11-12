@@ -34,6 +34,7 @@ constexpr gpio_num_t kSrdy = (gpio_num_t)BOARD_CELLULAR_SRDY_GPIO;
 
 struct Service {
     std::mutex mutex;
+    std::recursive_mutex lifecycle;
     std::shared_ptr<UartEthModem> modem;
     cellular_service_status_t status = {};
     bool user_enabled = false;
@@ -73,9 +74,11 @@ void on_modem_event(UartEthModem::UartEthModemEvent event, const std::string &de
             s_service.stop_after_probe = !s_service.user_enabled;
             break;
         case UartEthModem::UartEthModemEvent::ErrorNoSim:
+        case UartEthModem::UartEthModemEvent::ErrorSimNotReady:
             s_service.status.capability_known = true;
             s_service.status.capable = true;
-            s_service.status.state = CELLULAR_SERVICE_NO_SIM;
+            s_service.status.state = event == UartEthModem::UartEthModemEvent::ErrorNoSim
+                ? CELLULAR_SERVICE_NO_SIM : CELLULAR_SERVICE_SIM_NOT_READY;
             s_service.status.ready = false;
             s_service.probe_active = false;
             s_service.stop_after_probe = !s_service.user_enabled;
@@ -104,10 +107,6 @@ void on_modem_event(UartEthModem::UartEthModemEvent event, const std::string &de
             break;
     }
     set_detail(&s_service.status, detail);
-    ESP_LOGI(kTag, "NT26 state=%d capable=%d known=%d ready=%d%s%s",
-             (int)s_service.status.state, (int)s_service.status.capable,
-             (int)s_service.status.capability_known, (int)s_service.status.ready,
-             detail.empty() ? "" : " detail=", detail.c_str());
 }
 
 esp_err_t ensure_netif_runtime(void) {
@@ -118,7 +117,7 @@ esp_err_t ensure_netif_runtime(void) {
     return ESP_OK;
 }
 
-std::shared_ptr<UartEthModem> make_modem(void) {
+std::shared_ptr<UartEthModem> make_modem() {
     UartEthModem::Config config = {
         .uart_num = UART_NUM_2,
         .baud_rate = 2000000,
@@ -133,6 +132,7 @@ std::shared_ptr<UartEthModem> make_modem(void) {
 }
 
 esp_err_t start_modem(bool enabled, bool probing) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
         if (s_service.modem) return ESP_OK;
@@ -175,6 +175,7 @@ esp_err_t start_modem(bool enabled, bool probing) {
 }
 
 bool stop_modem(bool preserve_status) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     std::shared_ptr<UartEthModem> modem;
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
@@ -228,6 +229,7 @@ extern "C" void cellular_service_init(void) {
 
 extern "C" esp_err_t cellular_service_set_enabled(bool enabled) {
     cellular_service_status_t status;
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     cellular_service_get_status(&status);
     if (enabled) {
         if (!status.capability_known) return ESP_ERR_INVALID_STATE;
@@ -262,6 +264,7 @@ extern "C" esp_err_t cellular_service_set_enabled(bool enabled) {
 }
 
 extern "C" bool cellular_service_pause_for_sleep(void) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     bool has_modem;
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
@@ -278,6 +281,7 @@ extern "C" bool cellular_service_pause_for_sleep(void) {
 }
 
 extern "C" void cellular_service_resume_after_sleep(void) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     bool paused = false;
     bool enabled = false;
     bool probing = false;
@@ -292,6 +296,7 @@ extern "C" void cellular_service_resume_after_sleep(void) {
 }
 
 extern "C" void cellular_service_poll(void) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
     std::shared_ptr<UartEthModem> modem;
     bool stop_pending = false;
     bool probe_timed_out = false;

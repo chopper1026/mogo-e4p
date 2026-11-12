@@ -139,6 +139,40 @@ static bool s_enter_haptics_from_quick;
 static bool s_haptics_shortcut_back;
 static bool s_enter_network_from_quick;
 static bool s_network_shortcut_back;
+static network_status_t s_network_snapshot;
+enum {
+    NETWORK_TOGGLE_Y = 272,
+    NETWORK_TOGGLE_H = 126,
+    NETWORK_ROUTE_SECTION_Y = 434,
+    NETWORK_ROUTE_ROW_Y = 472,
+    NETWORK_ROW_H = 70,
+};
+
+static const char *settings_cellular_status(const network_status_t *network) {
+    if (!network->cellular_enabled) return "已关闭";
+    if (network->cellular_ready) return "已连接";
+    switch (network->cellular_state) {
+        case CELLULAR_SERVICE_NO_SIM: return "未检测到 SIM 卡";
+        case CELLULAR_SERVICE_SIM_NOT_READY:
+            return network->cellular_detail[0] ? network->cellular_detail : "SIM 卡未就绪";
+        case CELLULAR_SERVICE_NO_REGISTRATION: return "网络注册被拒";
+        case CELLULAR_SERVICE_ERROR: return "连接失败";
+        case CELLULAR_SERVICE_PROBING: return "正在检测模块";
+        case CELLULAR_SERVICE_STARTING: return "正在连接";
+        default: return "未连接";
+    }
+}
+
+static bool settings_network_poll(void) {
+    network_status_t next;
+    network_service_get_status(&next);
+    const bool changed = s_page == SETTINGS_NETWORK
+        ? memcmp(&next, &s_network_snapshot, sizeof(next)) != 0
+        : s_page == SETTINGS_MAIN && next.cellular_capable != s_network_snapshot.cellular_capable;
+    if (changed) s_network_snapshot = next;
+    return changed;
+}
+
 static ui_pinpad_t s_pinpad;
 static lock_pin_flow_t s_pinflow;
 static bool s_pin_pending;
@@ -690,8 +724,8 @@ static EpdRect standby_duration_rect(unsigned column) {
 }
 
 static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
-    // 每个设置项对应一个 Lucide 图标；索引顺序由各分组传入的 icons[] 数组决定。
-    // One Lucide icon per setting row; the index order comes from each group's icons[] array.
+    // 每个设置项对应一个生成图标；索引顺序由各分组传入的 icons[] 数组决定。
+    // One generated icon per setting row; the index order comes from each group's icons[] array.
     static const ui_icon_t icons[] = {
         UI_ICON_WIFI,              // 0 无线连接
         UI_ICON_BLUETOOTH,         // 1 蓝牙
@@ -715,7 +749,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
         UI_ICON_ZAP,               // 20 电源管理 / power management
         UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
-        UI_ICON_RADIO_TOWER,       // 22 移动网络
+        UI_ICON_MOGO_CELLULAR_SIGNAL, // 22 移动网络
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -955,24 +989,21 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         network_status_t network;
         network_service_get_status(&network);
         back_header(fb, "移动网络");
-        section(fb, 232, "无线开关");
-        setting_toggle(fb, 272, "Wi-Fi", network.wifi_ready ? "已连接" : network.wifi_enabled ? "连接中" : "已关闭",
-                       network.wifi_enabled);
+        section(fb, 232, "移动数据");
         if (network.cellular_capable) {
-            setting_toggle(fb, 424, "4G 移动网络", network.cellular_ready ? "已连接" : network.cellular_enabled ? "连接中" : "已关闭",
+            setting_toggle(fb, NETWORK_TOGGLE_Y, "4G 移动网络", settings_cellular_status(&network),
                            network.cellular_enabled);
-            section(fb, 606, "业务联网方式");
-            row(fb, 646, "日期、天气、OTA", network_route_name(network.route));
+            section(fb, NETWORK_ROUTE_SECTION_Y, "业务联网方式");
+            row(fb, NETWORK_ROUTE_ROW_Y, "日期、天气、OTA", network_route_name(network.route));
             char detail[96];
-            snprintf(detail, sizeof(detail), "4G 状态：%s · 信号 %d",
-                     network.cellular_ready ? "已注册" :
-                     network.cellular_state == CELLULAR_SERVICE_NO_SIM ? "未插卡" :
-                     network.cellular_state == CELLULAR_SERVICE_NO_REGISTRATION ? "未注册" : "未连接",
-                     network.cellular_signal == 99 ? 0 : network.cellular_signal);
-            ui_text(fb, 48, 780, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 48, 824, 21, "点按开关只改变对应无线；联网方式在上方单独选择。", EPD_DRAW_ALIGN_LEFT, false);
+            char signal[12];
+            if (network.cellular_signal == 99) snprintf(signal, sizeof(signal), "未知");
+            else snprintf(signal, sizeof(signal), "%d/31", network.cellular_signal);
+            snprintf(detail, sizeof(detail), "4G：%s · 信号 %s", settings_cellular_status(&network), signal);
+            ui_text(fb, 48, 602, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 48, 648, 21, "移动网络使用内置 SIM 卡；联网方式单独选择。", EPD_DRAW_ALIGN_LEFT, false);
         } else {
-            ui_text(fb, 48, 492, 21, network.cellular_capability_known
+            ui_text(fb, 48, 340, 21, network.cellular_capability_known
                     ? "当前硬件未检测到移动网络模块。"
                     : "正在检测移动网络硬件，请稍候。",
                     EPD_DRAW_ALIGN_LEFT, false);
@@ -1463,6 +1494,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_ble_shortcut_back = false;
     s_haptics_shortcut_back = false;
     s_network_shortcut_back = false;
+    network_service_get_status(&s_network_snapshot);
     // 快捷栏长按直达蓝牙子页：初始状态与主列表「蓝牙」行一致，消费后回到主列表。
     // Quick-bar shortcut straight to the Bluetooth sub-page: same initial state as
     // the main list's Bluetooth row, falling back to the main list after one use.
@@ -1549,6 +1581,8 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     }
     if (s_page == SETTINGS_BLUETOOTH && !(ctx->touch && ctx->touch->touched) &&
         settings_bluetooth_tick(ctx->now_ms)) return APP_REDRAW_PAGE;
+    if ((s_page == SETTINGS_NETWORK || s_page == SETTINGS_MAIN) &&
+        !(ctx->touch && ctx->touch->touched) && settings_network_poll()) return APP_REDRAW_PAGE;
 
     (void)ctx;
     if (s_boot_pending) {
@@ -1974,15 +2008,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_NETWORK) {
         network_status_t network;
         network_service_get_status(&network);
-        if (y >= 272 && y < 398) {
-            (void)network_service_set_enabled(NETWORK_BEARER_WIFI, !network.wifi_enabled);
-            return APP_REDRAW_PAGE;
-        }
-        if (network.cellular_capable && y >= 424 && y < 550) {
+        if (network.cellular_capable && y >= NETWORK_TOGGLE_Y &&
+            y < NETWORK_TOGGLE_Y + NETWORK_TOGGLE_H) {
             (void)network_service_set_enabled(NETWORK_BEARER_CELLULAR, !network.cellular_enabled);
             return APP_REDRAW_PAGE;
         }
-        if (network.cellular_capable && y >= 646 && y < 716) {
+        if (network.cellular_capable && y >= NETWORK_ROUTE_ROW_Y &&
+            y < NETWORK_ROUTE_ROW_Y + NETWORK_ROW_H) {
             network_route_t next = network.route == NETWORK_ROUTE_WIFI ? NETWORK_ROUTE_CELLULAR :
                 network.route == NETWORK_ROUTE_CELLULAR ? NETWORK_ROUTE_AUTO : NETWORK_ROUTE_WIFI;
             if (next != NETWORK_ROUTE_CELLULAR || network.cellular_capable)

@@ -73,6 +73,9 @@ S31 interrupt entry/exit and coprocessor switching call FreeRTOS coprocessor hel
 前光和无线停用后，板级睡眠入口关闭 P14 蓝牙／功放供电；P12 是触摸复位脚，保持高电平。唤醒时先由 `board_ioe_wake()` 恢复 P14，再恢复前光、触摸与加速度计。
 After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier supply and keeps touch reset P12 high. Wake restores P14 through `board_ioe_wake()` before restoring frontlight, touch and accelerometer.
 
+网络承载由 `main/services/network_service` 统一管理，日期、天气与 OTA 通过租约使用用户选择的 Wi-Fi、4G 或自动路由；租约期间不能关闭对应无线。`main/services/cellular` 负责运行时 NT26 探测、固定内置 SIM、注册/IP 就绪及休眠交接；未检测到模块时隐藏移动网络入口，固件与 OTA 身份不拆分。见 [NETWORK.md](development/guides/NETWORK.md)。
+`main/services/network_service` owns Wi-Fi/cellular/Auto routing and radio-protecting leases for time, weather and OTA. `main/services/cellular` owns runtime NT26 detection, internal-SIM configuration, registration/IP readiness and sleep handoff. Hide mobile controls when hardware is absent and retain one firmware/OTA identity.
+
 ## 依赖规则 / Dependency rules
 
 - 阅读方向由 `app_book` 持有会话状态，与晃动翻页共用传感器采样；`reader_orientation` 只判稳定重力，`display_orientation` 只映射显示方向及触点。UI 任务在绘制锁内交还预绘、更新几何并按字节锚点重排，失败恢复旧布局。阅读正文/工具栏可四向显示，系统菜单、锁屏、目录及设置暂用正常竖屏；离开/关书清空自动状态。`app_desc_t` 的可选回调连接顶部快捷栏与系统遮罩，`render()` 保持纯绘制。/ `app_book` owns session orientation and shares sensor sampling with shake paging; `reader_orientation` only detects stable gravity and `display_orientation` maps direction/contacts. The UI task joins prefetch, changes geometry and reflows around a byte anchor under the draw lock, restoring the old layout on failure. Body/tools support four directions; system menus, lock, TOC and settings temporarily use portrait, and closing/leaving clears auto mode. Optional page callbacks connect quick controls/system overlays while render remains paint-only. See [方向契约](development/guides/READER_ORIENTATION.md).

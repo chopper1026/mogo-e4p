@@ -53,7 +53,7 @@ static sc7a20h_handle_t s_acc;
 static bool s_acc_was_on;
 static uint8_t config[2], output[2];
 static int step, fault, clears;
-static bool buzzer, acc_on, transfer_ok = true, ota;
+static bool buzzer, acc_on, transfer_ok = true, cellular_ok = true, ota;
 static bool cover_ok = true, avatar_ok = true;
 static bool book_cover_jobs_quiesce(unsigned ms) { assert(ms == 2000); return cover_ok; }
 bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
@@ -63,6 +63,7 @@ static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 static void device_power_batt_log_event(int event) { assert(event == DEVICE_POWER_BATT_LOG_OFF); }
 static bool device_power_batt_log_flush(unsigned ms) { assert(ms == 250); return true; }
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
+static int cellular_pauses, cellular_resumes;
 static int error_result, waits;
 static bool soft_supported;
 static bool key_sampling=true;
@@ -92,7 +93,15 @@ static int trace_replays;
 static void sleep_trace_replay(void) { ++trace_replays; }
 static bool pico_online_busy(void) { return ota; }
 static bool wifi_transfer_pause_for_sleep(void) { ++pauses; return transfer_ok; }
-static void wifi_transfer_resume_after_sleep(void) { ++resumes; }
+static bool cellular_service_pause_for_sleep(void) {
+    assert(pauses == 1 && !resumes && !prepared && !step);
+    ++cellular_pauses; return cellular_ok;
+}
+static void cellular_service_resume_after_sleep(void);
+static void wifi_transfer_resume_after_sleep(void) {
+    assert(cellular_pauses == 1 && cellular_resumes == (cellular_ok ? 1 : 0));
+    ++resumes;
+}
 static int ble_pt_stop(int timeout) { assert(timeout == 2000); ++radio_stops; return ESP_OK; }
 static int fl_pauses, fl_resumes;
 static void frontlight_suspend(void) { ++fl_pauses; }
@@ -119,6 +128,12 @@ static int cst836u_wake(void *h) {
     assert((output[1] & P1_RAIL_MASK) == P1_RAIL_MASK);
     tp_mode = CST836U_MODE_NORMAL; ++touch_wakes; return ESP_OK;
 }
+static void cellular_service_resume_after_sleep(void) {
+    assert(cellular_pauses == 1 && !resumes && touch_wakes == 1);
+    assert(config[0] == P0_INPUT_MASK && config[1] == P1_INPUT_MASK);
+    assert(tp_mode == CST836U_MODE_NORMAL);
+    ++cellular_resumes;
+}
 static int pmu_result(void) {
     assert(!key_sampling && prepared && !rails_on && !acc_on && tp_mode == CST836U_MODE_DEEPSLEEP);
     assert(config[1] == P1_INPUT_MASK && !(output[0] & (P0_TPS_MASK | IOE_BIT(IO_MOTOR))));
@@ -143,7 +158,8 @@ static void reset(void) {
     tp_mode = CST836U_MODE_NORMAL;
     touch_wakes = acc_ups = acc_downs = off_calls = deep_calls = pauses = resumes = 0;
     syncs = prepared = radio_stops = waits = 0; error_result = ESP_FAIL;
-    transfer_ok = true; ota = false; soft_supported = false;
+    cellular_pauses = cellular_resumes = 0;
+    transfer_ok = cellular_ok = true; ota = false; soft_supported = false;
     fl_pauses = fl_resumes = 0;
 }
 int main(void) {
@@ -178,6 +194,7 @@ int main(void) {
         assert(app_enter_host_sleep(mode) == (ack ? ESP_ERR_TIMEOUT : ESP_FAIL));
         assert(key_sampling);
         assert(prepared == 1 && syncs == 1 && radio_stops == 1 && resumes == 1 && pauses == 1);
+        assert(cellular_pauses == 1 && cellular_resumes == 1);
         assert(off_calls == 1 && deep_calls == (mode == APP_SLEEP_DEEP));
         assert(waits == (ack ? 5000 : 0) + BOARD_RAIL_SETTLE_MS);
         assert(acc_on && tp_mode == CST836U_MODE_NORMAL);
@@ -188,6 +205,11 @@ int main(void) {
     reset(); soft_supported = true;
     assert(app_enter_host_sleep(APP_SLEEP_DEEP) == ESP_FAIL && deep_calls == 3 && !off_calls && waits == 400 + BOARD_RAIL_SETTLE_MS);
     reset(); transfer_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !prepared && !step);
+    assert(!cellular_pauses && !cellular_resumes && !resumes);
+    reset(); cellular_ok = false;
+    assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE);
+    assert(pauses == 1 && cellular_pauses == 1 && resumes == 1 && !cellular_resumes);
+    assert(!prepared && !step && !radio_stops && key_sampling && acc_on && tp_mode == CST836U_MODE_NORMAL);
     reset(); ota = true; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared);
     reset(); cover_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared); cover_ok = true;
     reset(); avatar_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared); avatar_ok = true;

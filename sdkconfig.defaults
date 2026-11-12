@@ -14,10 +14,10 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 # 多层 EPUB/PNG 调用留安全余量；大型缓存不得放栈上。/ Reserve nested EPUB/PNG stack headroom; keep large caches off-stack.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
-# 首版与 Metalio 一致：UART0 主控制台 + USB Serial/JTAG 次控制台，便于看启动日志。
-# Match Metalio for bring-up: UART0 primary console with USB Serial/JTAG secondary.
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+# USB 控制台释放 GPIO58/59，避免 UART0 日志与 NT26 的 UART2 引脚重叠。
+# Use the USB console to leave GPIO58/59 exclusively to the NT26 UART2 link.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_320=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms
@@ -38,10 +38,16 @@ CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # 无线参数整体对齐厂商 S31 构建（Metalio-E-INK4-Plus 的 sdkconfig 与
 # docs/ap-file-transfer.md §12）：静态 RX/TX 6、缓存 TX 4、TX BA 窗口 64、
-# 管理缓冲 32，WiFi 热路径代码进 IRAM。
+# 管理缓冲 32；三项吞吐 IRAM 优化同原厂关闭；本项目禁用 WiFi 省电，也无需休眠路径 IRAM 优化。
 # Radio settings follow the vendor S31 build (Metalio-E-INK4-Plus sdkconfig and
 # docs/ap-file-transfer.md §12): static RX/TX 6, cache TX 4, TX BA window 64,
-# management buffers 32, and WiFi hot-path code placed in IRAM.
+# management buffers 32. Disable the three throughput IRAM options as the vendor does,
+# leaving shared internal RAM for WiFi management frames and cellular DMA.
+# WiFi uses WIFI_PS_NONE, so also leave the modem-sleep code in flash.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+CONFIG_ESP_WIFI_SLP_IRAM_OPT=n
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
 CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y

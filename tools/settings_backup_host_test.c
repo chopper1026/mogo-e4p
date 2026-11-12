@@ -178,6 +178,7 @@ static int durable_face = -1, pending_face = -1;
 static int durable_rule = -1, pending_rule = -1, durable_rule_follow = -1, pending_rule_follow = -1;
 static bool face_write_fails, face_open_fails;
 static int durable_up = -1, pending_up = -1;
+static int loaded_network_route = -1, loaded_network_priority = -1;
 static bool regions_write_fails, progress_write_fails, touch_write_fails;
 esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     assert(!strcmp(ns, "read_pico"));
@@ -195,6 +196,13 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
 }
 void backup_nvs_close(nvs_handle_t h) { pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_NETWORK_ROUTE) || !strcmp(key, NVS_KEY_NETWORK_PRIORITY)) {
+        const int loaded = !strcmp(key, NVS_KEY_NETWORK_ROUTE)
+            ? loaded_network_route : loaded_network_priority;
+        if (loaded < 0) return ESP_ERR_NVS_NOT_FOUND;
+        *value = (uint8_t)loaded;
+        return ESP_OK;
+    }
     if (!strcmp(key, NVS_KEY_BOOK_RULE)) { if (durable_rule < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_rule; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_BOOK_RULE_TEXT)) { if (durable_rule_follow < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_rule_follow; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (durable_face < 0) return ESP_ERR_NVS_NOT_FOUND; *value = (uint8_t)durable_face; return ESP_OK; }
@@ -1139,6 +1147,28 @@ int main(void) {
     nvs_handle_t rejected = 0;
     assert(settings_write_open(&rejected) == ESP_ERR_INVALID_STATE && !flash_depth && !rejected);
     flash_failure = false;
+
+    app_settings_init();
+    assert(app_settings_network_route() == NETWORK_ROUTE_AUTO);
+    assert(app_settings_network_auto_priority() == NETWORK_AUTO_WIFI_FIRST);
+    for (int route = NETWORK_ROUTE_WIFI; route <= NETWORK_ROUTE_AUTO; ++route) {
+        loaded_network_route = route;
+        loaded_network_priority = NETWORK_AUTO_CELLULAR_FIRST;
+        app_settings_init();
+        assert(app_settings_network_route() == (network_route_t)route);
+        assert(app_settings_network_auto_priority() == NETWORK_AUTO_CELLULAR_FIRST);
+    }
+    loaded_network_route = loaded_network_priority = 255;
+    app_settings_init();
+    assert(app_settings_network_route() == NETWORK_ROUTE_AUTO);
+    assert(app_settings_network_auto_priority() == NETWORK_AUTO_WIFI_FIRST);
+    loaded_network_route = NETWORK_ROUTE_CELLULAR;
+    loaded_network_priority = NETWORK_AUTO_CELLULAR_FIRST;
+    app_settings_init();
+    loaded_network_route = loaded_network_priority = -1;
+    app_settings_init();
+    assert(app_settings_network_route() == NETWORK_ROUTE_AUTO);
+    assert(app_settings_network_auto_priority() == NETWORK_AUTO_WIFI_FIRST);
 
     loaded_home=3;app_settings_init();assert(app_settings_home_component()==APP_HOME_CLOCK);
     loaded_home=APP_HOME_MOON;app_settings_init();assert(app_settings_home_component()==APP_HOME_MOON);

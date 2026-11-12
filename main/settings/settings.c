@@ -356,6 +356,8 @@ static void migrate_device_name(char *name, size_t capacity) {
 }
 
 void app_settings_init(void) {
+    s_network_route = NETWORK_ROUTE_AUTO;
+    s_network_priority = NETWORK_AUTO_WIFI_FIRST;
     esp_err_t err = nvs_flash_init();
     // 设置分区异常时保留原数据供恢复，绝不因空间不足自动擦除用户资料。
     // Preserve settings on NVS errors; a full partition must never silently erase profile data.

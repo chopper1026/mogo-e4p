@@ -18,6 +18,8 @@
 static bool sd_mounted;
 static bool sd_invalid_present;
 static int mount_calls, mount_error, mkdir_error, is_directory = 1, fat_error;
+static int partial_mounts, mount_cleanups;
+static bool expect_format = true, fail_after_wl;
 static int sd_mkdir_error;
 static int file_mode = S_IFREG, file_error, unlink_error, forget_error, unlinks, forgets;
 static bool sd_exists = true, flash_exists = true;
@@ -85,8 +87,16 @@ esp_err_t board_sd_get_info(board_sd_info_t* out) {
 esp_err_t esp_vfs_fat_spiflash_mount_rw_wl(const char* path, const char* label,
     const esp_vfs_fat_mount_config_t* config, wl_handle_t* out) {
     assert(!strcmp(path, "/flash") && !strcmp(label, "storage"));
-    assert(config->format_if_mount_failed && config->max_files == 4 && config->allocation_unit_size == 4096);
-    ++mount_calls; if (!mount_error) *out = 1; return mount_error;
+    assert(config->format_if_mount_failed == expect_format && config->max_files == 4 && config->allocation_unit_size == 4096);
+    ++mount_calls;
+    if (mount_error && fail_after_wl) { assert(!partial_mounts); *out = 7; ++partial_mounts; }
+    if (!mount_error) *out = 1;
+    return mount_error;
+}
+esp_err_t wl_unmount(wl_handle_t handle) {
+    assert(handle == 7 && partial_mounts == 1);
+    --partial_mounts; ++mount_cleanups;
+    return ESP_OK;
 }
 esp_err_t esp_vfs_fat_info(const char* path, uint64_t* total, uint64_t* free_bytes) {
     assert(!strcmp(path, "/flash") || !strcmp(path, "/sdcard"));
@@ -99,7 +109,16 @@ int main(void) {
     assert(!book_store_flash_ready());
     assert(book_store_roots(NULL, &n) == ESP_ERR_INVALID_ARG);
     mount_error = ESP_FAIL;
+    expect_format = false; fail_after_wl = true;
+    for (unsigned attempt = 0; attempt < 16; ++attempt) {
+        assert(book_store_prepare_data() == ESP_FAIL);
+        assert(!partial_mounts && !book_store_flash_ready());
+    }
+    assert(mount_cleanups == 16);
+    expect_format = true;
     assert(book_store_roots(roots, &n) == ESP_FAIL && n == 0);
+    assert(mount_cleanups == 17 && !partial_mounts);
+    fail_after_wl = false;
     assert(book_store_roots_degraded());
     sd_mounted = true;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 1 && !roots[0].is_flash);

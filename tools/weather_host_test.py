@@ -58,10 +58,14 @@ void network_service_release(network_lease_t *lease);
     network_stub = work / "network_service_stub.c"
     network_stub.write_text("""#include \"network_service.h\"
 #include \"wifi_transfer.h\"
+extern bool weather_test_cellular;
 esp_err_t network_service_acquire(network_use_t use, network_lease_t *lease) {
     (void)use;
     if (!lease) return ESP_ERR_INVALID_ARG;
     *lease = (network_lease_t){0};
+    if (weather_test_cellular) {
+        lease->bearer = NETWORK_BEARER_CELLULAR; lease->active = true; return ESP_OK;
+    }
     wifi_transfer_status_t status = {0};
     wifi_transfer_get_status(&status);
     if (status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready) {
@@ -79,7 +83,8 @@ bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms) {
     (void)timeout_ms;
     if (!lease || !lease->active) return false;
     wifi_transfer_status_t status = {0}; wifi_transfer_get_status(&status);
-    return lease->bearer == NETWORK_BEARER_WIFI && status.network_ready;
+    return lease->bearer == NETWORK_BEARER_CELLULAR ||
+        (lease->bearer == NETWORK_BEARER_WIFI && status.network_ready);
 }
 void network_service_release(network_lease_t *lease) {
     if (!lease || !lease->active) return;

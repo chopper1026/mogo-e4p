@@ -32,6 +32,7 @@
 - [docs/development/guides/LOCK_STYLE_PICKER.md](guides/LOCK_STYLE_PICKER.md)
 - [docs/development/guides/MINI_LIBRARY.md](guides/MINI_LIBRARY.md)
 - [docs/development/guides/MOBI.md](guides/MOBI.md)
+- [docs/development/guides/NETWORK.md](guides/NETWORK.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_DICTIONARY.md](guides/READER_DICTIONARY.md)
 - [docs/development/guides/READER_ORIENTATION.md](guides/READER_ORIENTATION.md)
@@ -56,6 +57,10 @@
 - [docs/user-manual-detailed.zh-CN.json](../user-manual-detailed.zh-CN.json)
 - [docs/user-manual.zh-CN.json](../user-manual.zh-CN.json)
 - [tools/README.md](../../tools/README.md)
+
+## 计划与探索
+
+- [docs/plans/2026-11-12-gitnexus-plan-4g-network-bearer.md](../plans/2026-11-12-gitnexus-plan-4g-network-bearer.md)
 
 ## 设计与草稿
 

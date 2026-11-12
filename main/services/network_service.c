@@ -26,6 +26,7 @@ static atomic_uint s_cellular_time_pending;
 static atomic_bool s_time_active;
 static atomic_uint s_wifi_leases;
 static atomic_uint s_cellular_leases;
+static atomic_bool s_cellular_control;
 
 static bool time_cancelled(void) {
     return atomic_load(&s_time_cancel);
@@ -110,14 +111,25 @@ static bool start_cellular_for_lease(const network_status_t *status) {
     // These states are terminal for the current SIM/registration attempt.
     // AUTO must be allowed to fall through to the other bearer immediately.
     if (status->cellular_state == CELLULAR_SERVICE_NO_SIM ||
+        status->cellular_state == CELLULAR_SERVICE_SIM_NOT_READY ||
         status->cellular_state == CELLULAR_SERVICE_NO_REGISTRATION ||
         status->cellular_state == CELLULAR_SERVICE_ERROR) return false;
     return cellular_service_set_enabled(true) == ESP_OK;
 }
 
+static bool reserve_cellular_lease(void) {
+    if (atomic_load(&s_cellular_control)) return false;
+    atomic_fetch_add(&s_cellular_leases, 1);
+    if (!atomic_load(&s_cellular_control)) return true;
+    atomic_fetch_sub(&s_cellular_leases, 1);
+    return false;
+}
+
 static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease) {
     if (!lease) return ESP_ERR_INVALID_ARG;
     *lease = (network_lease_t){0};
+    if (bearer == NETWORK_BEARER_CELLULAR && !reserve_cellular_lease())
+        return ESP_ERR_INVALID_STATE;
     network_status_t status;
     network_service_get_status(&status);
     if (bearer == NETWORK_BEARER_WIFI) {
@@ -131,9 +143,11 @@ static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease)
             lease->active = true;
         }
     }
-    if (!lease->active) return ESP_ERR_NOT_FOUND;
+    if (!lease->active) {
+        if (bearer == NETWORK_BEARER_CELLULAR) atomic_fetch_sub(&s_cellular_leases, 1);
+        return ESP_ERR_NOT_FOUND;
+    }
     if (lease->bearer == NETWORK_BEARER_WIFI) atomic_fetch_add(&s_wifi_leases, 1);
-    else atomic_fetch_add(&s_cellular_leases, 1);
     void *netif = lease->bearer == NETWORK_BEARER_CELLULAR
         ? cellular_service_netif() : wifi_transfer_netif();
     if (netif) (void)esp_netif_set_default_netif((esp_netif_t *)netif);
@@ -150,17 +164,13 @@ void network_service_init(void) {
     atomic_store(&s_time_active, false);
     atomic_store(&s_wifi_leases, 0);
     atomic_store(&s_cellular_leases, 0);
+    atomic_store(&s_cellular_control, false);
 }
 
 void network_service_poll(void) {
     cellular_service_poll();
     network_status_t status;
     network_service_get_status(&status);
-    if (status.cellular_capability_known && !status.cellular_capable &&
-        s_route != NETWORK_ROUTE_WIFI) {
-        s_route = NETWORK_ROUTE_WIFI;
-        app_settings_set_network_route(s_route);
-    }
     void *netif = status.active_bearer == NETWORK_BEARER_CELLULAR
         ? cellular_service_netif() : wifi_transfer_netif();
     if (netif) (void)esp_netif_set_default_netif((esp_netif_t *)netif);
@@ -179,6 +189,8 @@ void network_service_get_status(network_status_t *out) {
     out->cellular_ready = cellular.ready;
     out->cellular_signal = cellular.signal_strength;
     out->cellular_state = (uint8_t)cellular.state;
+    memcpy(out->cellular_detail, cellular.detail, sizeof(out->cellular_detail));
+    out->cellular_detail[sizeof(out->cellular_detail) - 1] = '\0';
     out->wifi_enabled = wifi.state != WIFI_TRANSFER_STOPPED;
     out->wifi_ready = wifi.mode == WIFI_TRANSFER_MODE_STA && wifi.network_ready;
     out->route = s_route;
@@ -188,8 +200,13 @@ void network_service_get_status(network_status_t *out) {
 
 esp_err_t network_service_set_enabled(network_bearer_t bearer, bool enabled) {
     if (bearer == NETWORK_BEARER_CELLULAR) {
-        if (!enabled && atomic_load(&s_cellular_leases) != 0) return ESP_ERR_INVALID_STATE;
-        return cellular_service_set_enabled(enabled);
+        bool idle = false;
+        if (!atomic_compare_exchange_strong(&s_cellular_control, &idle, true))
+            return ESP_ERR_INVALID_STATE;
+        const esp_err_t err = !enabled && atomic_load(&s_cellular_leases) != 0
+            ? ESP_ERR_INVALID_STATE : cellular_service_set_enabled(enabled);
+        atomic_store(&s_cellular_control, false);
+        return err;
     }
     if (bearer != NETWORK_BEARER_WIFI) return ESP_ERR_INVALID_ARG;
     if (!enabled) {
@@ -226,38 +243,16 @@ esp_err_t network_service_acquire(network_use_t use, network_lease_t *lease) {
     *lease = (network_lease_t){0};
     network_status_t status;
     network_service_get_status(&status);
-    network_bearer_t desired = resolve_ready_bearer(&status);
-    if (desired == NETWORK_BEARER_NONE) {
-        if (status.route == NETWORK_ROUTE_WIFI) {
-            if (start_wifi_for_lease(lease) == ESP_OK) desired = NETWORK_BEARER_WIFI;
-        } else if (status.route == NETWORK_ROUTE_CELLULAR) {
-            if (start_cellular_for_lease(&status)) desired = NETWORK_BEARER_CELLULAR;
-        } else {
-            const bool cellular_first = status.auto_priority == NETWORK_AUTO_CELLULAR_FIRST;
-            if (cellular_first) {
-                if (start_cellular_for_lease(&status)) desired = NETWORK_BEARER_CELLULAR;
-                if (desired == NETWORK_BEARER_NONE && start_wifi_for_lease(lease) == ESP_OK)
-                    desired = NETWORK_BEARER_WIFI;
-            } else {
-                if (start_wifi_for_lease(lease) == ESP_OK) desired = NETWORK_BEARER_WIFI;
-                if (desired == NETWORK_BEARER_NONE && start_cellular_for_lease(&status))
-                    desired = NETWORK_BEARER_CELLULAR;
-            }
-        }
+    network_bearer_t first = resolve_ready_bearer(&status);
+    if (first == NETWORK_BEARER_NONE) {
+        first = status.route == NETWORK_ROUTE_CELLULAR ||
+            (status.route == NETWORK_ROUTE_AUTO && status.auto_priority == NETWORK_AUTO_CELLULAR_FIRST)
+            ? NETWORK_BEARER_CELLULAR : NETWORK_BEARER_WIFI;
     }
-    if (desired == NETWORK_BEARER_NONE) {
-        if (lease->owns_wifi) wifi_transfer_stop();
-        *lease = (network_lease_t){0};
-        return ESP_ERR_NOT_FOUND;
-    }
-    lease->bearer = desired;
-    lease->active = true;
-    if (desired == NETWORK_BEARER_WIFI) atomic_fetch_add(&s_wifi_leases, 1);
-    else if (desired == NETWORK_BEARER_CELLULAR) atomic_fetch_add(&s_cellular_leases, 1);
-    void *netif = desired == NETWORK_BEARER_CELLULAR
-        ? cellular_service_netif() : wifi_transfer_netif();
-    if (netif) (void)esp_netif_set_default_netif((esp_netif_t *)netif);
-    return ESP_OK;
+    esp_err_t err = acquire_bearer(first, lease);
+    if (err == ESP_OK || status.route != NETWORK_ROUTE_AUTO) return err;
+    return acquire_bearer(first == NETWORK_BEARER_WIFI
+        ? NETWORK_BEARER_CELLULAR : NETWORK_BEARER_WIFI, lease);
 }
 
 bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms) {
@@ -273,6 +268,7 @@ bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms) {
                 (lease->bearer == NETWORK_BEARER_CELLULAR && status.cellular_ready)) return true;
             if (lease->bearer == NETWORK_BEARER_CELLULAR &&
                 (status.cellular_state == CELLULAR_SERVICE_NO_SIM ||
+                 status.cellular_state == CELLULAR_SERVICE_SIM_NOT_READY ||
                  status.cellular_state == CELLULAR_SERVICE_NO_REGISTRATION ||
                  status.cellular_state == CELLULAR_SERVICE_ERROR ||
                  (status.cellular_state == CELLULAR_SERVICE_STOPPED &&

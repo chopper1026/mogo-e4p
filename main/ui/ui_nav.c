@@ -261,7 +261,7 @@ void ui_nav_status(uint8_t *fb) {
     if (wifi_visible) ui_nav_wifi_icon(fb, wifi_center, status_center_y, UI_NAV_NETWORK_ICON_PX, UI_GRAY_BLACK);
     if (cellular_visible)
         ui_draw_icon(fb, cellular_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
-                     UI_ICON_RADIO_TOWER, UI_GRAY_BLACK);
+                     UI_ICON_MOGO_CELLULAR_SIGNAL, UI_GRAY_BLACK);
     if (bluetooth_visible)
         ui_draw_icon(fb, bluetooth_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
                      UI_ICON_BLUETOOTH, UI_GRAY_BLACK);

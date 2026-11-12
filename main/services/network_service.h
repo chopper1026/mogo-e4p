@@ -20,6 +20,7 @@ typedef struct {
     bool cellular_ready;
     int cellular_signal;
     uint8_t cellular_state;
+    char cellular_detail[96];
     bool wifi_enabled;
     bool wifi_ready;
     network_route_t route;

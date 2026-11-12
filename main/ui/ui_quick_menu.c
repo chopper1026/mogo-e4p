@@ -116,7 +116,7 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
     epd_draw_circle(cx,cy,UI_QUICK_RADIUS,UI_GRAY_BLACK,fb);
     epd_draw_circle(cx,cy,UI_QUICK_RADIUS-1,UI_GRAY_BLACK,fb);
     if(button<3) ui_draw_icon(fb,cx,cy,44,s_icons[button],UI_GRAY_BLACK);
-    else if (button == ui_quick_menu_cellular_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_RADIO_TOWER,UI_GRAY_BLACK);
+    else if (button == ui_quick_menu_cellular_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_MOGO_CELLULAR_SIGNAL,UI_GRAY_BLACK);
     else if(frontlight_key) ui_draw_icon(fb,cx,cy,44,UI_ICON_SUN,UI_GRAY_BLACK);
     else if (button == ui_quick_menu_haptics_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_VIBRATE,UI_GRAY_BLACK);
     else if (button == ui_quick_menu_rotation_button(menu)) rotation_icon(fb,cx,cy,menu->rotation_enabled);

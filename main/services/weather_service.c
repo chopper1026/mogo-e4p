@@ -33,6 +33,8 @@
 #define WEATHER_SESSION_US (45LL * 1000000)
 #define WEATHER_CONNECT_US (6LL * 1000000)
 #define WEATHER_RESPONSE_US (5LL * 1000000)
+#define WEATHER_CELLULAR_CONNECT_US (20LL * 1000000)
+#define WEATHER_CELLULAR_RESPONSE_US (10LL * 1000000)
 #define WEATHER_IO_POLL_MS 200
 #define WEATHER_REFRESH_SECONDS (6LL * 60 * 60)
 typedef struct weather_search_batch {
@@ -169,7 +171,10 @@ static esp_err_t weather_date_header(esp_http_client_event_t *event) {
     header->seen = true;
     return ESP_OK;
 }
-static bool http_get(const char *path, char *body, weather_clock_t *response_clock) {
+static bool http_get_once(const char *path, char *body, weather_clock_t *response_clock,
+                          network_bearer_t bearer, bool *retryable) {
+    *retryable = false;
+    body[0] = 0;
     weather_date_header_t header = {0};
     if (response_clock) *response_clock = (weather_clock_t){0};
     char url[1024];
@@ -179,9 +184,14 @@ static bool http_get(const char *path, char *body, weather_clock_t *response_clo
         strchr(origin + 8, '/') || strchr(origin + 8, '?') || strchr(origin + 8, '#') ||
         strchr(origin + 8, '@') || cancelled()) return false;
     if (snprintf(url, sizeof(url), "%s/api/v2%s", origin, path) >= (int)sizeof(url)) return false;
+    const int64_t connect_us = bearer == NETWORK_BEARER_CELLULAR
+        ? WEATHER_CELLULAR_CONNECT_US : WEATHER_CONNECT_US;
+    const int64_t response_us = bearer == NETWORK_BEARER_CELLULAR
+        ? WEATHER_CELLULAR_RESPONSE_US : WEATHER_RESPONSE_US;
     int64_t started = esp_timer_get_time();
     esp_http_client_config_t config = {
-        .url = url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 6000, .is_async = true,
+        .url = url, .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = (int)(connect_us / 1000), .is_async = true,
         .disable_auto_redirect = true, .buffer_size = 1024, .buffer_size_tx = 1024,
         .event_handler = response_clock ? weather_date_header : NULL, .user_data = &header,
     };
@@ -190,17 +200,19 @@ static bool http_get(const char *path, char *body, weather_clock_t *response_clo
     esp_http_client_set_header(client, "Accept", "application/json");
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     bool ok = false;
+    bool transport_error;
     esp_err_t opened = ESP_FAIL;
-    while (!cancelled() && esp_timer_get_time() - started < WEATHER_CONNECT_US) {
+    while (!cancelled() && esp_timer_get_time() - started < connect_us) {
         opened = esp_http_client_open(client, 0);
         if (opened != ESP_ERR_HTTP_EAGAIN) break;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+    transport_error = opened != ESP_OK;
     if (!cancelled() && opened == ESP_OK) {
-        int64_t until = esp_timer_get_time() + WEATHER_RESPONSE_US;
+        int64_t until = esp_timer_get_time() + response_us;
         int64_t length = -1;
-        // 短等待读取可取消，EAGAIN仅在五秒响应窗口内重试。
-        // Short I/O waits stay cancellable; retry EAGAIN only within the five-second response window.
+        // 短等待读取可取消，EAGAIN仅在当前承载的响应窗口内重试。
+        // Short I/O waits stay cancellable within the selected bearer's response window.
         while (!cancelled()) {
             int wait = http_wait_ms(until);
             if (wait <= 0 || esp_http_client_set_timeout_ms(client, wait) != ESP_OK) break;
@@ -208,20 +220,23 @@ static bool http_get(const char *path, char *body, weather_clock_t *response_clo
             if (length != -ESP_ERR_HTTP_EAGAIN) break;
             vTaskDelay(pdMS_TO_TICKS(20));
         }
+        transport_error = length < 0;
         if (!cancelled() && esp_timer_get_time() < until && length >= 0 && length <= WEATHER_BODY_LIMIT) {
+            transport_error = false;
             size_t used = 0;
-            until = esp_timer_get_time() + WEATHER_RESPONSE_US;
+            until = esp_timer_get_time() + response_us;
             while (!cancelled() && used < WEATHER_BODY_LIMIT) {
                 int wait = http_wait_ms(until);
                 if (wait <= 0 || esp_http_client_set_timeout_ms(client, wait) != ESP_OK) break;
                 size_t chunk = WEATHER_BODY_LIMIT - used;
                 if (chunk > 512) chunk = 512;
                 int n = esp_http_client_read(client, body + used, (int)chunk);
+                transport_error = n < 0;
                 if (n == -ESP_ERR_HTTP_EAGAIN) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
                 if (n < 0) break;
                 if (!n) { ok = esp_http_client_is_complete_data_received(client); break; }
                 used += (size_t)n;
-                until = esp_timer_get_time() + WEATHER_RESPONSE_US;
+                until = esp_timer_get_time() + response_us;
             }
             body[used] = 0;
             if (used == WEATHER_BODY_LIMIT) ok = esp_http_client_is_complete_data_received(client);
@@ -231,11 +246,25 @@ static bool http_get(const char *path, char *body, weather_clock_t *response_clo
             } else ok = false;
         }
     }
+    ok = ok && !cancelled();
+    *retryable = !ok && !cancelled() && transport_error;
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    ok = ok && !cancelled();
     if (ok && response_clock) *response_clock = header.clock;
     return ok;
+}
+static bool http_get(const char *path, char *body, weather_clock_t *response_clock,
+                     network_bearer_t bearer) {
+    const unsigned attempts = bearer == NETWORK_BEARER_CELLULAR ? 2 : 1;
+    for (unsigned attempt = 0; attempt < attempts && !cancelled(); ++attempt) {
+        bool retryable;
+        if (http_get_once(path, body, response_clock, bearer, &retryable)) return true;
+        if (!retryable || attempt + 1 == attempts || cancelled()) break;
+        // 同一租约内仅重新建立一次连接；不重试业务错误，也不延长整个会话。
+        // Retry one fresh connection on the same lease, within the original session deadline.
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    return false;
 }
 static void search_free_batches(weather_search_batch_t **list) {
     while (*list) {
@@ -274,13 +303,17 @@ static void weather_worker(void *arg) {
     network_lease_t lease = {0};
     char *body = heap_caps_malloc(WEATHER_BODY_LIMIT + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     result_notice(APP_WEATHER_FAILED, "天气更新失败，可稍后重试");
-    if (!body || cancelled()) goto done;
+    if (!body) {
+
+        result_notice(APP_WEATHER_FAILED, "内存不足，请稍后重试"); goto done;
+    }
+    if (cancelled()) goto done;
     if (network_service_acquire(NETWORK_USE_WEATHER, &lease) != ESP_OK ||
         !network_service_wait_ready(&lease, 30000)) {
         result_notice(APP_WEATHER_UNAVAILABLE, "当前联网方式不可用，请检查网络设置");
         goto done;
     }
-    if (cancelled() || !http_get("/components", body, NULL)) goto done;
+    if (cancelled() || !http_get("/components", body, NULL, lease.bearer)) goto done;
     bool enabled, available;
     if (!weather_catalog_parse(body, strlen(body), &enabled, &available)) goto done;
     if (!enabled) {
@@ -298,7 +331,7 @@ static void weather_worker(void *arg) {
             memset(batch, 0, sizeof(*batch));
             unsigned total;
             snprintf(path, sizeof(path), "/components/weather/locations?q=%s&page=%u&pageSize=%u", escaped, page, WEATHER_SEARCH_BATCH_SIZE);
-            bool ok = http_get(path, body, NULL) && weather_locations_parse(body, strlen(body), batch->locations,
+            bool ok = http_get(path, body, NULL, lease.bearer) && weather_locations_parse(body, strlen(body), batch->locations,
                 WEATHER_SEARCH_BATCH_SIZE, &batch->count, &total, &batch->page) && batch->page == page &&
                 (!s_requested_total_known || total == s_requested_total) && (!i || total == s_result.total);
             if (!ok) { heap_caps_free(batch); goto done; }
@@ -309,7 +342,7 @@ static void weather_worker(void *arg) {
     }
     weather_location_t city = s_requested_city;
     if (s_request == APP_WEATHER_LOCATE || !s_requested_has_city) {
-        if (!http_get("/components/weather/auto-location", body, NULL)) {
+        if (!http_get("/components/weather/auto-location", body, NULL, lease.bearer)) {
             if (s_result.state == APP_WEATHER_FAILED)
                 result_notice(APP_WEATHER_CITY_REQUIRED, "未能确定城市，请手动选择");
             goto done;
@@ -322,7 +355,7 @@ static void weather_worker(void *arg) {
     char path[256];
     snprintf(path, sizeof(path), "/components/weather/forecast?locationId=%s", city.id);
     weather_clock_t clock = s_requested_clock, response_clock;
-    if (!http_get(path, body, &response_clock)) goto done;
+    if (!http_get(path, body, &response_clock, lease.bearer)) goto done;
     // 仅接受同一可信HTTPS预报的时间；旧响应不能倒退参照或延长原始有效期。
     // Trust time only from the same HTTPS forecast; older responses cannot roll back time or extend expiry.
     if (response_clock.utc && (!clock.utc || clock_now(&response_clock) > clock_now(&clock))) clock = response_clock;
@@ -464,6 +497,7 @@ static bool request_page(app_weather_request_t request, const char *query, unsig
     s_next_attempt = esp_timer_get_time() + WEATHER_RETRY_US;
     s_deadline = esp_timer_get_time() + WEATHER_SESSION_US;
     if (xTaskCreate(weather_worker, "weather", 8192, NULL, 1, NULL) != pdPASS) {
+
         atomic_store(&s_busy, false);
         s_view.state = APP_WEATHER_FAILED;
         snprintf(s_view.notice, sizeof(s_view.notice), "内存不足，请稍后重试"); ++s_view.revision; return false;
