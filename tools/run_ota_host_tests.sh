@@ -13,7 +13,7 @@ cjson=managed_components/espressif__cjson/cJSON
 # 按产品目标编译，覆盖 5 MB 双槽与 ESP32-S31 芯片 ID。
 # Build for the product target so the 5 MB dual slots and the ESP32-S31 chip ID are covered.
 flags="-std=gnu11 -Wall -Wextra -Werror -g -DCONFIG_IDF_TARGET_ESP32S31 \
-  -Imain -Imain/ota -Imain/time -Itools/ota_stubs -Itools/ota_stubs/freertos -I$cjson"
+  -Itools/ota_stubs -Itools/ota_stubs/freertos -Imain -Imain/ota -Imain/time -Imain/services -I$cjson"
 
 # 仅第三方 cJSON 使用系统已弃用的格式化 API；我方代码继续严格检查。
 # Only vendored cJSON uses the system's deprecated formatting API; keep our code under strict diagnostics.

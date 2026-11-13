@@ -17,6 +17,7 @@ typedef int esp_err_t;
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_ARG 0x102
+#define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_NOT_FINISHED 0x107
 typedef struct { int x,y,width,height; } EpdRect;
@@ -127,6 +128,7 @@ static size_t test_profile_count;
 static inline bool wifi_transfer_try_stop_if_idle(void) {return !test_busy;}
 static int test_stop_count;
 static bool test_wifi_running;
+static inline esp_err_t network_service_prepare_wifi(void) { return ESP_OK; }
 static inline void wifi_transfer_stop(void) { ++test_stop_count; test_wifi_running=false; }
 static inline void wifi_transfer_get_status(wifi_transfer_status_t* s) {*s=test_status;}
 static inline int wifi_transfer_get_saved_wifi(char* s,bool* c) {
