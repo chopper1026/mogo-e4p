@@ -151,7 +151,7 @@ int main(void){
  reset();stored=wall-21599;app_time_service_poll(true);assert(!jobs);
  for(int state=1;state<=4;++state){
   reset();network.state=state;network.mode=WIFI_TRANSFER_MODE_AP;network.network_ready=true;
-  app_time_service_poll(true);assert(!jobs);
+  app_time_service_poll(true);assert(jobs==0);
  }
  reset();creds=false;app_time_service_poll(true);assert(!jobs&&credential_reads==1);app_time_service_poll(true);assert(credential_reads==1);
  reset();task_ok=0;app_time_service_poll(true);assert(!jobs&&!atomic_load(&s_running));
