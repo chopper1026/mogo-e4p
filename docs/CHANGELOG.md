@@ -12,6 +12,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 完善电量校准。
 - 新增移动联网功能，4G 版设备可在快捷栏开启或关闭移动网络。
 - 透明书封支持 JPG 格式图片，可裁切或完整显示。
+- 优化透明书封锁屏合成：选图时按当前取景方式预建图层缓存，合成时跳过透明画布空白区域；保留原有 GC16 清理残影流程。
 
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-13
 

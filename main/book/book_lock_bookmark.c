@@ -155,6 +155,10 @@ static bool s_fast_geometry;
 static size_t s_fast_stride,s_fast_row;
 static bool s_layer_cached;
 bool book_lock_bookmark_cached(void) { return s_layer_cached; }
+static bool s_bounds_valid,s_bounds_has_content;
+static uint32_t s_bounds_path_hash,s_bounds_width,s_bounds_height,s_bounds_mode;
+static uint64_t s_bounds_size,s_bounds_mtime;
+static unsigned s_bounds_min_x,s_bounds_min_y,s_bounds_max_x,s_bounds_max_y;
 static void lock_fast_setup(void) {
     s_fast_geometry=epd_get_rotation()==EPD_ROT_INVERTED_PORTRAIT&&epd_width()==1216&&epd_height()==684;
     s_fast_stride=(size_t)epd_width()/2;
@@ -309,6 +313,24 @@ static bool decode_layer(const char *path,unsigned w,unsigned h,uint8_t *gray,ui
     memset(alpha,255,(size_t)w*h);
     return book_image_file_grayscale_cancel(path,false,w,h,gray,cancelled,context);
 }
+static bool layer_bounds(const uint8_t *alpha,unsigned w,unsigned h,
+                         unsigned *min_x,unsigned *min_y,unsigned *max_x,unsigned *max_y) {
+    if(!alpha||!w||!h||!min_x||!min_y||!max_x||!max_y)return false;
+    unsigned left=w,top=h,right=0,bottom=0;
+    bool found=false;
+    for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x)if(alpha[(size_t)y*w+x]){
+        if(!found){left=right=x;top=bottom=y;found=true;}
+        else {
+            if(x<left)left=x;
+            if(x>right)right=x;
+            if(y<top)top=y;
+            if(y>bottom)bottom=y;
+        }
+    }
+    if(!found)return false;
+    *min_x=left;*min_y=top;*max_x=right;*max_y=bottom;
+    return true;
+}
 // 按显示方式计算解码画布：完整显示保留原比例，裁切填满直接输出屏幕比例并由解码器居中裁源图。
 // Choose the decode canvas: fit preserves the source ratio; crop outputs panel ratio and lets the decoder center-crop.
 static bool canvas_for(const char *path,bool crop_to_fill,unsigned *w,unsigned *h) {
@@ -334,6 +356,8 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store,bool crop_to_fill)
     uint8_t *alpha=layers+count;
     // 缓存命中直接得到图层，跳过解码与去白底；未命中按格式解码后顺手把缓存写出去。
     // A cache hit supplies the layers and skips decoding and white removal; a miss decodes by format and refreshes the cache.
+    unsigned min_x=0,min_y=0,max_x=w? w-1:0,max_y=h? h-1:0;
+    bool has_content=false;
     bool cached=layer_load(path,w,h,crop_to_fill,layers);
     s_layer_cached=cached;
     const int64_t lock_t2=LOCK_US();
@@ -349,11 +373,29 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store,bool crop_to_fill)
         if(ok)ok=remove_cover_background(layers,alpha,w,h);
         lock_t4=LOCK_US();
     }
+    struct stat source_stat;
+    const bool source_stat_ok=path&&stat(path,&source_stat)==0;
+    const bool reuse_bounds=cached&&source_stat_ok&&s_bounds_valid&&
+        s_bounds_path_hash==layer_path_hash(path)&&s_bounds_size==(uint64_t)source_stat.st_size&&
+        s_bounds_mtime==(uint64_t)source_stat.st_mtime&&s_bounds_width==w&&s_bounds_height==h&&
+        s_bounds_mode==(uint32_t)crop_to_fill;
+    if(ok&&reuse_bounds){
+        has_content=s_bounds_has_content;min_x=s_bounds_min_x;min_y=s_bounds_min_y;
+        max_x=s_bounds_max_x;max_y=s_bounds_max_y;
+    } else if(ok) {
+        has_content=layer_bounds(alpha,w,h,&min_x,&min_y,&max_x,&max_y);
+        if(source_stat_ok){
+            s_bounds_valid=true;s_bounds_has_content=has_content;s_bounds_path_hash=layer_path_hash(path);
+            s_bounds_size=(uint64_t)source_stat.st_size;s_bounds_mtime=(uint64_t)source_stat.st_mtime;
+            s_bounds_width=w;s_bounds_height=h;s_bounds_mode=(uint32_t)crop_to_fill;
+            s_bounds_min_x=min_x;s_bounds_min_y=min_y;s_bounds_max_x=max_x;s_bounds_max_y=max_y;
+        }
+    }
     int ox=(684-(int)w)/2,oy=(1216-(int)h)/2;
     if(ok) {
         lock_fast_setup();
         // 小幅偏移的柔影只作用在非透明轮廓附近。/ A softly offset shadow affects only the nontransparent silhouette.
-        for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+        for(unsigned y=min_y;has_content&&y<=max_y;++y)for(unsigned x=min_x;x<=max_x;++x){
             unsigned a=alpha[(size_t)y*w+x];if(!a||x+ox+4>=684||y+oy+6>=1216)continue;
             // 影子目标若被不透明封面整像素覆盖，合成时与影子无关，直接跳过。
             // A shadow target fully covered by the opaque cover is overwritten by the blend, so skip it.
@@ -364,7 +406,7 @@ static bool lock_draw(uint8_t *fb,const char *path,bool store,bool crop_to_fill)
             fb_put(fb,xx,yy,ui_image_dither_gray((bg*(255-a/5)+127)/255,xx,yy));
         }
         lock_t5=LOCK_US();
-        for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){
+        for(unsigned y=min_y;has_content&&y<=max_y;++y)for(unsigned x=min_x;x<=max_x;++x){
             size_t at=(size_t)y*w+x;unsigned a=alpha[at];if(!a)continue;
             int xx=ox+x,yy=oy+y;
             unsigned value=layers[at]+(fb_gray(fb,xx,yy)*(255-a)+127)/255;
@@ -393,25 +435,28 @@ bool book_lock_bookmark_preview_mode(uint8_t *fb,const char *png,bool crop_to_fi
 bool book_lock_bookmark_preview(uint8_t *fb,const char *png) { return book_lock_bookmark_preview_mode(fb,png,false); }
 // 选图确认时预建图层缓存：换图后第一次锁屏不再等解码和去白底。
 // Build the layer cache when an image is picked, so the first lock after a change never decodes.
-void book_lock_bookmark_prepare(const char *png) {
+void book_lock_bookmark_prepare_mode(const char *png,bool crop_to_fill) {
     const int64_t t0=LOCK_US();
     unsigned w,h;
-    if(!canvas_for(png,false,&w,&h))return;
+    if(!canvas_for(png,crop_to_fill,&w,&h))return;
     size_t count=(size_t)w*h;
     if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)<2*count+512u*1024u)return;
     uint8_t *layers=heap_caps_malloc(2*count,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!layers)return;
-    bool cached=layer_load(png,w,h,false,layers);
+    bool cached=layer_load(png,w,h,crop_to_fill,layers);
     const int64_t t1=LOCK_US();
     if(!cached) {
         uint8_t *alpha=layers+count;
         if(decode_layer(png,w,h,layers,alpha,NULL,NULL)&&remove_cover_background(layers,alpha,w,h))
-            layer_store(png,w,h,false,layers);
+            layer_store(png,w,h,crop_to_fill,layers);
     }
     const int64_t t2=LOCK_US();
     LOCK_LOG("bookmark prepare %ux%u hit=%d load=%lld build=%lld total=%lld ms",
         w,h,(int)cached,(long long)LOCK_MS(t0,t1),(long long)LOCK_MS(t1,t2),(long long)LOCK_MS(t0,t2));
     free(layers);
+}
+void book_lock_bookmark_prepare(const char *png) {
+    book_lock_bookmark_prepare_mode(png,false);
 }
 void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect area) {
     if(!fb||!canvas||area.width<1||area.height<1)return;

@@ -16,6 +16,11 @@ def unit(assets=None):
     code+='\n#define HOST_ASSETS '+json.dumps(str(assets.resolve()) if assets else '')+'\n'
     code+='\n'+re.sub(r'^#(?:include|pragma)[^\n]*\n','',(ROOT/'main/services/lock_style_images.h').read_text(),flags=re.M)
     code+=r'''
+#define APP_BOOKMARK_MODE_CROP 0
+static unsigned bookmark_prepares;static bool bookmark_prepare_crop;
+static void book_lock_bookmark_prepare_mode(const char *path,bool crop_to_fill){
+ (void)path;++bookmark_prepares;bookmark_prepare_crop=crop_to_fill;
+}
 static uint8_t selected_style=1;
 static unsigned ticket_choice,calendar_choice,writes,requests,revision,cache_epoch,progress_revision,collage_revision;
 static unsigned face_prepares,pauses,scans;
@@ -156,10 +161,12 @@ int main(int argc,char **argv){
   assert(tap(246,758)&&s_pending==-1&&strstr(wallpaper,"04.png"));before=writes;ui_lock_style_tick(3500);assert(writes==before);
   images_fail=true;assert(tap(36,758)&&strstr(s_notice,"无法加载")&&writes==before);images_fail=false;
   images_ready=false;assert(tap(36,758)&&s_pending==3);images_ready=true;ui_lock_style_tick(4000);assert(selected_style==1&&strstr(wallpaper,"03.png"));
-  assert(tap(36,440)&&s_tab==3);assert(image_count()==7);assert(tap(36,758)&&selected_style==3);
+  assert(tap(36,440)&&s_tab==3);assert(image_count()==7);unsigned prepared=bookmark_prepares;
+  assert(tap(36,758)&&selected_style==3&&bookmark_prepares==prepared+1);
   assert(tap(528,110)&&bookmark_mode==1);
+  assert(bookmark_prepares==prepared+2&&!bookmark_prepare_crop);
   failed_save=true;assert(tap(398,110)&&bookmark_mode==1&&strstr(s_notice,"保存失败"));failed_save=false;
-  assert(tap(398,110)&&bookmark_mode==0);
+  assert(tap(398,110)&&bookmark_mode==0&&bookmark_prepares==prepared+3&&bookmark_prepare_crop);
   for(int i=0;i<8;++i)ui_lock_style_tick(5000+i*200);
   ++revision;assert(!ui_lock_style_tick(7000)); // 不可见预读完成不得刷新。 / Completed invisible prefetch must not refresh.
   assert(tap(36,202));images_ready=false;complete_during_state=true;

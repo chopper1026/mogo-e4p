@@ -15,6 +15,8 @@ bool book_lock_bookmark_preview(uint8_t *fb,const char *png);
 bool book_lock_bookmark_preview_mode(uint8_t *fb,const char *png,bool crop_to_fill);
 /// 选图确认后预建图层缓存，第一次锁屏不再解码 / Prebuild the layer cache after a pick so the first lock never decodes
 void book_lock_bookmark_prepare(const char *png);
+/// 按当前显示方式预建图层缓存 / Prebuild the layer cache for the selected display mode
+void book_lock_bookmark_prepare_mode(const char *png,bool crop_to_fill);
 /// 最近一次绘制是否命中TF卡图层缓存 / Whether the last draw hit the SD-card layer cache
 bool book_lock_bookmark_cached(void);
 void book_lock_bookmark_preview_paint(uint8_t *fb,const uint8_t *canvas,EpdRect area);

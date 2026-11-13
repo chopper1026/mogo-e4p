@@ -14,6 +14,7 @@
 #include "ui_lock_clock.h"
 #include "book_ticket.h"
 #include "book_progress.h"
+#include "book_lock_bookmark.h"
 #include "book_lock_collage.h"
 #include "ttf_font.h"
 #include "device_power.h"
@@ -321,6 +322,8 @@ static bool save_choice(const char *path,unsigned option){
     if(s_tab==0)option=(unsigned)app_settings_wallpaper_mode();
     if(s_tab==3)option=(unsigned)app_settings_bookmark_mode();
     bool ok=app_settings_select_lock(values[s_tab],path,option);
+    if(ok&&s_tab==3)book_lock_bookmark_prepare_mode(app_settings_bookmark_path(),
+        app_settings_bookmark_mode()==APP_BOOKMARK_MODE_CROP);
     snprintf(s_notice,sizeof(s_notice),"%s",ok?"已保存":"保存失败，请重试");
     return ok;
 }
@@ -331,6 +334,7 @@ static bool save_wallpaper_mode(unsigned mode){
 }
 static bool save_bookmark_mode(unsigned mode){
     bool ok=app_settings_set_bookmark_mode((app_bookmark_mode_t)mode);
+    if(ok)book_lock_bookmark_prepare_mode(app_settings_bookmark_path(),mode==APP_BOOKMARK_MODE_CROP);
     snprintf(s_notice,sizeof(s_notice),"%s",ok?"显示方式已保存":"保存失败，请重试");
     return ok;
 }
