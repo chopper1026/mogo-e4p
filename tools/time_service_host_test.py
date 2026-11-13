@@ -95,8 +95,15 @@ static bool wifi_transfer_take_time_sync(uint32_t *v){*v=pending;pending=0;retur
 static void wifi_transfer_get_status(wifi_transfer_status_t *s){event('S');*s=network;}
 static int wifi_transfer_get_saved_wifi(char *s,bool *b){*s=0;++credential_reads;*b=creds;return ESP_OK;}
 static int wifi_transfer_sync_time_auto(uint32_t *v){*v=wall;if(!worker_result)pending=wall;return worker_result;}
+static int wifi_transfer_sync_time(uint32_t *v);
 static int network_service_sync_time(uint32_t *v,bool automatic){
- (void)automatic;
+ if (!automatic) return wifi_transfer_sync_time(v);
+ if (network.mode == WIFI_TRANSFER_MODE_AP) return ESP_ERR_INVALID_STATE;
+ if (network.state == WIFI_TRANSFER_STOPPED) {
+  char ssid[33]; bool configured = false;
+  if (wifi_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured)
+   return ESP_ERR_NOT_FOUND;
+ }
  return wifi_transfer_sync_time_auto(v);
 }
 static void network_service_cancel_time_sync(void){}
@@ -134,7 +141,7 @@ scheduler+=r'''
 static void reset(void){
  manual_trace=false;manual_event_count=0;manual_events[0]=0;
  manual_error=write_error=read_error=pmu_offset=0;pmu_absent=false;the_pmu.time_synced=true;written_utc=0;
- s_loaded=false;s_last_sync=0;s_next_attempt_us=15000000;atomic_store(&s_running,false);
+ s_loaded=false;s_last_sync=0;s_next_attempt_us=15000000;s_boot_attempts=0;atomic_store(&s_running,false);
  stored=pending=jobs=pmu_syncs=saves=credential_reads=worker_result=record_saves=0;s_last_record=0;task_ok=1;creds=true;mono=15000000;
  network=(wifi_transfer_status_t){WIFI_TRANSFER_STOPPED,WIFI_TRANSFER_MODE_STA,false};
 }
@@ -151,9 +158,9 @@ int main(void){
  reset();stored=wall-21599;app_time_service_poll(true);assert(!jobs);
  for(int state=1;state<=4;++state){
   reset();network.state=state;network.mode=WIFI_TRANSFER_MODE_AP;network.network_ready=true;
-  app_time_service_poll(true);assert(jobs==0);
+  app_time_service_poll(true);assert(jobs==1);job(NULL);assert(!atomic_load(&s_running));
  }
- reset();creds=false;app_time_service_poll(true);assert(!jobs&&credential_reads==1);app_time_service_poll(true);assert(credential_reads==1);
+ reset();creds=false;app_time_service_poll(true);assert(jobs==1&&credential_reads==0);job(NULL);assert(!atomic_load(&s_running)&&credential_reads==1);app_time_service_poll(true);assert(credential_reads==1);
  reset();task_ok=0;app_time_service_poll(true);assert(!jobs&&!atomic_load(&s_running));
  task_ok=1;app_time_service_poll(true);assert(!jobs);mono+=CLOCK_RETRY_US;app_time_service_poll(true);assert(jobs==1);
  reset();worker_result=ESP_FAIL;app_time_service_poll(true);job(NULL);app_time_service_poll(true);assert(!pmu_syncs&&!saves&&jobs==1);
@@ -164,20 +171,20 @@ int main(void){
  // Retain partial success, write/read ordering, ten-second tolerance and current host time rather than stale network seconds.
  for(int error=ESP_FAIL;error<=ESP_ERR_NOT_FOUND;++error){
   reset();manual_trace=true;manual_error=error;app_time_sync_result_t r=app_time_service_sync_manual();
-  assert(r.error==error&&!r.network_time_received&&!record_saves&&!saves&&!written_utc&&!strcmp(manual_events,"SN"));
+  assert(r.error==error&&!r.network_time_received&&!record_saves&&!saves&&!written_utc&&!strcmp(manual_events,"N"));
  }
  reset();manual_trace=true;write_error=ESP_FAIL;app_time_sync_result_t r=app_time_service_sync_manual();
- assert(r.error==ESP_FAIL&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNW"));
+ assert(r.error==ESP_FAIL&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"NW"));
  reset();manual_trace=true;read_error=ESP_ERR_TIMEOUT;r=app_time_service_sync_manual();
- assert(r.error==ESP_ERR_TIMEOUT&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNWR"));
+ assert(r.error==ESP_ERR_TIMEOUT&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"NWR"));
  for(int fault=0;fault<4;++fault){
   reset();manual_trace=true;pmu_absent=fault==0;the_pmu.time_synced=fault!=1;pmu_offset=fault==2?-1:fault==3?11:0;
-  r=app_time_service_sync_manual();assert(r.error==ESP_ERR_INVALID_RESPONSE&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"SNWRP"));
+  r=app_time_service_sync_manual();assert(r.error==ESP_ERR_INVALID_RESPONSE&&r.network_time_received&&!record_saves&&!saves&&!strcmp(manual_events,"NWRP"));
  }
  for(int offset=0;offset<=10;offset+=10){
   reset();manual_trace=true;pmu_offset=offset;s_boot_attempts=3;r=app_time_service_sync_manual();
   assert(r.error==ESP_OK&&r.network_time_received&&record_saves==1&&saves==1&&s_last_record==(uint32_t)wall&&stored==(uint32_t)wall);
-  assert(!s_boot_attempts&&s_next_attempt_us==mono+CLOCK_RETRY_US&&!strcmp(manual_events,"SNWRPLOVCX"));
+  assert(!s_boot_attempts&&s_next_attempt_us==mono+CLOCK_RETRY_US&&!strcmp(manual_events,"NWRPLOVCX"));
  }
  puts("PASS: manual sync preserves partial network success, fresh host seconds, PMU write/read validation and success-only NVS bookkeeping");
  puts("PASS: actual scheduler on a flat six-hour cadence (online link reused, offline dialed), the settings last-sync record refreshed on every success, idle gating, single temporary worker, AP/upload exclusion, no-credential/OOM/error backoff and real-sync-only PMU/NVS handoff");
