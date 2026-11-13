@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends clang libclang-rt-dev libssl-dev zlib1g-dev libpng-dev nodejs
+          apt-get install -y --no-install-recommends clang libclang-rt-dev libssl-dev zlib1g-dev libpng-dev pkg-config nodejs
           . "$IDF_PATH/export.sh"
           python3 -m pip install --disable-pip-version-check "fonttools==4.63.0" "Pillow==12.2.0" -r tools/dictionary-requirements.txt
           mkdir -p /private/tmp build/host-compiler

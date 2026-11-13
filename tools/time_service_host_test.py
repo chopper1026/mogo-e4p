@@ -95,7 +95,11 @@ static bool wifi_transfer_take_time_sync(uint32_t *v){*v=pending;pending=0;retur
 static void wifi_transfer_get_status(wifi_transfer_status_t *s){event('S');*s=network;}
 static int wifi_transfer_get_saved_wifi(char *s,bool *b){*s=0;++credential_reads;*b=creds;return ESP_OK;}
 static int wifi_transfer_sync_time_auto(uint32_t *v){*v=wall;if(!worker_result)pending=wall;return worker_result;}
-static int network_service_sync_time(uint32_t *v,bool automatic){(void)automatic;return wifi_transfer_sync_time_auto(v);}
+static int network_service_sync_time(uint32_t *v,bool automatic){
+ (void)automatic;
+ if(network.state!=WIFI_TRANSFER_STOPPED) return ESP_ERR_INVALID_STATE;
+ return wifi_transfer_sync_time_auto(v);
+}
 static void network_service_cancel_time_sync(void){}
 static bool network_service_take_time_sync(uint32_t *v){return wifi_transfer_take_time_sync(v);}
 static int manual_error,write_error,read_error,pmu_offset;
@@ -146,7 +150,10 @@ int main(void){
  job(NULL);app_time_service_poll(true);assert(pmu_syncs==2&&record_saves==2&&s_last_record==wall);
  reset();stored=wall-21600;app_time_service_poll(true);assert(jobs==1); // overdue offline
  reset();stored=wall-21599;app_time_service_poll(true);assert(!jobs);
- for(int state=1;state<=4;++state){reset();network.state=state;network.mode=WIFI_TRANSFER_MODE_AP;network.network_ready=true;app_time_service_poll(true);assert(!jobs);}
+ for(int state=1;state<=4;++state){
+  reset();network.state=state;network.mode=WIFI_TRANSFER_MODE_AP;network.network_ready=true;
+  app_time_service_poll(true);assert(jobs==1);job(NULL);assert(!atomic_load(&s_running));
+ }
  reset();creds=false;app_time_service_poll(true);assert(!jobs&&credential_reads==1);app_time_service_poll(true);assert(credential_reads==1);
  reset();task_ok=0;app_time_service_poll(true);assert(!jobs&&!atomic_load(&s_running));
  task_ok=1;app_time_service_poll(true);assert(!jobs);mono+=CLOCK_RETRY_US;app_time_service_poll(true);assert(jobs==1);
