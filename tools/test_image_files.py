@@ -40,7 +40,7 @@ def main():
             "#define CONFIG_JD_TBLCLIP 1", "#define CONFIG_JD_FASTDECODE 0"]) + "\n")
         includes = ["tools/book_epub_stubs", "main/book", "main/image", "components/jpegdec/src",
                     "managed_components/espressif__esp_jpeg/tjpgd", "managed_components/espressif__esp_jpeg/include"]
-        flags = ["-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+        flags = ["-g", "-D__LINUX__", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                  "-ffunction-sections", "-fdata-sections"]
         flags += ["-I" + str(ROOT / path) for path in includes] + ["-I" + str(work)] + png_cflags
         sources = ["tools/book_image_file_host_test.c", "main/image/image_decode.c", "main/image/book_image_header.c",

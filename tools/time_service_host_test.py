@@ -97,7 +97,6 @@ static int wifi_transfer_get_saved_wifi(char *s,bool *b){*s=0;++credential_reads
 static int wifi_transfer_sync_time_auto(uint32_t *v){*v=wall;if(!worker_result)pending=wall;return worker_result;}
 static int network_service_sync_time(uint32_t *v,bool automatic){
  (void)automatic;
- if(network.state!=WIFI_TRANSFER_STOPPED) return ESP_ERR_INVALID_STATE;
  return wifi_transfer_sync_time_auto(v);
 }
 static void network_service_cancel_time_sync(void){}
