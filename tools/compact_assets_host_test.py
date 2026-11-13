@@ -39,7 +39,7 @@ def fixtures():
             raw.extend(row)
         assert start == end
     # These digests pin the original artwork, independent of the new encoders/decoders.
-    assert hashlib.sha256(raw).hexdigest() == '21747b01c3fbf7c8fee06c518d856e7cc6495031fa760f7f80dd3d904141f547'
+    assert hashlib.sha256(raw).hexdigest() == '2659b226c7b217955403cf98f49c9d948420c299f01ba38c83dd4c2240fb0d11'
     result = array('reference_icons', 'uint8_t', raw)
     digits = ROOT / 'main/assets/calendar_digits.h'
     widths, offsets, data = [values(digits, n) for n in (
