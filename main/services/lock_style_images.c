@@ -24,7 +24,7 @@
 #define CACHE_DIR LOCK_THUMB_ROOT "/thumbnails"
 #define RAM_SLOTS 12
 #define DISK_SLOTS 128
-#define CACHE_VERSION 1
+#define CACHE_VERSION 2
 #define CACHE_MAGIC UINT32_C(0x4c544831)
 typedef struct {
     uint32_t magic, version, width, height, bookmark, bytes;

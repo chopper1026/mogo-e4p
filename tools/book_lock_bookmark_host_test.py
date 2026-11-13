@@ -93,7 +93,7 @@ static void check_white_regions(void){
   memset(alpha,255,n);memset(reach,0,n);
   for(unsigned at=0;at<n;++at){seed=seed*1664525u+1013904223u;gray[at]=(seed>>29)<5?255:(seed&1?249:80);}
   memcpy(before,gray,n);
-  for(unsigned y=0;y<h;++y)for(unsigned x=0;x<w;++x){unsigned at=y*w+x;if((!x||!y||x+1==w||y+1==h)&&gray[at]>=250&&!reach[at]){reach[at]=1;queue[tail++]=at;}}
+  for(unsigned corner=0;corner<4;++corner){unsigned at=(unsigned[]){0,w-1,(h-1)*w,h*w-1}[corner];if(gray[at]>=250&&!reach[at]){reach[at]=1;queue[tail++]=at;}}
   while(head<tail){unsigned at=queue[head++],x=at%w,y=at/w,adj[4]={x?at-1:at,x+1<w?at+1:at,y?at-w:at,y+1<h?at+w:at};for(unsigned d=0;d<4;++d){unsigned next=adj[d];if(!reach[next]&&gray[next]>=250){reach[next]=1;queue[tail++]=next;}}}
   assert(remove_white_background(gray,alpha,w,h));
   for(unsigned at=0;at<n;++at){assert(alpha[at]==(reach[at]?0:255));assert(gray[at]==(reach[at]?0:before[at]));}
@@ -108,8 +108,19 @@ static void check_white_regions(void){
  assert(remove_white_background(large,large+684u*1216u,684,1216));
  for(unsigned at=0;at<2*684u*1216u;++at)assert(!large[at]);free(large);
 }
+static void check_corner_keying(void){
+ uint8_t gray[9*9],alpha[9*9];
+ memset(gray,80,sizeof(gray));memset(alpha,255,sizeof(alpha));
+ // Broad white background reaches the corners; a separate white pixel touches the left edge only.
+ for(unsigned y=0;y<3;++y)for(unsigned x=0;x<9;++x)gray[y*9+x]=255;
+ for(unsigned x=0;x<9;++x)gray[8*9+x]=255;
+ gray[4*9]=255;
+ assert(remove_flat_background(gray,alpha,9,9));
+ for(unsigned x=0;x<9;++x){assert(alpha[x]==0);assert(alpha[8*9+x]==0);}
+ assert(alpha[4*9]==255&&gray[4*9]==255);
+}
 int main(int argc,char **argv){
- assert(argc>=4);check_white_regions();
+ assert(argc>=4);check_white_regions();check_corner_keying();
  uint8_t thumbnail[160*284+16];memset(thumbnail,0xaa,sizeof(thumbnail));
  assert(book_lock_bookmark_thumbnail(argv[2],160,284,thumbnail,NULL,NULL));
  assert(thumbnail[15*160+15]>=238&&thumbnail[90*160+120]==0);
@@ -200,7 +211,7 @@ int main(int argc,char **argv){
  assert(book_lock_bookmark_draw(fb,argv[2])&&book_lock_bookmark_cached()&&!memcmp(fb,first,BYTES));
  free(first);
  free(fb);free(original);
- puts("PASS: PNG alpha/premultiplication, white/dark/colored flat-background keying, opaque black, fit/crop framing and mode-keyed cache, all 16 current-page backgrounds, 400 flood/BFS comparisons, white-edge removal with enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
+ puts("PASS: PNG alpha/premultiplication, corner-connected white/dark/colored flat-background keying, edge-touching white art preservation, opaque black, fit/crop framing and mode-keyed cache, all 16 current-page backgrounds, 400 flood/BFS comparisons, enclosed whites and original alpha preserved, path-keyed layer cache store/hit/corruption/alias, low-memory fallback and no internal-RAM allocation");
 }
 '''
 def chunk(k,b):return struct.pack('>I',len(b))+k+b+struct.pack('>I',zlib.crc32(k+b))
