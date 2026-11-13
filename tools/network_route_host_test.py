@@ -54,6 +54,7 @@ static void wifi_transfer_stop(void) { ++wifi_stops; wifi = (wifi_transfer_statu
 static void *wifi_transfer_netif(void) { return &wifi_marker; }
 void *cellular_service_netif(void) { return &cell_marker; }
 void cellular_service_get_status(cellular_service_status_t *out) { *out = cellular; }
+static void app_settings_set_network_route(network_route_t route) { (void)route; }
 esp_err_t cellular_service_set_enabled(bool enabled) {
     if (enabled) ++cell_starts; else ++cell_stops;
     cellular.enabled = enabled; return ESP_OK;

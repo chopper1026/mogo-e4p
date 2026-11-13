@@ -41,6 +41,7 @@ struct Service {
     bool probe_active = false;
     bool stop_after_probe = false;
     bool paused = false;
+    bool capability_persisted = false;
     int64_t probe_deadline_us = 0;
     int64_t next_signal_poll_us = 0;
 };
@@ -162,9 +163,10 @@ esp_err_t start_modem(bool enabled, bool probing) {
     if (err == ESP_OK) return ESP_OK;
     (void)modem->Stop();
     std::lock_guard<std::mutex> lock(s_service.mutex);
+    const bool keep_known_capability = s_service.status.capability_known && s_service.status.capable;
     if (s_service.modem == modem) s_service.modem.reset();
     s_service.status.capability_known = true;
-    s_service.status.capable = false;
+    s_service.status.capable = keep_known_capability;
     s_service.status.enabled = false;
     s_service.status.ready = false;
     s_service.status.state = CELLULAR_SERVICE_ERROR;
@@ -207,24 +209,35 @@ bool stop_modem(bool preserve_status) {
 
 extern "C" void cellular_service_init(void) {
     const bool enabled = app_settings_cellular_enabled();
+    const bool capability_known = app_settings_cellular_capability_known();
+    const bool capable = app_settings_cellular_capable();
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
         s_service.status = (cellular_service_status_t){
-            .capability_known = false,
-            .capable = false,
-            .enabled = enabled,
+            .capability_known = capability_known,
+            .capable = capable,
+            .enabled = enabled && (!capability_known || capable),
             .ready = false,
-            .state = CELLULAR_SERVICE_PROBING,
+            .state = capability_known ? CELLULAR_SERVICE_STOPPED : CELLULAR_SERVICE_PROBING,
             .signal_strength = 99,
-            .detail = "正在检测移动网络",
+            .detail = "",
         };
+        set_detail(&s_service.status, capability_known
+            ? (capable ? "已检测到移动网络模块" : "未检测到移动网络模块")
+            : "正在检测移动网络");
         s_service.user_enabled = enabled;
         s_service.paused = false;
+        s_service.capability_persisted = capability_known;
     }
-    // Probe both variants once. A Wi-Fi board fails closed and the UI keeps
-    // the mobile entry hidden; a 4G board with no SIM still proves capability.
-    if (start_modem(enabled, true) != ESP_OK)
-        ESP_LOGW(kTag, "runtime cellular probe could not start");
+    // Probe an unknown board once. A known Wi-Fi board stays stopped, while a
+    // known 4G board starts only when the user enabled its bearer.
+    if (!capability_known) {
+        if (start_modem(enabled, true) != ESP_OK)
+            ESP_LOGW(kTag, "runtime cellular probe could not start");
+    } else if (enabled && capable) {
+        if (start_modem(true, false) != ESP_OK)
+            ESP_LOGW(kTag, "known cellular modem could not start");
+    }
 }
 
 extern "C" esp_err_t cellular_service_set_enabled(bool enabled) {
@@ -291,6 +304,7 @@ extern "C" void cellular_service_resume_after_sleep(void) {
         s_service.paused = false;
         enabled = s_service.user_enabled;
         probing = !s_service.status.capability_known;
+        if (!probing && !s_service.status.capable) enabled = false;
     }
     if (paused && (enabled || probing)) (void)start_modem(enabled, probing);
 }
@@ -301,6 +315,8 @@ extern "C" void cellular_service_poll(void) {
     bool stop_pending = false;
     bool probe_timed_out = false;
     bool sample_signal = false;
+    bool record_capability = false;
+    bool capability = false;
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
         modem = s_service.modem;
@@ -309,6 +325,11 @@ extern "C" void cellular_service_poll(void) {
         const int64_t now = esp_timer_get_time();
         sample_signal = modem && modem->IsInitialized() && now >= s_service.next_signal_poll_us;
         if (sample_signal) s_service.next_signal_poll_us = now + kSignalPollIntervalUs;
+        if (s_service.status.capability_known && !s_service.capability_persisted) {
+            record_capability = true;
+            capability = s_service.status.capable;
+            s_service.capability_persisted = true;
+        }
     }
     if (sample_signal) {
         const int signal = modem->GetSignalStrength();
@@ -326,6 +347,7 @@ extern "C" void cellular_service_poll(void) {
     } else if (stop_pending) {
         (void)stop_modem(true);
     }
+    if (record_capability) app_settings_set_cellular_capability(capability);
 }
 
 extern "C" void cellular_service_get_status(cellular_service_status_t *out) {

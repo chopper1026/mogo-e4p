@@ -71,6 +71,7 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_AUTO_TIME "auto_time"
 #define NVS_KEY_AUTO_OTA "auto_ota"
 #define NVS_KEY_CELLULAR "cell_en"
+#define NVS_KEY_CELLULAR_CAPABILITY "cell_cap"
 #define NVS_KEY_NETWORK_ROUTE "net_route"
 #define NVS_KEY_NETWORK_PRIORITY "net_prio"
 #define NVS_KEY_TSYNC_AT "tsync_at"
@@ -318,6 +319,8 @@ static uint8_t s_auto_lock_minutes = 5;
 static bool s_auto_time_sync = true;
 static bool s_auto_ota = true;
 static bool s_cellular_enabled;
+static bool s_cellular_capability_known;
+static bool s_cellular_capable;
 static network_route_t s_network_route = NETWORK_ROUTE_AUTO;
 static network_auto_priority_t s_network_priority = NETWORK_AUTO_WIFI_FIRST;
 static uint32_t s_time_sync_last;
@@ -406,6 +409,14 @@ void app_settings_init(void) {
     s_auto_ota = nvs_get_u8(h, NVS_KEY_AUTO_OTA, &raw) != ESP_OK || raw != 0;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_CELLULAR, &raw) == ESP_OK) s_cellular_enabled = raw != 0;
+    raw = 0;
+    if (nvs_get_u8(h, NVS_KEY_CELLULAR_CAPABILITY, &raw) == ESP_OK && (raw == 1 || raw == 2)) {
+        s_cellular_capability_known = true;
+        s_cellular_capable = raw == 2;
+    } else {
+        s_cellular_capability_known = false;
+        s_cellular_capable = false;
+    }
     raw = NETWORK_ROUTE_AUTO;
     if (nvs_get_u8(h, NVS_KEY_NETWORK_ROUTE, &raw) == ESP_OK && network_route_valid((network_route_t)raw))
         s_network_route = (network_route_t)raw;
@@ -788,6 +799,14 @@ bool app_settings_cellular_enabled(void) { return s_cellular_enabled; }
 void app_settings_set_cellular_enabled(bool enabled) {
     s_cellular_enabled = enabled;
     nvs_put_u8(NVS_KEY_CELLULAR, enabled ? 1 : 0);
+}
+bool app_settings_cellular_capability_known(void) { return s_cellular_capability_known; }
+bool app_settings_cellular_capable(void) { return s_cellular_capability_known && s_cellular_capable; }
+void app_settings_set_cellular_capability(bool capable) {
+    if (s_cellular_capability_known && s_cellular_capable == capable) return;
+    s_cellular_capability_known = true;
+    s_cellular_capable = capable;
+    nvs_put_u8(NVS_KEY_CELLULAR_CAPABILITY, capable ? 2 : 1);
 }
 network_route_t app_settings_network_route(void) { return s_network_route; }
 void app_settings_set_network_route(network_route_t route) {

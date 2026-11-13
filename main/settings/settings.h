@@ -98,13 +98,18 @@ void app_settings_set_auto_time_sync(bool on);
 /// 自动 OTA 检查默认开启；设备本地保存，不随配置备份迁移。/ Automatic OTA checks default on; device-local, excluded from config backups.
 bool app_settings_auto_ota(void);
 void app_settings_set_auto_ota(bool on);
-/// 4G 模组开关；统一固件按运行时能力决定是否生效，Wi-Fi 仍可独立使用。
-/// Cellular modem switch; effective only after runtime capability detection, with Wi-Fi independent.
+/// 4G 模组开关；统一固件按运行时能力决定是否生效，并与 Wi-Fi 互斥。
+/// Cellular modem switch; effective only after runtime capability detection and mutually exclusive with Wi-Fi.
 bool app_settings_cellular_enabled(void);
 void app_settings_set_cellular_enabled(bool enabled);
+/// 4G 模组能力是否已探测并持久化；能力是硬件事实，不随用户开关变化。
+/// Whether 4G capability has been probed and persisted; this hardware fact is independent of the user switch.
+bool app_settings_cellular_capability_known(void);
+bool app_settings_cellular_capable(void);
+void app_settings_set_cellular_capability(bool capable);
 
-/// 业务联网路由；Wi-Fi 与 4G 开关独立于此选择。
-/// Business bearer preference; independent from the Wi-Fi and cellular radio switches.
+/// 业务联网路由；打开某个承载时会选择对应路由。
+/// Business bearer preference; enabling a bearer selects the corresponding route.
 network_route_t app_settings_network_route(void);
 void app_settings_set_network_route(network_route_t route);
 network_auto_priority_t app_settings_network_auto_priority(void);

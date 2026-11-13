@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: Apache-2.0
  *
  * The service is the only owner of the external business bearer decision.
- * Wi-Fi transfer remains the owner of its AP/STA server; this layer only
- * borrows its network-only STA path for time, weather and OTA.
+ * Manual Wi-Fi and cellular enable actions are mutually exclusive: enabling
+ * one bearer stops the other when it is idle and selects that bearer for
+ * business traffic. Wi-Fi transfer remains the owner of its AP/STA server;
+ * this layer only borrows its network-only STA path for time, weather and OTA.
  */
 #include "network_service.h"
 
@@ -199,26 +201,77 @@ void network_service_get_status(network_status_t *out) {
 }
 
 esp_err_t network_service_set_enabled(network_bearer_t bearer, bool enabled) {
-    if (bearer == NETWORK_BEARER_CELLULAR) {
-        bool idle = false;
-        if (!atomic_compare_exchange_strong(&s_cellular_control, &idle, true))
-            return ESP_ERR_INVALID_STATE;
-        const esp_err_t err = !enabled && atomic_load(&s_cellular_leases) != 0
-            ? ESP_ERR_INVALID_STATE : cellular_service_set_enabled(enabled);
+    if (bearer != NETWORK_BEARER_WIFI && bearer != NETWORK_BEARER_CELLULAR)
+        return ESP_ERR_INVALID_ARG;
+    bool idle = false;
+    if (!atomic_compare_exchange_strong(&s_cellular_control, &idle, true))
+        return ESP_ERR_INVALID_STATE;
+
+    esp_err_t err = ESP_OK;
+    if (!enabled) {
+        if (bearer == NETWORK_BEARER_CELLULAR) {
+            err = atomic_load(&s_cellular_leases) != 0
+                ? ESP_ERR_INVALID_STATE : cellular_service_set_enabled(false);
+        } else {
+            err = atomic_load(&s_wifi_leases) != 0
+                ? ESP_ERR_INVALID_STATE
+                : (wifi_transfer_try_stop_if_idle() ? ESP_OK : ESP_ERR_INVALID_STATE);
+        }
         atomic_store(&s_cellular_control, false);
         return err;
     }
-    if (bearer != NETWORK_BEARER_WIFI) return ESP_ERR_INVALID_ARG;
-    if (!enabled) {
-        if (atomic_load(&s_wifi_leases) != 0) return ESP_ERR_INVALID_STATE;
-        return wifi_transfer_try_stop_if_idle() ? ESP_OK : ESP_ERR_INVALID_STATE;
+
+    if (bearer == NETWORK_BEARER_CELLULAR) {
+        // A live Wi-Fi business lease cannot be interrupted by a manual 4G switch.
+        if (atomic_load(&s_wifi_leases) != 0) err = ESP_ERR_INVALID_STATE;
+        if (err == ESP_OK) {
+            wifi_transfer_status_t wifi = {0};
+            wifi_transfer_get_status(&wifi);
+            const bool wifi_was_enabled = wifi.state != WIFI_TRANSFER_STOPPED;
+            if (wifi_was_enabled && !wifi_transfer_try_stop_if_idle()) err = ESP_ERR_INVALID_STATE;
+            if (err == ESP_OK) err = cellular_service_set_enabled(true);
+        }
+        if (err == ESP_OK) {
+            s_route = NETWORK_ROUTE_CELLULAR;
+            app_settings_set_network_route(s_route);
+        }
+        atomic_store(&s_cellular_control, false);
+        return err;
     }
-    if (!saved_wifi()) return ESP_ERR_NOT_FOUND;
-    wifi_transfer_status_t status;
-    wifi_transfer_get_status(&status);
-    if (status.state != WIFI_TRANSFER_STOPPED) return ESP_OK;
-    const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
-    return wifi_transfer_start(&cfg);
+
+    // A live cellular business lease cannot be interrupted by a manual Wi-Fi switch.
+    if (atomic_load(&s_cellular_leases) != 0) err = ESP_ERR_INVALID_STATE;
+    wifi_transfer_status_t wifi = {0};
+    wifi_transfer_get_status(&wifi);
+    cellular_service_status_t cellular = {0};
+    cellular_service_get_status(&cellular);
+    const bool cellular_was_enabled = cellular.enabled;
+    if (err == ESP_OK && !saved_wifi()) err = ESP_ERR_NOT_FOUND;
+    if (err == ESP_OK && cellular_was_enabled) err = cellular_service_set_enabled(false);
+    if (err == ESP_OK && wifi.state == WIFI_TRANSFER_STOPPED) {
+        const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
+        err = wifi_transfer_start(&cfg);
+    } else if (err == ESP_OK && wifi.state != WIFI_TRANSFER_STOPPED) {
+        // Wi-Fi is already on; disabling cellular above is enough to enforce exclusivity.
+        err = ESP_OK;
+    }
+    if (err != ESP_OK && cellular_was_enabled) (void)cellular_service_set_enabled(true);
+    if (err == ESP_OK) {
+        s_route = NETWORK_ROUTE_WIFI;
+        app_settings_set_network_route(s_route);
+    }
+    atomic_store(&s_cellular_control, false);
+    return err;
+}
+
+esp_err_t network_service_prepare_wifi(void) {
+    bool idle = false;
+    if (!atomic_compare_exchange_strong(&s_cellular_control, &idle, true))
+        return ESP_ERR_INVALID_STATE;
+    const esp_err_t err = atomic_load(&s_cellular_leases) != 0
+        ? ESP_ERR_INVALID_STATE : cellular_service_set_enabled(false);
+    atomic_store(&s_cellular_control, false);
+    return err;
 }
 
 esp_err_t network_service_set_route(network_route_t route, network_auto_priority_t priority) {

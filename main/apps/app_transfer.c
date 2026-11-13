@@ -45,6 +45,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "wifi_transfer.h"
+#include "network_service.h"
 #include "board_sd.h"
 #include "settings.h"
 #include "ttf_font.h"
@@ -479,6 +480,7 @@ static void queue_network_start(wifi_transfer_mode_t mode) {
 }
 
 static bool enter_networks(void) {
+    if (network_service_prepare_wifi() != ESP_OK) return false;
     if (!wifi_transfer_try_stop_if_idle()) return false;
     stop_session();
     s_start_pending = false;
@@ -498,6 +500,7 @@ static bool enter_networks(void) {
 }
 
 static bool start_hotspot_service(void) {
+    if (network_service_prepare_wifi() != ESP_OK) return false;
     if (!wifi_transfer_try_stop_if_idle()) return false;
     stop_session();
     s_mode = WIFI_TRANSFER_MODE_AP;
@@ -517,6 +520,10 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_NETWORKS || s_forget_confirm || ctx->consumed) return APP_REDRAW_NONE;
     if (s_network_connect_pending) {
         s_network_connect_pending = false;
+        if (network_service_prepare_wifi() != ESP_OK) {
+            snprintf(s_network_message, sizeof(s_network_message), "移动网络正在使用，请稍后重试");
+            return APP_REDRAW_PAGE;
+        }
         wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
         esp_err_t err = wifi_transfer_start(&cfg);
         s_session_started = err == ESP_OK;
@@ -1133,6 +1140,11 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_HOME) return network_ui_tick(ctx);
     if (s_start_pending) {
         s_start_pending = false;
+        if (network_service_prepare_wifi() != ESP_OK) {
+            s_status.state = WIFI_TRANSFER_ERROR;
+            s_status.last_error = ESP_ERR_INVALID_STATE;
+            return APP_REDRAW_PAGE;
+        }
         // 传书模式也应在启动无线电前释放可重建字形，避免内部内存不足。
         // Release rebuildable glyphs before starting the radio for uploads too.
         ttf_font_cache_clear();

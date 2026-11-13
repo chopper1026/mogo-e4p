@@ -20,7 +20,9 @@
 #ifdef ESP_PLATFORM
 #include "network_service.h"
 #endif
+#include "storage_jobs.h"
 #include "time_service.h"
+#include "weather_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -40,6 +42,16 @@ static const esp_partition_t *s_verified;
 static network_lease_t s_network_lease;
 static bool s_network_lease_active;
 #endif
+
+// TLS and Wi-Fi need a larger contiguous internal block than the OTA task itself.
+// Keep the task stack in internal RAM because flash-cache critical sections inspect it.
+static const size_t kOtaStartInternalFree = 49152;
+static const size_t kOtaStartInternalBlock = 16384;
+static const size_t kOtaNetworkInternalFree = 32768;
+static const size_t kOtaNetworkInternalBlock = 8192;
+static const size_t kOtaExternalFree = 262144;
+
+static void state(pico_update_state_t value, const char *message);
 
 static bool initialize(void) {
     if (!s_status) s_status = heap_caps_calloc(1, sizeof(*s_status), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -61,6 +73,15 @@ static bool memory_available(size_t internal_min, size_t internal_block, size_t 
         heap_caps_get_largest_free_block(internal) >= internal_block &&
         heap_caps_get_free_size(external) >= external_min &&
         heap_caps_get_largest_free_block(external) >= 32768;
+}
+static bool release_nonessential_resources(void) {
+    app_weather_cancel_join();
+    app_time_service_cancel();
+    if (!storage_jobs_quiesce(2000)) {
+        state(PICO_UPDATE_FAILED, "后台资源仍在使用，请稍后重试");
+        return false;
+    }
+    return true;
 }
 // 锁只覆盖闪存操作，不覆盖网络等待、状态互斥锁或任务收尾，避免取消/刷屏互相等待。
 // Lock flash operations only, excluding network waits, status locks and joins to avoid cancellation/display deadlocks.
@@ -137,7 +158,6 @@ static bool online(bool *owned) {
     (void)owned;
     // OTA owns one route for the complete check/download, including range retries.
     // The selected route is never silently replaced by the other bearer.
-    app_time_service_cancel();
     memset(&s_network_lease, 0, sizeof(s_network_lease));
     if (network_service_acquire(NETWORK_USE_OTA, &s_network_lease) != ESP_OK) {
         state(PICO_UPDATE_FAILED, "当前联网方式不可用，请检查网络设置");
@@ -163,7 +183,6 @@ static bool online(bool *owned) {
     // 升级独占无线：在途的后台对时先取消，下面停服/起服才不会被它拖住。
     // The updater owns the radio: an in-flight background sync cancels first, so the stop/start
     // below is never held up by it.
-    app_time_service_cancel();
     wifi_transfer_status_t status;
     wifi_transfer_get_status(&status);
     if (!(status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready)) {
@@ -226,6 +245,9 @@ static esp_http_client_handle_t open_http_range(const char *url, uint32_t offset
         .buffer_size_tx = 1024, .crt_bundle_attach = esp_crt_bundle_attach,
         .disable_auto_redirect = true, .keep_alive_enable = true,
         .event_handler = range_header, .user_data = range};
+#if defined(CONFIG_MBEDTLS_DYNAMIC_BUFFER) && CONFIG_MBEDTLS_DYNAMIC_BUFFER
+    cfg.tls_dyn_buf_strategy = HTTP_TLS_DYN_BUF_RX_STATIC;
+#endif
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) return NULL;
     esp_http_client_set_header(client, "User-Agent", PICO_OTA_CAPABILITY);
@@ -448,8 +470,8 @@ static void worker(void *unused) {
         // 更新期间关闭无线省电；完成、取消和失败均恢复原策略。
         // Disable radio power saving for updates, then restore it on success, cancellation or failure.
         restore_ps = esp_wifi_get_ps(&previous_ps) == ESP_OK && esp_wifi_set_ps(WIFI_PS_NONE) == ESP_OK;
-        if (!memory_available(32768, 8192, 262144))
-            state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试");
+        if (!memory_available(kOtaNetworkInternalFree, kOtaNetworkInternalBlock, kOtaExternalFree))
+            state(PICO_UPDATE_FAILED, "网络内存不足，请退出传书后重试");
         else if (s_download) (void)download(); else (void)check_feed();
     }
     if (restore_ps) (void)esp_wifi_set_ps(previous_ps);
@@ -474,7 +496,8 @@ static esp_err_t start(bool downloading) {
     xSemaphoreGive(s_mutex);
     if (busy || (downloading && !available)) return ESP_ERR_INVALID_STATE;
     if (s_joinable) { xSemaphoreTake(s_done, portMAX_DELAY); s_joinable = false; }
-    if (!memory_available(49152, 16384, 524288)) {
+    if (!release_nonessential_resources()) return ESP_ERR_INVALID_STATE;
+    if (!memory_available(kOtaStartInternalFree, kOtaStartInternalBlock, 524288)) {
         state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试");
         return ESP_ERR_NO_MEM;
     }
@@ -485,7 +508,8 @@ static esp_err_t start(bool downloading) {
     xSemaphoreGive(s_mutex);
     state(downloading ? PICO_UPDATE_DOWNLOADING : PICO_UPDATE_CHECKING,
           downloading ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
-    if (xTaskCreate(worker, "mogo_ota", 12288, NULL, 4, NULL) != pdPASS) {
+    BaseType_t task_result = xTaskCreate(worker, "mogo_ota", 12288, NULL, 4, NULL);
+    if (task_result != pdPASS) {
         xSemaphoreTake(s_mutex, portMAX_DELAY); s_status->busy = false; xSemaphoreGive(s_mutex);
         state(PICO_UPDATE_FAILED, "内存不足，无法开始升级"); return ESP_ERR_NO_MEM;
     }

@@ -36,6 +36,9 @@ static int esp_event_loop_create_default() { return ESP_OK; }
 static int board_ioe_wake() { return ESP_OK; }
 static bool app_settings_cellular_enabled() { return setting_enabled; }
 static void app_settings_set_cellular_enabled(bool enabled) { setting_enabled = enabled; }
+static bool app_settings_cellular_capability_known() { return false; }
+static bool app_settings_cellular_capable() { return false; }
+static void app_settings_set_cellular_capability(bool capable) { (void)capable; }
 #define ESP_LOGI(tag, ...) ((void)(tag))
 #define ESP_LOGW(tag, ...) ((void)(tag))
 class UartEthModem {

@@ -39,8 +39,10 @@ void network_service_init(void);
 void network_service_poll(void);
 void network_service_get_status(network_status_t *out);
 
-/// Toggle one radio without changing the business route preference.
+/// Toggle one radio and select it as the business route when enabling it.
 esp_err_t network_service_set_enabled(network_bearer_t bearer, bool enabled);
+/// Stop cellular before a local Wi-Fi AP/STA transfer without changing the business route.
+esp_err_t network_service_prepare_wifi(void);
 esp_err_t network_service_set_route(network_route_t route, network_auto_priority_t priority);
 network_route_t network_service_route(void);
 network_auto_priority_t network_service_auto_priority(void);
