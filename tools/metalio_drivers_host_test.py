@@ -617,6 +617,9 @@ def sleep_source(diagnostics=True):
 typedef enum {APP_WAKE_NONE,APP_WAKE_KEY,APP_WAKE_PICKUP,APP_WAKE_TIMEOUT} app_wake_source_t;
 typedef struct {bool jobs_ready,ble_stopped;} app_lifecycle_light_t;
 static bool jobs_ready=true, ble_stopped=true, pickup_setting=true, key_pending;
+static unsigned cellular_service_resumes, wifi_transfer_resumes;
+static void cellular_service_resume_after_sleep(void){++cellular_service_resumes;}
+static void wifi_transfer_resume_after_sleep(void){++wifi_transfer_resumes;}
 static unsigned suspend_count,resume_count,sleep_count,key_polls,cache_restores,last_wake;
 static int scenario;
 static uint32_t wake_causes;

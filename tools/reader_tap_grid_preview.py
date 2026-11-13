@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """中文：原生4bpp九宫格/动作选择器与三种模式，检查真实字体边界。/ Render native grid controls and all modes with real glyph/bounds checks."""
 import argparse
+import re
 from pathlib import Path
 import reader_toolbar_preview as renderer
 
@@ -14,8 +15,9 @@ def unit():
     module = (ROOT / 'main/ui/ui_reader_tap_grid.c').read_text()
     module = '\n'.join(line for line in module.splitlines() if not line.startswith('#include "'))
     code = code.replace('int main(int argc,char **argv){', '#include "book/book_reader_input.h"\n' + module + '\nint main(int argc,char **argv){')
-    marker = ' printf("PASS: 18 actual reader renders'
-    at = code.index(marker)
+    marker = re.search(r'\s+printf\("PASS: [^"]*actual reader renders', code)
+    assert marker, 'reader toolbar preview pass marker'
+    at = marker.start()
     code = code[:at] + r'''
  for(font_scale=100;font_scale<=200;font_scale+=50){
   for(unsigned mode=0;mode<3;++mode){

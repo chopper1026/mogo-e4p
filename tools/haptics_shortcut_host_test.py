@@ -43,6 +43,14 @@ static bool s_main_wifi_saved;
 static void wifi_transfer_get_saved_wifi(char *ssid,bool *saved){ssid[0]=0;*saved=false;}
 static void settings_prepare_profile(void){}
 static bool s_ble_shortcut_back,s_enter_ble_from_quick,s_haptics_shortcut_back,s_enter_haptics_from_quick;
+static bool s_enter_network_from_quick,s_network_shortcut_back;
+typedef struct {
+ bool cellular_capability_known,cellular_capable,cellular_enabled,cellular_ready;
+ int cellular_signal; unsigned char cellular_state; char cellular_detail[96];
+ bool wifi_enabled,wifi_ready; int route,auto_priority,active_bearer;
+} network_status_t;
+static network_status_t s_network_snapshot;
+static void network_service_get_status(network_status_t *out){ memset(out,0,sizeof(*out)); }
 static bool s_upgrade_confirm,s_upgrade_online,s_upgrade_shortcut_back;
 enum {PICO_UPDATE_AVAILABLE};
 static struct {int state;bool busy;} s_update;

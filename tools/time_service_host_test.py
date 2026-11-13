@@ -68,6 +68,14 @@ enum {WIFI_TRANSFER_STOPPED,WIFI_TRANSFER_STARTING,WIFI_TRANSFER_READY,WIFI_TRAN
 enum {WIFI_TRANSFER_MODE_AP,WIFI_TRANSFER_MODE_STA};
 typedef struct {int state,mode;bool network_ready;} wifi_transfer_status_t;
 static wifi_transfer_status_t network;
+typedef struct {
+ bool cellular_capability_known,cellular_capable,cellular_enabled,cellular_ready;
+ int cellular_signal; unsigned char cellular_state; char cellular_detail[96];
+ bool wifi_enabled,wifi_ready; int route,auto_priority,active_bearer;
+} network_status_t;
+static void network_service_get_status(network_status_t *out){
+ memset(out,0,sizeof(*out)); out->wifi_ready=network.network_ready; out->active_bearer=1;
+}
 static uint64_t stored;
 static uint32_t pending;
 static int jobs,task_ok=1,pmu_syncs,saves,worker_result,credential_reads;
@@ -87,6 +95,9 @@ static bool wifi_transfer_take_time_sync(uint32_t *v){*v=pending;pending=0;retur
 static void wifi_transfer_get_status(wifi_transfer_status_t *s){event('S');*s=network;}
 static int wifi_transfer_get_saved_wifi(char *s,bool *b){*s=0;++credential_reads;*b=creds;return ESP_OK;}
 static int wifi_transfer_sync_time_auto(uint32_t *v){*v=wall;if(!worker_result)pending=wall;return worker_result;}
+static int network_service_sync_time(uint32_t *v,bool automatic){(void)automatic;return wifi_transfer_sync_time_auto(v);}
+static void network_service_cancel_time_sync(void){}
+static bool network_service_take_time_sync(uint32_t *v){return wifi_transfer_take_time_sync(v);}
 static int manual_error,write_error,read_error,pmu_offset;
 static bool pmu_absent;
 static uint32_t written_utc;

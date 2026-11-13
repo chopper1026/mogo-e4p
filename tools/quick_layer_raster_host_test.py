@@ -75,7 +75,8 @@ header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
 code+=re.search(r'typedef enum \{\s*UI_QUICK_CTL_NONE.*?\} ui_quick_control_t;',header,re.S).group(0)+'\n'
 code+=re.search(r'typedef struct \{.*?\} ui_quick_menu_t;',header,re.S).group(0)+'\n'
-for name in ('ui_quick_menu_button_count', 'ui_quick_menu_haptics_button', 'ui_quick_menu_landscape', 'ui_quick_menu_button_x',
+for name in ('ui_quick_menu_button_count', 'ui_quick_menu_cellular_button', 'ui_quick_menu_rotation_button',
+             'ui_quick_menu_haptics_button', 'ui_quick_menu_landscape', 'ui_quick_menu_button_x',
              'ui_quick_menu_row_offset', 'ui_quick_menu_button_y', 'ui_quick_menu_height',
              'ui_quick_menu_frontlight_track', 'ui_quick_menu_frontlight_hit'):
     code+=function('main/ui/ui_quick_menu.h',name)

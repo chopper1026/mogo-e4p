@@ -465,7 +465,7 @@ static int screen_width=684;
 #include <time.h>
 typedef struct {int x,y,width,height;} EpdRect;
 enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGHT};
-enum {UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_ZAP};
+enum {UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_ZAP,UI_ICON_MOGO_CELLULAR_SIGNAL};
 #define UI_LOCK_WIDTH 684
 #define UI_GRAY_BLACK 0
 #define UI_GRAY_WHITE 255
@@ -474,6 +474,11 @@ enum {UI_ICON_WIFI,UI_ICON_BLUETOOTH,UI_ICON_ZAP};
 #define WIFI_TRANSFER_MODE_STA 1
 typedef struct {bool time_synced;time_t unix_sec;} pmu_snapshot_t;
 typedef struct {bool network_ready;int mode;} wifi_transfer_status_t;
+typedef struct {
+ bool cellular_capability_known,cellular_capable,cellular_enabled,cellular_ready;
+ int cellular_signal; unsigned char cellular_state; char cellular_detail[96];
+ bool wifi_enabled,wifi_ready; int route,auto_priority,active_bearer;
+} network_status_t;
 static pmu_snapshot_t pmu;
 static int pct;
 static bool wifi,bluetooth,s_system_ttf,charging;
@@ -486,7 +491,8 @@ static char signature[96];
 static const pmu_snapshot_t *device_power_get(void){return &pmu;}
 static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct;}
 static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return charging;}
-static void wifi_transfer_get_status(wifi_transfer_status_t *status){*status=(wifi_transfer_status_t){wifi,WIFI_TRANSFER_MODE_STA};}
+static void __attribute__((unused)) wifi_transfer_get_status(wifi_transfer_status_t *status){*status=(wifi_transfer_status_t){wifi,WIFI_TRANSFER_MODE_STA};}
+static void network_service_get_status(network_status_t *status){memset(status,0,sizeof(*status));status->wifi_ready=wifi;}
 static bool app_settings_ble_turner(void){return bluetooth;}
 static const char *app_settings_status_signature(void){return signature;}
 static int letters(const char *s){int n=0;for(;*s;++s)if(((unsigned char)*s&0xc0)!=0x80)++n;return n;}

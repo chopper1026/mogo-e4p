@@ -86,8 +86,18 @@ static bool app_settings_home_full_refresh(void){return home_full;}
 static void app_settings_set_home_full_refresh(bool v){home_full=v;}
 static void profile_editor_open(bool signature){assert(signature);++profile_edits;}
 static bool haptics_available(void){return true;}
+typedef struct {
+ bool cellular_capability_known,cellular_capable,cellular_enabled,cellular_ready;
+ int cellular_signal; unsigned char cellular_state; char cellular_detail[96];
+ bool wifi_enabled,wifi_ready; int route,auto_priority,active_bearer;
+} network_status_t;
+static void network_service_get_status(network_status_t *status){memset(status,0,sizeof(*status));}
 #define UI_NAV_TOP 1096
 '''+enum+'\nstatic settings_page_t s_page;\n'+macros+'''
+'''
+unit += 'static int settings_wireless_rows(void);\n'
+unit += fn('settings_wireless_rows') + '\n'
+unit += r'''
 #define SETTINGS_SCROLL_MAX (SETTINGS_POWER_Y+SETTINGS_POWER_ROWS*SETTINGS_ROW_H-UI_NAV_TOP+12)
 '''+fn('settings_stacked')+'\n'+fn('settings_profile_height')+'\n'+fn('settings_main_row_height')+'\n'+layout+fn('system_font_layout')+'\n'+fn('system_font_item_rect')+'\n'+fn('system_font_sync_button')+'\n'
 unit+='static app_redraw_t font_tap(int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+modal+choose+'return APP_REDRAW_NONE;}\n'
