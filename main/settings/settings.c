@@ -1610,6 +1610,15 @@ typedef struct {
     uint8_t checksum[4];
 } settings_backup_wifi_t;
 
+// v42 appends the runtime-selectable cellular and business-route settings.
+// v42 追加 4G 开关及业务路由设置，旧备份不读取此尾块。
+typedef struct {
+    uint8_t cellular_enabled;
+    uint8_t route;
+    uint8_t priority;
+    uint8_t checksum[4];
+} settings_backup_network_t;
+
 // PICOSETA为第10版八字节标识；映射块独立校验，不改旧网络/阅读数据块。
 // PICOSETA is the eight-byte v10 identifier; independently check mappings without changing old network/history blocks.
 typedef struct { uint8_t actions[3], checksum[4]; } settings_backup_keys_t;
@@ -1895,9 +1904,9 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
     // a/b/c/d追加禁触、票根背景、日历子样式与九宫格；e允许时钟，f在阅读线低两位保存样式、bit2保存跟随正文，无新尾块。
     // a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids; e accepts clocks, f packs guide style in bits 0–1 and text-follow in bit 2 without new tails.
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31；g 追加 v42 网络设置。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31; g appends v42 network settings.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1923,6 +1932,24 @@ static bool backup_wifi_valid(const settings_backup_wifi_t *wifi) {
     for (int i = 0; i < 4; ++i) stored |= (uint32_t)wifi->checksum[i] << (i * 8);
     return stored == backup_wifi_checksum(wifi) &&
            wifi_transfer_wifi_backup_valid(&wifi->credentials);
+}
+
+static uint32_t backup_network_checksum(const settings_backup_network_t *network) {
+    const uint8_t *bytes = (const uint8_t *)network;
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < offsetof(settings_backup_network_t, checksum); ++i)
+        hash = (hash ^ bytes[i]) * 16777619u;
+    return hash;
+}
+
+static bool backup_network_valid(const settings_backup_network_t *network) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i)
+        stored |= (uint32_t)network->checksum[i] << (8 * i);
+    return network->cellular_enabled <= 1 &&
+           network_route_valid((network_route_t)network->route) &&
+           network_auto_priority_valid((network_auto_priority_t)network->priority) &&
+           stored == backup_network_checksum(network);
 }
 
 enum {
@@ -1996,7 +2023,8 @@ esp_err_t app_settings_backup_save(void) {
     // v37：追加票根背景选择。/ V37 appends the ticket background choice.
     // v38：追加日历子样式，主样式编号4表示日历。/ V38 appends the calendar variant; main style 4 selects calendar.
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
-    memcpy(backup.magic, "PICOSETf", sizeof(backup.magic));
+    // v42：追加移动网络开关及业务路由，旧备份仍按当前设备设置保留。/ V42 appends cellular and business-route settings; older backups retain current device settings.
+    memcpy(backup.magic, "PICOSETg", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2184,7 +2212,15 @@ esp_err_t app_settings_backup_save(void) {
     memcpy(tap.actions, s_reader_tap_actions, sizeof(tap.actions));
     uint32_t tap_hash = backup_tap_checksum(&tap);
     for (unsigned i = 0; i < 4; ++i) tap.checksum[i] = (uint8_t)(tap_hash >> (8 * i));
+    settings_backup_network_t network = {
+        .cellular_enabled = s_cellular_enabled ? 1 : 0,
+        .route = (uint8_t)s_network_route,
+        .priority = (uint8_t)s_network_priority,
+    };
+    uint32_t network_hash = backup_network_checksum(&network);
+    for (unsigned i = 0; i < 4; ++i) network.checksum[i] = (uint8_t)(network_hash >> (8 * i));
     if (ok) ok = fwrite(&tap, 1, sizeof(tap), file) == sizeof(tap);
+    if (ok) ok = fwrite(&network, 1, sizeof(network), file) == sizeof(network);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -2291,6 +2327,11 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_calendar_t calendar_style = {.on = APP_CALENDAR_ALMANAC};
     settings_backup_tap_t tap = {0};
     memcpy(tap.actions, s_reader_tap_defaults, sizeof(tap.actions));
+    settings_backup_network_t network = {
+        .cellular_enabled = s_cellular_enabled ? 1 : 0,
+        .route = (uint8_t)s_network_route,
+        .priority = (uint8_t)s_network_priority,
+    };
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
     settings_backup_chrome_t chrome = {.items = {
@@ -2400,6 +2441,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 37) ok = fread(&ticket_background, 1, sizeof(ticket_background), file) == sizeof(ticket_background) && backup_progress_bar_valid(&ticket_background);
     if (ok && version >= 38) ok = fread(&calendar_style, 1, sizeof(calendar_style), file) == sizeof(calendar_style) && backup_progress_bar_valid(&calendar_style);
     if (ok && version >= 39) ok = fread(&tap, 1, sizeof(tap), file) == sizeof(tap) && backup_tap_valid(&tap);
+    if (ok && version >= 42) ok = fread(&network, 1, sizeof(network), file) == sizeof(network) && backup_network_valid(&network);
     if (version < 39) tap.mode = (profile.home_full_refresh & 32) ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
@@ -2500,6 +2542,9 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TICKET_BACKGROUND, ticket_background.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TOUCH_HAPTIC, haptic.on);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CELLULAR, network.cellular_enabled);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_NETWORK_ROUTE, network.route);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_NETWORK_PRIORITY, network.priority);
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     // v41 才定义 profile bit6 为壁纸显示方式；更早版本的同一位属于已撤下实验，必须回落裁剪。
@@ -2642,6 +2687,9 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(s_book_background, background.path, sizeof(s_book_background));
     s_home_component = (app_home_component_t)home.component;
     s_home_goal_minutes = home.minutes;
+    s_cellular_enabled = network.cellular_enabled != 0;
+    s_network_route = (network_route_t)network.route;
+    s_network_priority = (network_auto_priority_t)network.priority;
     strlcpy(s_font, backup.font, sizeof(s_font));
     strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));

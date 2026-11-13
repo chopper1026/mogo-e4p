@@ -1948,8 +1948,10 @@ void IRAM_ATTR UartEthModem::SrdyIsrHandler(void* arg) {
 
     xQueueSendFromISR(self->event_queue_, &event, &xHigherPriorityTaskWoken);
 
-    // Set event group bit for SRDY high (used by WaitForSrdyAck)
-    xEventGroupSetBitsFromISR(self->event_group_, kEventSrdyHigh, &xHigherPriorityTaskWoken);
+    // Only a high SRDY level acknowledges a transmitted frame. A low edge is
+    // a normal modem-busy notification and must not release the TX wait.
+    if (level != 0)
+        xEventGroupSetBitsFromISR(self->event_group_, kEventSrdyHigh, &xHigherPriorityTaskWoken);
 
     if (xHigherPriorityTaskWoken) {
         portYIELD_FROM_ISR();

@@ -71,6 +71,7 @@ SUITES = {
     "cellular_state": [sys.executable, "tools/cellular_state_host_test.py"],
     "cellular_sim": [sys.executable, "tools/cellular_sim_host_test.py"],
     "cellular_readiness": [sys.executable, "tools/cellular_readiness_host_test.py"],
+    "cellular_srdy_ack": [sys.executable, "tools/cellular_srdy_ack_host_test.py"],
     "cellular_service": [sys.executable, "tools/cellular_service_host_test.py"],
     "network_route": [sys.executable, "tools/network_route_host_test.py"],
     "touch_upgrade": [sys.executable, "tools/ft6336u_upgrade_host_test.py"],

@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-13
 
+- 修复 4G 模组 SRDY 低电平误触发发送确认的问题，避免帧提前释放导致的间歇性握手或 DHCP 失败；设置备份 v42 新增 4G 开关、业务路由和自动优先级，并保留旧备份兼容。/ Fix false TX acknowledgements on low SRDY edges to avoid intermittent handshake or DHCP failures; v42 settings backups now include the cellular switch, business route and auto priority while retaining legacy compatibility.
 - 业务联网方式默认自动、Wi-Fi 优先；缺失或无效设置恢复默认，模块探测不再将用户联网偏好自动改写成 Wi-Fi，保留已保存的有效选择。/ Default business networking to Auto with Wi-Fi first, restore defaults for missing/invalid settings and preserve valid user choices across cellular capability probes.
 - 移动网络设置移除 Wi-Fi 开关并上移 4G 与联网方式选项；快捷栏、设置入口和状态栏统一改用四柱圆角信号图标。/ Remove the Wi-Fi toggle from mobile settings, move the remaining controls up and use a shared four-bar cellular icon in quick controls, Settings and the status bar.
 - 移动网络固定使用内置 SIM，删除卡槽选择和旧偏好；启动时确认内置卡配置，并清理联网排查时加入的临时诊断日志。/ Use the internal SIM exclusively, remove slot selection and its saved preference, enforce the internal slot at startup and remove temporary network diagnostics.

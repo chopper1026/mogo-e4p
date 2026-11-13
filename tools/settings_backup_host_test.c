@@ -21,8 +21,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v39 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v39; legacy fixtures drop them all. */
+/* v15..v42 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v42; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,7 +30,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -308,7 +308,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -363,7 +363,7 @@ static void test_reader_progress_bar(void) {
     assert(app_settings_set_reader_progress_bar(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
     long progress_at = ftell(file);
     settings_backup_progress_bar_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -454,7 +454,7 @@ static void test_book_styles(void) {
     assert(app_settings_set_book_styles(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
     long styles_at = ftell(file);
     settings_backup_book_styles_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && !fclose(file));
@@ -544,7 +544,7 @@ static void test_home_regions_backup(void) {
     app_home_components_apply(0x11);
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "rb");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
     long regions_at = ftell(file);
     settings_backup_home_regions_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -729,7 +729,7 @@ static void test_reader_touch_lock(void) {
     assert(!app_settings_reader_touch_disabled());
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_touch_t unsafe = {.on = 1};
     uint32_t hash = backup_progress_bar_checksum(&unsafe);
@@ -767,7 +767,7 @@ static void test_reader_touch_lock(void) {
         assert(app_settings_backup_save() == ESP_OK);
         file = fopen(BACKUP_FILE, "r+b");
         settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 41);
+        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 42);
         assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
         memcpy(header.magic, "PICOSETZ", 8); backup_seal(&header);
@@ -779,7 +779,7 @@ static void test_reader_touch_lock(void) {
         assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
         assert(fwrite(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile));
-        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END));
+        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END));
         long history_at = ftell(file);
         assert(fwrite("RPHIST1", 1, 8, file) == 8 && !fflush(file));
         assert(!ftruncate(fileno(file), history_at + 8) && !fclose(file));
@@ -833,7 +833,7 @@ static void test_ticket_background(void) {
     assert(app_settings_set_ticket_background(APP_TICKET_BACKGROUND_COVER));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_ticket_background_t original;
     assert(fread(&original, 1, sizeof(original), file) == sizeof(original) && fclose(file) == 0);
@@ -867,7 +867,7 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
     settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 41);
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 42);
     assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
     assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
     memcpy(header.magic, "PICOSETa", 8); backup_seal(&header);
@@ -905,7 +905,7 @@ static void test_clock_style(void) {
         // Reject style 5 in old v39 even with a valid base checksum.
         settings_backup_v1_t header={0};memcpy(header.magic,"PICOSETd",8);
         FILE *f=fopen(BACKUP_FILE,"rb");assert(f&&fread(&header,1,sizeof(header),f)==sizeof(header)&&!fclose(f));
-        assert(backup_version(&header)==41&&backup_valid(&header));
+        assert(backup_version(&header)==42&&backup_valid(&header));
         memcpy(header.magic,"PICOSETd",8);backup_seal(&header);assert(!backup_valid(&header));
         header.flags[BK_LOCK]=4;backup_seal(&header);assert(backup_valid(&header));
     }
@@ -988,7 +988,7 @@ static void test_calendar_style(void) {
     assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
     for(unsigned corruption=0;corruption<3;++corruption){
         assert(app_settings_backup_save()==ESP_OK);
-        FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_tap_t)),SEEK_END));
+        FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
         long at=ftell(f);settings_backup_calendar_t v;assert(fread(&v,1,sizeof(v),f)==sizeof(v));
         if(corruption==0)v.checksum[0]^=1;
         else {v.on=corruption==1?2:255;uint32_t hash=backup_progress_bar_checksum(&v);for(unsigned i=0;i<4;++i)v.checksum[i]=(uint8_t)(hash>>(8*i));}
@@ -997,7 +997,7 @@ static void test_calendar_style(void) {
         assert(app_settings_lock_style()==4&&app_settings_calendar_style()==APP_CALENDAR_MONTH);
     }
     for(unsigned cut=0;cut<sizeof(settings_backup_calendar_t);++cut){
-        assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_tap_t)),SEEK_END));
+        assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
         assert(!ftruncate(fileno(f),ftell(f)+cut)&&!fclose(f));commits=commit_count;
         assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&(unsigned)commit_count==commits);
     }
@@ -1011,7 +1011,7 @@ static void test_calendar_style(void) {
     uint32_t hash=backup_shutdown_checksum(&h,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
     hash=backup_profile_checksum(&h,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
     rewind(f);assert(fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(ext,1,sizeof(ext),f)==sizeof(ext)&&fwrite(&profile,1,sizeof(profile),f)==sizeof(profile));
-    assert(!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+    assert(!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
     assert(fwrite("RPHIST1",1,8,f)==8&&!fflush(f)&&!ftruncate(fileno(f),at+8)&&!fclose(f));
     assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
     esp_err_t result=app_settings_backup_restore();
@@ -1067,7 +1067,7 @@ static void test_tap_grid(void) {
     // Range checks still reject a correctly re-sealed invalid payload before any NVS/history/WiFi writes.
     for(unsigned fault=0;fault<6;++fault){
         assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f);
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
         settings_backup_tap_t tap;assert(fread(&tap,1,sizeof(tap),f)==sizeof(tap));
         if(fault==0)tap.mode=3;
         if(fault==1)tap.actions[0]=APP_READER_KEY_LEGACY_BACK;
@@ -1082,9 +1082,9 @@ static void test_tap_grid(void) {
         assert(commits==commit_count&&imports==wifi_imports&&restores==history_restores);
         assert_tap(APP_READER_TAP_GRID,actions);
     }
-    for(unsigned cut=0;cut<sizeof(settings_backup_tap_t);++cut){
+    for(unsigned cut=0;cut<sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);++cut){
         assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f);
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_tap_t)),SEEK_END));
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
         assert(!ftruncate(fileno(f),ftell(f)+cut)&&!fclose(f));commits=commit_count;
         assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&commits==commit_count);
     }
@@ -1097,7 +1097,7 @@ static void test_tap_grid(void) {
         uint32_t hash=backup_shutdown_checksum(&h,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
         hash=backup_profile_checksum(&h,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
         rewind(f);assert(fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(ext,1,7,f)==7&&fwrite(&profile,1,sizeof(profile),f)==sizeof(profile));
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
         assert(fwrite("RPHIST1",1,8,f)==8&&!fflush(f)&&!ftruncate(fileno(f),at+8)&&!fclose(f));
         assert(app_settings_set_reader_tap_config(APP_READER_TAP_GRID,actions));
         assert(app_settings_backup_restore()==ESP_OK);assert_tap((app_reader_tap_mode_t)oldmode,s_reader_tap_defaults);
@@ -1112,6 +1112,7 @@ static void test_tap_grid(void) {
 }
 
 static void test_reading_guides(void) {
+    FILE *file;
     app_settings_set_lock_style(2);
     for (unsigned style=0; style<4; ++style) for (unsigned follow=0; follow<2; ++follow) {
         app_settings_set_book_reading_line(style);
@@ -1121,7 +1122,7 @@ static void test_reading_guides(void) {
         assert(app_settings_backup_save()==ESP_OK);
         FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
         assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && !fclose(file));
-        assert(backup_version(&header)==41 && header.flags[BK_READING_LINE]==(style|(follow?4:0)));
+        assert(backup_version(&header)==42 && header.flags[BK_READING_LINE]==(style|(follow?4:0)));
         app_settings_set_book_reading_line((style+1)%4);
         app_settings_set_book_reading_line_follow_text(!follow);
         commit_fails=true;assert(app_settings_backup_restore()==ESP_FAIL);commit_fails=false;
@@ -1134,22 +1135,62 @@ static void test_reading_guides(void) {
         header.flags[BK_READING_LINE]=3;backup_seal(&header);assert(!backup_valid(&header));
         header.flags[BK_READING_LINE]=4;backup_seal(&header);assert(!backup_valid(&header));
     }
+    // v42 carries the movable-network settings as an independently checked tail.
+    app_settings_set_cellular_enabled(true);
+    app_settings_set_network_route(NETWORK_ROUTE_CELLULAR);
+    app_settings_set_network_auto_priority(NETWORK_AUTO_CELLULAR_FIRST);
+    assert(app_settings_backup_save() == ESP_OK);
+    app_settings_set_cellular_enabled(false);
+    app_settings_set_network_route(NETWORK_ROUTE_WIFI);
+    app_settings_set_network_auto_priority(NETWORK_AUTO_WIFI_FIRST);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_cellular_enabled() &&
+           app_settings_network_route() == NETWORK_ROUTE_CELLULAR &&
+           app_settings_network_auto_priority() == NETWORK_AUTO_CELLULAR_FIRST);
+    file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t)), SEEK_END) == 0);
+    long network_at = ftell(file);
+    settings_backup_network_t valid_network;
+    assert(fread(&valid_network, 1, sizeof(valid_network), file) == sizeof(valid_network));
+    valid_network.checksum[0] ^= 1;
+    assert(fseek(file, network_at, SEEK_SET) == 0 &&
+           fwrite(&valid_network, 1, sizeof(valid_network), file) == sizeof(valid_network) &&
+           !fclose(file));
+    int network_commits = commit_count;
+    assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == network_commits);
+    assert(app_settings_backup_save() == ESP_OK);
+    file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t)), SEEK_END) == 0);
+    network_at = ftell(file);
+    assert(ftruncate(fileno(file), network_at + (long)sizeof(settings_backup_network_t) - 1) == 0 && !fclose(file));
+    assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == network_commits);
+    assert(app_settings_backup_save() == ESP_OK);
     // v40 has the same tail; reseal each header-dependent checksum and retain its full history.
     app_settings_set_book_reading_line(2);app_settings_set_book_reading_line_follow_text(false);
     assert(app_settings_backup_save()==ESP_OK);
-    FILE *file=fopen(BACKUP_FILE,"r+b");settings_backup_v1_t header;uint8_t ext[7];settings_backup_profile_t profile;
+    file=fopen(BACKUP_FILE,"r+b");settings_backup_v1_t header;uint8_t ext[7];settings_backup_profile_t profile;
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fread(ext,1,7,file)==7 && fread(&profile,1,sizeof(profile),file)==sizeof(profile));
     memcpy(header.magic,"PICOSETe",8);backup_seal(&header);
     uint32_t hash=backup_shutdown_checksum(&header,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[i+3]=(uint8_t)(hash>>(8*i));
     hash=backup_profile_checksum(&header,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
     rewind(file);assert(fwrite(&header,1,sizeof(header),file)==sizeof(header) && fwrite(ext,1,7,file)==7 && fwrite(&profile,1,sizeof(profile),file)==sizeof(profile) && !fclose(file));
+    file = fopen(BACKUP_FILE, "r+b");
+    assert(file && fseek(file, 0, SEEK_END) == 0);
+    long v40_end = ftell(file), v40_network_at = v40_end - 8 - (long)sizeof(settings_backup_network_t);
+    uint8_t v40_history[8];
+    assert(v40_network_at >= 0 && fseek(file, v40_network_at + sizeof(settings_backup_network_t), SEEK_SET) == 0 &&
+           fread(v40_history, 1, sizeof(v40_history), file) == sizeof(v40_history) &&
+           fseek(file, v40_network_at, SEEK_SET) == 0 &&
+           fwrite(v40_history, 1, sizeof(v40_history), file) == sizeof(v40_history) &&
+           fflush(file) == 0 && ftruncate(fileno(file), v40_end - (long)sizeof(settings_backup_network_t)) == 0 &&
+           !fclose(file));
     app_settings_set_book_reading_line(3);app_settings_set_book_reading_line_follow_text(true);
     assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
     assert(app_settings_book_reading_line()==2 && !app_settings_book_reading_line_follow_text());
     app_settings_set_book_reading_line(255);assert(app_settings_book_reading_line()==2);
     durable_rule_follow=2;app_settings_init();assert(!app_settings_book_reading_line_follow_text());
     app_settings_set_book_reading_line(0);durable_rule_follow=-1;
-    puts("PASS: all guide styles/follow modes, restart, v41 backup, failed restore, invalid values and v40 migration");
+    puts("PASS: all guide styles/follow modes, restart, v42 backup, failed restore, invalid values and v40 migration");
 }
 
 int main(void) {
@@ -1577,7 +1618,7 @@ int main(void) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -1649,7 +1690,7 @@ int main(void) {
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -2069,7 +2110,7 @@ int main(void) {
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                               sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -2102,7 +2143,7 @@ int main(void) {
     for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
     long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
     assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
     assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
@@ -2130,7 +2171,7 @@ int main(void) {
     assert(app_settings_set_reader_chrome_heights(96,73));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
     long height_at=ftell(saved);settings_backup_chrome_heights_t valid_height;
     assert(fread(&valid_height,1,sizeof(valid_height),saved)==sizeof(valid_height)&&fclose(saved)==0);
     for(unsigned fault=0;fault<3;++fault){
@@ -2222,7 +2263,7 @@ int main(void) {
     assert(!backup_shutdown_style_valid(&bad_shutdown));
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
     const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
-        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t));
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
     assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
     assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
     int commits_before_bad_shutdown=commit_count;
