@@ -32,6 +32,7 @@
 #define PSA_ALG_SHA_256 1
 #define PSA_HASH_OPERATION_INIT {0}
 typedef void *SemaphoreHandle_t;
+typedef int BaseType_t;
 typedef unsigned esp_ota_handle_t;
 typedef struct {uint32_t magic_word,secure_version,reserv1[2];char version[32],project_name[32];uint8_t unused[176];} esp_app_desc_t;
 typedef struct {uint8_t magic;uint8_t unused[11];uint16_t chip_id;uint8_t tail[10];} esp_image_header_t;
