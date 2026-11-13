@@ -40,8 +40,8 @@ static void white_flood_mark(white_flood_t *f,size_t at,unsigned y) {
     f->pending[y]=1;f->rows[f->tail]=(uint16_t)y;
     f->tail=(f->tail+1)%f->height;++f->count;
 }
-// 不透明白底图片才自动去白：四邻接连通到画布边缘，封闭白色图案保留。
-// Remove only near-white regions connected to an opaque image's canvas edges by four-neighbor paths; preserve enclosed whites.
+// 不透明图片才自动去底：从四角出发沿四邻接扩散，封闭或贴边的白色主体保留。
+// Remove only flat-background regions reachable from the four corners; preserve enclosed or edge-touching white art.
 // 原始alpha优先，避免透明素材的白色主体被误删；工作区仅一位/像素和有界行队列。
 // Original alpha takes priority, protecting white artwork in transparent assets; workspace is one bit/pixel plus a bounded row queue.
 static bool remove_white_background_threshold(uint8_t *gray,uint8_t *alpha,unsigned w,unsigned h,
@@ -49,23 +49,17 @@ static bool remove_white_background_threshold(uint8_t *gray,uint8_t *alpha,unsig
     size_t count=(size_t)w*h;
     if(!gray||!alpha||!w||!h||w>684||h>1216)return false;
     for(size_t i=0;i<count;++i)if(alpha[i]!=255)return true;
-    bool border=false;
-    for(unsigned x=0;x<w;++x)if(gray[x]>=threshold||gray[(h-1)*w+x]>=threshold){border=true;break;}
-    if(!border)for(unsigned y=0;y<h;++y)if(gray[(size_t)y*w]>=threshold||gray[(size_t)y*w+w-1]>=threshold){border=true;break;}
-    if(!border)return true;
+    const size_t corners[4]={0,(size_t)w-1,(size_t)(h-1)*w,(size_t)h*w-1};
+    bool corner=false;
+    for(unsigned i=0;i<4;++i)if(gray[corners[i]]>=threshold){corner=true;break;}
+    if(!corner)return true;
     size_t bits=(count+7)/8,queue_offset=(bits+h+1)&~(size_t)1;
     uint8_t *work=heap_caps_malloc(queue_offset+2*h,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!work)return false;
     memset(work,0,queue_offset);
     white_flood_t f={.visited=work,.pending=work+bits,.rows=(uint16_t *)(work+queue_offset),.height=h};
-    for(unsigned x=0;x<w;++x){
-        if(gray[x]>=threshold)white_flood_mark(&f,x,0);
-        size_t at=(size_t)(h-1)*w+x;if(gray[at]>=threshold)white_flood_mark(&f,at,h-1);
-    }
-    for(unsigned y=1;y+1<h;++y){
-        size_t at=(size_t)y*w;if(gray[at]>=threshold)white_flood_mark(&f,at,y);
-        if(gray[at+w-1]>=threshold)white_flood_mark(&f,at+w-1,y);
-    }
+    for(unsigned i=0;i<4;++i)if(gray[corners[i]]>=threshold)
+        white_flood_mark(&f,corners[i],(unsigned)(corners[i]/w));
     while(f.count){
         unsigned y=f.rows[f.head];f.head=(f.head+1)%h;--f.count;f.pending[y]=0;
         size_t row=(size_t)y*w;
@@ -106,8 +100,8 @@ static bool remove_flat_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsig
     if(!samples)return true;
     unsigned bin=0;for(unsigned i=1;i<32;++i)if(histogram[i]>histogram[bin])bin=i;
     unsigned background=bin*8u+4u;
-    // 白底沿用原先的单向阈值；其他底色只允许小幅JPEG边缘振铃，避免少量边缘图案把键控范围放大。
-    // Keep the original one-sided white rule; other tones allow only small JPEG edge ringing so art cannot widen the key range.
+    // 白底沿用近白阈值；其他底色只允许小幅JPEG边缘振铃，且都从四角开始，避免贴边图案被键控。
+    // Keep the near-white rule; other tones allow small JPEG ringing but always seed from corners so edge art is preserved.
     if(background>=248u)return remove_white_background_threshold(gray,alpha,w,h,245);
     unsigned tolerance=background>=224u?8u:16u;
     unsigned low=background>tolerance?background-tolerance:0;
@@ -118,14 +112,9 @@ static bool remove_flat_background(uint8_t *gray,uint8_t *alpha,unsigned w,unsig
     memset(work,0,queue_offset);
     white_flood_t f={.visited=work,.pending=work+bits,.rows=(uint16_t *)(work+queue_offset),.height=h};
 #define FLAT_PIXEL(at) (gray[(at)]>=low&&gray[(at)]<=high)
-    for(unsigned x=0;x<w;++x){
-        if(FLAT_PIXEL(x))white_flood_mark(&f,x,0);
-        size_t at=(size_t)(h-1)*w+x;if(FLAT_PIXEL(at))white_flood_mark(&f,at,h-1);
-    }
-    for(unsigned y=1;y+1<h;++y){
-        size_t at=(size_t)y*w;if(FLAT_PIXEL(at))white_flood_mark(&f,at,y);
-        if(FLAT_PIXEL(at+w-1))white_flood_mark(&f,at+w-1,y);
-    }
+    const size_t corners[4]={0,(size_t)w-1,(size_t)(h-1)*w,(size_t)h*w-1};
+    for(unsigned i=0;i<4;++i)if(FLAT_PIXEL(corners[i]))
+        white_flood_mark(&f,corners[i],(unsigned)(corners[i]/w));
     while(f.count){
         unsigned y=f.rows[f.head];f.head=(f.head+1)%h;--f.count;f.pending[y]=0;
         size_t row=(size_t)y*w;
@@ -194,7 +183,7 @@ static void fb_put(uint8_t *fb,int x,int y,uint8_t gray) {
 #define LOCK_LAYER_DIR LOCK_LAYER_ROOT "/locks"
 #define LOCK_LAYER_PATH LOCK_LAYER_DIR "/bookmark-layer.bin"
 #define LOCK_LAYER_MAGIC UINT32_C(0x424b4c59)
-#define LOCK_LAYER_VERSION 4u
+#define LOCK_LAYER_VERSION 5u
 #define LOCK_LAYER_STAGE 32768u
 typedef struct {
     uint32_t magic,version,rotation,width,height,mode;
