@@ -53,6 +53,7 @@
 - [docs/ota-release-notes/1.0.8.txt](../ota-release-notes/1.0.8.txt)
 - [docs/ota-release-notes/1.0.9.txt](../ota-release-notes/1.0.9.txt)
 - [docs/ota-release-notes/1.1.0.txt](../ota-release-notes/1.1.0.txt)
+- [docs/ota-release-notes/1.1.1.txt](../ota-release-notes/1.1.1.txt)
 - [docs/ota-release-notes/README.md](../ota-release-notes/README.md)
 - [docs/user-manual-detailed.zh-CN.json](../user-manual-detailed.zh-CN.json)
 - [docs/user-manual.zh-CN.json](../user-manual.zh-CN.json)

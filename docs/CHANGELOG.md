@@ -3,6 +3,15 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## v1.1.1 · 2026-11-13
+
+- 阅读线增加实线和跟随正文开关。
+- 顶部快捷栏增加触摸震动开关，长按可进入触摸震动设置页。
+- 重构锁屏样式设置页面，壁纸增加裁切和完整显示选项。
+- 完善电量校准。
+- 新增移动联网功能，4G 版设备可在快捷栏开启或关闭移动网络。
+- 透明书封支持 JPG 格式图片，可裁切或完整显示。
+
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-13
 
 - 修复 4G 模组 SRDY 低电平误触发发送确认的问题，避免帧提前释放导致的间歇性握手或 DHCP 失败；设置备份 v42 新增 4G 开关、业务路由和自动优先级，并保留旧备份兼容。/ Fix false TX acknowledgements on low SRDY edges to avoid intermittent handshake or DHCP failures; v42 settings backups now include the cellular switch, business route and auto priority while retaining legacy compatibility.
