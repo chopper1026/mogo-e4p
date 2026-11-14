@@ -49,8 +49,30 @@ static void check_bounds(uint8_t *fb,ui_lock_clock_face_t face){
     for(int y=0;y<1216;++y)for(int x=0;x<684;++x)
         if(x<a.x||x>=a.x+a.width||y<a.y||y>=a.y+a.height)assert(pixel_at(fb,x,y)==0x50);
 }
+static void check_battery_contrast(void){
+    uint8_t *fb=malloc(684*1216/2);assert(fb);
+    const int left=100,top=200;
+    for(int percent=0;percent<=100;percent+=100){
+        memset(fb,0xff,684*1216/2);sample.percent=percent;sample.charging=false;
+        ui_nav_battery_draw(fb,left,top);
+        uint8_t baseline[32*16];
+        for(int y=top-7;y<=top+8;y++)for(int x=left+12;x<=left+31;x++)
+            baseline[(y-(top-7))*32+(x-(left+12))]=pixel_at(fb,x,y);
+        memset(fb,0xff,684*1216/2);sample.charging=true;
+        ui_nav_battery_draw(fb,left,top);
+        bool contrasting_ink=false;
+        for(int y=top-7;y<=top+8;y++)for(int x=left+12;x<=left+31;x++){
+            const uint8_t p=pixel_at(fb,x,y);
+            const uint8_t old=baseline[(y-(top-7))*32+(x-(left+12))];
+            if(percent==0 && p<=1 && old>=14) contrasting_ink=true;
+            if(percent==100 && p>=14 && old<=1) contrasting_ink=true;
+        }
+        assert(contrasting_ink);
+    }
+    free(fb);
+}
 int main(int argc,char **argv){
- assert(argc==2&&ttf_font_open_builtin()==ESP_OK);uint8_t *fb=malloc(684*1216/2);assert(fb);char path[1024];
+ assert(argc==2&&ttf_font_open_builtin()==ESP_OK);check_battery_contrast();uint8_t *fb=malloc(684*1216/2);assert(fb);char path[1024];
  ui_lock_clock_face_t face={true,16,48,11,10,2};
  for(int digit=0;digit<10;++digit){face.hour=digit*2;face.minute=digit*6;face.weekday=digit%7;check_bounds(fb,face);}
  face=(ui_lock_clock_face_t){true,16,48,11,10,2};

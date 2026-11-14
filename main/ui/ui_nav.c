@@ -212,11 +212,12 @@ void ui_nav_battery_draw(uint8_t *fb, int x, int cy) {
         if (width > 0) ui_fill_round_rect(fb, (EpdRect){x + 4, cy - 7, width, 14}, 4, UI_GRAY_BLACK);
     }
     if (charging) {
-        // 闪电只落在深色电量块上：透明像素保留底色，白色墨在浅色区自然消失，
-        // 不必再按电量高低切换墨色。
-        // The bolt shows only over the dark fill: transparent pixels keep the background,
-        // so white ink vanishes on the light part and no SOC-dependent colour is needed.
-        ui_draw_icon(fb, x + 21, cy, UI_NAV_BOLT_ICON_PX, UI_ICON_ZAP, UI_GRAY_WHITE);
+        // 电量块可能只覆盖闪电的一部分：先画白色外圈，再画黑色内芯，
+        // 低电量时黑芯落在白底上，高电量时白圈落在黑块上，两种背景都清楚。
+        // The fill can cover only part of the bolt: a white halo followed by a
+        // black core keeps it legible on both the white background and dark fill.
+        ui_draw_icon(fb, x + 21, cy, UI_NAV_BOLT_ICON_PX + 4, UI_ICON_ZAP, UI_GRAY_WHITE);
+        ui_draw_icon(fb, x + 21, cy, UI_NAV_BOLT_ICON_PX - 2, UI_ICON_ZAP, UI_GRAY_BLACK);
     }
 }
 void ui_nav_status(uint8_t *fb) {

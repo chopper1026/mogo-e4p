@@ -14,6 +14,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 透明书封支持 JPG 格式图片，可裁切或完整显示。
 - 优化透明书封锁屏合成：选图时按当前取景方式预建图层缓存，合成时跳过透明画布空白区域；保留原有 GC16 清理残影流程。
 
+## v1.1.1 · 本地测试 / Local testing · 2026-11-14
+
+- 充电时电量图标的闪电增加黑白反差，即使电量接近耗尽也能清楚显示。
+
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-13
 
 - 修复 4G 模组 SRDY 低电平误触发发送确认的问题，避免帧提前释放导致的间歇性握手或 DHCP 失败；设置备份 v42 新增 4G 开关、业务路由和自动优先级，并保留旧备份兼容。/ Fix false TX acknowledgements on low SRDY edges to avoid intermittent handshake or DHCP failures; v42 settings backups now include the cellular switch, business route and auto priority while retaining legacy compatibility.
