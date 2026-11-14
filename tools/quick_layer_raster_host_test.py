@@ -61,7 +61,6 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  fb[i]=(uint8_t)((fb[i]&~(15u<<shift))|((gray>>4)<<shift));
 }
 static void epd_fill_rect(EpdRect r,uint8_t gray,uint8_t *fb){for(int y=0;y<r.height;++y)for(int x=0;x<r.width;++x)epd_draw_pixel(r.x+x,r.y+y,gray,fb);}
-static void epd_draw_line(int x,int y,int xx,int yy,uint8_t gray,uint8_t *fb){assert(x==xx);for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}
 static void epd_draw_circle(int cx,int cy,int r,uint8_t gray,uint8_t *fb){for(int y=-r;y<=r;++y)for(int x=-r;x<=r;++x)if(x*x+y*y<=r*r&&x*x+y*y>(r-1)*(r-1))epd_draw_pixel(cx+x,cy+y,gray,fb);}
 static void epd_fill_circle(int cx,int cy,int r,uint8_t gray,uint8_t *fb){for(int y=-r;y<=r;++y)for(int x=-r;x<=r;++x)if(x*x+y*y<=r*r)epd_draw_pixel(cx+x,cy+y,gray,fb);}
 static void ui_nav_status(uint8_t *fb){epd_fill_rect((EpdRect){36,29,52,16},0,fb);}
@@ -75,7 +74,8 @@ header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
 code+=re.search(r'typedef enum \{\s*UI_QUICK_CTL_NONE.*?\} ui_quick_control_t;',header,re.S).group(0)+'\n'
 code+=re.search(r'typedef struct \{.*?\} ui_quick_menu_t;',header,re.S).group(0)+'\n'
-for name in ('ui_quick_menu_button_count', 'ui_quick_menu_cellular_button', 'ui_quick_menu_rotation_button',
+for name in ('ui_quick_menu_base_button_count', 'ui_quick_menu_button_count', 'ui_quick_menu_lock_button',
+             'ui_quick_menu_cellular_button', 'ui_quick_menu_rotation_button',
              'ui_quick_menu_haptics_button', 'ui_quick_menu_landscape', 'ui_quick_menu_button_x',
              'ui_quick_menu_row_offset', 'ui_quick_menu_button_y', 'ui_quick_menu_height',
              'ui_quick_menu_frontlight_track', 'ui_quick_menu_frontlight_hit'):
@@ -109,7 +109,7 @@ int main(void){
      .haptics_available=haptics>0,.haptics_enabled=haptics==2};menu.frontlight=fl!=0;menu.fl_on=fl==1;menu.fl_bri=60;menu.fl_cct=30;
     const int layer_height=ui_quick_menu_height(&menu);
     assert(layer_height<=epd_rotated_display_height());
-    if(ui_quick_menu_landscape())assert(layer_height==(policy>0||haptics>0||fl==1?404:264));
+    if(ui_quick_menu_landscape())assert(layer_height==(policy>0||haptics>0||fl!=0?404:264));
     patterned();int before=allocs;ui_quick_menu_draw(frame,&menu,true,false);
     assert(allocs==before&&!live);int grays=0;
     for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x){

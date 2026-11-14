@@ -10,7 +10,7 @@ typedef struct {
     reader_session_t *session; ///< 同步借用书源与书籍信息 / Synchronously borrowed source and book metadata
     int *px; ///< 页面正文字号，在选好进度后按全局设置更新 / Page body size, updated from global settings after progress selection
     bool (*reserve)(const char *path); ///< 幂等预留待保存进度；旧书交还前后各一次 / Idempotent pending-progress reservation, once before and once after old-book handoff
-    void (*replace)(void); ///< 保存旧进度、释放旧书，再应用全屏偏好并激活阅读字体 / Save old progress, release the old book, then apply full-screen preference and activate reading fonts
+    void (*replace)(void); ///< 保存旧进度、释放旧书，再激活阅读字体，显隐沿用当前设置 / Save old progress, release the old book, then activate reading fonts using current bar settings
     void (*describe)(const char *path); ///< 仅书源成功后应用书内字体并填写路径和书名 / Apply embedded fonts and fill path/title only after source success
     bool (*pending_restore)(const char *path, uint32_t size, book_progress_t *out); ///< 优先恢复匹配尺寸的脏进度 / Prefer dirty progress with a matching file size
     bool (*load)(void *ctx, size_t chapter, size_t offset); ///< 加载目标并跳过隐藏图页；保留页面提示及锁顺序 / Load the target and skip hidden image pages, retaining page notices and lock order

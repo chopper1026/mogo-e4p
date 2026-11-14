@@ -80,14 +80,13 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         // Explicitly select fast pacing per turn and restore afterward, without leaking reader timing into main-page ripple.
         const int prior_tick = request->water_turn_pending ? e0470_page_turn_tick_us() : 0;
         if (request->water_turn_pending) e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
-        // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
-        // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
+        // 翻页动画独立于页脚显隐。/ The turn effect is independent of footer visibility.
         err = request->water_turn_pending
             ? update_display_water_turn(hl, request->area, request->water_dir)
-            // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
-            // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
-            : (request->fullscreen || request->turn_pending) && request->mode == MODE_GL16
-                ? display_refresh_area(hl, request->turn_pending ? DISPLAY_REFRESH_READER_TEXT : DISPLAY_REFRESH_READER_BODY, request->area, DISPLAY_REFRESH_DEFAULT)
+            // 正文翻页只驱动变化像素；设置面板等局部绘制保留原路径。
+            // Text turns drive changed pixels only; other local UI keeps its path.
+            : request->turn_pending && request->mode == MODE_GL16
+                ? display_refresh_area(hl, DISPLAY_REFRESH_READER_TEXT, request->area, DISPLAY_REFRESH_DEFAULT)
                 : display_refresh_area(hl, DISPLAY_REFRESH_READER_LAYOUT, request->area, request->mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT);
         if (request->water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
 
@@ -105,8 +104,8 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         ? display_refresh_screen(hl, DISPLAY_REFRESH_READER_BODY, frame_flags |
             (request->page_mode == MODE_DU ? DISPLAY_REFRESH_QUICK : DISPLAY_REFRESH_DEFAULT))
         : update_display_fast_page(hl);
-    // 正文成功后再更新页脚、进度和顶部；任一步失败都保留错误并停止后续输出。
-    // Update footer, progress and status after a successful body; preserve errors and stop subsequent output on failure.
+    // 正文成功后再更新页脚和顶部；任一步失败都保留错误并停止后续输出。
+    // Update footer and status after a successful body; preserve errors and stop subsequent output on failure.
     if (err == EPD_DRAW_SUCCESS && request->refresh == READER_PRESENT_AREA &&
         request->reader_body && request->prior_reader && !request->cleanup && !request->feedback && !request->closing_notice) {
         if (request->footer_pending) {
@@ -116,10 +115,6 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
                 ? DISPLAY_REFRESH_DETAIL : DISPLAY_REFRESH_READER_FOOTER, request->footer_area, DISPLAY_REFRESH_DEFAULT);
             if (err != EPD_DRAW_SUCCESS) goto done;
             result.footer_updated = true;
-        }
-        if (request->fullscreen && request->progress_area.height > 0) {
-            err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->progress_area, DISPLAY_REFRESH_DEFAULT);
-            if (err != EPD_DRAW_SUCCESS) goto done;
         }
         if (request->status_pending) {
             err = display_refresh_area(hl, DISPLAY_REFRESH_DETAIL, request->status_area, DISPLAY_REFRESH_DEFAULT);

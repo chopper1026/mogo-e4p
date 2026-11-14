@@ -10,6 +10,15 @@ static ui_quick_menu_t menu;
 static int64_t time_ms;
 static int screen_width=684;
 
+static int control_y(ui_quick_control_t control) {
+ EpdRect track=ui_quick_menu_frontlight_track(&menu,control);
+ return track.y+track.height/2;
+}
+static int control_hit_y(ui_quick_control_t control) {
+ EpdRect hit=ui_quick_menu_frontlight_hit(&menu,control);
+ return hit.y+hit.height/2;
+}
+
 static ui_quick_event_t feed(int x,int y,int count,bool pressed,bool released,bool allowed,bool owned){
  app_touch_t touch={.x=x,.y=y,.count=count,.touched=count!=0};
  app_ctx_t ctx={.touch=&touch,.now_ms=time_ms,.pressed=pressed,.released=released};
@@ -87,28 +96,28 @@ int main(void){
  assert(e.control==UI_QUICK_CTL_ON&&e.value==1&&e.commit&&menu.fl_on);
  // 开灯拖亮度：无极定位，松手提交。
  // With the light on, dragging brightness positions continuously and commits on release.
- e=feed(399,300,1,true,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_BRIGHTNESS),1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==59&&!e.commit&&menu.fl_on);
- e=feed(512,300,1,false,false,true,true);
+ e=feed(512,control_y(UI_QUICK_CTL_BRIGHTNESS),1,false,false,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==78&&!e.commit);
- e=feed(512,300,0,false,true,true,true);
+ e=feed(512,control_y(UI_QUICK_CTL_BRIGHTNESS),0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==78&&e.commit&&menu.fl_bri==78&&menu.fl_on);
  // 整行可点：胶囊上方整行也能直接定位到档位。
  // The whole row is a hit target, so taps above the capsule still position it directly.
- e=feed(300,232,1,true,false,true,true);
+ e=feed(300,control_hit_y(UI_QUICK_CTL_BRIGHTNESS),1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==42&&menu.fl_on);
- e=feed(300,232,0,false,true,true,true);
+ e=feed(300,control_hit_y(UI_QUICK_CTL_BRIGHTNESS),0,false,true,true,true);
  assert(e.commit&&menu.fl_bri==42&&menu.fl_on);
  // 色温照常提交。
  // CCT commits as usual.
- e=feed(399,398,1,true,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_CCT),1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.value==59&&!e.commit&&menu.fl_on);
- e=feed(399,398,0,false,true,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_CCT),0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.value==59&&e.commit&&menu.fl_cct==59);
  // 按住滑杆向上拖不应把整层收起；松手仍提交最后一档。
  // Dragging a slider upward must not dismiss the layer; release still commits the last step.
- e=feed(399,398,1,true,false,true,true);
- e=feed(399,330,1,false,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_CCT),1,true,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_CCT)-68,1,false,false,true,true);
  assert(e.action==UI_QUICK_NONE&&menu.open);
  e=feed(399,330,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_CCT&&e.commit&&menu.open);
@@ -117,9 +126,9 @@ int main(void){
  e=feed(598,156,1,true,false,true,true);
  e=feed(598,156,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&e.commit&&!menu.fl_on);
- e=feed(399,300,1,true,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_BRIGHTNESS),1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_NONE);
- e=feed(399,300,0,false,true,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_BRIGHTNESS),0,false,true,true,true);
  assert(e.action==UI_QUICK_CLOSE&&!menu.open);
  puts("PASS: fourth circle toggles the frontlight, capsule rows expand only while on, full-row hit areas, 1%-step commit and drag protection");
 
@@ -143,12 +152,12 @@ int main(void){
  // Resting below the circle band (overshoot) disarms the continuation for good.
  ui_quick_menu_reset(&menu);time_ms=0;
  feed(300,32,1,true,false,true,true);
- assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open);
+ assert(feed(300,500,1,false,false,true,true).action==UI_QUICK_OPEN&&menu.open);
  time_ms=300;
- assert(feed(300,300,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_pull);
+ assert(feed(300,500,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_pull);
  time_ms=350;
- assert(feed(300,400,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
- feed(300,400,0,false,true,true,true);
+ assert(feed(300,600,1,false,false,true,true).action==UI_QUICK_NONE&&!menu.fl_expanded);
+ feed(300,600,0,false,true,true,true);
  // 停顿不足再拉过一程、或再拉行程不足，都不展开。
  // An insufficient pause, or a resumed pull shorter than the opening travel, never expands.
  ui_quick_menu_reset(&menu);time_ms=0;
@@ -173,9 +182,9 @@ int main(void){
  assert(feed(300,250,0,false,true,true,true).action==UI_QUICK_NONE&&menu.open);
  // 展开后灯仍灭：整行可命中，拖动提交档位但不开灯。
  // Still off after expansion: full rows hit and drags commit levels without lighting.
- e=feed(399,300,1,true,false,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_BRIGHTNESS),1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.value==59&&!e.commit&&!menu.fl_on);
- e=feed(399,300,0,false,true,true,true);
+ e=feed(399,control_y(UI_QUICK_CTL_BRIGHTNESS),0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_BRIGHTNESS&&e.commit&&e.value==59&&!menu.fl_on&&menu.fl_bri==59);
  // 熄灯点按收起临时展开：开灯再熄灯后卡片区域不再命中。
  // The light-off tap collapses the session expansion: after on then off the card area stops matching.
@@ -185,9 +194,9 @@ int main(void){
  e=feed(598,156,1,true,false,true,true);
  e=feed(598,156,0,false,true,true,true);
  assert(e.control==UI_QUICK_CTL_ON&&e.value==0&&!menu.fl_on&&!menu.fl_expanded);
- e=feed(399,300,1,true,false,true,true);
+ e=feed(399,500,1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_NONE);
- e=feed(399,300,0,false,true,true,true);
+ e=feed(399,500,0,false,true,true,true);
  assert(e.action==UI_QUICK_CLOSE&&!menu.open&&!menu.fl_expanded);
  // 重开不记忆：开层后的再次下拉也能展开；收层再开只剩圆钮区。
  // Reopening forgets: a fresh drag on the open layer also expands; after closing
@@ -201,9 +210,9 @@ int main(void){
  feed(300,20,0,false,true,true,true);
  open();
  assert(!menu.fl_expanded);
- e=feed(399,300,1,true,false,true,true);
+ e=feed(399,500,1,true,false,true,true);
  assert(e.control==UI_QUICK_CTL_NONE&&!menu.fl_expanded);
- e=feed(399,300,0,false,true,true,true);
+ e=feed(399,500,0,false,true,true,true);
  assert(e.action==UI_QUICK_CLOSE&&!menu.open);
  // 层下缘起手的再次下拉不展开（起手必须抓在遮罩上）。
  // A fresh drag started below the band never expands (the grip must be on the shade).
@@ -247,14 +256,15 @@ int main(void){
  // 竖屏滑杆在下方、横屏滑杆在右侧；方向键仍在第二排，按钮/间隙/滑杆独立命中。
  // Portrait sliders sit below and landscape sliders sit right; orientation stays in row two with disjoint key/gap/slider hits.
  for(screen_width=684;screen_width<=1216;screen_width+=532){
-  menu.rotation_available=true;menu.rotation_enabled=true;open();
+  menu.rotation_available=true;menu.rotation_enabled=true;ui_quick_menu_set_frontlight(&menu,false,false,40,50);open();
   assert(ui_quick_menu_button_count(&menu)==5&&menu.rotation_enabled);
   const ui_quick_action_t actions[]={UI_QUICK_WIFI,UI_QUICK_BLUETOOTH,UI_QUICK_FULL,UI_QUICK_LOCK,UI_QUICK_ROTATION};
   for(int i=0;i<5;++i){
    int x=ui_quick_menu_button_x(&menu,i,screen_width);
    int y=ui_quick_menu_button_y(&menu,i);
-   assert(x==(screen_width>684?102+(i==4?0:i)*140:(i==4?screen_width/8:(2*i+1)*screen_width/8)));
-   assert(y==(i==4?296:156));
+   const bool row_two=i==4;
+   assert(x==(screen_width>684?102+(i>=4?i-4:i)*140:(row_two?screen_width/8:(2*i+1)*screen_width/8)));
+   assert(y==(row_two?296:156));
    assert(feed(x,y,1,true,false,true,true).action==UI_QUICK_NONE&&ui_quick_menu_pressed(&menu)==i);
    assert(feed(x,y,0,false,true,true,true).action==actions[i]);
   }
@@ -264,7 +274,13 @@ int main(void){
   assert(feed(x,296,0,false,true,true,true).action==UI_QUICK_ROTATION);
   assert(ui_quick_menu_height(&menu)==404);
   ui_quick_menu_set_frontlight(&menu,true,true,40,50);
+  assert(ui_quick_menu_button_count(&menu)==6);
   assert(ui_quick_menu_height(&menu)==(screen_width>684?404:620));
+  x=ui_quick_menu_button_x(&menu,ui_quick_menu_lock_button(&menu),screen_width);
+  assert(feed(x,296,1,true,false,true,true).action==UI_QUICK_NONE);
+  assert(feed(x,296,0,false,true,true,true).action==UI_QUICK_LOCK);
+  ui_quick_menu_set_frontlight(&menu,true,true,40,50);
+  x=ui_quick_menu_button_x(&menu,ui_quick_menu_rotation_button(&menu),screen_width);
   feed(x,296,1,true,false,true,true);
   assert(feed(x,296,0,false,true,true,true).action==UI_QUICK_ROTATION);
   for(int ctl=UI_QUICK_CTL_BRIGHTNESS;ctl<=UI_QUICK_CTL_CCT;++ctl){
@@ -316,7 +332,7 @@ int main(void){
   ui_quick_menu_set_frontlight(&menu,true,true,40,50);open();
   const int key=4+reader;
   const int x=ui_quick_menu_button_x(&menu,key,screen_width),y=296;
-  assert(ui_quick_menu_button_count(&menu)==5+reader);
+  assert(ui_quick_menu_button_count(&menu)==6+reader);
   assert(ui_quick_menu_height(&menu)==(screen_width==684?620:404));
   assert(feed(x,y,1,true,false,true,true).action==UI_QUICK_NONE&&ui_quick_menu_pressed(&menu)==key);
   e=feed(x,y,0,false,true,true,true);

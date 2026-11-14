@@ -3,7 +3,7 @@
 # English: Run page regressions for session position, turn modes and reader settings; artifacts stay in build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-python3 tools/reader_fullscreen_host_test.py
+python3 tools/reader_resume_controls_host_test.py
 python3 tools/reader_spacing_host_test.py
 python3 tools/reader_tap_dismiss_host_test.py
 python3 tools/settings_entry_clock_host_test.py

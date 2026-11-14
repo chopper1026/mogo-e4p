@@ -290,7 +290,7 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
                 else if (menu->hit == 1) event->action = UI_QUICK_BLUETOOTH;
                 else if (menu->hit == ui_quick_menu_cellular_button(menu)) event->action = UI_QUICK_CELLULAR;
                 else if (menu->hit == 2) event->action = UI_QUICK_FULL;
-                else if (menu->hit == 3) event->action = UI_QUICK_LOCK;
+                else if (menu->hit == ui_quick_menu_lock_button(menu)) event->action = UI_QUICK_LOCK;
                 else if (menu->hit == ui_quick_menu_rotation_button(menu)) event->action = UI_QUICK_ROTATION;
             } else if (menu->drag != UI_QUICK_CTL_NONE) {
                 event->control = menu->drag;

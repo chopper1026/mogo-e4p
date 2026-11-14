@@ -37,10 +37,10 @@ int app_index_of(const app_desc_t *current) {
     if (current->on_before_lock) assert(page_flushed);
     return tab;
 }
-bool app_book_resume_context(char *path, size_t capacity, bool *is_fullscreen) {
+bool app_book_resume_context(char *path, size_t capacity) {
     event('R'); assert(tab == 1 && capacity == sizeof(saved.path));
     if (!reader) return false;
-    strcpy(path, "/sdcard/books/阅读.epub"); *is_fullscreen = fullscreen;
+    strcpy(path, "/sdcard/books/阅读.epub");
     return true;
 }
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) {
@@ -60,7 +60,7 @@ int main(void) {
     app_ctx_t ctx = {0}; expected_ctx = &ctx;
     app_desc_t page = {0};
     // 所有页面索引、阅读/全屏、保存失败和可选回调保持原选择及先保存页面的顺序。
-    // Preserve selection and page-before-checkpoint order across indices, reader/fullscreen, save failure and optional callbacks.
+    // Preserve selection and page-before-checkpoint order across indices, reader/bar settings, save failure and optional callbacks.
     for (int index = -2; index <= 5; ++index)
     for (unsigned bits = 0; bits < 16; ++bits) {
         reset(); tab = index; reader = bits & 1; fullscreen = bits & 2;
@@ -73,7 +73,7 @@ int main(void) {
         expect(expected);
         assert(saved.tab == (index >= 0 && index < 4 ? index : 0));
         assert(saved.reader == (tab == 1 && reader));
-        assert(saved.fullscreen == (tab == 1 && reader && fullscreen));
+        assert(saved.fullscreen == 0);
         if (saved.reader) assert(!strcmp(saved.path, "/sdcard/books/阅读.epub"));
         else assert(!saved.path[0]);
     }

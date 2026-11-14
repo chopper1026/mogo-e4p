@@ -76,7 +76,6 @@ static void save_progress(void){++saved;}
 static void free_book(void){++freed;}
 static void return_to_cached_shelf(app_ctx_t *ctx){++restored;ctx->leaf=shelf_page;assert(shelf_category==3);}
 static app_redraw_t turn_page(app_ctx_t *ctx,int d){(void)ctx;(void)d;return APP_REDRAW_AREA;}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static void invalidate_prep(void){}
 static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}

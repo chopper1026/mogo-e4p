@@ -20,8 +20,7 @@ typedef struct {
     EpdRect area; ///< 页面给出的局部区域 / Requested area
     EpdRect body_area; ///< 阅读正文带 / Reader body band
     EpdRect status_area; ///< 随翻页更新的顶部带 / Top band refreshed with page turns
-    EpdRect footer_area; ///< 窗口化页脚带 / Windowed footer band
-    EpdRect progress_area; ///< 全屏进度带 / Full-screen progress band
+    EpdRect footer_area; ///< 可见页脚带 / Visible footer band
     EpdRect tools_area; ///< 阅读工具栏覆盖带 / Reader tools band
     EpdRect screen_area; ///< 完整逻辑屏幕 / Complete logical screen
     e0470_turn_dir_t water_dir; ///< 水波纹方向 / Water-turn direction
@@ -37,7 +36,6 @@ typedef struct {
     bool closing_panel_to_text; ///< 面板收起回到纯文字 / Closing a panel onto text
     bool closing_notice; ///< 提示收起后整屏归一 / Normalize the whole screen after dismissing a notice
     bool feedback; ///< 书架按压局部反馈 / Shelf press feedback
-    bool fullscreen; ///< 阅读全屏偏好 / Reader full-screen state
     bool turn_pending; ///< 普通文字翻页 / Ordinary text turn
     bool water_turn_pending; ///< 已允许水波纹翻页 / Approved water turn
     bool status_pending; ///< 本次翻页顶部状态有变化 / Top status changed for this turn

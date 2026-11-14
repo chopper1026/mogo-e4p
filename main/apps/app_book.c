@@ -29,8 +29,8 @@
  * User revision 2026-10-30: update time/power with page turns, without idle top-band output;
  * shorten chrome output with default GL16 status and short-DU ordinary footers, retain default GL16
  * cleanup for chapter/illustration footers, and keep body-first presentation.
- * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义八动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部全屏提示移除。
- * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body actions; the translucent editor activates only successfully saved drafts and removes the fullscreen footer hint.
+ * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部提示移除。
+ * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body regions; the translucent editor activates only successfully saved drafts and removes the footer hint.
  * 用户2026-11-11修复：阅读点按与滑动接纳左右留白，九宫格留白归相邻边缘格；正文分区与上下热区不变，修复边缘有震动却无动作。
  * User fix 2026-11-11: accept side margins for reader taps/swipes and map grid margins to adjacent edge cells, retaining body divisions and vertical bounds to fix vibrating edge taps with no action.
  * 用户同日修订：阅读线新增实线和跟随正文开关，缩短到实际文字范围；默认保留铺满正文区域。
@@ -82,7 +82,7 @@
  * User approval: list covers use 120×156 boxes, retaining their center and right-side text positions with aspect fill and centered cropping.
  * 用户修订：快刷亚克力采用规则一像素棋盘格，与已缓存封面合并输出，不注册灰区或等待框架先显示；未缓存封面继续有界延后解码。普通及水波纹保留灰阶，切页/锁屏取消旧目标。
  * 用户修订：书架读取最多当前整页缓存；未缓存封面限时准备，整组显现后才确认待刷标记，文件间检查导航，不新增整页缓存。
- * 用户修订：阅读背景先列pictures图片、忽略隐藏文件，点开预览上下切换，返回目录；背景按整屏坐标固定，不随文字边距或全屏状态缩放。
+ * 用户修订：阅读背景先列pictures图片、忽略隐藏文件，点开预览上下切换，返回目录；背景按整屏坐标固定，不随文字边距或信息栏显隐缩放。
  * User revision: fast acrylic uses a regular one-pixel checkerboard in the same output as cached covers, without gray registration or a furniture-first wait; uncached covers retain bounded lazy decoding. Ordinary/water retain grays; page/lock changes cancel stale targets.
  * 用户要求采用PR17的快速水波纹，并最新指定8条带、每拍11090us；每次显式设置，结束恢复先前节拍，避免影响主页动画。全刷、插图及失败恢复保留原优先级。
  * User requests PR17 fast ripple with the latest 8 bands at 11090us; explicitly select pacing per turn and restore it afterward so main animations remain independent. Retain cleanup, image and recovery priority.
@@ -93,8 +93,12 @@
  * User revision: adopt PR9's book_layout unchanged; callers only adapt bitmap caching and context lifetimes.
  * Authorized keyboard revision: titles and search share T9/QWERTY, bilingual offline phrase candidates; body layout stays intact.
  * 用户修订：输入不重画题头、封面或正文，只刷新输入变化区域，退出后释放查字缓存。
- * 用户修订：新开书沿用记住的全屏偏好（默认全屏）；翻页收起工具栏与滑块但不改变全屏状态；重排以已选目标页的文字位置为锚，不跳过未读文字。
- * User revision: new books follow the remembered full-screen preference (default on); turns dismiss the toolbar and sliders but keep the current full-screen state; reflow anchors the selected destination before changing geometry so unread text is not skipped.
+ * 用户2026-11-14修订：页眉页脚已有独立显隐，取消重复的全屏模式；状态栏、页眉、页脚分别决定正文边界，隐藏页脚也隐藏进度。
+ * User revision 2026-11-14: independent status/header/footer visibility replaces full screen; hidden bars release body space and hiding the footer also hides its progress.
+ * 用户2026-11-14续定：正文上下与可见信息栏保留9px基础间距；隐藏后与屏幕边缘保留9px，用户上下边距另加。
+ * User follow-up 2026-11-14: retain a 9px text gap from visible bars or screen edges when hidden, plus user top/bottom margins.
+ * 翻页收起工具栏与滑块，不改变显隐；重排以已选目标页的文字位置为锚，不跳过未读文字。
+ * Turns dismiss tools/sliders without changing visibility; reflow anchors the selected destination so unread text is not skipped.
  * 用户修订：字重用横向减/加胶囊，每次微调1/16像素覆盖率；保持字形比例/字宽，不加载额外整份字库。
  * User revision: a horizontal minus/plus pill adjusts coverage by 1/16 pixel per tap, preserving advances/proportions without another font.
  * 用户确认：字体/字重与书内字体/排版分别并排，移除阅读背景入口；字号和阅读线继续可调。
@@ -114,7 +118,7 @@
  * Shake is off by default: left/right impulses turn back/forward, suppressing touch and rebound; exit restores the sensor and sleeps it. Render only paints.
  * Prefetch overlaps synchronous output and stops between rows; no font/chapter resources survive presentation.
  * Ordinary turns refresh only body and footer; manual and periodic ghost cleanup share one whole-screen GC16 output.
- * User revision: single body taps use halves or upper 1/3/lower 2/3 independently of key mappings; full screen is toggled from the toolbar button or a full-screen key action, and center double taps are gone.
+ * User revision: single body taps use halves or upper 1/3/lower 2/3 independently of key mappings; center double taps have no action.
  * Short key actions are configurable with two presets; middle holds are configurable and default to home. The reader has no bottom-right menu icon.
  * User-authorized management shows full details before separate clear/delete confirmations; retain failed saves for retry without pruning other books.
  * User revision2026-11-05: logical categories never move files; create then pick books, retaining classification selections across search/filters to avoid repeated selection.
@@ -158,10 +162,12 @@
  * sheet; the default header becomes title/clock/battery icon while the footer keeps
  * chapter/blank/page·progress. The composed header fingerprint is compared per turn and the top
  * diff band only presents when it changed; idle stays silent.
- * 用户 2026-11-02 修订：页眉页脚高度独立调节，默认几何不变；正文、信息栏绘制与刷新边界同步重排，全屏不受影响。
- * User revision 2026-11-02: independent bar heights retain default geometry; body, chrome and refresh bounds reflow together without changing full-screen geometry.
- * 用户 2026-11-07 修订：页脚进度条从12px减为6px；显隐开关默认显示，同时控制全屏底线。实屏反馈后改为隐藏时回收进度带并按当前文字位置重排，保留页脚文字位置和用户边距。
- * User revision 2026-11-07: halve the footer bar to 6px with default-on visibility for footer/full-screen progress. After screen feedback, hiding reclaims the progress band and reflows around the current text position, preserving footer text placement and user margins.
+ * 用户 2026-11-02 修订：页眉页脚高度独立调节，默认几何不变；正文、信息栏绘制与刷新边界同步重排；隐藏栏不预留高度。
+ * User revision 2026-11-02: independent bar heights retain default geometry; body, chrome and refresh bounds reflow together, reserving no height for hidden bars.
+ * 用户 2026-11-14 修订：页眉页脚独立显示/隐藏，隐藏整栏后回收正文空间并保持阅读位置；显隐与高度同行，设置主面板一屏显示。
+ * User revision 2026-11-14: independently hide each bar and reclaim its body space around the reading anchor; inline visibility and height controls keep the settings on one sheet.
+ * 用户 2026-11-07 修订：页脚进度条从12px减为6px；显隐开关默认显示，进度归属页脚。实屏反馈后改为隐藏时回收进度带并按当前文字位置重排，保留页脚文字位置和用户边距。
+ * User revision 2026-11-07: halve the footer bar to 6px with default-on visibility within the footer. After screen feedback, hiding reclaims the progress band and reflows around the current text position, preserving footer text placement and user margins.
  * 用户 2026-10-21 修订：工具栏开关恢复为带内 GL16 差分；此前改 GC16 只因实心进度条擦除后留轮廓，
  * 差分脏区膨胀已补推边缘邻行/邻列，不再需要整块全像素驱动。
  * User revision 2026-10-21: the tools toggle returns to a band GL16 differential. GC16 was only
@@ -340,7 +346,6 @@ static bool s_dictionary_presented;
 static bool s_reader_notice_presented;
 static char s_requested_open[BOOK_STORE_PATH_MAX];
 static bool s_requested_open_home;
-static bool s_requested_fullscreen = true;
 static bool s_reader_return_home;
 static bool s_requested_manage;
 static shelf_entry_t* s_shelf;
@@ -434,7 +439,6 @@ static struct {
 } s_indent_hold;
 static bool s_indent_feedback_pending;
 static void reader_indent_hold_cancel(void);
-static bool s_reader_fullscreen;
 static reader_orientation_t s_orientation;
 static int64_t s_orientation_retry_ms;
 static bool reader_orientation_apply(display_orientation_t orientation);
@@ -574,6 +578,7 @@ static unsigned s_chrome_pick_slot;  // 0/1/2 = 左/中/右 / left/center/right
 static int s_chrome_scroll;
 static int s_chrome_height[2] = {APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT};
 static bool s_reader_progress_bar = true;
+static bool s_chrome_visible[2] = {true, true};
 static bool s_chrome_drag;
 static int s_chrome_pick_scroll;
 static bool s_chrome_pick_drag;
@@ -596,8 +601,8 @@ static int s_tap_selected = -1;
 static bool s_tap_picker;
 static char s_tap_error[64];
 static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action);
-static const app_reader_key_action_t s_tap_order[8] = {
-    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS, APP_READER_KEY_FULLSCREEN,
+static const app_reader_key_action_t s_tap_order[UI_READER_TAP_ACTION_COUNT] = {
+    APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
     APP_READER_KEY_HOME, APP_READER_KEY_REFRESH, APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_NONE,
 };
 #define s_toolbar (s_reader_panel != READER_PANEL_NONE)
@@ -616,16 +621,11 @@ static void prepare_inline_image(void);
 static void release_page_images(void);
 static void sort_shelf(app_ctx_t* ctx);
 static void prepare_covers(app_ctx_t* ctx);
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx);
 bool app_book_request_open(const char* path) {
     if (!path || !path[0] || strnlen(path, sizeof(s_requested_open)) >= sizeof(s_requested_open)) return false;
     if (!book_file_path_supported(path)) return false;
     copy_text(s_requested_open, sizeof(s_requested_open), path);
     s_requested_open_home = false;
-    // 从书架进书沿用用户记忆的全屏偏好（默认全屏）；锁屏恢复链路仍用显式参数。
-    // Shelf entries follow the remembered full-screen preference (default on); the sleep
-    // resume path keeps its explicit argument.
-    s_requested_fullscreen = app_settings_reader_open_fullscreen();
     return true;
 }
 bool app_book_request_open_from_home(const char* path) {
@@ -633,24 +633,20 @@ bool app_book_request_open_from_home(const char* path) {
     s_requested_open_home = true;
     return true;
 }
-bool app_book_request_resume(const char *path, bool fullscreen) {
-    if (!app_book_request_open_from_home(path)) return false;
-    s_requested_fullscreen = fullscreen;
-    return true;
+bool app_book_request_resume(const char *path) {
+    return app_book_request_open_from_home(path);
 }
-bool app_book_request_return_to_body(const char *path, bool fullscreen) {
+bool app_book_request_return_to_body(const char *path) {
     // 走普通开书来源：正文的返回仍是书架，不继承深睡恢复的「回首页」语义。
     // Use the ordinary open origin: the body still returns to the shelf, unlike the
     // deep-sleep resume's "back to home" semantics.
     if (!app_book_request_open(path)) return false;
-    s_requested_fullscreen = fullscreen;
     return true;
 }
-bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen) {
+bool app_book_resume_context(char *path, size_t capacity) {
     if (!s_text || !s_reader_session.book.path[0] || s_view == SHELF || s_view == MANAGE || s_view == BULK ||
-        !path || !fullscreen || strlen(s_reader_session.book.path) >= capacity || s_save_failed) return false;
+        !path || strlen(s_reader_session.book.path) >= capacity || s_save_failed) return false;
     copy_text(path, capacity, s_reader_session.book.path);
-    *fullscreen = s_reader_fullscreen;
     return true;
 }
 void app_book_request_manage(void) { s_requested_manage = true; }
@@ -672,29 +668,20 @@ static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_WIDTH epd_rotated_display_width()
 #define READER_HEIGHT epd_rotated_display_height()
 #define READER_BAR_TOP (READER_HEIGHT - UI_BAR_MARGIN - UI_BAR_H)
-#define READER_FULLSCREEN_PROGRESS_TOP (READER_HEIGHT - 12)
 #define READER_FOOTER_PROGRESS_SPACE 19
-// 隐藏时回收条形预留，文字仍在原位，正文与文字间保留8px。
-// Reclaim the hidden bar's reservation while keeping footer text in place with an 8px body gap.
+// 隐藏页脚进度条只回收条形预留；独立隐藏页眉/页脚时回收整个信息栏。
+// Hiding only the footer progress bar reclaims its strip; hiding a chrome bar reclaims its full band.
 static int reader_footer_height(void) {
+    if (!s_chrome_visible[1]) return 0;
     return s_chrome_height[1] - (s_reader_progress_bar ? 0 : READER_FOOTER_PROGRESS_SPACE);
 }
-// 正文保留顶部呼吸空间，下沿与当前可见页脚带相接。
-// Keep the top breathing space and meet the currently visible footer band.
+// 正文绘制与清理带包含基础留白，边界随信息栏显隐变化。
+// The body paint/clear band includes its gaps and follows bar visibility.
 static EpdRect reader_area(void) {
-    const int top = s_reader_fullscreen
-        ? (app_settings_reader_statusbar() ? 80 : 0)
-        : (app_settings_reader_statusbar() ? 80 : 0) + s_chrome_height[0];
-    // 全屏进度线单独差分，翻页时不让正文刷新反复驱动整条横线。
-    // Keep the full-screen progress strip out of body updates so turns do not drive the whole bar.
-    const int bottom = s_reader_fullscreen
-        ? (s_reader_progress_bar ? READER_FULLSCREEN_PROGRESS_TOP : READER_HEIGHT)
-        : READER_BAR_TOP + UI_BAR_H - reader_footer_height();
+    const int top = (app_settings_reader_statusbar() ? 80 : 0) +
+        (s_chrome_visible[0] ? s_chrome_height[0] : 0);
+    const int bottom = READER_HEIGHT - (s_chrome_visible[1] ? UI_BAR_MARGIN + reader_footer_height() : 0);
     return (EpdRect){0, top, READER_WIDTH, bottom - top};
-}
-static EpdRect reader_fullscreen_progress_area(void) {
-    const int top = s_reader_progress_bar ? READER_FULLSCREEN_PROGRESS_TOP : READER_HEIGHT;
-    return (EpdRect){0, top, READER_WIDTH, READER_HEIGHT - top};
 }
 // 工具栏覆盖底部 120px；默认高度的页脚进度条（1143–1149）和章节行都在这条带内。
 // The tools bar covers the bottom 120 px; the default footer bar (1143–1149) and title row sit inside it.
@@ -703,13 +690,10 @@ static EpdRect reader_tools_area(void) {
 }
 static EpdRect body_rect_for_tracking(int tracking_index) {
     (void)tracking_index;
-    int top = s_reader_fullscreen
-        ? (app_settings_reader_statusbar() ? 96 : 24)
-        : (app_settings_reader_statusbar() ? 96 : 16) + s_chrome_height[0];
-    // 正文底与页脚差分带相接。/ Body bottom meets the footer refresh band.
-    int bottom = s_reader_fullscreen
-        ? (s_reader_progress_bar ? READER_FULLSCREEN_PROGRESS_TOP : READER_HEIGHT) - 2
-        : READER_BAR_TOP + UI_BAR_H - reader_footer_height();
+    const EpdRect area = reader_area();
+    const int gap = 9;
+    const int top = area.y + gap;
+    const int bottom = area.y + area.height - gap;
     // 四向留白是屏幕边距，横排竖排同一套：左右缩栏宽，上下缩页高。
     // 不吸附整字格，完整行把余量摊到字间。
     // The four insets are screen-side margins shared by both writing modes: left/right narrow the
@@ -2166,7 +2150,6 @@ static void draw_reader_more(uint8_t *fb) {
     draw_sheet_back(fb, 804);
     draw_font_pair(fb, reader_more_rect(0), "阅读统计", "时长与翻页");
     draw_font_pair(fb, reader_more_rect(1), "书签列表", "已保存的位置");
-    draw_font_pair(fb, reader_more_rect(2), s_reader_fullscreen ? "退出全屏" : "全屏阅读", "切换显示");
 }
 
 static EpdRect reader_weight_rect(int index) { return (EpdRect){index?542:56,909,86,86}; }
@@ -2378,7 +2361,7 @@ static const char *reader_key_label(app_reader_key_action_t action) {
         [APP_READER_KEY_PREV] = "上一页",
         [APP_READER_KEY_NEXT] = "下一页",
         [APP_READER_KEY_TOOLS] = "阅读工具栏",
-        [APP_READER_KEY_FULLSCREEN] = "切换全屏",
+        [APP_READER_KEY_LEGACY_FULLSCREEN] = "阅读工具栏",
         [APP_READER_KEY_HOME] = "返回主页",
         [APP_READER_KEY_REFRESH] = "手动全刷",
         [APP_READER_KEY_NONE] = "不操作",
@@ -2402,9 +2385,9 @@ static void draw_tap_grid(uint8_t *fb) {
     }
     ui_reader_tap_grid_draw(fb, cells, labels, s_tap_selected, s_tap_error);
     if (s_tap_picker) {
-        const char *options[8];
+        const char *options[UI_READER_TAP_ACTION_COUNT];
         int selected = -1;
-        for (unsigned i = 0; i < 8; ++i) {
+        for (unsigned i = 0; i < UI_READER_TAP_ACTION_COUNT; ++i) {
             options[i] = reader_tap_label(s_tap_order[i]);
             if (s_tap_order[i] == (app_reader_key_action_t)s_tap_draft[s_tap_selected]) selected = (int)i;
         }
@@ -2489,15 +2472,15 @@ static void draw_key_settings(uint8_t *fb) {
 // stored values keep the enum's own numbering.
 static const app_reader_key_action_t s_reader_key_order[] = {
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
-    APP_READER_KEY_FULLSCREEN, APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
+    APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
     APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_TOUCH, APP_READER_KEY_NONE,
 };
 #define READER_KEY_ACTION_ROWS ((int)(sizeof(s_reader_key_order) / sizeof(s_reader_key_order[0])))
 #define KEY_ACTION_TOP 390
 #define KEY_ACTION_PITCH 86
 #define KEY_ACTION_HEIGHT 78
-// 九个动作共用绘制和命中矩形，提示与返回键仍有独立空间。
-// Nine actions share paint/hit rectangles, leaving separate hint and Back space.
+// 八个动作共用绘制和命中矩形，提示与返回键仍有独立空间。
+// Eight actions share paint/hit rectangles, leaving separate hint and Back space.
 static EpdRect reader_key_action_card(int index) {
     return (EpdRect){36, KEY_ACTION_TOP + index * KEY_ACTION_PITCH, 612, KEY_ACTION_HEIGHT};
 }
@@ -2524,13 +2507,13 @@ static void draw_key_picker(uint8_t *fb) {
 }
 
 /* ---- 页眉页脚设置面板 / Header & footer chrome panels ---- */
-// 六个槽位、两条高度、进度条开关加「恢复默认」整行滚动；主面板首屏七行，内容选择首屏九行。
-// Six slots, two heights, progress visibility and reset scroll whole rows; settings show seven rows and content pickers show nine.
+// 显隐与高度共用一行，六槽、两条信息栏、进度条和恢复默认一屏可见。
+// Visibility and height share each bar's row, keeping all six slots, both bars, progress and reset visible.
 #define CHROME_ROW_TOP (KEY_SETTINGS_TOP + 104)
-#define CHROME_ROW_HEIGHT 88
-#define CHROME_ROW_GAP 8
+#define CHROME_ROW_HEIGHT 60
+#define CHROME_ROW_GAP 4
 #define CHROME_ROW_PITCH (CHROME_ROW_HEIGHT + CHROME_ROW_GAP)
-#define CHROME_ROW_VISIBLE 7
+#define CHROME_ROW_VISIBLE 10
 #define CHROME_ROW_VIEW_HEIGHT (CHROME_ROW_VISIBLE * CHROME_ROW_HEIGHT + (CHROME_ROW_VISIBLE - 1) * CHROME_ROW_GAP)
 #define CHROME_PROGRESS_ROW 8
 #define CHROME_ROW_COUNT 10
@@ -2575,19 +2558,19 @@ static void draw_chrome_row(uint8_t *fb, int row) {
     }
     if (row == CHROME_PROGRESS_ROW) {
         ui_text_box(fb, (EpdRect){58, cy - 24, 300, 48}, 26, "页脚进度条", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_box(fb, (EpdRect){414, cy - 24, 202, 48}, 25,
-                    app_settings_reader_progress_bar() ? "显示" : "隐藏", EPD_DRAW_ALIGN_RIGHT, false);
+        draw_reading_switch(fb, (EpdRect){556, cy - 19, 69, 39}, s_reader_progress_bar);
         return;
     }
-    if (row >= 6) {
+    if (row == 6 || row == 7) {
         const unsigned bar = (unsigned)row - 6;
         char value[24];
         snprintf(value, sizeof(value), "%d px", s_chrome_height[bar]);
-        ui_text_box(fb, (EpdRect){58, cy - 24, 238, 48}, 26,
-                    bar ? "页脚高度" : "页眉高度", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){58, cy - 24, 140, 48}, 26,
+                    bar ? "页脚" : "页眉", EPD_DRAW_ALIGN_LEFT, false);
+        draw_reading_switch(fb, (EpdRect){218, cy - 19, 69, 39}, s_chrome_visible[bar]);
         ui_text_box(fb, (EpdRect){414, cy - 24, 140, 48}, 25, value, EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_box(fb, (EpdRect){338, cy - 32, 72, 64}, 32, "−", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_box(fb, (EpdRect){566, cy - 32, 72, 64}, 32, "+", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){338, cy - 27, 72, 54}, 30, "−", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){566, cy - 27, 72, 54}, 30, "+", EPD_DRAW_ALIGN_CENTER, false);
         return;
     }
     const app_reader_slot_item_t item = app_settings_reader_chrome_item((unsigned)row / 3, (unsigned)row % 3);
@@ -2599,7 +2582,7 @@ static void draw_chrome_settings(uint8_t *fb) {
     draw_sheet(fb, KEY_SETTINGS_TOP, "页眉页脚");
     draw_sheet_back(fb, KEY_SETTINGS_TOP);
     for (int row = 0; row < CHROME_ROW_COUNT; ++row) draw_chrome_row(fb, row);
-    reader_panel_text_vc(fb, 342, 1193, 21, s_chrome_error[0] ? s_chrome_error : "上下滑动查看更多", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 1193, 21, s_chrome_error[0] ? s_chrome_error : "隐藏信息栏后，正文会自动填满空出的区域", EPD_DRAW_ALIGN_CENTER, false);
 }
 static EpdRect chrome_pick_card(int index) {
     return (EpdRect){36, CHROME_PICK_TOP - s_chrome_pick_scroll + index * CHROME_PICK_PITCH, 612, CHROME_PICK_HEIGHT};
@@ -2625,9 +2608,8 @@ static void draw_chrome_picker(uint8_t *fb) {
     }
     reader_panel_text_vc(fb, 342, 1186, 20, s_chrome_error[0] ? s_chrome_error : "选择该位置显示的内容", EPD_DRAW_ALIGN_CENTER, false);
 }
-// 两个面板共用整行滚动：视口内起手的纵向手势按一行步进，落点始终对齐行边界。
-// Both panels share whole-row scrolling: a vertical gesture starting inside the viewport steps one
-// row and always lands on a row boundary.
+// 内容选择面板使用整行滚动；设置主面板十行全部可见。
+// The content picker uses whole-row scrolling; all ten settings rows remain visible.
 static app_redraw_t chrome_list_scroll(app_ctx_t *ctx, const ui_gesture_event_t *ev,
                                        int view_top, int view_height, int pitch, int max_scroll,
                                        int *scroll, bool *drag) {
@@ -3317,12 +3299,14 @@ static void reader_chrome_data(reader_chrome_data_t *data) {
 // 翻页时对比页眉合成文本，决定顶部差分带是否随本帧推屏。
 // Composed header texts decide on each turn whether the top diff band joins this frame.
 static uint32_t reader_chrome_fingerprint(void) {
+    if (!s_chrome_visible[0]) return 0;
     reader_chrome_data_t data;
     reader_chrome_data(&data);
     return reader_chrome_header_fingerprint(&data);
 }
 
 static void draw_reader_header(uint8_t *fb) {
+    if (!s_chrome_visible[0]) return;
     // 信息居中，分隔线固定在信息栏下沿；默认高度保留原位置。
     // Center the slots and keep the rule at the bar's bottom; the default preserves original positions.
     const int top = app_settings_reader_statusbar() ? 80 : 0;
@@ -3408,11 +3392,11 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
 // with horizontal positions fixed and the block centred in the band. Any level and any style has to
 // stay inside the band, or it lands on the body text.
 // 重排前把章节题头的几何重新说给排版：竖排留右侧列宽、横排留顶部行高，
-// 绘制侧读的是同一组 s_chapter_lead_*。切模式、切全屏、改字号都必须走这里，
+// 绘制侧读的是同一组 s_chapter_lead_*。切模式、改显隐、改字号都必须走这里，
 // 否则排版按旧模式预留、题头按新模式绘制，题头就会压到正文上。
 // Tell the layout the chapter heading geometry before every re-layout: columns to the right in
 // vertical setting, rows at the top in horizontal. Drawing reads the same s_chapter_lead_*
-// values. Switching mode or full screen or changing the type size must all come through here;
+// values. Changing mode, bar visibility or type size must all come through here;
 // otherwise the layout reserves for the old mode while the heading draws in the new one and lands
 // on top of the body.
 // 题头几何按当前模式重算：竖排留右侧列宽、横排留顶部行高。
@@ -3526,7 +3510,7 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
 static void draw_reader_outer(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);
     if (app_settings_reader_statusbar()) ui_nav_status(fb);
-    if (!s_reader_fullscreen) draw_reader_header(fb);
+    draw_reader_header(fb);
     EpdRect body=body_rect();
     if (page == 0 && s_chapter_heading_title[0] &&
         (s_chapter_lead_height || s_chapter_lead_width)) {
@@ -3547,15 +3531,7 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
     }
     ui_reader_background_paint(fb, (EpdRect){0,0,READER_WIDTH,READER_HEIGHT}, true);
     draw_reader_images(fb, page, body);
-    if (s_reader_fullscreen) {
-        // Full-book progress uses the last few screen rows and no footer text.
-        EpdRect track = {36, READER_FULLSCREEN_PROGRESS_TOP + 3, READER_WIDTH - 72, 3};
-        if (s_reader_progress_bar) {
-            ui_fill_round_rect(fb, track, 1, 0x90);
-            track.width = track.width * (int)percent(page) / 100;
-            if (track.width) ui_fill_round_rect(fb, track, 1, UI_GRAY_BLACK);
-        }
-    } else {
+    if (s_chrome_visible[1]) {
         EpdRect track = progress_rect();
         // 显示时文字顶为带顶+27；隐藏后带顶下移19px，文字顶仍保持原位置。
         // Text starts 27px below the shown band; hiding moves the band down 19px and keeps the text fixed.
@@ -3732,23 +3708,19 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     unlock_draw();
 }
 static EpdRect reader_status_area(void) {
-    // 状态栏和页眉合并到正文上沿，全屏只保留状态栏。
-    // Merge status and header up to the body's top; full screen retains status alone.
-    if (!s_reader_fullscreen)
-        return (EpdRect){0, 0, READER_WIDTH, (app_settings_reader_statusbar() ? 80 : 0) + s_chrome_height[0]};
-    return (EpdRect){0, 0, READER_WIDTH, 80};
+    return (EpdRect){0, 0, READER_WIDTH, reader_area().y};
 }
 static bool reader_status_visible(void) {
-    // 窗口化页眉常驻时钟，全屏只有状态栏开档才有时间显示。
-    // The windowed header always shows the clock; full screen only with the status bar on.
+    // 只更新当前可见的状态栏或页眉。
+    // Update only a visible status bar or header.
     return s_view==READING && s_text &&
-        (app_settings_reader_statusbar() || !s_reader_fullscreen);
+        (app_settings_reader_statusbar() || s_chrome_visible[0]);
 }
 static void reader_status_paint(uint8_t *fb) {
     EpdRect area=reader_status_area();
     ui_fill_rect_fast(area,UI_GRAY_WHITE,fb);
     if (app_settings_reader_statusbar()) ui_nav_status(fb);
-    if (!s_reader_fullscreen) draw_reader_header(fb);
+    draw_reader_header(fb);
     if (app_settings_book_background_path()[0])
         ui_reader_background_paint(fb,area,true);
 }
@@ -3890,7 +3862,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                    redraw == APP_REDRAW_FULL ? READER_PRESENT_FULL : READER_PRESENT_PAGE,
         .mode = s_mode, .page_mode = APP_PAGE_REFRESH_MODE,
         .area = s_area, .body_area = reader_area(), .status_area = reader_status_area(), .footer_area = progress_rect(),
-        .progress_area = reader_fullscreen_progress_area(), .tools_area = reader_tools_area(),
+        .tools_area = reader_tools_area(),
         .screen_area = {0, 0, READER_WIDTH, READER_HEIGHT},
         .water_dir = s_water_turn_dir,
         .reading = s_view == READING, .reader_body = s_view == READING && s_text,
@@ -3905,7 +3877,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             s_reader_panel == READER_PANEL_NONE && !s_dictionary_view.open && reader_text_body(),
         .closing_notice = s_reader_notice_presented && !s_reader_notice[0],
         .feedback = s_view == SHELF && s_shelf_feedback_pending,
-        .fullscreen = s_reader_fullscreen, .turn_pending = s_reader_turn_pending,
+        .turn_pending = s_reader_turn_pending,
         .water_turn_pending = s_water_turn_pending,
         .status_pending = status_pending, .footer_pending = s_reader_footer_pending,
         .footer_strong = s_reader_footer_strong,
@@ -4021,7 +3993,7 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     unlock_draw();
     ESP_LOGI(TAG, "paint cached=%d ms=%lld", cached, (esp_timer_get_time() - started) / 1000);
     s_area = reader_area();
-    s_reader_footer_pending = !s_reader_fullscreen;
+    s_reader_footer_pending = s_chrome_visible[1];
     s_mode = mode;
     return APP_REDRAW_AREA;
 }
@@ -4351,7 +4323,6 @@ static void skip_hidden_image_pages(app_ctx_t *ctx, int direction) {
 static void reader_open_replace(void) {
     save_progress();
     free_book();
-    s_reader_fullscreen = s_requested_fullscreen;
     app_font_activate_reading();
 }
 static void reader_open_describe(const char *path) {
@@ -4511,7 +4482,6 @@ static bool open_requested_book(app_ctx_t* ctx) {
     s_requested_open[0] = 0;
     s_requested_open_home = false;
     bool opened = open_book(ctx, path);
-    s_requested_fullscreen = app_settings_reader_open_fullscreen();
     if (!opened) return false;
     s_reader_return_home = from_home;
     return true;
@@ -5073,9 +5043,8 @@ static void manage_apply(app_ctx_t* ctx) {
 /* ---- 输入与生命周期 / Input and lifecycle ---- */
 
 static bool reader_turn_chrome(app_ctx_t *ctx) {
-    // 翻页只收起面板与滑块，全屏状态保持不变；全屏切换走工具栏按钮与按键。
-    // Turns collapse panels and sliders only; full screen stays untouched and is
-    // toggled from the toolbar button or keys.
+    // 翻页只收起面板与滑块，保留状态栏、页眉与页脚的显隐设置。
+    // Turns collapse panels and sliders while preserving status, header and footer visibility.
     (void)ctx;
     bool changed = s_reader_panel != READER_PANEL_NONE || s_reader_slider >= 0;
     s_reader_panel = READER_PANEL_NONE;
@@ -5120,7 +5089,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     if (moved == READER_TURN_LOAD_FAILED) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_reader_session.position.chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
     if (!s_text) { s_view = SHELF; return APP_REDRAW_PAGE; }
-    // 先选择旧布局的目标页，再切全屏，保留目标位置而不是跨过未读段落。
+    // 先选择旧布局的目标页，随后重排保留目标位置，不跨过未读段落。
     // Choose the destination in the old layout first, then reflow to retain its reading position.
     bool chrome_changed = reader_turn_chrome(ctx);
     if (!s_text) return APP_REDRAW_PAGE;
@@ -5424,33 +5393,6 @@ static app_redraw_t reader_return(app_ctx_t *ctx) {
     return APP_REDRAW_PAGE;
 }
 
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
-    (void)ctx;
-    if (!s_text) return APP_REDRAW_NONE;
-    reader_reflow_result_t result = reader_reflow_fullscreen(reader_reflow_context(), &s_reader_fullscreen);
-    if (result != READER_REFLOW_APPLIED) {
-        if (result == READER_REFLOW_LOST_LAYOUT) {
-            free_book();
-            s_view = SHELF;
-            copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
-            return APP_REDRAW_PAGE;
-        }
-        return APP_REDRAW_NONE;
-    }
-    release_page_images();
-    prepare_inline_image();
-    s_jump_offset = SIZE_MAX;
-    s_reader_panel = READER_PANEL_NONE;
-    // 切换成功即落盘偏好；重排失败的回滚路径不写。/ Persist the preference on a successful
-    // toggle only; the failed-reflow rollback path never writes.
-    app_settings_set_reader_open_fullscreen(s_reader_fullscreen);
-    // 书架点击直接调 open_book，只读这个待开值而不重新读设置；不同步的话关书再进会回到切换前的模式。
-    // A shelf tap calls open_book directly and reads this pending value without re-reading the
-    // setting, so without this sync closing and reopening the book restores the pre-toggle mode.
-    s_requested_fullscreen = s_reader_fullscreen;
-    save_progress();
-    return APP_REDRAW_PAGE;
-}
 
 static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item_t* item) {
     if (!item || !strcmp(ttf_font_path(), item->path)) return APP_REDRAW_NONE;
@@ -5478,15 +5420,19 @@ static app_redraw_t select_reading_font_item(app_ctx_t* ctx, const ttf_font_item
 // Trial height/visibility in reader state before persistence and restore the old geometry on failure.
 static app_redraw_t apply_reader_chrome_layout(int header, int footer, bool progress, bool reset) {
     const int previous[2] = {s_chrome_height[0], s_chrome_height[1]};
+    const bool previous_visible[2] = {s_chrome_visible[0], s_chrome_visible[1]};
     const bool previous_progress = s_reader_progress_bar;
-    const bool reflow = progress != previous_progress ||
-        (!s_reader_fullscreen && (header != previous[0] || footer != previous[1]));
+    const bool reflow = (previous_visible[1] && progress != previous_progress) ||
+        (previous_visible[0] && header != previous[0]) ||
+        (previous_visible[1] && footer != previous[1]) ||
+        (reset && (!previous_visible[0] || !previous_visible[1]));
     size_t offset = book_layout_page_start_offset(s_reader_session.position.page);
     lock_draw();
     invalidate_prep();
     s_chrome_height[0] = header;
     s_chrome_height[1] = footer;
     s_reader_progress_bar = progress;
+    if (reset) s_chrome_visible[0] = s_chrome_visible[1] = true;
     bool ok = true, restored = true;
     if (reflow) {
         refresh_chapter_lead();
@@ -5500,6 +5446,51 @@ static app_redraw_t apply_reader_chrome_layout(int header, int footer, bool prog
         s_chrome_height[0] = previous[0];
         s_chrome_height[1] = previous[1];
         s_reader_progress_bar = previous_progress;
+        s_chrome_visible[0] = previous_visible[0];
+        s_chrome_visible[1] = previous_visible[1];
+        if (reflow) {
+            refresh_chapter_lead();
+            restored = reader_reflow_build();
+        }
+    }
+    unlock_draw();
+    if (!restored) {
+        free_book();
+        s_view = SHELF;
+        copy_text(s_message, sizeof(s_message), "排版失败，请重新扫描并打开图书");
+    } else if (!ok) copy_text(s_chrome_error, sizeof(s_chrome_error), "调整失败，请重试");
+    else {
+        s_chrome_error[0] = 0;
+        if (reflow) {
+            release_page_images();
+            prepare_inline_image();
+            s_jump_offset = SIZE_MAX;
+            save_progress();
+        }
+    }
+    s_reader_footer_pending = s_reader_image_refresh_pending = false;
+    s_reader_footer_strong = s_water_turn_pending = false;
+    return APP_REDRAW_PAGE;
+}
+
+static app_redraw_t apply_reader_chrome_visibility(bool header_visible, bool footer_visible) {
+    const bool previous[2] = {s_chrome_visible[0], s_chrome_visible[1]};
+    const bool reflow = header_visible != previous[0] || footer_visible != previous[1];
+    size_t offset = book_layout_page_start_offset(s_reader_session.position.page);
+    lock_draw();
+    invalidate_prep();
+    s_chrome_visible[0] = header_visible;
+    s_chrome_visible[1] = footer_visible;
+    bool ok = true, restored = true;
+    if (reflow) {
+        refresh_chapter_lead();
+        ok = reader_reflow_build();
+    }
+    if (ok) ok = app_settings_set_reader_chrome_visibility(header_visible, footer_visible);
+    if (ok && reflow) s_reader_session.position.page = book_layout_page_for_offset(offset);
+    if (!ok) {
+        s_chrome_visible[0] = previous[0];
+        s_chrome_visible[1] = previous[1];
         if (reflow) {
             refresh_chapter_lead();
             restored = reader_reflow_build();
@@ -5713,7 +5704,7 @@ static app_redraw_t reader_tap_grid_action(app_ctx_t *ctx, uint16_t x, uint16_t 
         else copy_text(s_tap_error, sizeof(s_tap_error), "保存失败，请重试");
     } else if (s_tap_picker) {
         if (y < 494 || ui_rect_hit(ui_reader_tap_picker_back_rect(), x, y)) s_tap_picker = false;
-        else for (unsigned i = 0; i < 8; ++i) {
+        else for (unsigned i = 0; i < UI_READER_TAP_ACTION_COUNT; ++i) {
             if (!ui_rect_hit(ui_reader_tap_option_rect(i), x, y)) continue;
             s_tap_draft[s_tap_selected] = (uint8_t)s_tap_order[i];
             s_tap_picker = false;
@@ -5810,7 +5801,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
             s_bookmark_selected = 0;
             s_reader_panel = READER_PANEL_BOOKMARKS;
-        } else if (ui_rect_hit(reader_more_rect(2), x, y)) return toggle_reader_fullscreen(ctx);
+        }
         else return APP_REDRAW_NONE;
         invalidate_prep();
         return APP_REDRAW_PAGE;
@@ -5965,8 +5956,11 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                     return apply_reader_chrome_layout(s_chrome_height[0], s_chrome_height[1],
                                                       !s_reader_progress_bar, false);
                 }
-                if (row >= 6) {
+                if (row == 6 || row == 7) {
                     const unsigned bar = (unsigned)row - 6;
+                    if (x < 320)
+                        return apply_reader_chrome_visibility(bar ? s_chrome_visible[0] : !s_chrome_visible[0],
+                                                             bar ? !s_chrome_visible[1] : s_chrome_visible[1]);
                     int next = s_chrome_height[bar];
                     if (x >= 338 && x < 410) next -= APP_READER_CHROME_HEIGHT_STEP;
                     else if (x >= 566 && x < 638) next += APP_READER_CHROME_HEIGHT_STEP;
@@ -6651,7 +6645,6 @@ static void on_enter(app_ctx_t* ctx) {
         if (s_text && book_kind() == BOOK_KIND_EPUB)
             (void)load_chapter(ctx, s_reader_session.position.chapter, book_layout_page_start_offset(s_reader_session.position.page), false);
     }
-    s_reader_fullscreen = false;
     s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
     s_bookmark_selected = 0;
     clear_selection();
@@ -6663,6 +6656,8 @@ static void on_enter(app_ctx_t* ctx) {
     s_px = app_settings_book_px();
     s_chrome_height[0] = app_settings_reader_chrome_height(0);
     s_chrome_height[1] = app_settings_reader_chrome_height(1);
+    s_chrome_visible[0] = app_settings_reader_chrome_visible(0);
+    s_chrome_visible[1] = app_settings_reader_chrome_visible(1);
     s_recent_sort = app_settings_shelf_recent_sort();
     s_margin[MARGIN_LEFT] = app_settings_book_margin_left();
     s_margin[MARGIN_RIGHT] = app_settings_book_margin_right();
@@ -7386,7 +7381,6 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
             s_stats_activity_ms = ctx->now_ms;
             return turn_page(ctx, action == APP_READER_KEY_PREV ? -1 : 1);
         case APP_READER_KEY_HOME: return reader_return(ctx);
-        case APP_READER_KEY_FULLSCREEN: return toggle_reader_fullscreen(ctx);
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
         case APP_READER_KEY_FRONTLIGHT: {
             // 前光开关只驱动灯，不重画正文；无前光的板保持不操作。

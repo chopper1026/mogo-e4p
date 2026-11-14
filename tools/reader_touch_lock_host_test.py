@@ -50,7 +50,6 @@ static bool app_book_reader_body_visible(void){return s_view==READING&&s_reader_
 static app_redraw_t dictionary_dismiss(void){dictionary_cancel();return APP_REDRAW_PAGE;}
 static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;assert(direction==1||direction==-1);++turns;s_reader_panel=READER_PANEL_NONE;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_return(app_ctx_t *ctx){ctx->request_return=true;return APP_REDRAW_PAGE;}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static bool frontlight_ready(void){return false;}
 static bool app_settings_frontlight_on(void){return false;}

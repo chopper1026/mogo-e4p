@@ -97,7 +97,6 @@ static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_ve
 #define APP_READER_TAP_GRID 2
 
 static bool app_settings_reader_statusbar(void){return true;}
-static bool app_settings_reader_progress_bar(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}
 '''
 unit+=function('ui_text_box',kit).replace('void ui_text_box(', 'static void actual_text_box(')+'\n'
@@ -128,6 +127,7 @@ unit+=re.search(r'^#define KEY_SETTINGS_TOP .*',s,re.M)[0]+'\n'
 unit+='\n'.join(re.findall(r'^#define CHROME_(?:ROW_.*|PROGRESS_ROW.*)',s,re.M))+'\n'
 unit+=r'''
 static int s_chrome_scroll,s_chrome_height[2]={144,121};
+static bool s_chrome_visible[2]={true,true},s_reader_progress_bar=true;
 typedef int app_reader_slot_item_t;
 static app_reader_slot_item_t app_settings_reader_chrome_item(unsigned bar,unsigned slot){(void)bar;(void)slot;return 0;}
 static const char *reader_chrome_item_label(app_reader_slot_item_t item){(void)item;return "页码与全书进度";}

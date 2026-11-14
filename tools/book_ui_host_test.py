@@ -211,7 +211,7 @@ static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
 static char s_requested_open[288];
-static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen;
+static bool s_requested_open_home,s_reader_return_home;
 static int test_open_calls;
 static char* s_text;
 enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
@@ -299,7 +299,7 @@ static int64_t s_shake_touch_ms;
 static book_shake_gate_t s_shake_gate;
 static void board_sensor_sleep(void *acc){assert(acc);if(!test_sensor_sleep_fail)test_sensor_powered=false;}
 static bool sc7a20h_powered(void *acc){return acc&&test_sensor_powered;}
-static bool s_reader_fullscreen,test_reader_statusbar=true,test_hold_refresh,test_hide_images,test_power_turn;
+static bool test_reader_statusbar=true,test_hold_refresh,test_hide_images,test_power_turn;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_shelf_key_pressed;
 static int s_shelf_key_delta;
 #define UI_PAGER_PREVIOUS 0
@@ -330,8 +330,6 @@ static size_t book_layout_page_for_offset(size_t off){return off/100;}
 static bool app_settings_reader_power_turn(void){return test_power_turn;}
 static void app_settings_set_reader_power_turn(bool on){test_power_turn=on;}
 static void app_settings_set_reader_statusbar(bool on){test_reader_statusbar=on;}
-static bool test_open_full=true;
-static bool app_settings_reader_open_fullscreen(void){return test_open_full;}
 static void app_settings_set_reader_hold_refresh(bool on){test_hold_refresh=on;}
 static void app_settings_set_reader_hide_images(bool on){test_hide_images=on;}
 static bool s_reader_footer_pending,s_reader_footer_strong,s_reader_image_refresh_pending,s_water_turn_pending;
@@ -373,9 +371,11 @@ static bool app_settings_book_reading_line_follow_text(void){return false;}
 static int app_settings_book_reading_line_offset(void){return 0;}
 static bool app_settings_reader_statusbar(void){return test_reader_statusbar;}
 static int s_chrome_height[2]={80,57};
+static bool s_chrome_visible[2]={true,true};
 static bool s_reader_progress_bar=true;
 static bool app_settings_reader_progress_bar(void){return true;}
 static uint8_t app_settings_reader_chrome_height(unsigned bar){return bar?57:80;}
+static bool app_settings_reader_chrome_visible(unsigned bar){return bar < 2 ? s_chrome_visible[bar] : true;}
 static bool app_settings_reader_hold_refresh(void){return test_hold_refresh;}
 static bool app_settings_reader_hide_images(void){return test_hide_images;}
 static void book_layout_set_spacing(int line,int para){(void)line;(void)para;}
@@ -442,10 +442,10 @@ static char test_wrapped[512];
 #define UI_MARGIN 40
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
-#define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
 #define READER_FOOTER_PROGRESS_SPACE 19
 #define UI_BAR_TOP 1096
 #define UI_BAR_H 96
+#define UI_BAR_MARGIN 24
 #define BOOK_MARGIN_MIN 0
 #define BOOK_MARGIN_MAX 96
 #define BOOK_MARGIN_STEP 6
@@ -484,7 +484,6 @@ static uint8_t app_settings_frontlight_brightness(void){return 40;}
 static uint8_t app_settings_frontlight_cct(void){return 50;}
 static esp_err_t frontlight_apply(bool on,uint8_t brightness,uint8_t cct){(void)brightness;(void)cct;test_frontlight_on=on;++test_frontlight_applies;return 0;}
 static bool app_settings_main_fast_refresh(void){return false;}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 // 题头预留区 stub：提取的排版函数会调用，宿主不验证题头像素。
 // Chapter-heading stubs: extracted layout functions call them; the host build
 // does not verify heading pixels.
@@ -509,7 +508,7 @@ unit += "static const reader_reflow_t *reader_reflow_context(void);\n"
 from book_shelf_test_code import shelf_hooks, service_hooks, service_unhooks, shelf_checks
 unit += shelf_hooks
 unit += "\nbool book_shelf_hidden_read(nvs_handle_t, const char *);\n"
-for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -656,38 +655,26 @@ int main(void) {
     assert(marks.count==0);
     EpdRect reading_body=reader_area(), text_body=body_rect(), reading_footer=progress_rect();
     assert(reading_body.y>=160&&reading_body.y%32==0);
-    assert(text_body.y==176&&text_body.y>=reading_body.y);
+    assert(text_body.y==169&&text_body.y>=reading_body.y);
     assert(reading_body.y+reading_body.height==UI_BAR_TOP+39);
-    assert(text_body.y+text_body.height==reading_body.y+reading_body.height);
+    assert(text_body.y+text_body.height+9==reading_body.y+reading_body.height);
     assert(reading_body.y+reading_body.height<=reading_footer.y+16);
     assert(reading_footer.y==UI_BAR_TOP+39&&reading_footer.height==UI_BAR_H-39);
     assert(reading_footer.x==36&&reading_footer.width==612);
-    s_reader_fullscreen=true;
-    reading_body=reader_area();
-    text_body=body_rect();
-    EpdRect fullscreen_progress=reader_fullscreen_progress_area();
-    assert(reading_body.y==80&&text_body.y==96);
-    assert(reading_body.y+reading_body.height==fullscreen_progress.y);
-    assert(text_body.y+text_body.height==fullscreen_progress.y-2);
-    assert(fullscreen_progress.y==UI_LOCK_HEIGHT-12&&fullscreen_progress.height==12);
-    test_reader_statusbar=false;
-    reading_body=reader_area();
-    text_body=body_rect();
-    assert(reading_body.y==0&&text_body.y==24&&text_body.y+text_body.height==fullscreen_progress.y-2);
-    s_reader_fullscreen=false;test_reader_statusbar=true;
-    // 所有高度组合共用正文与刷新边界，切换全屏时不带入窗口高度。
-    // Every height pair shares body/refresh boundaries; full screen ignores windowed heights.
+    // All height/status/visibility combinations share body and refresh bounds.
     for(int h=64;h<=144;h+=8)for(int f=57;f<=121;f+=8)
-      for(int full=0;full<2;++full)for(int status=0;status<2;++status){
-        s_chrome_height[0]=h;s_chrome_height[1]=f;s_reader_fullscreen=full;test_reader_statusbar=status;
+      for(int visible=0;visible<4;++visible)for(int status=0;status<2;++status){
+        s_chrome_height[0]=h;s_chrome_height[1]=f;test_reader_statusbar=status;
+        s_chrome_visible[0]=visible&1;s_chrome_visible[1]=visible&2;
         EpdRect area=reader_area(),body=body_rect(),footer=progress_rect();
-        assert(area.y==(full?(status?80:0):(status?80:0)+h));
-        assert(body.height>600&&body.y>=area.y);
-        assert(area.y+area.height==(full?READER_FULLSCREEN_PROGRESS_TOP:footer.y));
-        assert(body.y+body.height==(full?READER_FULLSCREEN_PROGRESS_TOP-2:footer.y));
-        assert(footer.y+footer.height==1192&&footer.height==f);
+        int bottom=UI_LOCK_HEIGHT-(s_chrome_visible[1]?24+f:0);
+        assert(area.y==(status?80:0)+(s_chrome_visible[0]?h:0));
+        assert(body.height>600&&body.y==area.y+9);
+        assert(area.y+area.height==bottom&&body.y+body.height+9==bottom);
+        assert(footer.height==(s_chrome_visible[1]?f:0));
       }
-    s_chrome_height[0]=80;s_chrome_height[1]=57;s_reader_fullscreen=false;test_reader_statusbar=true;
+    s_chrome_visible[0]=s_chrome_visible[1]=true;
+    s_chrome_height[0]=80;s_chrome_height[1]=57;test_reader_statusbar=true;
     char footer_name[72];
     reader_footer_strip_number(footer_name,sizeof(footer_name),"第一章：海边的信");
     assert(!strcmp(footer_name,"海边的信"));
@@ -940,12 +927,12 @@ int main(void) {
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
     // 屏幕返回仍回来源，中键长按始终全刷。/ Screen back returns to source; middle holds always refresh.
     assert(reader_return(&ctx)==APP_REDRAW_PAGE&&s_view==SHELF);
-    s_view=READING;s_text="text";s_reader_fullscreen=true;test_hold_refresh=true;test_nav_target=-1;
+    s_view=READING;s_text="text";test_hold_refresh=true;test_nav_target=-1;
     s_reader_return_home=true;s_reader_panel=READER_PANEL_TOOLS;s_reader_slider=0;
     s_reader_footer_pending=s_reader_image_refresh_pending=s_water_turn_pending=s_reader_cleanup=true;
     s_turns=4;s_du_count=2;
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
-    assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
+    assert(s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
     assert(!s_reader_footer_pending&&!s_reader_image_refresh_pending&&!s_water_turn_pending&&!s_reader_cleanup&&!s_turns&&!s_du_count);
     test_hold_refresh=false;s_reader_return_home=false;
     s_reader_panel=READER_PANEL_TOOLS;s_page=1;
@@ -970,7 +957,7 @@ int main(void) {
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE && test_nav_target==0);
     s_reader_return_home=false;
     test_hold_action=APP_READER_KEY_REFRESH;
-    test_hold_refresh=test_power_turn=false;s_reader_fullscreen=false;test_reader_statusbar=true;
+    test_hold_refresh=test_power_turn=false;test_reader_statusbar=true;
     s_view=TOC;s_toc_jump_open=true;s_toc_jump_percent=50;
     assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&s_toc_jump_percent==45);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE&&s_toc_jump_percent==50);
@@ -989,17 +976,18 @@ int main(void) {
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_NONE && test_turn_direction==1);
     s_reader_panel=READER_PANEL_NONE;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_NONE);
-    test_keys[0]=APP_READER_KEY_HOME;test_keys[1]=APP_READER_KEY_FULLSCREEN;test_keys[2]=APP_READER_KEY_TOOLS;
-    s_reader_fullscreen=false;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_fullscreen);
+    test_keys[0]=APP_READER_KEY_HOME;test_keys[1]=APP_READER_KEY_TOOLS;test_keys[2]=APP_READER_KEY_TOOLS;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
+    s_reader_panel=READER_PANEL_NONE;
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL && s_reader_panel==READER_PANEL_NONE);
     // 中键双击：绑定后第一次单击挂起，窗口内第二次触发双击；超时补发单击，长按吃掉挂起。
     // Middle double press: the first click is held, a second inside the window fires the double,
     // an expired click is replayed by the tick, and a hold drops the held click.
-    test_keys[1]=APP_READER_KEY_TOOLS;test_double_action=APP_READER_KEY_FULLSCREEN;
-    s_reader_panel=READER_PANEL_NONE;s_reader_fullscreen=false;
-    ctx.now_ms=1000;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE&&!s_reader_fullscreen);
-    ctx.now_ms=1200;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&s_reader_fullscreen);
+    test_keys[1]=APP_READER_KEY_TOOLS;test_double_action=APP_READER_KEY_REFRESH;
+    s_reader_panel=READER_PANEL_NONE;
+    ctx.now_ms=1000;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_NONE);
+    ctx.now_ms=1200;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&s_reader_panel==READER_PANEL_NONE);
     ctx.now_ms=2000;s_reader_panel=READER_PANEL_NONE;
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);
     ctx.now_ms=2400;assert(middle_pending_tick(&ctx)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_TOOLS);
@@ -1009,7 +997,7 @@ int main(void) {
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE&&test_nav_target==0);
     assert(middle_pending_tick(&ctx)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_NONE);
     s_reader_return_home=false;
-    test_double_action=APP_READER_KEY_NONE;test_keys[1]=APP_READER_KEY_FULLSCREEN;
+    test_double_action=APP_READER_KEY_NONE;test_keys[1]=APP_READER_KEY_TOOLS;
     // 单动作语义：HOME 跟随来路标志。这里验证按键映射生效，置位标志再回首页。
     // Single-action semantics: HOME follows the origin flag. Set it so the mapping goes home.
     s_reader_return_home=true;test_nav_target=-1;

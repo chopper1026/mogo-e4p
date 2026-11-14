@@ -98,7 +98,6 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
 // Inline battery reads matching firmware; the shim struct keeps only ui_nav's fields.
 static inline int pmu_battery_percent(const pmu_snapshot_t *p){if(!p||!p->present||!p->quick_ok)return -1;return p->qb_soc<=1000?(p->qb_soc+5)/10:-1;}
 static inline bool pmu_battery_charging(const pmu_snapshot_t *p){return p&&p->present&&p->quick_ok&&(p->qb_flags&4)!=0;}
-static bool s_reader_fullscreen;
 static int statusbar_on=1;
 #include "reader_book.h"
 static struct {reader_book_t book;} s_reader_session = {.book = {.title = "灵葫芦修仙记", .chapter_title = "第一章"}};

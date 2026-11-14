@@ -12,6 +12,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 修正 4G 每帧发送确认的 SRDY 中断边沿；业务请求开始前确认默认网卡，DNS 随接口切换，避免自动回退后路由漂移。天气收到不完整响应时允许同一 4G 租约内重试一次，并为天气和 OTA 补充失败阶段、TLS、正文读取量、天气解析拒收原因和可用内存诊断。/ Correct the cellular TX ACK edge, establish the business route before requests, follow per-interface DNS and preserve fallback leases. Retry one incomplete weather response on the same cellular lease and add HTTP, TLS, body size, weather rejection and memory diagnostics.
 - 移除 GitHub OTA 回退清单，联网升级只请求官方服务器清单，失败时直接提示；保留官方源的连接重试和严格校验。/ Remove the GitHub fallback manifest, request online update manifests only from the official server and report failures, retaining connection retries and strict validation.
 
+- 充电时电量图标的闪电增加黑白反差，即使电量接近耗尽也能清楚显示。
+- 重新排布页眉页脚设置项，六槽内容、独立显示开关、高度、进度条和恢复默认均可在单屏查看；隐藏页眉或页脚后，正文回收对应空间并保持阅读位置；选择随重启及设置备份保存。
+- 快捷栏增加独立锁屏键，位于第二排末尾并使用清晰完整的锁形图标；刷新和锁屏都会先收起快捷栏并恢复底页，再执行对应操作。
+- 移除独立全屏模式，状态栏、页眉、页脚分别控制显隐并释放正文空间；页脚进度随页脚隐藏，旧全屏配置与绑定自动迁移，v44 设置备份保存统一后的显隐。
+- 正文上下基础间距统一为 9px，隐藏页眉页脚后仍保留相应的屏幕边缘留白；自定义上下边距在此基础上叠加。
+
 ## v1.1.1 · 2026-11-13
 
 - 修复透明 JPG/不透明 PNG 的背景键控：不再把仅贴到画布边缘的白色封条误判为背景；键控算法升级后自动重建旧图层和缩略图缓存。

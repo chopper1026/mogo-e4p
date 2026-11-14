@@ -62,23 +62,20 @@ void app_device_settings_request_network(bool return_to_origin) {
 // 阅读正文返回：正文可见且恢复点可用时由主循环记下，返回时重开同一本书。
 // Reader-body return: the loop captures the resume point when the body is visible
 // and reopens the same book on the way back.
-static bool reader_body, reader_resume_ok, reader_resume_fullscreen;
+static bool reader_body, reader_resume_ok;
 static char reader_resume_path[64];
 static int reader_returns;
 static char reader_return_path[64];
-static bool reader_return_fullscreen;
 static bool transfer_returns;
 bool app_book_reader_body_visible(void) {return reader_body;}
-bool app_book_resume_context(char *p,size_t c,bool *f) {
-    if (!reader_resume_ok || !p || !f || strlen(reader_resume_path) >= c) return false;
+bool app_book_resume_context(char *p,size_t c) {
+    if (!reader_resume_ok || !p || strlen(reader_resume_path) >= c) return false;
     memcpy(p, reader_resume_path, strlen(reader_resume_path) + 1);
-    *f = reader_resume_fullscreen;
     return true;
 }
-bool app_book_request_return_to_body(const char *p,bool f) {
+bool app_book_request_return_to_body(const char *p) {
     ++reader_returns;
     if (p) snprintf(reader_return_path,sizeof(reader_return_path),"%s",p);
-    reader_return_fullscreen = f;
     return true;
 }
 static app_redraw_t transfer_return_tick(app_ctx_t *c) {
@@ -218,11 +215,11 @@ const EpdWaveform *display_normalize_waveform(bool hold_gray) {
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
         assert(a.y==UI_QUICK_CIRCLE_Y-UI_QUICK_RADIUS ||
-               (haptics_present&&a.y==UI_QUICK_CIRCLE_Y+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_RADIUS));
+               ((fl_ready||haptics_present)&&a.y==UI_QUICK_CIRCLE_Y+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_RADIUS));
         if(m==MODE_GL16)++fl_key_gl;
         else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     }
-    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+    if(a.width==UI_QUICK_FL_ROW_W&&a.height==UI_QUICK_FL_ROW_H){
         assert(!"binary sliders require padded complete DU");
     }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
@@ -233,7 +230,9 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
 enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const void*w,int m,EpdRect a,
                                                   int pad_lines,int pad_col_bytes) {
     (void)pad_lines;(void)pad_col_bytes;
-    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+    if(a.width==UI_QUICK_FL_ROW_W&&a.height==UI_QUICK_FL_ROW_H){
+        assert(a.y==UI_QUICK_FL_BRI_CY+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_FL_ROW_H/2||
+               a.y==UI_QUICK_FL_CCT_CY+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_FL_ROW_H/2);
         assert(w==&E0470_WAVEFORM&&m==MODE_DU&&pad_lines==1&&pad_col_bytes==1);
         ++fl_drag_pushes;
         return update_display_area_with(h,w,m,a);
@@ -248,7 +247,8 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     assert(a.x==0&&a.y==0&&a.width==684&&
-           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT||a.height==1216));
+           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_HEIGHT+UI_QUICK_ROTATION_ROW_STEP||
+            a.height==UI_QUICK_FRONTLIGHT_HEIGHT+UI_QUICK_ROTATION_ROW_STEP||a.height==1216));
     if(a.height==1216){
         assert(w==&normalize_wave&&m==MODE_GL16);++normalize_pushes;
         return update_display_area_with(h,w,m,a);
@@ -271,24 +271,22 @@ void ui_quick_menu_draw_status(uint8_t *fb) {
     if(battery_test || network_test)ui_nav_status(fb);
 }
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
-    return (EpdRect){0,0,684,menu->frontlight&&menu->fl_on?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
+    return (EpdRect){0,0,684,ui_quick_menu_height(menu)};
 }
 bool ui_quick_menu_draw_control(uint8_t *fb,const ui_quick_menu_t *menu,
                                 ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_control_draws;
     if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
-    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
-                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
-                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
+    const EpdRect track=ui_quick_menu_frontlight_track(menu,control);
+    *dirty=(EpdRect){track.x-8,track.y-8,track.width+16,UI_QUICK_FL_ROW_H};
     return true;
 }
 bool ui_quick_menu_draw_control_white(uint8_t *fb,const ui_quick_menu_t *menu,
                                       ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_sweep_draws;
     if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
-    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
-                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
-                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
+    const EpdRect track=ui_quick_menu_frontlight_track(menu,control);
+    *dirty=(EpdRect){track.x-8,track.y-8,track.width+16,UI_QUICK_FL_ROW_H};
     return true;
 }
 bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
@@ -454,9 +452,9 @@ static void reset(void) {
     bt_return_to_origin=false;
     haptics_present = haptics_on = haptics_return_to_origin = false;
     haptics_settings_requests = haptics_settings_writes = 0;
-    reader_body=reader_resume_ok=reader_resume_fullscreen=false;
+    reader_body=reader_resume_ok=false;
     reader_resume_path[0]=0;
-    reader_returns=0;reader_return_path[0]=0;reader_return_fullscreen=false;
+    reader_returns=0;reader_return_path[0]=0;
     auto_update_pending=auto_update_return=false;auto_update_offers=auto_update_acks=0;
     transfer_returns=false;
     haptic_pulses=haptic_stops=0;
@@ -697,16 +695,16 @@ int main(void) {
     test_screen_touch_lock();
     // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。
     // Automatic offers retain the body resume point through real navigation; touch and existing requests win.
-    reset();start_book=reader_body=reader_resume_ok=reader_resume_fullscreen=true;
+    reset();start_book=reader_body=reader_resume_ok=true;
     strcpy(reader_resume_path,"/sdcard/books/OTA.txt");auto_update_pending=auto_update_return=true;
     for(int i=0;i<3;++i)add(0,0,0,0);
     run();assert(auto_update_offers==1&&auto_update_acks==1&&reader_returns==1);
-    assert(!strcmp(reader_return_path,reader_resume_path)&&reader_return_fullscreen);
+    assert(!strcmp(reader_return_path,reader_resume_path));
     reset();start_book=reader_body=true;auto_update_pending=true;
     add(200,400,1,0);run();assert(!auto_update_offers&&auto_update_pending);
     reset();enable_main_tabs();auto_update_pending=true;request_on_tick=true;
     add(0,0,0,0);run();assert(!auto_update_offers&&auto_update_pending);
-    puts("PASS: automatic OTA offer restores reading/fullscreen once and never overrides touch or an existing route");
+    puts("PASS: automatic OTA offer restores reading once with current bar settings and never overrides touch or an existing route");
 #ifdef POWER_KEY_SAMPLER_USB_TEST
     // USB独占期间暂停，退出后恢复；设备独占页保持直读归属。/ Pause for USB ownership, resume afterwards, and leave exclusive pages in control.
     reset();battery_test=true;first.on_tick=key_sampling_tick;
@@ -996,11 +994,15 @@ int main(void) {
     assert(!ble_enabled&&quick_recent_requests==1&&!ble_resets&&quick_gl==1&&quick_draws==1&&quick_status_draws==2&&quick_press_draws==2&&base_renders==2&&!touch_calls);
     reset();add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(427,156,1,0);add(0,0,0,0);run();
-    assert(fulls==2&&base_renders==2&&quick_draws==1&&quick_du==1&&quick_press_draws==1);
-    reset();first.on_before_lock=before_lock;
+    assert(fulls==2&&base_renders==3&&quick_draws==1&&quick_du==1&&quick_press_draws==1);
+    reset();first.on_before_lock=before_lock;fl_ready=haptics_present=true;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
-    add(427,156,1,0);add(0,0,0,0);add(598,156,1,0);add(0,0,0,0);run();
-    assert(idle_locks==1&&before_locks==1&&fulls>=2&&!touch_calls);
+    add(427,156,1,0);add(0,0,0,0);
+    // 刷新收层后重新打开，第二排震动键之后的最后一键才是锁屏。
+    // Reopen after refresh closes the layer; lock follows haptics at the end of row two.
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(256,296,1,0);add(0,0,0,0);run();
+    assert(idle_locks==1&&before_locks==1&&fulls>=2&&!touch_calls&&quick_draws==2&&normalize_pushes==1&&!haptics_settings_writes);
     for(int policy=0;policy<3;++policy){
         reset();main_fast=policy==1;main_water=policy==2;first.on_gesture=gesture;click_enabled=true;
         add(85,1141,1,0);add(85,1141,1,0);add(0,0,0,0);run();
@@ -1042,42 +1044,41 @@ int main(void) {
     // 从阅读正文长按离开：返回时按离开时的书与全屏状态重开正文，而不是落到书架。
     // Leaving the reading body via a quick-bar hold: the return reopens that book
     // and full-screen state instead of landing on the shelf.
-    reset();start_book=true;reader_body=reader_resume_ok=true;reader_resume_fullscreen=true;
+    reset();start_book=true;reader_body=reader_resume_ok=true;
     snprintf(reader_resume_path,sizeof(reader_resume_path),"%s","/sdcard/books/a.epub");
     transfer_returns=true;time_step=1000000;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(85,156,1,0);add(85,156,1,0);add(85,156,1,0);add(0,0,0,0);run();
     assert(wifi_setup_requests==1&&reader_returns==1&&!strcmp(reader_return_path,"/sdcard/books/a.epub")&&
-           reader_return_fullscreen&&enters==2);
+           enters==2);
     puts("quick layer return: leaving the reading body restores the same book and full-screen state");
     for (int fullscreen = 0; fullscreen < 2; ++fullscreen) for (int body = 0; body < 2; ++body) {
         reset(); start_book = reader_resume_ok = true; reader_body = body != 0;
-        reader_resume_fullscreen = fullscreen != 0;
         haptics_present = haptics_on = true; auto_update_return = true; time_step = 1000000;
         snprintf(reader_resume_path, sizeof(reader_resume_path), "%s", "/sdcard/books/haptics.epub");
         add(300,20,1,0); add(300,110,1,0); add(0,0,0,0);
         add(85,296,1,0); add(85,296,1,0); add(85,296,1,0); add(0,0,0,0); run();
         assert(haptics_settings_requests == 1 && haptics_return_to_origin && haptics_on && !haptics_settings_writes);
         assert(reader_returns == 1 && !strcmp(reader_return_path, "/sdcard/books/haptics.epub"));
-        assert(reader_return_fullscreen == (fullscreen != 0) && enters == 2);
+        assert(enters == 2);
     }
     puts("quick haptics return: real loop restores the reader path from body/sheets in both full-screen states without toggling or replaying release");
-    // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
-    // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
+    // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 620，拖动帧与松手
+    // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 404，收层
     // 整屏归一；开关点按不再单独重画圆钮。
     // The fourth circle is the frontlight switch: the capsules expand with a
-    // whole-layer re-composite to 480, drag frames and the release commit both
+    // whole-layer re-composite to 620, drag frames and the release commit both
     // use complete DU (no two-stage settle; zero white/gray pushes),
-    // switching off returns to 264 and closing normalizes the whole screen; the switch tap
+    // switching off returns to 404 and closing normalizes the whole screen; the switch tap
     // no longer repaints its circle alone.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(598,156,1,0);add(0,0,0,0);
-    add(399,300,1,0);add(512,300,1,0);add(0,0,0,0);
-    add(399,398,1,0);add(0,0,0,0);
-    add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
+    add(399,424,1,0);add(512,424,1,0);add(0,0,0,0);
+    add(399,524,1,0);add(0,0,0,0);
+    add(300,700,1,0);add(300,500,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==78&&fl_cct==59);
-    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&fulls==1&&!white_restores&&normalize_pushes==1);
+    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT+UI_QUICK_ROTATION_ROW_STEP&&fulls==1&&!white_restores&&normalize_pushes==1);
     assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
     // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
     // Opening and the switch tap each re-composite and redraw the layer; on close the

@@ -19,10 +19,8 @@ void app_lifecycle_checkpoint(app_ctx_t *ctx, const app_desc_t *current) {
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
     pico_resume_t resume = {.tab = tab >= 0 && tab < 4 ? (uint8_t)tab : 0};
-    bool fullscreen = false;
-    if (tab == 1 && app_book_resume_context(resume.path, sizeof(resume.path), &fullscreen)) {
+    if (tab == 1 && app_book_resume_context(resume.path, sizeof(resume.path))) {
         resume.reader = 1;
-        resume.fullscreen = fullscreen;
     }
     (void)pico_boot_save_resume(&resume);
 }

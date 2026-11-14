@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：全宽浅顶部层，下圆角与基础四个无文字圆钮；运行时确认的移动网络、旋转和
- * 震动入口按能力追加到第二排；有前光的板把第四枚圆钮画成太阳
- * 开关。灯灭时层高只有圆钮区；开灯后圆钮下方展开两条横向胶囊滑杆，直接浮在遮
+ * 震动入口按能力追加到第二排；有前光的板把第四枚圆钮画成太阳开关，锁屏键放在第二排末尾。
+ * 灯灭时层高只有圆钮区；开灯后圆钮下方展开两条横向胶囊滑杆，直接浮在遮
  * 罩上：无卡片、无文字、无旋钮，图标在胶囊内左端，白色填充从左缘生长。灯灭时
  * 开层后停顿再继续下拉可临时展开胶囊，只属本次开层；一次连续快滑只开层。
  * English: A shallow full-width top layer with rounded bottom corners and four
  * base unlabeled circles; runtime cellular, rotation and haptics entries append
- * to the second row, while boards with a frontlight draw a sun switch in the
- * fourth circle. While the light is off the layer keeps only the circle band; switching
+ * to the second row, while frontlight boards draw a sun switch in the fourth
+ * circle and end row two with a lock key. While the light is off the layer keeps only the circle band; switching
  * it on expands two horizontal capsule sliders below the circles, floating on
  * the shade: no card, text or knob, the icon inside the left end and a white
  * fill growing from the left edge. With the light off, pausing after the open
@@ -30,6 +30,8 @@
  * to the two rows so the quick layer no longer fills the screen height.
  * 用户新增：第二排增加触摸震动开关，阅读时紧邻旋转键。
  * User addition: add a second-row haptics switch beside reader rotation.
+ * 用户 2026-11-14 修订：锁屏键移到第二排末尾，复用完整的系统锁形掩模，修复锁梁断点。
+ * User revision on 2026-11-14: end row two with lock and use the system icon mask to keep its shackle continuous.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -53,23 +55,6 @@ static bool layer_pixel(int x, int y, int width, int height) {
     int dx = x < r ? x - r : x - (width - r - 1);
     int dy = y - (height - r - 1);
     return dx * dx + dy * dy < r * r;
-}
-
-// 44px锁形沿用细线几何，圆角锁体与上半圆锁梁；不引入生成图标资产。
-// A 44px lock follows the thin-line geometry, with a rounded body and arched shackle; no new generated icon asset is needed.
-static void lock_icon(uint8_t *fb, int cx, int cy) {
-    for (int stroke = 0; stroke < 3; ++stroke) {
-        ui_draw_round_rect(fb, (EpdRect){cx - 14 + stroke, cy - 1 + stroke,
-                                      28 - stroke * 2, 23 - stroke * 2}, 4 - stroke, UI_GRAY_BLACK);
-        int radius = 9 - stroke;
-        for (int x = -radius; x <= radius; ++x) {
-            int y = 0;
-            while ((y + 1) * (y + 1) + x * x <= radius * radius) ++y;
-            epd_draw_pixel(cx + x, cy - 10 - y, UI_GRAY_BLACK, fb);
-            if (abs(x) == radius) epd_draw_line(cx + x, cy - 10, cx + x, cy - 1, UI_GRAY_BLACK, fb);
-        }
-    }
-    ui_fill_rect_fast((EpdRect){cx - 1, cy + 8, 3, 7}, UI_GRAY_BLACK, fb);
 }
 
 // 顺时针圆箭头围住锁头：开锁表示跟随重力，闭锁表示固定方向。
@@ -118,9 +103,10 @@ static void draw_key(uint8_t *fb,int button,const ui_quick_menu_t *menu,bool act
     if(button<3) ui_draw_icon(fb,cx,cy,44,s_icons[button],UI_GRAY_BLACK);
     else if (button == ui_quick_menu_cellular_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_MOGO_CELLULAR_SIGNAL,UI_GRAY_BLACK);
     else if(frontlight_key) ui_draw_icon(fb,cx,cy,44,UI_ICON_SUN,UI_GRAY_BLACK);
+    else if (button == ui_quick_menu_lock_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_LOCK,UI_GRAY_BLACK);
     else if (button == ui_quick_menu_haptics_button(menu)) ui_draw_icon(fb,cx,cy,44,UI_ICON_VIBRATE,UI_GRAY_BLACK);
     else if (button == ui_quick_menu_rotation_button(menu)) rotation_icon(fb,cx,cy,menu->rotation_enabled);
-    else lock_icon(fb,cx,cy);
+    else ui_draw_icon(fb,cx,cy,44,UI_ICON_LOCK,UI_GRAY_BLACK);
     if(pressed){
         epd_draw_circle(cx,cy,UI_QUICK_RADIUS-7,UI_GRAY_BLACK,fb);
         epd_draw_circle(cx,cy,UI_QUICK_RADIUS-8,UI_GRAY_BLACK,fb);

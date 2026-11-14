@@ -272,7 +272,7 @@ void app_main(void) {
             }
             struct stat st;
             if (!stat(resume.path, &st) && S_ISREG(st.st_mode) &&
-                app_book_request_resume(resume.path, resume.fullscreen)) first = app_at(1);
+                app_book_request_resume(resume.path)) first = app_at(1);
         }
     }
     char interrupted[PICO_BOOT_PATH_MAX];

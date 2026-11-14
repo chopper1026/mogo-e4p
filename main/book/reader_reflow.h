@@ -50,15 +50,3 @@ bool reader_reflow_indent(const reader_reflow_t *reflow, int em, int adjustment)
 /// Write settings and reflow under the held lock; restore old settings/layout on failure. Caller unlocks, reports failure and handles images/progress on success.
 /// 书内样式先构建后保存，保存失败也恢复原布局。/ Book styles persist only after rebuilding and restore the layout on write failure too.
 bool reader_reflow_option_locked(const reader_reflow_t *reflow, int kind, bool previous, size_t offset);
-
-typedef enum {
-    READER_REFLOW_APPLIED, ///< 已提交新布局 / New layout committed
-    READER_REFLOW_RESTORED, ///< 新布局失败，旧布局已恢复 / New layout failed and old layout restored
-    READER_REFLOW_LOST_LAYOUT, ///< 新旧布局均失败 / Both new and old layout builds failed
-} reader_reflow_result_t;
-
-/// 调用方确认有正文；锁前读取锚点，锁内交还预绘并切换或恢复全屏布局。
-/// Caller confirms content exists; capture the anchor before locking, then hand prefetch back and toggle or restore the full-screen layout under the lock.
-/// 返回前已解锁；偏好、图片、进度和双失败后的退回书架由调用方处理。
-/// Unlock before returning; caller handles preferences, images, progress and shelf fallback after both builds fail.
-reader_reflow_result_t reader_reflow_fullscreen(const reader_reflow_t *reflow, bool *fullscreen);

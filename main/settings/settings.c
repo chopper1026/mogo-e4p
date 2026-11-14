@@ -18,6 +18,8 @@
  * User revision: backup v33 appends Home regions; legacy backups preserve the current layout.
  * 用户新增：阅读票根背景独立持久化，备份v37追加校验尾块，旧设置与备份保持透明背景。
  * User addition: independently persist ticket backgrounds with a checked v37 backup tail, defaulting legacy settings/backups to transparent.
+ * 用户2026-11-14修订：独立显隐替代全屏，单键持久化并迁移旧偏好；v44保留旧块布局、改用独立显隐语义，退役动作3改为工具栏。
+ * User revision 2026-11-14: independent bar visibility replaces full screen in a single migrated key; v44 preserves old blocks with new visibility semantics and maps retired action 3 to tools.
  * NVS load/store. A failed open keeps the deep-sleep default; the
  * partition is not erased.
  */
@@ -112,7 +114,8 @@ static void settings_write_close(nvs_handle_t handle) {
 // status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
 #define NVS_KEY_STATUS "rd_status"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
-#define NVS_KEY_OPEN_FULL "rd_open_full"
+#define NVS_KEY_OPEN_FULL "rd_open_full" // 仅用于旧配置迁移。/ Legacy migration only.
+#define NVS_KEY_CHROME_VISIBLE "rd_chrome_vis"
 #define NVS_KEY_HIDE_IMAGES "rd_no_image"
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
@@ -129,6 +132,8 @@ static void settings_write_close(nvs_handle_t handle) {
 #define NVS_KEY_CHROME_FOOTER_R "rd_ftr_r"
 #define NVS_KEY_CHROME_HEADER_H "rd_hdr_h"
 #define NVS_KEY_CHROME_FOOTER_H "rd_ftr_h"
+#define NVS_KEY_CHROME_HEADER_VISIBLE "rd_hdr_on"
+#define NVS_KEY_CHROME_FOOTER_VISIBLE "rd_ftr_on"
 #define NVS_KEY_READER_PROGRESS "rd_progress"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_TAP_CONFIG "rd_tap_grid"
@@ -214,9 +219,6 @@ static bool s_reader_volume_turn;
 static bool s_reader_shake_turn;
 static bool s_reader_touch_disabled;
 static bool s_reader_statusbar = true;
-// 打开图书的全屏偏好：默认全屏（沿用历史行为），用户切换后记忆。/ Full-screen preference when
-// opening a book: full screen by default (historical behavior), remembered once toggled.
-static bool s_reader_open_fullscreen = true;
 static bool s_reader_hide_images;
 static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
@@ -247,13 +249,26 @@ static app_reader_tap_mode_t s_reader_tap_mode;
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_NEXT
 static const uint8_t s_reader_tap_defaults[APP_READER_TAP_CELLS] = {READER_TAP_DEFAULT_ACTIONS};
 static uint8_t s_reader_tap_actions[APP_READER_TAP_CELLS] = {READER_TAP_DEFAULT_ACTIONS};
+static uint8_t reader_action_migrate(uint8_t action) {
+    return action == APP_READER_KEY_LEGACY_FULLSCREEN ? APP_READER_KEY_TOOLS : action;
+}
 bool app_settings_reader_tap_action_valid(app_reader_key_action_t action) {
-    return (action >= APP_READER_KEY_PREV && action <= APP_READER_KEY_NONE) || action == APP_READER_KEY_FRONTLIGHT;
+    return ((action >= APP_READER_KEY_PREV && action <= APP_READER_KEY_NONE) || action == APP_READER_KEY_FRONTLIGHT) &&
+        action != APP_READER_KEY_LEGACY_FULLSCREEN;
 }
 static bool reader_tap_valid(unsigned mode, const uint8_t *actions) {
     if (mode > APP_READER_TAP_GRID || !actions) return false;
     for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i)
         if (!app_settings_reader_tap_action_valid((app_reader_key_action_t)actions[i])) return false;
+    return true;
+}
+// 先按原字节校验旧存储，再迁移动作；公开设置入口不接纳退役编号。
+// Validate original stored bytes before migration; public setters reject retired IDs.
+static bool reader_tap_stored_valid(unsigned mode, const uint8_t *actions) {
+    if (mode > APP_READER_TAP_GRID || !actions) return false;
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i)
+        if (actions[i] != APP_READER_KEY_LEGACY_FULLSCREEN &&
+            !app_settings_reader_tap_action_valid((app_reader_key_action_t)actions[i])) return false;
     return true;
 }
 static void reader_tap_encode(char out[11], unsigned mode, const uint8_t *actions) {
@@ -264,6 +279,8 @@ static void reader_tap_encode(char out[11], unsigned mode, const uint8_t *action
 
 static bool s_reader_progress_bar = true;
 static uint8_t s_reader_chrome_heights[2] = {APP_READER_HEADER_HEIGHT_DEFAULT, APP_READER_FOOTER_HEIGHT_DEFAULT};
+// 沿用旧默认全屏的实际显隐，之后只保存两栏开关。/ Preserve historical default visibility, then store only bar switches.
+static bool s_reader_chrome_visible[2] = {false, false};
 static bool reader_chrome_heights_valid(uint8_t header, uint8_t footer) {
     return header >= APP_READER_HEADER_HEIGHT_MIN && header <= APP_READER_HEADER_HEIGHT_MAX &&
         (header - APP_READER_HEADER_HEIGHT_MIN) % APP_READER_CHROME_HEIGHT_STEP == 0 &&
@@ -535,7 +552,6 @@ void app_settings_init(void) {
     s_reader_statusbar = statusbar == 1;
     uint8_t open_full = 1;
     if (nvs_get_u8(h, NVS_KEY_OPEN_FULL, &open_full) == ESP_OK && open_full > 1) open_full = 1;
-    s_reader_open_fullscreen = open_full == 1;
     uint8_t hold_refresh = 0;
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
@@ -544,20 +560,20 @@ void app_settings_init(void) {
         // Short presses still reject "no action"; frontlight and touch toggles are valid exceptions.
         if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK &&
             (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT || value == APP_READER_KEY_TOUCH))
-            s_reader_keys[i] = value;
+            s_reader_keys[i] = reader_action_migrate(value);
     }
     uint8_t hold_action = APP_READER_KEY_HOME;
     s_reader_hold_action = nvs_get_u8(h, NVS_KEY_HOLD_ACTION, &hold_action) == ESP_OK &&
             hold_action < APP_READER_KEY_COUNT && hold_action != APP_READER_KEY_LEGACY_BACK
-        ? hold_action : APP_READER_KEY_HOME;
+        ? reader_action_migrate(hold_action) : APP_READER_KEY_HOME;
     uint8_t double_action = APP_READER_KEY_NONE;
     s_reader_double_action = nvs_get_u8(h, NVS_KEY_DOUBLE_ACTION, &double_action) == ESP_OK &&
             double_action < APP_READER_KEY_COUNT && double_action != APP_READER_KEY_LEGACY_BACK
-        ? double_action : APP_READER_KEY_NONE;
+        ? reader_action_migrate(double_action) : APP_READER_KEY_NONE;
     uint8_t up_action = APP_READER_KEY_NONE;
     s_reader_up_action = nvs_get_u8(h, NVS_KEY_UP_ACTION, &up_action) == ESP_OK &&
             up_action < APP_READER_KEY_COUNT && up_action != APP_READER_KEY_LEGACY_BACK
-        ? up_action : APP_READER_KEY_NONE;
+        ? reader_action_migrate(up_action) : APP_READER_KEY_NONE;
     uint8_t touch_disabled = 0;
     s_reader_touch_disabled = nvs_get_u8(h, NVS_KEY_TOUCH_DISABLED, &touch_disabled) == ESP_OK &&
         touch_disabled == 1 && app_settings_reader_touch_toggle_bound();
@@ -576,6 +592,18 @@ void app_settings_init(void) {
         ? header : APP_READER_HEADER_HEIGHT_DEFAULT;
     s_reader_chrome_heights[1] = reader_chrome_heights_valid(APP_READER_HEADER_HEIGHT_DEFAULT, footer)
         ? footer : APP_READER_FOOTER_HEIGHT_DEFAULT;
+    uint8_t header_visible = 1, footer_visible = 1;
+    if (nvs_get_u8(h, NVS_KEY_CHROME_HEADER_VISIBLE, &header_visible) != ESP_OK || header_visible > 1)
+        header_visible = 1;
+    if (nvs_get_u8(h, NVS_KEY_CHROME_FOOTER_VISIBLE, &footer_visible) != ESP_OK || footer_visible > 1)
+        footer_visible = 1;
+    // 单键同时保存两栏与新语义，提交中断不会生成半套显隐状态。
+    // One key stores both bars and marks the new semantics, avoiding half-migrated visibility.
+    uint8_t visibility = 0;
+    const bool migrate_chrome = nvs_get_u8(h, NVS_KEY_CHROME_VISIBLE, &visibility) != ESP_OK || visibility > 3;
+    if (migrate_chrome) visibility = open_full ? 0 : header_visible | (footer_visible << 1);
+    s_reader_chrome_visible[0] = (visibility & 1) != 0;
+    s_reader_chrome_visible[1] = (visibility & 2) != 0;
     uint8_t progress_bar = 1;
     nvs_get_u8(h, NVS_KEY_READER_PROGRESS, &progress_bar);
     s_reader_progress_bar = progress_bar != 0;
@@ -594,9 +622,10 @@ void app_settings_init(void) {
         uint8_t actions[APP_READER_TAP_CELLS];
         for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) actions[i] = (uint8_t)(tap_config[i + 1] - '0');
         unsigned mode = (unsigned)(tap_config[0] - '0');
-        if (reader_tap_valid(mode, actions)) {
+        if (reader_tap_stored_valid(mode, actions)) {
             s_reader_tap_mode = (app_reader_tap_mode_t)mode;
-            memcpy(s_reader_tap_actions, actions, sizeof(actions));
+            for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i)
+                s_reader_tap_actions[i] = reader_action_migrate(actions[i]);
         }
     }
     s_reader_vertical_turn = s_reader_tap_mode == APP_READER_TAP_VERTICAL;
@@ -687,6 +716,12 @@ void app_settings_init(void) {
         if (saved == ESP_OK) saved = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
         if (saved == ESP_OK) (void)nvs_commit(h);
         settings_write_close(h);
+    }
+    if (migrate_chrome && settings_write_open(&h) == ESP_OK) {
+        esp_err_t saved = nvs_set_u8(h, NVS_KEY_CHROME_VISIBLE, visibility);
+        if (saved == ESP_OK) saved = nvs_commit(h);
+        settings_write_close(h);
+        if (saved != ESP_OK) ESP_LOGW(TAG, "reader visibility migration %s", esp_err_to_name(saved));
     }
     // Migrate only the former default preset once; keep all other user mappings.
     // Committed marker makes a later explicit full-refresh choice remain untouched.
@@ -1229,12 +1264,7 @@ void app_settings_set_reader_statusbar(bool on) {
     // bit (1=hidden) so a downgrade keeps the same full-screen behavior.
     nvs_put_u8(NVS_KEY_IMMERSIVE, on ? 0 : 1);
 }
-bool app_settings_reader_open_fullscreen(void) { return s_reader_open_fullscreen; }
-void app_settings_set_reader_open_fullscreen(bool on) {
-    if (s_reader_open_fullscreen == on) return;
-    s_reader_open_fullscreen = on;
-    nvs_put_u8(NVS_KEY_OPEN_FULL, on ? 1 : 0);
-}
+
 bool app_settings_reader_hide_images(void) { return s_reader_hide_images; }
 void app_settings_set_reader_hide_images(bool on) {
     if (s_reader_hide_images == on) return;
@@ -1272,7 +1302,8 @@ app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
 }
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action) {
-    if (key >= 6 || action < 0 || action >= APP_READER_KEY_COUNT) return false;
+    if (key >= 6 || action < 0 || action >= APP_READER_KEY_COUNT ||
+        action == APP_READER_KEY_LEGACY_FULLSCREEN || action == APP_READER_KEY_LEGACY_BACK) return false;
     if (!s_reader_touch_disabled) return true;
     uint8_t keys[3];
     memcpy(keys, s_reader_keys, sizeof(keys));
@@ -1330,7 +1361,7 @@ bool app_settings_set_reader_up_action(app_reader_key_action_t action) {
 void app_settings_set_reader_key_preset(unsigned preset) {
     static const uint8_t values[2][3] = {
         {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT},
-        {APP_READER_KEY_HOME, APP_READER_KEY_FULLSCREEN, APP_READER_KEY_TOOLS}
+        {APP_READER_KEY_HOME, APP_READER_KEY_TOOLS, APP_READER_KEY_TOOLS}
     };
     if (preset < 1 || preset > 2) return;
     if (s_reader_touch_disabled && !reader_touch_binding(values[preset - 1],
@@ -1382,6 +1413,22 @@ bool app_settings_set_reader_chrome_heights(uint8_t header, uint8_t footer) {
     }
     return err == ESP_OK;
 }
+bool app_settings_reader_chrome_visible(unsigned bar) {
+    return bar < 2 ? s_reader_chrome_visible[bar] : true;
+}
+bool app_settings_set_reader_chrome_visibility(bool header, bool footer) {
+    if (s_reader_chrome_visible[0] == header && s_reader_chrome_visible[1] == footer) return true;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_CHROME_VISIBLE, (header ? 1 : 0) | (footer ? 2 : 0));
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err == ESP_OK) {
+        s_reader_chrome_visible[0] = header;
+        s_reader_chrome_visible[1] = footer;
+    }
+    return err == ESP_OK;
+}
 bool app_settings_reader_progress_bar(void) { return s_reader_progress_bar; }
 bool app_settings_set_reader_progress_bar(bool on) {
     if (s_reader_progress_bar == on) return true;
@@ -1396,7 +1443,8 @@ bool app_settings_set_reader_progress_bar(bool on) {
 bool app_settings_set_reader_chrome_default(void) {
     if (!memcmp(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome)) &&
         s_reader_chrome_heights[0] == APP_READER_HEADER_HEIGHT_DEFAULT &&
-        s_reader_chrome_heights[1] == APP_READER_FOOTER_HEIGHT_DEFAULT && s_reader_progress_bar) return true;
+        s_reader_chrome_heights[1] == APP_READER_FOOTER_HEIGHT_DEFAULT &&
+        s_reader_chrome_visible[0] && s_reader_chrome_visible[1] && s_reader_progress_bar) return true;
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return false;
@@ -1404,6 +1452,7 @@ bool app_settings_set_reader_chrome_default(void) {
         err = nvs_set_u8(h, s_reader_chrome_names[i], s_reader_chrome_defaults[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, APP_READER_HEADER_HEIGHT_DEFAULT);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, APP_READER_FOOTER_HEIGHT_DEFAULT);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_VISIBLE, 3);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_READER_PROGRESS, 1);
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
@@ -1411,6 +1460,7 @@ bool app_settings_set_reader_chrome_default(void) {
         memcpy(s_reader_chrome, s_reader_chrome_defaults, sizeof(s_reader_chrome));
         s_reader_chrome_heights[0] = APP_READER_HEADER_HEIGHT_DEFAULT;
         s_reader_chrome_heights[1] = APP_READER_FOOTER_HEIGHT_DEFAULT;
+        s_reader_chrome_visible[0] = s_reader_chrome_visible[1] = true;
         s_reader_progress_bar = true;
     }
     return err == ESP_OK;
@@ -1766,6 +1816,18 @@ static bool backup_chrome_heights_valid(const settings_backup_chrome_heights_t *
     return reader_chrome_heights_valid(height->header, height->footer) &&
         stored == backup_chrome_heights_checksum(height);
 }
+// v43 追加页眉页脚独立显隐；旧备份默认显示。
+// V43 appends independent header/footer visibility; legacy backups show both bars.
+typedef struct { uint8_t header, footer, checksum[4]; } settings_backup_chrome_visibility_t;
+static uint32_t backup_chrome_visibility_checksum(const settings_backup_chrome_visibility_t *visibility) {
+    return ((2166136261u ^ visibility->header) * 16777619u ^ visibility->footer) * 16777619u;
+}
+static bool backup_chrome_visibility_valid(const settings_backup_chrome_visibility_t *visibility) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)visibility->checksum[i] << (8 * i);
+    return visibility->header <= 1 && visibility->footer <= 1 &&
+        stored == backup_chrome_visibility_checksum(visibility);
+}
 // v33 追加版本化首页布局，独立校验且禁止重复实际组件。
 // V33 appends an independently checked, versioned Home layout with unique real widgets.
 typedef struct { uint8_t value, checksum[4]; } settings_backup_home_regions_t;
@@ -1795,7 +1857,7 @@ static uint32_t backup_tap_checksum(const settings_backup_tap_t *tap) {
 static bool backup_tap_valid(const settings_backup_tap_t *tap) {
     uint32_t stored = 0;
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)tap->checksum[i] << (8 * i);
-    return reader_tap_valid(tap->mode, tap->actions) && stored == backup_tap_checksum(tap);
+    return reader_tap_stored_valid(tap->mode, tap->actions) && stored == backup_tap_checksum(tap);
 }
 static uint32_t backup_progress_bar_checksum(const settings_backup_progress_bar_t *bar) {
     return (2166136261u ^ bar->on) * 16777619u;
@@ -1923,9 +1985,9 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // W appends v32 bar heights; X appends v33 Home regions; Y appends v34 progress visibility; Z appends v35 book styles.
     // a/b/c/d追加禁触、票根背景、日历子样式与九宫格；e允许时钟，f在阅读线低两位保存样式、bit2保存跟随正文，无新尾块。
     // a/b/c/d append touch lock, ticket backgrounds, calendar variants and tap grids; e accepts clocks, f packs guide style in bits 0–1 and text-follow in bit 2 without new tails.
-    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31；g 追加 v42 网络设置。
-    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31; g appends v42 network settings.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : 0;
+    // A-F 为旧版；G/H 为 rc9x；K 为上游 rc96/97；L 为本地旧布局；M/N/O/P/Q 为本合并格式；R 追加 v27；S 追加 v28；T 追加 v29；U 追加 v30；V 追加 v31；g 追加 v42 网络设置；h 追加 v43 页眉页脚显隐；i 改为 v44 独立显隐语义。
+    // A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31; g appends v42 network settings; h appends v43 chrome visibility; i marks v44 independent visibility semantics.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -2042,8 +2104,9 @@ esp_err_t app_settings_backup_save(void) {
     // v37：追加票根背景选择。/ V37 appends the ticket background choice.
     // v38：追加日历子样式，主样式编号4表示日历。/ V38 appends the calendar variant; main style 4 selects calendar.
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
-    // v42：追加移动网络开关及业务路由，旧备份仍按当前设备设置保留。/ V42 appends cellular and business-route settings; older backups retain current device settings.
-    memcpy(backup.magic, "PICOSETg", sizeof(backup.magic));
+    // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
+    // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
+    memcpy(backup.magic, "PICOSETi", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2113,7 +2176,7 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_weight_t weight = {.encoded = 128+s_book_weight_fine+APP_BOOK_WEIGHT_FINE_MAX};
     uint32_t weight_hash = backup_weight_checksum(&weight);
     for (unsigned i = 0; i < 4; ++i) weight.checksum[i] = (uint8_t)(weight_hash >> (8 * i));
-    settings_backup_open_full_t open_full = {.open_full = s_reader_open_fullscreen ? 1 : 0};
+    settings_backup_open_full_t open_full = {.open_full = 0}; // 保留旧块偏移。/ Reserved legacy block.
     uint32_t open_full_hash = backup_open_full_checksum(&open_full);
     for (unsigned i = 0; i < 4; ++i) open_full.checksum[i] = (uint8_t)(open_full_hash >> (8 * i));
     settings_backup_title_style_t title_style = {.style = s_book_title_style};
@@ -2240,6 +2303,12 @@ esp_err_t app_settings_backup_save(void) {
     for (unsigned i = 0; i < 4; ++i) network.checksum[i] = (uint8_t)(network_hash >> (8 * i));
     if (ok) ok = fwrite(&tap, 1, sizeof(tap), file) == sizeof(tap);
     if (ok) ok = fwrite(&network, 1, sizeof(network), file) == sizeof(network);
+    settings_backup_chrome_visibility_t visibility = {
+        .header = s_reader_chrome_visible[0] ? 1 : 0,
+        .footer = s_reader_chrome_visible[1] ? 1 : 0};
+    uint32_t visibility_hash = backup_chrome_visibility_checksum(&visibility);
+    for (unsigned i = 0; i < 4; ++i) visibility.checksum[i] = (uint8_t)(visibility_hash >> (8 * i));
+    if (ok) ok = fwrite(&visibility, 1, sizeof(visibility), file) == sizeof(visibility);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -2353,6 +2422,7 @@ esp_err_t app_settings_backup_restore(void) {
     };
     settings_backup_chrome_heights_t heights = {
         .header = APP_READER_HEADER_HEIGHT_DEFAULT, .footer = APP_READER_FOOTER_HEIGHT_DEFAULT};
+    settings_backup_chrome_visibility_t visibility = {.header = 1, .footer = 1};
     settings_backup_chrome_t chrome = {.items = {
         APP_READER_SLOT_TITLE, APP_READER_SLOT_CLOCK, APP_READER_SLOT_ICON_BATTERY,
         APP_READER_SLOT_CHAPTER, APP_READER_SLOT_BLANK, APP_READER_SLOT_PAGE_PROGRESS}};
@@ -2461,6 +2531,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 38) ok = fread(&calendar_style, 1, sizeof(calendar_style), file) == sizeof(calendar_style) && backup_progress_bar_valid(&calendar_style);
     if (ok && version >= 39) ok = fread(&tap, 1, sizeof(tap), file) == sizeof(tap) && backup_tap_valid(&tap);
     if (ok && version >= 42) ok = fread(&network, 1, sizeof(network), file) == sizeof(network) && backup_network_valid(&network);
+    if (ok && version >= 43) ok = fread(&visibility, 1, sizeof(visibility), file) == sizeof(visibility) && backup_chrome_visibility_valid(&visibility);
     if (version < 39) tap.mode = (profile.home_full_refresh & 32) ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
     // Older backups lack the block: chrome keeps its defaults and is written back like every other setting.
@@ -2474,6 +2545,15 @@ esp_err_t app_settings_backup_restore(void) {
         backup_erase_secret(&wifi, sizeof(wifi));
         return ESP_ERR_INVALID_RESPONSE;
     }
+
+    // 所有校验完成后才折算旧全屏与动作，v44 直接使用独立显隐。
+    // Migrate only after all original checksums pass; v44 already stores independent visibility.
+    if (version < 44 && open_full.open_full) visibility.header = visibility.footer = 0;
+    for (unsigned i = 0; i < 3; ++i) keys.actions[i] = reader_action_migrate(keys.actions[i]);
+    hold.action = reader_action_migrate(hold.action);
+    double_action.action = reader_action_migrate(double_action.action);
+    up_action.action = reader_action_migrate(up_action.action);
+    for (unsigned i = 0; i < APP_READER_TAP_CELLS; ++i) tap.actions[i] = reader_action_migrate(tap.actions[i]);
 
     if (legacy_local_layout) {
         // 旧本地字距是 0..4 档，对应 -4/-2/0/+2/+4；先还原实际像素再映射到 31 档索引。
@@ -2552,6 +2632,7 @@ esp_err_t app_settings_backup_restore(void) {
         err = nvs_set_u8(h, s_reader_chrome_names[i], chrome.items[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, heights.header);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, heights.footer);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_VISIBLE, visibility.header | (visibility.footer << 1));
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_READER_PROGRESS, progress_bar.on);
     if (err == ESP_OK && version >= 33) err = nvs_set_u8(h, "home_regions", regions.value);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
@@ -2593,7 +2674,6 @@ esp_err_t app_settings_backup_restore(void) {
     // upgrades and downgrades.
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_OPEN_FULL, open_full.open_full);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_STYLE, title_style.style);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_SIZE, title_size.px);
     // 新编码：192..222 对应 -15..+15 px，兼容旧的 0..4 档与 128..148 中间格式。
@@ -2643,6 +2723,8 @@ esp_err_t app_settings_backup_restore(void) {
     memcpy(s_reader_chrome, chrome.items, sizeof(s_reader_chrome));
     s_reader_chrome_heights[0] = heights.header;
     s_reader_chrome_heights[1] = heights.footer;
+    s_reader_chrome_visible[0] = visibility.header != 0;
+    s_reader_chrome_visible[1] = visibility.footer != 0;
     s_reader_progress_bar = progress_bar.on != 0;
     s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
     s_book_weight_fine = fine_weight;
@@ -2687,7 +2769,6 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_touch_disabled = touch_disabled;
     s_reader_up_action = up_action.action;
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
-    s_reader_open_fullscreen = open_full.open_full == 1;
     s_book_title_style = title_style.style;
     s_book_title_size = title_size.px;
     s_book_tracking = f[BK_TRACKING];

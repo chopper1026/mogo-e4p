@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 中文：从阅读页面提取设置和全屏重排事务；保留校验、回滚和持久化顺序。
- * English: Setting and full-screen reflow transactions extracted from the reader page, preserving validation, rollback and persistence order.
+ * 中文：从阅读页面提取设置重排事务；保留校验、回滚和持久化顺序。
+ * English: Setting reflow transactions extracted from the reader page, preserving validation, rollback and persistence order.
  */
 #include "reader_reflow.h"
 #include <string.h>
@@ -136,21 +136,4 @@ bool reader_reflow_option_locked(const reader_reflow_t *reflow, int kind, bool p
         (void)reflow->build();
     }
     return ok;
-}
-
-reader_reflow_result_t reader_reflow_fullscreen(const reader_reflow_t *reflow, bool *fullscreen) {
-    size_t offset = book_layout_page_start_offset(reflow->position->page);
-    reflow->begin();
-    *fullscreen = !*fullscreen;
-    reflow->refresh_lead();
-    bool ok = reflow->build();
-    bool restored = true;
-    if (ok) reflow->position->page = book_layout_page_for_offset(offset);
-    else {
-        *fullscreen = !*fullscreen;
-        reflow->refresh_lead();
-        restored = reflow->build();
-    }
-    reflow->end();
-    return ok ? READER_REFLOW_APPLIED : restored ? READER_REFLOW_RESTORED : READER_REFLOW_LOST_LAYOUT;
 }
