@@ -40,7 +40,8 @@ static const int* display_reader_text_waveform(void){return &E0470_SOFT_TEXTTURN
 static const char *TAG="test";
 static int s_view,s_presented_view,s_reader_panel,s_pressed_control,s_reader_slider;
 static bool s_shelf_page_pending,s_shelf_feedback_pending,s_reader_cleanup,s_reader_entry_full,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm;
-static bool s_reader_fullscreen,s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
+static bool s_chrome_visible[2]={true,true};
+static bool s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
 static bool s_excerpt_forward;
 static char s_reader_notice[64];
 static int64_t s_dictionary_notice_until;
@@ -137,8 +138,7 @@ static void xSemaphoreTake(void *done,int timeout){(void)done;(void)timeout;}
 static void consume_prep_symbols(void){xSemaphoreTake(s_prep_done,0);}
 static void guard_draw_result(void *hl,int error){(void)hl;assert(error==EPD_DRAW_SUCCESS||error==EPD_DRAW_ERROR);}
 static EpdRect reader_area(void){return (EpdRect){36,176,612,856};}
-static EpdRect progress_rect(void){return (EpdRect){36,1040,612,42};}
-static EpdRect reader_fullscreen_progress_area(void){return (EpdRect){0,1200,684,4};}
+static EpdRect progress_rect(void){return s_chrome_visible[1]?(EpdRect){36,1040,612,42}:(EpdRect){0};}
 static unsigned percent(unsigned page){return page;}
 static bool test_hide_images,test_load_failed,s_save_failed,s_input_settle;
 static int test_types[2][2],test_push_error,test_effect;
@@ -243,7 +243,6 @@ int main(void){
  assert(test_button_draws==2&&test_body_draws==body_before);
  for(int repeat=0;repeat<80;++repeat){
    int row=repeat%9;EpdRect original=row_rect(row);s_pressed_control=repeat%2?row:-1;
-   s_reader_fullscreen=true;
    assert(paint_control(&ctx,original)==APP_REDRAW_AREA&&s_shelf_feedback_pending);
    assert(s_area.x==original.x&&s_area.y==original.y-16&&s_area.width==original.width&&s_area.height==original.height+16);
    unsigned before=pushes;assert(present(&ctx,APP_REDRAW_AREA));
@@ -255,7 +254,7 @@ int main(void){
  body_before=test_body_draws;unsigned prepares_before=test_prepares;
  for(int fast=0;fast<2;++fast)for(int repeat=0;repeat<80;++repeat){
    test_style=5;test_fast=fast;s_pressed_control=repeat%2?repeat%4:-1;
-   s_view=s_presented_view=SHELF;s_reader_fullscreen=true;s_du_count=5;
+   s_view=s_presented_view=SHELF;s_du_count=5;
    EpdRect original=row_rect(repeat%4);
    assert(paint_control(&ctx,original)==APP_REDRAW_AREA&&s_shelf_feedback_pending);
    unsigned before=pushes;assert(present(&ctx,APP_REDRAW_AREA));
@@ -267,7 +266,7 @@ int main(void){
  assert(test_body_draws==body_before&&test_prepares==prepares_before&&test_list_draws==160);
  test_style=0;test_fast=false;
  puts("PASS: 160 list bounces/settles use cover-only differentials and reuse caches; gray/fast modes retain their waveforms and navigation");
- s_reader_fullscreen=false;assert(paint_control(&ctx,(EpdRect){500,90,90,54})==APP_REDRAW_AREA&&!s_shelf_feedback_pending);
+ assert(paint_control(&ctx,(EpdRect){500,90,90,54})==APP_REDRAW_AREA&&!s_shelf_feedback_pending);
  assert(present(&ctx,APP_REDRAW_AREA)&&route==AREA&&pushed_mode==MODE_DU);
  assert(paint_control(&ctx,row_rect(0))==APP_REDRAW_AREA);s_view=READING;
  assert(present(&ctx,APP_REDRAW_AREA)&&route==READER&&!s_shelf_feedback_pending);
@@ -283,14 +282,14 @@ int main(void){
  assert(trace_area[0].y==reader_area().y&&trace_area[0].height==reader_area().height);
  assert(trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
  assert(trace_area[1].y==progress_rect().y&&!s_reader_turn_pending);
- for(int full=0;full<2;++full){
-   s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
-   s_reader_footer_pending=!full;trace_count=0;
+ for(int footer=0;footer<2;++footer){
+   s_chrome_visible[1]=footer;s_reader_turn_pending=true;s_reader_cleanup=true;
+   s_reader_footer_pending=footer;trace_count=0;
    assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==LOCAL_FULL&&pushed_mode==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
    s_reader_turn_pending=true;trace_count=0;
    assert(present(&ctx,APP_REDRAW_FULL)&&trace_count==1&&route==FULL);
  }
- s_reader_fullscreen=false;s_reader_turn_pending=true;s_reader_image_refresh_pending=true;
+ s_chrome_visible[1]=true;s_reader_turn_pending=true;s_reader_image_refresh_pending=true;
  trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
  assert(trace_count==1&&route==AREA&&pushed_mode==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
  s_reader_turn_pending=s_water_turn_pending=true;trace_count=0;
@@ -299,28 +298,29 @@ int main(void){
  // The consumed turn flag must not affect the next settings repaint.
  s_reader_panel=99;trace_count=0;
  assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==AREA&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_WAVEFORM);
- s_reader_panel=READER_PANEL_NONE;s_reader_fullscreen=true;s_reader_turn_pending=true;trace_count=0;
- assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==2&&trace_route[0]==DIFF&&trace_route[1]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM&&trace_wave[1]==E0470_WAVEFORM);
- // 快水波仅接管实际动画输出；成功、失败及全屏都恢复主页节拍，优先级分支不改节拍。
- // Fast ripple scopes pacing to actual animation output; success, failure and full screen restore main pacing, while priority branches never change it.
- for(int full=0;full<2;++full)for(int error=0;error<2;++error){
-   s_reader_fullscreen=full;s_reader_footer_pending=false;s_water_turn_pending=true;
-   test_push_error=error;test_tick_us=full?19000:12000;int prior=test_tick_us,sets=test_tick_sets;
+ s_reader_panel=READER_PANEL_NONE;s_chrome_visible[1]=false;s_reader_turn_pending=true;trace_count=0;
+ assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
+ // 快水波仅接管实际动画输出；页脚显隐与推屏失败均恢复主页节拍，优先级分支不改节拍。
+ // Fast ripple restores main pacing with either footer visibility and on failure; priority branches never change it.
+ for(int footer=0;footer<2;++footer)for(int error=0;error<2;++error){
+   s_chrome_visible[1]=footer;s_reader_footer_pending=footer;s_water_turn_pending=true;
+   test_push_error=error;test_tick_us=footer?19000:12000;int prior=test_tick_us,sets=test_tick_sets;
    trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
    assert(trace_route[0]==WATER&&test_tick_sets==sets+2);
-   assert(trace_count==(full&&!error?2u:1u));
+   assert(trace_count==(footer&&!error?2u:1u));
+   if(footer&&!error)assert(trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
    assert(test_tick_us==prior&&!s_water_turn_pending);
  }
- test_push_error=0;test_tick_us=12000;s_reader_fullscreen=false;
+ test_push_error=0;test_tick_us=12000;s_chrome_visible[1]=true;
  for(int priority=0;priority<3;++priority){
    s_water_turn_pending=true;s_reader_cleanup=priority==1;s_reader_image_refresh_pending=priority==2;
    int sets=test_tick_sets;trace_count=0;
    assert(present(&ctx,priority==0?APP_REDRAW_FULL:APP_REDRAW_AREA));
    assert(trace_route[0]!=(int)WATER&&test_tick_sets==sets&&test_tick_us==12000&&!s_water_turn_pending);
  }
- puts("PASS: text turn/body/footer, periodic/manual cleanup, grayscale image, water effect, settings and full-screen routes");
+ puts("PASS: text turn/body/footer, periodic/manual cleanup, grayscale image, water effect, settings and hidden-footer routes");
  for(int input_view=EDIT;input_view<=SEARCH;input_view++)for(int repeat=0;repeat<80;repeat++){
-   s_view=input_view;s_reader_fullscreen=true;s_reader_footer_pending=true;
+   s_view=input_view;s_chrome_visible[1]=false;s_reader_footer_pending=true;
    s_area=(EpdRect){36,243,612,82};s_mode=repeat==0?MODE_GL16:MODE_DU;s_du_count=10;
    trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
    assert(trace_count==1&&route==DIFF&&trace_wave[0]==(repeat==0?E0470_WAVEFORM:E0470_FOLLOW_WAVEFORM));
@@ -334,45 +334,39 @@ int main(void){
    assert(pushed_area.x==24&&pushed_area.y==612&&pushed_area.width==636&&pushed_area.height==114);
    assert(!s_input_settle&&!s_du_count);
  }
- s_view=s_presented_view=READING;s_reader_fullscreen=false;s_reader_footer_pending=false;
+ s_view=s_presented_view=READING;s_chrome_visible[1]=true;s_reader_footer_pending=false;
  puts("PASS: 160 search/title updates keep a single local push; idle settles drive only the candidate strip with full-pixel GL16 and never refresh the footer or whole page");
 
  // 实际翻页、绘制和推屏函数共用页类型；混排与跨章不靠纯图标志判定。
  // Actual turn/paint/present functions share page types; mixed and cross-chapter guards do not rely on the pure-image flag.
- for(int full=0;full<2;++full)for(int hidden=0;hidden<2;++hidden)
+ for(int footer=0;footer<2;++footer)for(int hidden=0;hidden<2;++hidden)
  for(int from=0;from<3;++from)for(int to=0;to<3;++to){
-   s_reader_fullscreen=full;test_hide_images=hidden;test_types[0][0]=from;test_types[0][1]=to;
+   s_chrome_visible[1]=footer;test_hide_images=hidden;test_types[0][0]=from;test_types[0][1]=to;
    s_view=s_presented_view=READING;s_reader_panel=READER_PANEL_NONE;s_reader_slider=-1;s_chapter=s_page=0;
    trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
    assert(s_reader_text_frame==(hidden||from==0));
    app_redraw_t redraw=turn_page(&ctx,1);
    bool eligible=hidden||(from==0&&to==0);
-   assert(s_reader_fullscreen==full && s_reader_panel==READER_PANEL_NONE);
-   if (!full) {
-     // 翻页保持窗口化，正文后普通页脚走短 DU，插图页脚保留默认 GL16。
-     // Windowed turns use short-DU footers after the body, retaining default GL16 for illustration footers.
-     assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
-     trace_count=0;present(&ctx,redraw);
-     if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
-     else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
-     else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==AREA);
-     assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
-     assert(trace_count==2&&trace_route[1]==(to&&!hidden?DIFF:AREA));
-     assert(trace_mode[1]==(to&&!hidden?MODE_GL16:MODE_DU));
-     assert(trace_wave[1]==(to&&!hidden?E0470_WAVEFORM:E0470_FOLLOW_WAVEFORM));
-     continue;
-   }
+   assert(s_chrome_visible[1]==footer && s_reader_panel==READER_PANEL_NONE);
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
    trace_count=0;present(&ctx,redraw);
    if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
    else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
-   else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==(full?DIFF:AREA));
+   else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==AREA);
    assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
+   // 仅可见页脚随正文输出；插图保留 GL16，普通文字使用短 DU。
+   // Only visible footers follow the body; illustrations retain GL16 and text uses short DU.
+   assert(trace_count==(footer?2u:1u));
+   if(footer){
+     assert(trace_route[1]==(to&&!hidden?DIFF:AREA));
+     assert(trace_mode[1]==(to&&!hidden?MODE_GL16:MODE_DU));
+     assert(trace_wave[1]==(to&&!hidden?E0470_WAVEFORM:E0470_FOLLOW_WAVEFORM));
+   }
  }
  test_hide_images=false;
- for(int full=0;full<2;++full)for(int from=0;from<3;++from)
+ for(int footer=0;footer<2;++footer)for(int from=0;from<3;++from)
  for(int to=0;to<3;++to)for(int dir=-1;dir<=1;dir+=2){
-   s_reader_fullscreen=full;
+   s_chrome_visible[1]=footer;
    int old=dir>0?0:1,new=1-old;
    test_types[old][dir>0?1:0]=from;test_types[new][dir>0?0:1]=to;
    s_chapter=old;s_page=dir>0?1:0;trace_count=0;
@@ -381,9 +375,10 @@ int main(void){
    assert(s_chapter==(unsigned)new&&s_reader_turn_pending==(from==0&&to==0));
    trace_count=0;present(&ctx,redraw);
    assert((trace_wave[0]!=E0470_TEXTTURN_WAVEFORM&&trace_wave[0]!=E0470_SOFT_TEXTTURN_WAVEFORM)||(from==0&&to==0));
-   assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
+   assert(trace_count==(footer?2u:1u));
+   if(footer)assert(trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
  }
- s_reader_fullscreen=true;
+ s_chrome_visible[1]=false;
  // 失败推屏、面板及离开阅读会失效旧基准；下一次正常绘制后恢复。
  // Failed presents, panels and leaving reading invalidate history; a successful body restores it.
  memset(test_types,0,sizeof(test_types));s_chapter=s_page=0;
@@ -445,7 +440,7 @@ int main(void){
   trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(trace_route[0]!=LOCAL_FULL);
  }
  puts("PASS: notice dismissal normalizes the complete screen once, protects image/background gray, retries display failures and does not repeat");
- puts("PASS: 36 text/mixed/image/hidden/full-screen combinations, 36 bidirectional chapter transitions with GL16 footer/progress, failed image/display/load guards and actual cleanup/water turns");
+ puts("PASS: text/mixed/image/hidden-image combinations with both footer visibility states, bidirectional chapter transitions, failed image/display/load guards and actual cleanup/water turns");
 }
 '''
 
