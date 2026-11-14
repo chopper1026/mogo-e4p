@@ -38,4 +38,7 @@ cc $san $flags tools/ota_online_host_test.c main/ota/ota_release.c "$out/cjson.o
   -o "$out/online" -lpthread
 "$out/online"
 
+# 覆盖真实设备分支的租约准入，防止仅测非 ESP_PLATFORM 路径而遗漏联网错误。
+# Exercise device-side lease admission as well as the legacy non-ESP_PLATFORM path.
+python3 tools/network_route_host_test.py
 python3 tools/ota_ui_host_test.py

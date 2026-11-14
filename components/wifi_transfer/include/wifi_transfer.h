@@ -61,6 +61,7 @@ typedef struct {
     char wifi_ssid[33]; ///< 已保存网络名称，不含密码 / Saved network name, never a password
     bool wifi_configured; ///< 存在有效凭据 / Valid credentials saved
     bool network_ready; ///< 已取得可用网络地址 / Usable network address acquired
+    bool network_only; ///< 当前或最近一次会话仅联网、不提供文件服务 / Current or last session has no file server
     unsigned sta_count; ///< 连接数 / Station count
     char ssid[33]; ///< 热点名称 / AP name
     char cur_name[241]; ///< 完整 UTF-8 文件名 / Complete UTF-8 filename

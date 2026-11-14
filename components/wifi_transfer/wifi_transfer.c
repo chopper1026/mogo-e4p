@@ -2135,6 +2135,7 @@ esp_err_t wifi_transfer_start(const wifi_transfer_cfg_t *cfg) {
     memset(&s_status, 0, sizeof(s_status)); s_status.state = WIFI_TRANSFER_STARTING;
     s_stopping = s_upload_active = false;
     s_status.mode = cfg->mode;
+    s_status.network_only = cfg->network_only;
     portEXIT_CRITICAL(&s_lock);
     transfer_credentials_t saved = {0};
     wifi_config_t wifi = {0};

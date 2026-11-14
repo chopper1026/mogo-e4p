@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## v1.1.1 · 2026-11-14 · 本地测试 / Local testing
 
+- 修复联网 OTA 在 Wi-Fi 正在连接时提前报不可用、失败后无法直接重试的问题；保护热点、传书与已有租约，并细分未配网、4G/SIM 状态、网络忙碌和内存不足提示。/ Fix premature OTA rejection while Wi-Fi connects and allow safe retries after failed network-only sessions, preserving AP, transfer and lease ownership with actionable configuration, cellular/SIM, busy and memory notices.
 - 传书响应在 JSON 分配失败时完整释放已分配对象；4G 接收事件队列满时归还 DMA 缓冲，并在任务中恢复接收，减少异常路径占用内存或耗尽接收池的问题。/ Release transfer response allocations on JSON failures, return cellular DMA buffers when the RX event queue is full and recover reception in task context to avoid retained memory and exhausted buffer pools.
 - 修复 Wi‑Fi 或 4G 成功取得 IP 后状态栏不主动重绘的问题；快捷栏显示移动网络已开启时，仍以实际联网状态决定状态栏信号图标。/ Refresh the status bar when Wi‑Fi or cellular obtains an IP, while keeping the quick-bar enabled state separate from the connected-state icon.
 - 4G 天气及 OTA 请求可在 DNS 返回的两个地址间切换，避免连接失败后反复使用同一地址；保留原域名的 HTTPS 校验与既有重试预算，用户已反馈重连后功能恢复。/ Try another current DNS address after a cellular weather or OTA transport failure, preserving HTTPS hostname verification and existing retry budgets; the user confirmed recovery after reconnection.

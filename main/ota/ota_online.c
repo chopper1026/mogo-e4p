@@ -19,6 +19,8 @@
 #include "wifi_transfer.h"
 #ifdef ESP_PLATFORM
 #include "network_service.h"
+#include "cellular_service.h"
+#include "esp_log.h"
 #endif
 #include "storage_jobs.h"
 #include "time_service.h"
@@ -173,21 +175,56 @@ static bool layout_valid(void) {
         a->size == 0x400000 && b->size == 0x400000 && data->address == 0xd10000 && data->size == 0x2000;
 #endif
 }
+#ifdef ESP_PLATFORM
+static const char *network_unavailable_notice(esp_err_t error) {
+    if (error == ESP_ERR_NO_MEM) return "网络启动内存不足，请稍后重试";
+    network_status_t network;
+    network_service_get_status(&network);
+    if (network.route == NETWORK_ROUTE_CELLULAR) {
+        if (!network.cellular_capability_known) return "正在检测移动网络，请稍后重试";
+        if (!network.cellular_capable) return "未检测到4G模块，请选择Wi-Fi联网";
+        if (!network.cellular_enabled) return "已选择4G，请先开启移动网络";
+        switch (network.cellular_state) {
+            case CELLULAR_SERVICE_NO_SIM: return "未检测到SIM卡，请检查移动网络";
+            case CELLULAR_SERVICE_SIM_NOT_READY: return "SIM卡未就绪，请检查移动网络";
+            case CELLULAR_SERVICE_NO_REGISTRATION: return "移动网络注册失败，请检查网络设置";
+            case CELLULAR_SERVICE_ERROR: return "移动网络连接失败，请重新开启后重试";
+            default: break;
+        }
+    } else {
+        wifi_transfer_status_t wifi;
+        wifi_transfer_get_status(&wifi);
+        if (wifi.mode == WIFI_TRANSFER_MODE_AP && wifi.state != WIFI_TRANSFER_STOPPED)
+            return "设备热点不能联网，请退出热点后重试";
+        if (network.route == NETWORK_ROUTE_WIFI || !network.cellular_enabled || !network.cellular_capable) {
+            char ssid[33]; bool configured = false;
+            if (wifi_transfer_get_saved_wifi(ssid, &configured) == ESP_OK && !configured)
+                return "尚未保存Wi-Fi，请先在网络设置中配网";
+        }
+    }
+    if (error == ESP_ERR_INVALID_STATE) return "网络正在使用或切换，请稍后重试";
+    if (error == ESP_ERR_TIMEOUT) return "网络连接超时，请重试";
+    return "联网失败，请检查所选网络后重试";
+}
+#endif
 static bool online(bool *owned) {
 #ifdef ESP_PLATFORM
     (void)owned;
     // OTA owns one route for the complete check/download, including range retries.
     // The selected route is never silently replaced by the other bearer.
     memset(&s_network_lease, 0, sizeof(s_network_lease));
-    if (network_service_acquire(NETWORK_USE_OTA, &s_network_lease) != ESP_OK) {
-        state(PICO_UPDATE_FAILED, "当前联网方式不可用，请检查网络设置");
+    esp_err_t error = network_service_acquire(NETWORK_USE_OTA, &s_network_lease);
+    if (error != ESP_OK) {
+        ESP_LOGW("ota", "network acquire failed error=%s", esp_err_to_name(error));
+        network_diagnostics_snapshot("ota", NETWORK_BEARER_NONE);
+        state(PICO_UPDATE_FAILED, network_unavailable_notice(error));
         return false;
     }
     s_network_lease_active = true;
     if (!network_service_wait_ready(&s_network_lease, 30000)) {
         network_service_release(&s_network_lease);
         s_network_lease_active = false;
-        state(PICO_UPDATE_FAILED, "网络连接超时，请重试");
+        state(PICO_UPDATE_FAILED, network_unavailable_notice(ESP_ERR_TIMEOUT));
         return false;
     }
     if (time(NULL) < 1704067200) {

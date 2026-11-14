@@ -12,6 +12,12 @@ S31 的 Wi-Fi 管理帧和 NT26 DMA 共用片内 RAM。产品配置沿用原厂�
 
 日期对时、天气和联网 OTA 通过 `network_service` 租约使用选定承载。租约存续期间快捷栏不能关闭对应无线；本地传书仍只使用 Wi-Fi。进入浅睡、锁屏或关机前先停止移动模块，唤醒后按用户开关恢复，避免 P14 共享电源轨在模组任务仍运行时被板级睡眠流程切断。
 
+已有 STA 正在连接时，业务借用该会话并等待取得 IP，不提前拒绝，也不重启或在结束时关闭用户开启的 Wi-Fi。上次失败的 STA 只有在纯联网、没有其他 Wi-Fi 租约且允许停止时才能重建；热点、文件服务及忙碌会话不自动重启。租约准入与手动无线切换共用控制门，防止恢复过程与新租约交错。自动模式仍按优先级回退，强制路由不跨承载；回退承载不存在时保留原始启动错误。
+Business requests borrow an already-connecting STA and wait for IP without rejecting, restarting or later stopping user-enabled Wi-Fi. Rebuild a failed STA only when it is network-only, has no other Wi-Fi leases and can stop safely; never automatically restart AP, file-server or busy sessions. Admission and manual radio changes share a control gate. Auto retains its fallback policy, forced routes never cross bearers, and an absent fallback does not hide the original startup error.
+
+联网 OTA 的准入失败提示区分未配网、热点占用、网络切换或忙碌、启动内存不足，以及强制 4G 下的模块检测、未开启、SIM 未就绪和注册失败；同时记录启动错误码和网络诊断。提示仅说明当前软件状态，不代替实际网络、SIM 或射频排查。
+OTA admission failures distinguish missing Wi-Fi configuration, AP use, busy/switching radios, startup memory shortage and forced-cellular hardware, enable, SIM and registration states, recording the startup error and network diagnostics. These notices describe software state, not a confirmed network, SIM or radio root cause.
+
 租约等待取得 IP 后，须成功将该接口设为默认网卡才允许开始 DNS、TCP 或 TLS。无可用承载时不强行切到 Wi-Fi；自动模式回退后，首选无线恢复也不抢占正在使用的租约。产品启用 `CONFIG_ESP_NETIF_SET_DNS_PER_DEFAULT_NETIF`，分别保存各接口的 DHCP DNS，并随默认网卡切换解析服务器；已有本地 `sdkconfig` 须同步该选项。
 
 天气请求按实际租约承载设置等待：Wi-Fi 连接 6 秒、响应空闲 5 秒；4G 连接 20 秒、响应空闲 10 秒。4G 遇到连接失败或响应传输错误时，在同一租约内最多重新建立一次连接；不重试业务错误，不切换承载。两者均保留整个会话 45 秒上限及最长 200 毫秒读取等待，支持离页取消，不因重连或单段响应到达而延长整个会话。

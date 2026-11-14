@@ -96,11 +96,19 @@ static bool saved_wifi(void) {
 static esp_err_t start_wifi_for_lease(network_lease_t *lease) {
     wifi_transfer_status_t status;
     wifi_transfer_get_status(&status);
-    if (status.mode == WIFI_TRANSFER_MODE_STA && status.network_ready) {
+    if (status.mode == WIFI_TRANSFER_MODE_STA &&
+        (status.network_ready || status.state == WIFI_TRANSFER_STARTING)) {
         lease->owns_wifi = false;
         return ESP_OK;
     }
-    if (status.state != WIFI_TRANSFER_STOPPED || !saved_wifi()) return ESP_ERR_NOT_FOUND;
+    const bool retry = status.state == WIFI_TRANSFER_ERROR && status.network_only &&
+        status.mode == WIFI_TRANSFER_MODE_STA;
+    if (status.state != WIFI_TRANSFER_STOPPED && !retry) return ESP_ERR_INVALID_STATE;
+    if (!saved_wifi()) return ESP_ERR_NOT_FOUND;
+    // 准入与无线切换共用控制门；仅重建没有其他租约的纯联网失败会话。
+    // Admission shares the radio-control gate; rebuild failed network-only sessions without other leases.
+    if (retry && (atomic_load(&s_wifi_leases) || !wifi_transfer_try_stop_if_idle()))
+        return ESP_ERR_INVALID_STATE;
     const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
     esp_err_t err = wifi_transfer_start(&cfg);
     if (err == ESP_OK) lease->owns_wifi = true;
@@ -119,14 +127,6 @@ static bool start_cellular_for_lease(const network_status_t *status) {
     return cellular_service_set_enabled(true) == ESP_OK;
 }
 
-static bool reserve_cellular_lease(void) {
-    if (atomic_load(&s_cellular_control)) return false;
-    atomic_fetch_add(&s_cellular_leases, 1);
-    if (!atomic_load(&s_cellular_control)) return true;
-    atomic_fetch_sub(&s_cellular_leases, 1);
-    return false;
-}
-
 static bool select_bearer_netif(network_bearer_t bearer) {
     void *netif = bearer == NETWORK_BEARER_CELLULAR ? cellular_service_netif()
         : bearer == NETWORK_BEARER_WIFI ? wifi_transfer_netif() : NULL;
@@ -136,12 +136,15 @@ static bool select_bearer_netif(network_bearer_t bearer) {
 static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease) {
     if (!lease) return ESP_ERR_INVALID_ARG;
     *lease = (network_lease_t){0};
-    if (bearer == NETWORK_BEARER_CELLULAR && !reserve_cellular_lease())
+    bool idle = false;
+    if (!atomic_compare_exchange_strong(&s_cellular_control, &idle, true))
         return ESP_ERR_INVALID_STATE;
     network_status_t status;
     network_service_get_status(&status);
+    esp_err_t error = ESP_ERR_NOT_FOUND;
     if (bearer == NETWORK_BEARER_WIFI) {
-        if (status.wifi_ready || start_wifi_for_lease(lease) == ESP_OK) {
+        error = status.wifi_ready ? ESP_OK : start_wifi_for_lease(lease);
+        if (error == ESP_OK) {
             lease->bearer = NETWORK_BEARER_WIFI;
             lease->active = true;
         }
@@ -149,17 +152,16 @@ static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease)
         if (status.cellular_ready || start_cellular_for_lease(&status)) {
             lease->bearer = NETWORK_BEARER_CELLULAR;
             lease->active = true;
+            error = ESP_OK;
         }
     }
-    if (!lease->active) {
-        if (bearer == NETWORK_BEARER_CELLULAR) atomic_fetch_sub(&s_cellular_leases, 1);
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (lease->bearer == NETWORK_BEARER_WIFI) atomic_fetch_add(&s_wifi_leases, 1);
+    if (lease->active && lease->bearer == NETWORK_BEARER_WIFI) atomic_fetch_add(&s_wifi_leases, 1);
+    else if (lease->active) atomic_fetch_add(&s_cellular_leases, 1);
     if ((lease->bearer == NETWORK_BEARER_WIFI && status.wifi_ready) ||
         (lease->bearer == NETWORK_BEARER_CELLULAR && status.cellular_ready))
         (void)select_bearer_netif(lease->bearer);
-    return ESP_OK;
+    atomic_store(&s_cellular_control, false);
+    return error;
 }
 
 void network_service_init(void) {
@@ -251,19 +253,14 @@ esp_err_t network_service_set_enabled(network_bearer_t bearer, bool enabled) {
 
     // A live cellular business lease cannot be interrupted by a manual Wi-Fi switch.
     if (atomic_load(&s_cellular_leases) != 0) err = ESP_ERR_INVALID_STATE;
-    wifi_transfer_status_t wifi = {0};
-    wifi_transfer_get_status(&wifi);
     cellular_service_status_t cellular = {0};
     cellular_service_get_status(&cellular);
     const bool cellular_was_enabled = cellular.enabled;
     if (err == ESP_OK && !saved_wifi()) err = ESP_ERR_NOT_FOUND;
     if (err == ESP_OK && cellular_was_enabled) err = cellular_service_set_enabled(false);
-    if (err == ESP_OK && wifi.state == WIFI_TRANSFER_STOPPED) {
-        const wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
-        err = wifi_transfer_start(&cfg);
-    } else if (err == ESP_OK && wifi.state != WIFI_TRANSFER_STOPPED) {
-        // Wi-Fi is already on; disabling cellular above is enough to enforce exclusivity.
-        err = ESP_OK;
+    if (err == ESP_OK) {
+        network_lease_t connection = {0};
+        err = start_wifi_for_lease(&connection);
     }
     if (err != ESP_OK && cellular_was_enabled) (void)cellular_service_set_enabled(true);
     if (err == ESP_OK) {
@@ -314,8 +311,10 @@ esp_err_t network_service_acquire(network_use_t use, network_lease_t *lease) {
     }
     esp_err_t err = acquire_bearer(first, lease);
     if (err == ESP_OK || status.route != NETWORK_ROUTE_AUTO) return err;
-    return acquire_bearer(first == NETWORK_BEARER_WIFI
+    esp_err_t fallback_error = acquire_bearer(first == NETWORK_BEARER_WIFI
         ? NETWORK_BEARER_CELLULAR : NETWORK_BEARER_WIFI, lease);
+    // 回退承载不存在时保留首选承载的真实启动错误。/ Keep the first startup error if the fallback is absent.
+    return fallback_error == ESP_ERR_NOT_FOUND ? err : fallback_error;
 }
 
 bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms) {
