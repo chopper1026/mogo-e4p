@@ -368,8 +368,28 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
             app_device_settings_request_haptics(true);
             ctx->request_app = &app_device_settings;
         }
-    } else if (event.action == UI_QUICK_FULL) app_quick_layer_present(ctx, current, true);
-    else if (event.action == UI_QUICK_LOCK) *lock_requested = true;
+    } else if (event.action == UI_QUICK_FULL) {
+        // 刷新前先收起快捷层并恢复底页，随后才执行整屏刷新；这样刷新键不会把
+        // 快捷栏本身留在屏上，也不会让下一次锁屏继承打开状态。
+        // Close and restore the underlay before the full refresh so the quick
+        // bar is never left on screen and cannot leak into the next lock action.
+        if (s_quick.open) {
+            quick_frontlight_persist();
+            app_quick_layer_reset();
+        }
+        app_quick_layer_present(ctx, current, true);
+    }
+    else if (event.action == UI_QUICK_LOCK) {
+        // 锁屏动作也先收起快捷栏：同一轮后续主循环才进入锁屏，屏上不会残留遮罩。
+        // Close the quick layer before handing the lock request to the loop, so
+        // the same tick never carries the overlay into the lock screen.
+        if (s_quick.open) {
+            quick_frontlight_persist();
+            app_quick_layer_reset();
+            app_quick_layer_present(ctx, current, false);
+        }
+        *lock_requested = true;
+    }
     else if (event.action == UI_QUICK_ROTATION && s_quick.rotation_available && current->on_rotation_toggle) {
         current->on_rotation_toggle(ctx);
         quick_rotation_sync(ctx, current);

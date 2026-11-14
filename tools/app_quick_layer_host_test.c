@@ -176,6 +176,11 @@ static void tap(int button) {
     app_quick_layer_present_buttons(&ctx, current);
     (void)frame(false, false, true, x, 156, 10, false);
 }
+static bool tap_xy(int x, int y) {
+    (void)frame(true, true, false, x, y, 10, false);
+    app_quick_layer_present_buttons(&ctx, current);
+    return frame(false, false, true, x, y, 10, false);
+}
 static void hold(int button, const app_desc_t *p) {
     open_layer(); current = p; int x = (button * 2 + 1) * 684 / 8;
     (void)frame(true, true, false, x, 156, 10, false);
@@ -215,9 +220,10 @@ int main(void) {
     // 未松手的实际调节仍须由关闭、重置或读错提交；重复清理不能再次写设置。
     // Close, reset and read errors still commit a live drag; repeated cleanup must not write again.
     for (unsigned boundary = 0; boundary < 4; ++boundary) {
+        app_quick_layer_init();
         open_layer();
         unsigned writes = settings_writes;
-        (void)frame(true, true, false, 600, 284, 10, true);
+        (void)frame(true, true, false, 600, 424, 10, true);
         assert(hw_on && hw_bri != saved_bri && settings_writes == writes);
         if (boundary == 0) app_quick_layer_reset();
         else if (boundary == 1) assert(app_quick_layer_cancel_input());
@@ -231,23 +237,29 @@ int main(void) {
     puts("PASS: pending slider changes survive reset, read error, USB close and display failure exactly once");
     app_quick_layer_init(); open_layer();
     unsigned p = pushes, a = applies, w = settings_writes;
-    (void)frame(true, true, false, 100, 284, 10, true);
-    (void)frame(true, false, false, 600, 284, 10, true);
-    (void)frame(true, false, false, 350, 284, 10, true);
-    (void)frame(false, false, true, 350, 284, 10, true);
+    (void)frame(true, true, false, 100, 424, 10, true);
+    (void)frame(true, false, false, 600, 424, 10, true);
+    (void)frame(true, false, false, 350, 424, 10, true);
+    (void)frame(false, false, true, 350, 424, 10, true);
     assert(applies == a + 4 && settings_writes == w + 1 && pushes == p);
     assert(saved_on == hw_on && saved_bri == hw_bri && saved_cct == hw_cct);
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p + 1);
     assert(last_kind == 38 && last_wave == &E0470_WAVEFORM && last_mode == MODE_DU);
-    assert(last_area.y == 244 && last_area.height == 80);
+    assert(last_area.y == 384 && last_area.height == 80);
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p + 1);
-    (void)frame(true, true, false, 600, 384, 10, true);
+    (void)frame(true, true, false, 600, 524, 10, true);
     app_quick_layer_discard_frontlight(); p = pushes;
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p);
     w = settings_writes; assert(app_quick_layer_cancel_input()); assert(settings_writes == w + 1); release();
     assert(saved_cct == hw_cct);
 
-    open_layer(); p = renders; tap(2); assert(renders == p);
+    open_layer(); p = renders; tap(2); assert(renders == p + 1 && !app_quick_layer_is_open());
+    // 没有前光时第四键仍是锁屏；控制器在交给主循环前先收起快捷层并恢复底页。
+    // Without frontlight the fourth key remains lock; the controller closes and
+    // restores the layer before handing the request to the loop.
+    available = false; app_quick_layer_init(); open_layer();
+    p = renders; assert(tap_xy(598, 156) && !app_quick_layer_is_open() && renders == p + 1);
+    available = true; app_quick_layer_init(); open_layer();
     hold_gray = true; tap(3); p = renders; usb = true;
     release(); assert(!app_quick_layer_is_open() && renders == p + 1);
     assert(last_kind == 36 && last_wave == &normalize_wave && last_mode == MODE_GL16 && last_area.height == 1216);
@@ -265,7 +277,7 @@ int main(void) {
             (void)frame(true, true, false, 85, 156, 10, false);
             app_quick_layer_present_buttons(&ctx, current);
         }
-        if (path == 3) (void)frame(true, true, false, 250, 284, 10, false);
+        if (path == 3) (void)frame(true, true, false, 250, 424, 10, false);
         if (path == 4) {usb = true; release(); usb = false;}
         assert(!app_quick_layer_is_open() && fallback == f + 1 && failures == n + 1);
         p = pushes; app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p);
@@ -296,7 +308,7 @@ int main(void) {
             usb = (seed & 4095) == 4; online = (seed & 8191) == 5;
             if ((seed & 1023) == 6) error_once = 1;
             static const int xs[] = {85, 256, 427, 598, 100, 350, 620, 200};
-            static const int ys[] = {10, 100, 156, 156, 284, 384, 700, 10};
+            static const int ys[] = {10, 100, 156, 156, 424, 524, 700, 10};
             unsigned index = (seed >> 12) & 7;
             bool down = action < 24;
             bool was_down = touch.touched;
@@ -310,8 +322,9 @@ int main(void) {
     }
     app_quick_layer_reset(); p = pushes;
     app_quick_layer_flush_frontlight(&ctx, current); assert(pushes == p);
-    // 页面回调直接控制自动/锁定；重复点击不换页，其他页面不暴露第五枚。
-    // Page callbacks toggle auto/lock directly; repeated taps stay on-page and other pages omit the fifth key.
+    // 页面回调直接控制自动/锁定；重复点击不换页，前光板的锁屏键位于第二排末尾。
+    // Page callbacks toggle auto/lock directly; repeated taps stay on-page, with
+    // the frontlight board's lock key at the end of row two.
     open_layer();current=&reader_page;
     for(int i=0;i<2;++i){
         (void)frame(true,true,false,85,296,10,false);app_quick_layer_present_buttons(&ctx,current);

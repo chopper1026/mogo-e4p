@@ -17,14 +17,14 @@
  * pulling further down expands the capsules for that opening only: closing or
  * reopening returns to the circle band alone, and the light-off tap still
  * collapses them; one continuous fast swipe only opens, never expands.
- * 用户修订：锁屏图标移出快捷栏；常驻大滑杆先改为随开关展开的卡片行，再按用户
- * 参考图去掉卡片容器，改成控制中心式横向胶囊；亮度用半填充圆图标，色温用温度
- * 计图标，滑杆只在开灯时可触。
- * User revision: drop the lock icon; the always-present sliders first became a
- * card of rows, then per the user's reference the card was dropped for control
- * centre style horizontal capsules; brightness uses the half-filled circle and
- * colour temperature the thermometer, and the sliders respond only while the
- * light is on.
+ * 用户修订：保留独立锁屏键；有前光的板把前光开关放在第四枚圆钮，
+ * 锁屏键放在第二排末尾，避免把锁屏动作藏在硬件能力分支里。滑杆仍按参考图使用
+ * 控制中心式横向胶囊，亮度用半填充圆图标，色温用温度计图标，只在开灯时可触。
+ * User revision: keep a dedicated lock key. On frontlight boards
+ * the light switch stays in the fourth circle and the lock key ends row two,
+ * so locking is not hidden by a capability-specific fallback. Sliders retain
+ * the control-centre capsules, with contrast and thermometer icons, and respond
+ * only while the light is on.
  * 用户新增：WiFi 与蓝牙圆键按住 0.5 秒直接进入各自的设置页；点按仍只切换开关。
  * User addition: holding the WiFi or Bluetooth circle for 0.5 s opens its settings
  * page; a tap still only toggles the switch.
@@ -40,6 +40,8 @@
  * stays two rows tall instead of stacking portrait sliders below the keys.
  * 用户新增：触摸震动键放第二排，阅读时位于旋转键右侧；点按切换，长按进入震动设置。
  * User addition: a second-row haptics key follows reader rotation; tap toggles it and hold opens its settings.
+ * 用户 2026-11-14 修订：第二排先排移动网络、阅读方向、震动，锁屏键最后；锁形复用系统图标。
+ * User revision on 2026-11-14: row two orders cellular, reader rotation, haptics, then lock; reuse the system lock icon.
  * 冻结：不访问硬件、设置或刷新，不申请帧缓存；只在展开/状态变化后由主循环调用绘图。
  * Frozen: No hardware, settings, presentation or frame allocations; the loop draws only on opening or state changes.
  */
@@ -121,8 +123,8 @@ typedef struct {
     uint16_t x0, y0;
     int hit;
     int64_t started_ms;
-    /// 本板是否有前光；没有时第四枚圆钮画锁屏，不画滑杆。
-    /// Whether this board has a frontlight; without one the fourth circle keeps the lock and sliders are omitted.
+    /// 本板是否有前光；有前光时锁屏键位于第二排末尾，没有前光时第四枚圆钮就是锁屏。
+    /// Frontlight boards end row two with lock; without frontlight the fourth circle is the lock.
     bool frontlight;
     bool fl_on;
     /// 灯灭时继续下拉产生的本次开层临时展开；开层、收层与熄灯点按都会清零，
@@ -155,21 +157,29 @@ typedef struct {
     ui_quick_control_t drag;
 } ui_quick_menu_t;
 
-/// 绘图与命中共享布局；第二排依次为移动网络、阅读方向、震动键。/ Shared painting/hit geometry; row two holds mobile network, reader rotation, then haptics.
+/// 绘图与命中共享布局；第二排依次放移动网络、阅读方向和震动，有前光时末尾为锁屏。
+/// Shared painting/hit geometry; row two has cellular, rotation and haptics, followed by lock on frontlight boards.
+static inline int ui_quick_menu_base_button_count(const ui_quick_menu_t *menu) {
+    return menu && menu->frontlight ? 5 : 4;
+}
 static inline int ui_quick_menu_button_count(const ui_quick_menu_t *menu) {
-    return 4 + (menu && menu->cellular_available ? 1 : 0) +
+    return ui_quick_menu_base_button_count(menu) + (menu && menu->cellular_available ? 1 : 0) +
         (menu && menu->rotation_available ? 1 : 0) + (menu && menu->haptics_available ? 1 : 0);
+}
+static inline int ui_quick_menu_lock_button(const ui_quick_menu_t *menu) {
+    return menu && menu->frontlight ? ui_quick_menu_button_count(menu) - 1 : 3;
 }
 static inline int ui_quick_menu_cellular_button(const ui_quick_menu_t *menu) {
     return menu && menu->cellular_available ? 4 : -1;
 }
 static inline int ui_quick_menu_rotation_button(const ui_quick_menu_t *menu) {
-    return menu && menu->rotation_available ? 4 + (menu->cellular_available ? 1 : 0) : -1;
+    return menu && menu->rotation_available ? 4 +
+        (menu->cellular_available ? 1 : 0) : -1;
 }
 /// 震动键排在可选的阅读旋转键之后；无马达时不显示。/ Haptics follows optional reader rotation and is absent without a motor.
 static inline int ui_quick_menu_haptics_button(const ui_quick_menu_t *menu) {
-    return menu && menu->haptics_available ? 4 + (menu->cellular_available ? 1 : 0) +
-        (menu->rotation_available ? 1 : 0) : -1;
+    return menu && menu->haptics_available ? 4 +
+        (menu->cellular_available ? 1 : 0) + (menu->rotation_available ? 1 : 0) : -1;
 }
 static inline bool ui_quick_menu_landscape(void) {
     return epd_rotated_display_width() > epd_rotated_display_height();
@@ -182,7 +192,7 @@ static inline int ui_quick_menu_button_x(const ui_quick_menu_t *menu, int button
     return (column * 2 + 1) * width / 8;
 }
 static inline int ui_quick_menu_row_offset(const ui_quick_menu_t *menu) {
-    return menu && (menu->cellular_available || menu->rotation_available || menu->haptics_available)
+    return menu && (menu->frontlight || menu->cellular_available || menu->rotation_available || menu->haptics_available)
         ? UI_QUICK_ROTATION_ROW_STEP : 0;
 }
 static inline int ui_quick_menu_button_y(const ui_quick_menu_t *menu, int button) {
@@ -190,7 +200,7 @@ static inline int ui_quick_menu_button_y(const ui_quick_menu_t *menu, int button
 }
 static inline int ui_quick_menu_height(const ui_quick_menu_t *menu) {
     if (ui_quick_menu_landscape())
-        return menu && (menu->cellular_available || menu->rotation_available || menu->haptics_available ||
+        return menu && (menu->frontlight || menu->cellular_available || menu->rotation_available || menu->haptics_available ||
                         (menu->frontlight && (menu->fl_on || menu->fl_expanded)))
             ? UI_QUICK_HEIGHT + UI_QUICK_ROTATION_ROW_STEP : UI_QUICK_HEIGHT;
     return (menu && menu->frontlight && (menu->fl_on || menu->fl_expanded)

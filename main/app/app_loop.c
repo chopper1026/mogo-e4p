@@ -996,7 +996,11 @@ void app_loop_run(const app_loop_config_t* config) {
             if (key_action != DEVICE_POWER_KEY_NONE) {
                 last_input_ms = ctx.now_ms;
                 bool quick_was_open = app_quick_layer_is_open();
-                if (quick_was_open && !quick_lock_requested) {
+                if (quick_was_open) {
+                    // 快捷栏动作（含快捷栏锁屏）先恢复底页，再进入锁屏流程；锁屏
+                    // 不应继承仍在屏上的快捷栏遮罩。
+                    // Restore the underlay before every lock path, including the
+                    // quick-bar lock button, so the lock screen never inherits the overlay.
                     app_quick_layer_reset();
                     app_quick_layer_present(&ctx, current, false);
                 }

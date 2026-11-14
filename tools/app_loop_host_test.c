@@ -208,11 +208,11 @@ const EpdWaveform *display_normalize_waveform(bool hold_gray) {
 enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     if(a.height==108&&a.width==108){
         assert(a.y==UI_QUICK_CIRCLE_Y-UI_QUICK_RADIUS ||
-               (haptics_present&&a.y==UI_QUICK_CIRCLE_Y+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_RADIUS));
+               ((fl_ready||haptics_present)&&a.y==UI_QUICK_CIRCLE_Y+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_RADIUS));
         if(m==MODE_GL16)++fl_key_gl;
         else {assert(w==&E0470_FOLLOW_WAVEFORM&&m==MODE_DU);++quick_du;}
     }
-    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+    if(a.width==UI_QUICK_FL_ROW_W&&a.height==UI_QUICK_FL_ROW_H){
         assert(!"binary sliders require padded complete DU");
     }
     if(a.height==76)assert(a.x==0&&a.y==0&&a.width==684&&w==&E0470_WAVEFORM&&m==MODE_GL16);
@@ -223,7 +223,9 @@ enum EpdDrawError update_display_area_diff_with(EpdiyHighlevelState*h,const void
 enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState*h,const void*w,int m,EpdRect a,
                                                   int pad_lines,int pad_col_bytes) {
     (void)pad_lines;(void)pad_col_bytes;
-    if(a.width==604&&(a.y==UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2||a.y==UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2)){
+    if(a.width==UI_QUICK_FL_ROW_W&&a.height==UI_QUICK_FL_ROW_H){
+        assert(a.y==UI_QUICK_FL_BRI_CY+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_FL_ROW_H/2||
+               a.y==UI_QUICK_FL_CCT_CY+UI_QUICK_ROTATION_ROW_STEP-UI_QUICK_FL_ROW_H/2);
         assert(w==&E0470_WAVEFORM&&m==MODE_DU&&pad_lines==1&&pad_col_bytes==1);
         ++fl_drag_pushes;
         return update_display_area_with(h,w,m,a);
@@ -238,7 +240,8 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 static bool tap_during_present;
 enum EpdDrawError update_display_area_full_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {
     assert(a.x==0&&a.y==0&&a.width==684&&
-           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_FRONTLIGHT_HEIGHT||a.height==1216));
+           (a.height==UI_QUICK_HEIGHT||a.height==UI_QUICK_HEIGHT+UI_QUICK_ROTATION_ROW_STEP||
+            a.height==UI_QUICK_FRONTLIGHT_HEIGHT+UI_QUICK_ROTATION_ROW_STEP||a.height==1216));
     if(a.height==1216){
         assert(w==&normalize_wave&&m==MODE_GL16);++normalize_pushes;
         return update_display_area_with(h,w,m,a);
@@ -261,24 +264,22 @@ void ui_quick_menu_draw_status(uint8_t *fb) {
     if(battery_test)ui_nav_status(fb);
 }
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
-    return (EpdRect){0,0,684,menu->frontlight&&menu->fl_on?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
+    return (EpdRect){0,0,684,ui_quick_menu_height(menu)};
 }
 bool ui_quick_menu_draw_control(uint8_t *fb,const ui_quick_menu_t *menu,
                                 ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_control_draws;
     if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
-    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
-                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
-                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
+    const EpdRect track=ui_quick_menu_frontlight_track(menu,control);
+    *dirty=(EpdRect){track.x-8,track.y-8,track.width+16,UI_QUICK_FL_ROW_H};
     return true;
 }
 bool ui_quick_menu_draw_control_white(uint8_t *fb,const ui_quick_menu_t *menu,
                                       ui_quick_control_t control,EpdRect *dirty) {
     (void)fb;(void)menu;++fl_sweep_draws;
     if((control!=UI_QUICK_CTL_BRIGHTNESS&&control!=UI_QUICK_CTL_CCT)||!menu->fl_on)return false;
-    *dirty=(EpdRect){UI_QUICK_FL_ROW_X, control==UI_QUICK_CTL_BRIGHTNESS
-                     ?UI_QUICK_FL_BRI_CY-UI_QUICK_FL_ROW_H/2:UI_QUICK_FL_CCT_CY-UI_QUICK_FL_ROW_H/2,
-                     UI_QUICK_FL_ROW_W, UI_QUICK_FL_ROW_H};
+    const EpdRect track=ui_quick_menu_frontlight_track(menu,control);
+    *dirty=(EpdRect){track.x-8,track.y-8,track.width+16,UI_QUICK_FL_ROW_H};
     return true;
 }
 bool ui_quick_menu_draw_button(uint8_t *fb,const ui_quick_menu_t *menu,int button,bool active,bool pressed,EpdRect *dirty) {
@@ -978,11 +979,15 @@ int main(void) {
     assert(!ble_enabled&&quick_recent_requests==1&&!ble_resets&&quick_gl==1&&quick_draws==1&&quick_status_draws==2&&quick_press_draws==2&&base_renders==2&&!touch_calls);
     reset();add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(427,156,1,0);add(0,0,0,0);run();
-    assert(fulls==2&&base_renders==2&&quick_draws==1&&quick_du==1&&quick_press_draws==1);
-    reset();first.on_before_lock=before_lock;
+    assert(fulls==2&&base_renders==3&&quick_draws==1&&quick_du==1&&quick_press_draws==1);
+    reset();first.on_before_lock=before_lock;fl_ready=haptics_present=true;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
-    add(427,156,1,0);add(0,0,0,0);add(598,156,1,0);add(0,0,0,0);run();
-    assert(idle_locks==1&&before_locks==1&&fulls>=2&&!touch_calls);
+    add(427,156,1,0);add(0,0,0,0);
+    // 刷新收层后重新打开，第二排震动键之后的最后一键才是锁屏。
+    // Reopen after refresh closes the layer; lock follows haptics at the end of row two.
+    add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
+    add(256,296,1,0);add(0,0,0,0);run();
+    assert(idle_locks==1&&before_locks==1&&fulls>=2&&!touch_calls&&quick_draws==2&&normalize_pushes==1&&!haptics_settings_writes);
     for(int policy=0;policy<3;++policy){
         reset();main_fast=policy==1;main_water=policy==2;first.on_gesture=gesture;click_enabled=true;
         add(85,1141,1,0);add(85,1141,1,0);add(0,0,0,0);run();
@@ -1044,22 +1049,22 @@ int main(void) {
         assert(reader_return_fullscreen == (fullscreen != 0) && enters == 2);
     }
     puts("quick haptics return: real loop restores the reader path from body/sheets in both full-screen states without toggling or replaying release");
-    // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 480，拖动帧与松手
-    // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 264，收层
+    // 第四枚圆钮是前光开关：开灯才展开胶囊滑杆并整层重排到 620，拖动帧与松手
+    // 提交都走完整 DU 差分（不追加两段定稿，白表/灰表零推送），熄灯收回 404，收层
     // 整屏归一；开关点按不再单独重画圆钮。
     // The fourth circle is the frontlight switch: the capsules expand with a
-    // whole-layer re-composite to 480, drag frames and the release commit both
+    // whole-layer re-composite to 620, drag frames and the release commit both
     // use complete DU (no two-stage settle; zero white/gray pushes),
-    // switching off returns to 264 and closing normalizes the whole screen; the switch tap
+    // switching off returns to 404 and closing normalizes the whole screen; the switch tap
     // no longer repaints its circle alone.
     reset();fl_ready=true;fl_on=false;fl_bri=40;fl_cct=50;
     add(300,20,1,0);add(300,110,1,0);add(0,0,0,0);
     add(598,156,1,0);add(0,0,0,0);
-    add(399,300,1,0);add(512,300,1,0);add(0,0,0,0);
-    add(399,398,1,0);add(0,0,0,0);
-    add(300,500,1,0);add(300,300,1,0);add(0,0,0,0);run();
+    add(399,424,1,0);add(512,424,1,0);add(0,0,0,0);
+    add(399,524,1,0);add(0,0,0,0);
+    add(300,700,1,0);add(300,500,1,0);add(0,0,0,0);run();
     assert(fl_on&&fl_bri==78&&fl_cct==59);
-    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT&&fulls==1&&!white_restores&&normalize_pushes==1);
+    assert(quick_gl_height==UI_QUICK_FRONTLIGHT_HEIGHT+UI_QUICK_ROTATION_ROW_STEP&&fulls==1&&!white_restores&&normalize_pushes==1);
     assert(!fl_key_gl&&fl_control_draws==5&&fl_sweep_draws==0&&fl_drag_pushes==5&&fl_white_pushes==0&&fl_gray_pushes==0);
     // 展开与开关点按各重排一次并重画一层；收起时层已关闭，只重排底层页面。
     // Opening and the switch tap each re-composite and redraw the layer; on close the

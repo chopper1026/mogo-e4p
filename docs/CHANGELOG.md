@@ -17,6 +17,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## v1.1.1 · 本地测试 / Local testing · 2026-11-14
 
 - 充电时电量图标的闪电增加黑白反差，即使电量接近耗尽也能清楚显示。
+- 快捷栏增加独立锁屏键，位于第二排末尾并使用清晰完整的锁形图标；刷新和锁屏都会先收起快捷栏并恢复底页，再执行对应操作。
 
 ## v1.1.0 · 本地测试 / Local testing · 2026-11-13
 
