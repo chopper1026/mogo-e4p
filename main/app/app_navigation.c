@@ -26,7 +26,6 @@ extern const app_desc_t app_book;
 // Retain the existing one-shot quick-layer reader snapshot without extending its lifetime through other navigation.
 static bool s_quick_return_body;
 static char s_quick_return_path[256];
-static bool s_quick_return_fullscreen;
 static bool s_nav_contact_down, s_nav_polled;
 
 bool app_navigation_main_page_ready(app_ctx_t* ctx, const app_desc_t* app) {
@@ -74,8 +73,7 @@ void app_navigation_capture_reader_return(const app_desc_t *current) {
     // 阅读弹层仍属于当前书；由阅读会话检查排除书架、无书和保存失败的状态。
     // Reader sheets still belong to the active book; the session excludes shelf, missing-book and failed-save states.
     s_quick_return_body = current == &app_book &&
-        app_book_resume_context(s_quick_return_path, sizeof(s_quick_return_path),
-                                &s_quick_return_fullscreen);
+        app_book_resume_context(s_quick_return_path, sizeof(s_quick_return_path));
 }
 
 bool app_poll_main_navigation_from(app_ctx_t *ctx,unsigned current_tab) {
@@ -127,12 +125,11 @@ void app_navigation_apply_request(app_ctx_t *ctx, const app_desc_t **current,
             *current = history->return_app;
             history->return_app = NULL;
             app_font_activate_system();
-            // 快捷栏长按离开阅读正文后的返回：按离开时的书与全屏状态重开正文。
+            // 快捷栏长按离开阅读正文后的返回：按离开时的书重开正文，沿用当前显隐设置。
             // Returning from a quick-bar hold that left the reading body reopens
-            // that book and full-screen state instead of landing on the shelf.
+            // that book with current bar settings instead of landing on the shelf.
             if (*current == &app_book && s_quick_return_body)
-                (void)app_book_request_return_to_body(s_quick_return_path,
-                                                     s_quick_return_fullscreen);
+                (void)app_book_request_return_to_body(s_quick_return_path);
             if ((*current)->on_enter) (*current)->on_enter(ctx);
             // 初始化后恢复通用页码，避免 on_enter 的默认页码覆盖来源。
             // Restore the shared leaf after initialization overrides its default.

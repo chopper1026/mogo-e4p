@@ -45,6 +45,11 @@ static void reader_panel_text_vc(uint8_t *fb,int x,int cy,int px,const char *tex
  (void)fb;(void)x;(void)px;(void)text;(void)align;(void)inverted;
  assert(cy==drawn_card.y+drawn_card.height/2);
 }
+static void draw_reading_switch(uint8_t *fb,EpdRect track,bool on){
+ (void)fb;(void)on;
+ assert(track.x>=drawn_card.x&&track.x+track.width<=drawn_card.x+drawn_card.width);
+ assert(track.y>=drawn_card.y&&track.y+track.height<=drawn_card.y+drawn_card.height);
+}
 static void ui_draw_icon(uint8_t *fb,int x,int cy,int size,int icon,int gray){
  (void)fb;(void)x;(void)size;(void)icon;(void)gray;
  assert(cy==drawn_card.y+drawn_card.height/2);
@@ -53,12 +58,14 @@ enum {READER_PANEL_NONE,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_CHROME_SETTIN
 static app_reader_slot_item_t items[2][3];
 static unsigned s_chrome_pick_bar,s_chrome_pick_slot;
 static int s_reader_panel,s_chrome_scroll,s_chrome_pick_scroll,s_mode;
-static bool s_chrome_pick_drag,save_ok=true,s_reader_fullscreen;
+static bool s_chrome_pick_drag,save_ok=true;
 static bool progress_bar=true,s_reader_progress_bar=true,statusbar=true;
 enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
 static int s_margin[MARGIN_COUNT];
 bool app_settings_reader_statusbar(void){return statusbar;}
 static int s_chrome_height[2]={80,57};
+static bool s_chrome_visible[2]={true,true};
+static bool saved_visible[2]={true,true};
 static bool s_reader_footer_pending,s_reader_image_refresh_pending,s_reader_footer_strong,s_water_turn_pending;
 static size_t s_jump_offset;
 static char s_message[96];
@@ -83,10 +90,10 @@ static app_reader_slot_item_t app_settings_reader_chrome_item_impl(unsigned bar,
 #define app_settings_reader_chrome_item app_settings_reader_chrome_item_impl
 static bool app_settings_set_reader_chrome_item_impl(unsigned bar,unsigned slot,app_reader_slot_item_t item){++saves;if(save_ok)items[bar][slot]=item;return save_ok;}
 #define app_settings_set_reader_chrome_item app_settings_set_reader_chrome_item_impl
-static bool reset_default(void){++saves;if(save_ok)progress_bar=true;return save_ok;}
+static bool reset_default(void){++saves;if(save_ok){progress_bar=true;saved_visible[0]=saved_visible[1]=true;}return save_ok;}
 #define app_settings_set_reader_chrome_default reset_default
-static bool get_progress_bar(void){return progress_bar;}
-#define app_settings_reader_progress_bar get_progress_bar
+static bool set_visibility(bool header,bool footer){assert(locked);++saves;if(save_ok){saved_visible[0]=header;saved_visible[1]=footer;}return save_ok;}
+#define app_settings_set_reader_chrome_visibility set_visibility
 static bool set_progress_bar(bool on){assert(locked);++saves;if(save_ok)progress_bar=on;return save_ok;}
 #define app_settings_set_reader_progress_bar set_progress_bar
 static bool set_heights(uint8_t h,uint8_t f){(void)h;(void)f;++saves;return save_ok;}
@@ -105,8 +112,8 @@ unit += re.search(r'static const app_reader_slot_item_t s_chrome_item_order\[\] 
 unit += '#define READER_CHROME_ITEM_ROWS 10\n'
 unit += '\n'.join(re.findall(r'^#define UI_LOCK_(?:WIDTH|HEIGHT) .*', (ROOT / 'main/ui/ui_kit.h').read_text(), re.M)) + '\n'
 unit += '\n'.join(re.findall(r'^#define UI_BAR_(?:TOP|H|MARGIN) .*', (ROOT / 'main/ui/ui_kit.h').read_text(), re.M)) + '\n'
-unit += '\n'.join(re.findall(r'^#define READER_(?:FULLSCREEN_PROGRESS_TOP|FOOTER_PROGRESS_SPACE) .*', page, re.M)) + '\n'
-for name in ('reader_footer_height', 'reader_area', 'reader_fullscreen_progress_area', 'body_rect_for_tracking', 'progress_rect'):
+unit += '\n'.join(re.findall(r'^#define READER_FOOTER_PROGRESS_SPACE .*', page, re.M)) + '\n'
+for name in ('reader_footer_height', 'reader_area', 'body_rect_for_tracking', 'progress_rect'):
     unit += function(name, book) + '\n'
 unit += r'''
 static bool reader_reflow_build(void){
@@ -122,7 +129,7 @@ if 'static bool chrome_row_visible(' in page:
 unit += function('reader_chrome_item_label', chrome) + '\n'
 unit += function('draw_chrome_row', book) + '\n'
 unit += function('chrome_list_scroll', book) + '\n'
-for name in ('apply_reader_chrome_layout', 'apply_reader_chrome_heights'):
+for name in ('apply_reader_chrome_layout', 'apply_reader_chrome_visibility', 'apply_reader_chrome_heights'):
     unit += function(name, book) + '\n'
 action = function('reader_panel_action', book)
 start = action.index('    if (s_reader_panel == READER_PANEL_CHROME_SETTINGS ||')
@@ -148,15 +155,15 @@ int main(void){
   data.clock="";data.date="";check_layout(&data);data.clock="12:34";data.date="11-01 周日";
  }
  app_ctx_t ctx={0};
- assert(CHROME_ROW_VISIBLE==7&&CHROME_ROW_HEIGHT>=80);
+ assert(CHROME_ROW_VISIBLE==10&&CHROME_ROW_COUNT==10&&CHROME_ROW_MAX_SCROLL==0&&CHROME_ROW_HEIGHT<80);
  assert(CHROME_ROW_TOP>=KEY_SETTINGS_TOP+92&&CHROME_ROW_TOP<=KEY_SETTINGS_TOP+108);
  assert(CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT<=1174);
  for(int row=0;row<CHROME_ROW_COUNT;++row)
-  assert(chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT)==(row<7));
+  assert(row < CHROME_ROW_VISIBLE || !chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT));
  for(s_chrome_scroll=0;s_chrome_scroll<=CHROME_ROW_MAX_SCROLL;s_chrome_scroll+=CHROME_ROW_PITCH){
   drawn_rows=0;
   for(int row=0;row<CHROME_ROW_COUNT;++row)draw_chrome_row(NULL,row);
-  assert(drawn_rows==7);
+  assert(drawn_rows==CHROME_ROW_VISIBLE);
   s_reader_panel=READER_PANEL_CHROME_SETTINGS;unsigned before=saves;
   assert(action(&ctx,300,1193)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_CHROME_SETTINGS&&saves==before);
   assert(action(&ctx,300,CHROME_ROW_TOP-1)==APP_REDRAW_NONE);
@@ -166,7 +173,7 @@ int main(void){
    EpdRect card=chrome_row_rect(row);
    if(card.y<CHROME_ROW_TOP||card.y+card.height>CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT)continue;
    s_reader_panel=READER_PANEL_CHROME_SETTINGS;
-   assert(action(&ctx,row>=6&&row<8?600:card.x,card.y)==APP_REDRAW_PAGE);
+   assert(action(&ctx,(row==6||row==8)?600:card.x,card.y)==APP_REDRAW_PAGE);
    if(row<6)assert(s_reader_panel==READER_PANEL_CHROME_PICKER&&s_chrome_pick_bar==(unsigned)row/3&&s_chrome_pick_slot==(unsigned)row%3);
   }
  }
@@ -178,7 +185,7 @@ int main(void){
  const int points[4][2]={{progress.x,progress.y},{progress.x+progress.width-1,progress.y},
   {progress.x,progress.y+progress.height-1},{progress.x+progress.width-1,progress.y+progress.height-1}};
  for(unsigned full=0;full<2;++full)for(unsigned fail=0;fail<2;++fail)for(unsigned i=0;i<4;++i){
-  s_reader_fullscreen=full;save_ok=!fail;progress_bar=s_reader_progress_bar=true;s_chrome_error[0]=0;
+  statusbar=full;save_ok=!fail;progress_bar=s_reader_progress_bar=true;s_chrome_error[0]=0;
   unsigned old_builds=builds,old_invalidates=invalidates;
   assert(action(&ctx,points[i][0],points[i][1])==APP_REDRAW_PAGE);
   assert(progress_bar==(bool)fail&&s_reader_progress_bar==progress_bar);
@@ -187,7 +194,7 @@ int main(void){
  }
  save_ok=true;unsigned progress_saves_before=saves;
  assert(action(&ctx,progress.x,progress.y+progress.height)==APP_REDRAW_NONE&&saves==progress_saves_before);
- progress_bar=s_reader_progress_bar=false;s_reader_fullscreen=false;
+ progress_bar=s_reader_progress_bar=false;statusbar=true;
  assert(action(&ctx,36,chrome_row_rect(CHROME_ROW_COUNT-1).y)==APP_REDRAW_PAGE&&progress_bar);
  for(s_chrome_pick_scroll=0;s_chrome_pick_scroll<=CHROME_PICK_MAX_SCROLL;s_chrome_pick_scroll+=CHROME_PICK_PITCH){
   s_reader_panel=READER_PANEL_CHROME_PICKER;unsigned before=saves;
@@ -202,31 +209,34 @@ int main(void){
  s_chrome_scroll=CHROME_ROW_MAX_SCROLL;s_reader_panel=READER_PANEL_CHROME_SETTINGS;save_ok=false;
  EpdRect reset=chrome_row_rect(CHROME_ROW_COUNT-1);action(&ctx,300,reset.y+20);assert(s_chrome_error[0]);
  for(unsigned full=0;full<2;++full)for(unsigned fail=0;fail<4;++fail){
-  progress_bar=s_reader_progress_bar=true;
-  s_reader_fullscreen=full;s_chrome_height[0]=80;s_chrome_height[1]=57;
+  progress_bar=s_reader_progress_bar=true;s_chrome_visible[0]=s_chrome_visible[1]=true;
+  statusbar=full;s_chrome_height[0]=80;s_chrome_height[1]=57;
   s_reader_session.position.page=3;builds=maps=progress_saves=freed=0;
-  save_ok=fail!=3;build_failures=full?0:fail==1?1:fail==2?2:0;s_view=READING;
+  save_ok=fail!=3;build_failures=fail==1?1:fail==2?2:0;s_view=READING;
   apply_reader_chrome_heights(96,73,false);
-  bool success=full?save_ok:fail==0;
+  bool success=fail==0;
   assert(!locked&&s_chrome_height[0]==(success?96:80)&&s_chrome_height[1]==(success?73:57));
-  assert(s_reader_session.position.page==(!full&&success?300/80:3));
-  assert(maps==(!full&&success)&&progress_saves==maps);
-  assert(builds==(full?0:success?1:2));assert(freed==(!full&&fail==2));
+  assert(s_reader_session.position.page==(success?300/80:3));
+  assert(maps==(success)&&progress_saves==maps);
+  assert(builds==(success?1:2));assert(freed==(fail==2));
  }
  // 两种阅读模式、显隐双向、默认恢复及全部失败路径均保留当前位置和持久化边界。
  // Both modes, toggle directions, defaults and all failure paths preserve the anchor and persistence boundary.
  for(unsigned full=0;full<2;++full)for(unsigned previous=0;previous<2;++previous)
  for(unsigned reset=0;reset<2;++reset)for(unsigned fail=0;fail<4;++fail){
-  s_reader_fullscreen=full;progress_bar=s_reader_progress_bar=previous;
+  statusbar=full;progress_bar=s_reader_progress_bar=previous;
   s_chrome_height[0]=80;s_chrome_height[1]=57;s_reader_session.position.page=3;
   builds=maps=progress_saves=freed=0;s_jump_offset=42;s_view=READING;s_chrome_error[0]=0;
-  bool next=reset||!previous,reflow=next!=previous;
+  s_chrome_visible[0]=saved_visible[0]=false;s_chrome_visible[1]=saved_visible[1]=true;
+  bool next=reset||!previous,reflow=next!=previous || reset;
   save_ok=fail!=3;build_failures=reflow?(fail==1?1:fail==2?2:0):0;
   app_redraw_t result=reset?apply_reader_chrome_heights(80,57,true):
       apply_reader_chrome_layout(80,57,next,false);
   bool success=save_ok&&(!reflow||fail==0);
   assert(result==APP_REDRAW_PAGE&&!locked);
   assert(s_reader_progress_bar==(success?next:previous)&&progress_bar==s_reader_progress_bar);
+  assert(s_chrome_visible[0]==(success&&reset)&&s_chrome_visible[1]);
+  assert(saved_visible[0]==s_chrome_visible[0]&&saved_visible[1]==s_chrome_visible[1]);
   assert(builds==(reflow?(success?1:2):0)&&maps==(success&&reflow)&&progress_saves==maps);
   assert(s_reader_session.position.page==(success&&reflow?300/80:3));
   assert(s_jump_offset==(success&&reflow?SIZE_MAX:42));
@@ -237,56 +247,119 @@ int main(void){
    assert(!memcmp(&built_body,&expected,sizeof(expected)));
   }
  }
- // 排版、页脚与刷新区域共用显隐几何：普通回收19px，全屏回收12px，用户边距不变。
- // Layout, footer and refresh share visibility geometry: reclaim 19px/12px without changing margins.
- for(unsigned full=0;full<2;++full)for(unsigned status=0;status<2;++status)
- for(int header=64;header<=144;header+=8)for(int footer=57;footer<=121;footer+=8){
-  s_reader_fullscreen=full;statusbar=status;s_chrome_height[0]=header;s_chrome_height[1]=footer;
-  s_margin[0]=18;s_margin[1]=30;s_margin[2]=12;s_margin[3]=24;
-  s_reader_progress_bar=true;
-  EpdRect shown=body_rect_for_tracking(0),shown_area=reader_area(),shown_footer=progress_rect();
-  EpdRect shown_strip=reader_fullscreen_progress_area();
-  s_reader_progress_bar=false;
-  EpdRect hidden=body_rect_for_tracking(0),hidden_area=reader_area(),hidden_footer=progress_rect();
-  EpdRect hidden_strip=reader_fullscreen_progress_area();
-  assert(hidden.x==shown.x&&hidden.y==shown.y&&hidden.width==shown.width);
-  assert(hidden.height-shown.height==(full?12:19)&&hidden_area.height-shown_area.height==(full?12:19));
-  assert(hidden_footer.y-shown_footer.y==19&&shown_footer.height-hidden_footer.height==19);
-  assert(shown_strip.y+shown_strip.height==UI_LOCK_HEIGHT&&hidden_strip.height==0);
-  assert(hidden_area.y+hidden_area.height==(full?UI_LOCK_HEIGHT:hidden_footer.y));
-  assert(hidden.y+hidden.height+s_margin[3]+(full?2:0)==hidden_area.y+hidden_area.height);
+ // 每个信息栏、两个方向与保存/试排/回滚失败；所有显隐变化都围绕当前位置重排。
+ // Each bar, both directions and save/build/rollback failures; all visibility changes reflow around the current anchor.
+ for(unsigned full=0;full<2;++full)for(unsigned old=0;old<4;++old)
+ for(unsigned bar=0;bar<2;++bar)for(unsigned fail=0;fail<4;++fail){
+  statusbar=full;bool previous[2]={old&1,old&2},next[2]={old&1,old&2};
+  next[bar]=!next[bar];
+  for(unsigned i=0;i<2;++i)s_chrome_visible[i]=saved_visible[i]=previous[i];
+  s_reader_session.position.page=3;builds=maps=progress_saves=freed=0;
+  s_jump_offset=42;s_view=READING;s_chrome_error[0]=0;
+  save_ok=fail!=3;build_failures=fail==1?1:fail==2?2:0;
+  assert(apply_reader_chrome_visibility(next[0],next[1])==APP_REDRAW_PAGE);
+  bool success=save_ok&&fail==0;
+  for(unsigned i=0;i<2;++i){
+   assert(s_chrome_visible[i]==(success?next[i]:previous[i]));
+   assert(saved_visible[i]==s_chrome_visible[i]);
+  }
+  assert(!locked&&builds==(success?1:2));
+  assert(maps==(success)&&progress_saves==maps);
+  assert(s_reader_session.position.page==(success?300/80:3));
+  assert(s_jump_offset==(success?SIZE_MAX:42));
+  assert(freed==(fail==2)&&s_view==(freed?SHELF:READING));
+  if(!success&&!freed)assert(s_chrome_error[0]);
+  if(!freed){EpdRect expected=body_rect_for_tracking(0);assert(!memcmp(&built_body,&expected,sizeof(expected)));}
  }
+ for(unsigned full=0;full<2;++full)for(unsigned fail=0;fail<4;++fail){
+  statusbar=full;progress_bar=s_reader_progress_bar=true;
+  s_chrome_height[0]=144;s_chrome_height[1]=121;
+  s_chrome_visible[0]=saved_visible[0]=false;s_chrome_visible[1]=saved_visible[1]=false;
+  s_reader_session.position.page=3;builds=maps=progress_saves=freed=0;s_view=READING;
+  save_ok=fail!=3;build_failures=fail==1?1:fail==2?2:0;
+  assert(apply_reader_chrome_heights(80,57,true)==APP_REDRAW_PAGE);
+  bool success=save_ok&&fail==0;
+  assert(s_chrome_height[0]==(success?80:144)&&s_chrome_height[1]==(success?57:121));
+  assert(s_chrome_visible[0]==success&&s_chrome_visible[1]==success);
+  assert(saved_visible[0]==success&&saved_visible[1]==success);
+  assert(builds==(success?1:2)&&maps==(success));
+  assert(freed==(fail==2));
+ }
+ s_chrome_visible[0]=s_chrome_visible[1]=true;
+ // Every bar/status/progress/height combination shares pagination and refresh bounds.
+ for(unsigned status=0;status<2;++status)
+ for(int header=64;header<=144;header+=8)for(int footer=57;footer<=121;footer+=8)
+ for(unsigned progress=0;progress<2;++progress)for(unsigned visible=0;visible<4;++visible){
+  statusbar=status;s_chrome_height[0]=header;s_chrome_height[1]=footer;
+  s_reader_progress_bar=progress;s_chrome_visible[0]=visible&1;s_chrome_visible[1]=visible&2;
+  s_margin[0]=18;s_margin[1]=30;s_margin[2]=12;s_margin[3]=24;
+  EpdRect body=body_rect_for_tracking(0),area=reader_area(),footer_rect=progress_rect();
+  int expected_top=(status?80:0)+(s_chrome_visible[0]?header:0);
+  int expected_bottom=UI_LOCK_HEIGHT-(s_chrome_visible[1]?UI_BAR_MARGIN+footer-(progress?0:19):0);
+  assert(area.y==expected_top&&area.y+area.height==expected_bottom);
+  assert(body.x==18&&body.width==READER_WIDTH-48&&body.y==expected_top+9+12);
+  assert(body.y+body.height+24+9==expected_bottom);
+  assert(footer_rect.height==(s_chrome_visible[1]?footer-(progress?0:19):0));
+  if(s_chrome_visible[1])assert(expected_bottom==footer_rect.y);
+  else assert(expected_bottom==UI_LOCK_HEIGHT);
+ }
+ // Hidden-bar height/progress changes persist without needless layout or anchor updates.
+ s_chrome_visible[0]=s_chrome_visible[1]=false;save_ok=true;build_failures=0;
+ s_chrome_height[0]=80;s_chrome_height[1]=57;s_reader_progress_bar=true;
+ builds=maps=progress_saves=0;s_reader_session.position.page=3;
+ apply_reader_chrome_heights(96,73,false);
+ assert(builds==0&&maps==0&&progress_saves==0&&s_reader_session.position.page==3);
+ apply_reader_chrome_layout(96,73,false,false);
+ assert(builds==0&&maps==0&&progress_saves==0&&s_reader_session.position.page==3);
+ s_chrome_visible[0]=s_chrome_visible[1]=true;
  progress_bar=s_reader_progress_bar=true;statusbar=true;
- save_ok=true;s_reader_fullscreen=false;s_chrome_height[0]=APP_READER_HEADER_HEIGHT_MAX;s_chrome_height[1]=57;
- s_chrome_scroll=3*CHROME_ROW_PITCH;s_reader_panel=READER_PANEL_CHROME_SETTINGS;
+ save_ok=true;statusbar=true;s_chrome_height[0]=APP_READER_HEADER_HEIGHT_MAX;s_chrome_height[1]=57;
+ s_chrome_scroll=0;s_reader_panel=READER_PANEL_CHROME_SETTINGS;
  EpdRect height=chrome_row_rect(6);unsigned before=saves;
  assert(action(&ctx,602,height.y+48)==APP_REDRAW_NONE&&saves==before);
  assert(action(&ctx,474,height.y+48)==APP_REDRAW_NONE&&saves==before);
  assert(action(&ctx,374,height.y+48)==APP_REDRAW_PAGE&&s_chrome_height[0]==APP_READER_HEADER_HEIGHT_MAX-8);
+ // 高度与显隐命中独立：开关两侧边界均可点，数字/间隙不改值。
+ // Height and visibility have separate hits; labels/switch bounds toggle, numeric/gaps are inert.
+ for(unsigned bar=0;bar<2;++bar){
+  EpdRect card=chrome_row_rect(6+bar);
+  const int xs[]={36,218,286,319};
+  for(unsigned i=0;i<sizeof(xs)/sizeof(*xs);++i){
+   bool old=s_chrome_visible[bar],other=s_chrome_visible[1-bar];
+   assert(action(&ctx,xs[i],card.y+20)==APP_REDRAW_PAGE);
+   assert(s_chrome_visible[bar]!=old&&s_chrome_visible[1-bar]==other);
+  }
+  unsigned before=saves;
+  assert(action(&ctx,320,card.y+20)==APP_REDRAW_NONE&&saves==before);
+ }
+ // 主面板无滚动；内容选择保留整行滚动、边界与拖动锁存。
+ // The settings sheet stays fixed; picker scrolling retains bounds and drag latching.
  int scroll=0;bool drag=false;
  ui_gesture_event_t ev={.type=UI_GESTURE_SWIPE_U,.x0=300,.x=300,.y0=CHROME_ROW_TOP+120,.y=CHROME_ROW_TOP};
- for(int step=0;step<CHROME_ROW_COUNT-CHROME_ROW_VISIBLE;++step){
-  unsigned old_renders=renders;
-  assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA);
-  assert(scroll==(step+1)*CHROME_ROW_PITCH&&renders==old_renders+1);
-  assert(s_area.x==0&&s_area.y==CHROME_ROW_TOP&&s_area.width==UI_LOCK_WIDTH&&s_area.height==CHROME_ROW_VIEW_HEIGHT&&s_mode==MODE_GL16);
- }
- assert(scroll==CHROME_ROW_MAX_SCROLL);
- s_chrome_scroll=scroll;
- assert(chrome_row_visible(chrome_row_rect(CHROME_ROW_COUNT-1),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT));
  unsigned old_renders=renders;
  assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&renders==old_renders);
+ ev.y0=CHROME_PICK_TOP+120;ev.y=CHROME_PICK_TOP;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA);
+ assert(scroll==CHROME_PICK_MAX_SCROLL&&s_area.y==CHROME_PICK_TOP&&s_area.height==CHROME_PICK_VIEW_HEIGHT);
+ old_renders=renders;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&renders==old_renders);
  ev.type=UI_GESTURE_SWIPE_D;
- while(scroll)assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA);
- assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE);
- ev.type=UI_GESTURE_SWIPE_U;ev.y0=CHROME_ROW_TOP-1;
- assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&scroll==0);
- ev.y0=CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT;
- assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&scroll==0);
- ev.type=UI_GESTURE_MOVE;ev.y0=CHROME_ROW_TOP+120;ev.y=ev.y0-108;
- assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA&&drag&&scroll==CHROME_ROW_PITCH);
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA&&scroll==0);
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE);
+ ev.type=UI_GESTURE_MOVE;ev.y=ev.y0-107;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&!drag);
+ ev.y=ev.y0-120;ev.x=ev.x0+140;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&!drag);
+ ev.x=ev.x0;
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_AREA&&drag);
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&drag);
  ev.type=UI_GESTURE_SWIPE_U;
- assert(chrome_list_scroll(&ctx,&ev,CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT,CHROME_ROW_PITCH,CHROME_ROW_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&!drag&&scroll==CHROME_ROW_PITCH);
+ assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&!drag);
+ const int outside_y[]={CHROME_PICK_TOP-1,CHROME_PICK_TOP+CHROME_PICK_VIEW_HEIGHT};
+ for(unsigned i=0;i<2;++i){
+  ev.y0=outside_y[i];old_renders=renders;
+  assert(chrome_list_scroll(&ctx,&ev,CHROME_PICK_TOP,CHROME_PICK_VIEW_HEIGHT,CHROME_PICK_PITCH,CHROME_PICK_MAX_SCROLL,&scroll,&drag)==APP_REDRAW_NONE&&renders==old_renders);
+ }
  puts("PASS: all chrome slot combinations stay bounded and disjoint; visible rows alone accept taps; reset reports failures");
  (void)s_mode;
 }
@@ -310,22 +383,25 @@ layout_unit += r'''
 #define UI_LOCK_HEIGHT 1216
 #define UI_BAR_TOP 1096
 #define UI_BAR_H 96
-#define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
+#define UI_BAR_MARGIN 24
 #define READER_FOOTER_PROGRESS_SPACE 19
 enum { MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM, MARGIN_COUNT };
-static bool s_reader_fullscreen,s_reader_progress_bar=true;
+static bool statusbar=true,s_reader_progress_bar=true;
 static int s_chrome_height[2]={80,57},s_margin[MARGIN_COUNT]={36,36,0,0};
-static bool app_settings_reader_statusbar(void){return true;}
+static bool s_chrome_visible[2]={true,true};
+static bool app_settings_reader_statusbar(void){return statusbar;}
 '''
-for name in ('reader_footer_height', 'body_rect_for_tracking'):
+for name in ('reader_footer_height', 'reader_area', 'body_rect_for_tracking'):
     layout_unit += function(name, book) + '\n'
 layout_unit += r'''
 int main(void){
  char text[4097];for(size_t i=0;i<sizeof(text)-1;++i)text[i]="abcdefghijklmnopqrstuvxyz"[i%25];text[4096]=0;
- const int sizes[]={18,24,36,48,60,72,90};unsigned gained[2]={0};uint8_t fb=0;
+ const int sizes[]={18,24,36,48,60,72,90};unsigned gained[4]={0};uint8_t fb=0;
  for(unsigned full=0;full<2;++full)for(unsigned size=0;size<sizeof(sizes)/sizeof(sizes[0]);++size)
- for(unsigned line=110;line<=150;line+=20)for(int footer=57;footer<=121;footer+=64){
-  int px=sizes[size];s_reader_fullscreen=full;s_chrome_height[1]=footer;s_reader_progress_bar=true;
+ for(unsigned line=110;line<=150;line+=20)for(int footer=57;footer<=121;footer+=64)
+ for(unsigned variant=0;variant<4;++variant){
+  s_chrome_visible[0]=s_chrome_visible[1]=true;
+  int px=sizes[size];statusbar=full;s_chrome_height[1]=footer;s_reader_progress_bar=true;
   book_layout_set_spacing(line,0);book_layout_set_first_line_indent(0);
   EpdRect shown=body_rect_for_tracking(0);
   assert(book_layout_build(text,strlen(text),shown,px));
@@ -334,12 +410,17 @@ int main(void){
   assert(shown_end&&shown_pages>2);
   book_layout_draw_cursor_t old_cursor={0};drawn[0]=0;
   assert(book_layout_draw_slice(&fb,0,shown,px,&old_cursor)==0);
-  s_reader_progress_bar=false;EpdRect hidden=body_rect_for_tracking(0);
+  if(variant==0)s_reader_progress_bar=false;
+  else {
+   s_chrome_visible[0]=variant==2;
+   s_chrome_visible[1]=variant==1;
+  }
+  EpdRect hidden=body_rect_for_tracking(0);
   assert(book_layout_build(text,strlen(text),hidden,px));
   assert(book_layout_draw_slice(&fb,0,shown,px,&old_cursor)==-1);
   size_t hidden_end=book_layout_page_start_offset(1),page=book_layout_page_for_offset(anchor);
   assert(hidden_end>=shown_end&&book_layout_page_count()<=shown_pages);
-  if(hidden_end>shown_end)++gained[full];
+  if(hidden_end>shown_end)++gained[variant];
   assert(book_layout_page_start_offset(page)<=anchor&&anchor<book_layout_page_start_offset(page+1));
   drawn[0]=0;
   for(size_t p=0;p<book_layout_page_count();++p){
@@ -354,11 +435,12 @@ int main(void){
   book_layout_draw_cursor_t cursor={0};int done,steps=0;
   do{done=book_layout_draw_slice(&fb,0,hidden,px,&cursor);assert(done>=0&&++steps<128);}while(!done);
   assert(!strcmp(expected,drawn));
+  s_chrome_visible[0]=s_chrome_visible[1]=true;s_reader_progress_bar=true;
   assert(book_layout_build(text,strlen(text),shown,px));
   assert(book_layout_page_start_offset(1)==shown_end&&book_layout_page_count()==shown_pages);
  }
- assert(gained[0]&&gained[1]);book_layout_free();
- printf("PASS: real pagination reclaims hidden progress space (extra-line samples: footer=%u fullscreen=%u), retains anchors, continuous text, idle drawing and round trips\n",gained[0],gained[1]);
+ assert(gained[0]&&gained[1]&&gained[2]&&gained[3]);book_layout_free();
+ printf("PASS: real pagination reclaims progress/header/footer/both space (extra-line samples: %u/%u/%u/%u), retains anchors, continuous text, idle drawing and round trips\n",gained[0],gained[1],gained[2],gained[3]);
  return 0;
 }
 '''

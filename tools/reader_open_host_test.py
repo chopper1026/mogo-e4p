@@ -80,7 +80,7 @@ void book_layout_set_image_bleed_width(int width){assert(width>=0);image_bleed_w
 static const char *app_settings_book_background_path(void){return background_path;}
 static char s_message[256],s_latest_path[BOOK_STORE_PATH_MAX],s_reader_notice[128];
 static char s_chapter_heading_title[128],s_chapter_heading_label[32];
-static bool s_reader_return_home,s_reader_fullscreen,s_requested_fullscreen,s_book_fonts_applied;
+static bool s_reader_return_home,s_book_fonts_applied;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_save_failed;
 static bool s_water_turn_pending,s_reader_turn_pending,s_reader_text_frame,s_reader_stable_frame,s_excerpt_forward;
 static bool s_reader_entry_full,s_reader_image_refresh_pending,s_clear_confirm,s_batch_confirm;
@@ -124,7 +124,7 @@ static void *heap_caps_malloc(size_t n,int caps){(void)caps;return test_malloc(n
 book_progress_watch_t *book_progress_watch_create(const char *path){(void)path;if(fail_watch)return NULL;++watch_count;return calloc(1,sizeof(book_progress_watch_t));}
 void book_progress_watch_destroy(book_progress_watch_t *w){assert(w&&watch_count);--watch_count;free(w);}
 static void app_font_activate_system(void){event('Y');}
-static void app_font_activate_reading(void){assert(s_reader_fullscreen==s_requested_fullscreen);event('A');}
+static void app_font_activate_reading(void){event('A');}
 static bool app_settings_book_fonts(void){return embedded;}
 int app_settings_book_px(void){event('X');return global_px;}
 static bool app_settings_reader_hide_images(void){return hide_images;}
@@ -187,7 +187,7 @@ static void reset(void){
     embedded=true;hide_images=hidden=save_fails=load_fails=skip_loses=fail_watch=false;
     global_px=59;fail_reserve=source_error=0;file_size=2000;chapters=12;
     reserve_calls=persist_calls=source_opens=source_closes=0;has_persisted=false;
-    s_view=SHELF;s_reader_return_home=true;s_requested_fullscreen=true;
+    s_view=SHELF;s_reader_return_home=true;
     events[0]=0;prefetch_borrowed=true;
 }
 static void report(const char *name){printf("%s:%s:%u/%u/%u:%zu/%zu:%d:%s\n",name,events,reserve_calls,persist_calls,watch_count,loaded_chapter,loaded_offset,s_px,s_message);}

@@ -21,8 +21,8 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v42 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v42; legacy fixtures drop them all. */
+/* v15..v43 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v43; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_background_t) + \
                             sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t) + \
                             sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) + \
@@ -30,7 +30,7 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
                             sizeof(settings_backup_up_t) + sizeof(settings_backup_book_fonts_t) + \
                             sizeof(settings_backup_book_vertical_t) + sizeof(settings_backup_shutdown_style_t) + \
                             sizeof(settings_backup_haptic_t) + sizeof(settings_backup_margins_t) + \
-                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t))
+                            sizeof(settings_backup_shake_t) + sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t))
 static unsigned flash_depth;
 static bool flash_failure;
 bool epd_flash_begin(void) { if (flash_failure) return false; ++flash_depth; return true; }
@@ -130,6 +130,7 @@ static int loaded_vertical=-1;
 static uint8_t loaded_idle;static bool has_idle;
 static uint8_t loaded_shutdown;static bool has_shutdown;
 static int loaded_chrome_heights[2]={-1,-1};
+static int loaded_chrome_visible[2]={-1,-1};
 static int loaded_margin=-1,loaded_margin_l=-1,loaded_margin_r=-1,loaded_margin_t=-1,loaded_margin_b=-1;
 esp_err_t board_sd_get_info(board_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
@@ -137,8 +138,8 @@ esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; if (mode == NVS_READWRITE) assert(flash_depth); *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
 static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { if(!strcmp(key,NVS_KEY_VERTICAL_TURN)&&loaded_vertical>=0){*value=(uint8_t)loaded_vertical;return ESP_OK;} for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_H:NVS_KEY_CHROME_HEADER_H)&&loaded_chrome_heights[i]>=0){*value=loaded_chrome_heights[i];return ESP_OK;} (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)&&has_shutdown){*value=loaded_shutdown;return ESP_OK;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, NVS_KEY_WALLPAPER_MODE) && loaded_wallpaper_mode >= 0) { *value=(uint8_t)loaded_wallpaper_mode; return ESP_OK; } if (!strcmp(key, NVS_KEY_BOOKMARK_MODE) && loaded_bookmark_mode >= 0) { *value=(uint8_t)loaded_bookmark_mode; return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=(uint8_t)loaded_margin;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_L)&&loaded_margin_l>=0){*value=(uint8_t)loaded_margin_l;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_R)&&loaded_margin_r>=0){*value=(uint8_t)loaded_margin_r;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_T)&&loaded_margin_t>=0){*value=(uint8_t)loaded_margin_t;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_B)&&loaded_margin_b>=0){*value=(uint8_t)loaded_margin_b;return ESP_OK;} return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { if(!strcmp(key,NVS_KEY_VERTICAL_TURN))loaded_vertical=value; for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_H:NVS_KEY_CHROME_HEADER_H))loaded_chrome_heights[i]=value; (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){loaded_shutdown=value;has_shutdown=true;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, NVS_KEY_WALLPAPER_MODE)) loaded_wallpaper_mode=value; if (!strcmp(key, NVS_KEY_BOOKMARK_MODE)) loaded_bookmark_mode=value; if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { if(!strcmp(key,NVS_KEY_VERTICAL_TURN)&&loaded_vertical>=0){*value=(uint8_t)loaded_vertical;return ESP_OK;} for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_H:NVS_KEY_CHROME_HEADER_H)&&loaded_chrome_heights[i]>=0){*value=loaded_chrome_heights[i];return ESP_OK;} for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_VISIBLE:NVS_KEY_CHROME_HEADER_VISIBLE)&&loaded_chrome_visible[i]>=0){*value=(uint8_t)loaded_chrome_visible[i];return ESP_OK;} (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)&&has_shutdown){*value=loaded_shutdown;return ESP_OK;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)&&has_idle){*value=loaded_idle;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, NVS_KEY_WALLPAPER_MODE) && loaded_wallpaper_mode >= 0) { *value=(uint8_t)loaded_wallpaper_mode; return ESP_OK; } if (!strcmp(key, NVS_KEY_BOOKMARK_MODE) && loaded_bookmark_mode >= 0) { *value=(uint8_t)loaded_bookmark_mode; return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } if(!strcmp(key,NVS_KEY_BOOK_MARGIN)&&loaded_margin>=0){*value=(uint8_t)loaded_margin;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_L)&&loaded_margin_l>=0){*value=(uint8_t)loaded_margin_l;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_R)&&loaded_margin_r>=0){*value=(uint8_t)loaded_margin_r;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_T)&&loaded_margin_t>=0){*value=(uint8_t)loaded_margin_t;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_MARGIN_B)&&loaded_margin_b>=0){*value=(uint8_t)loaded_margin_b;return ESP_OK;} return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { if(!strcmp(key,NVS_KEY_VERTICAL_TURN))loaded_vertical=value; for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_H:NVS_KEY_CHROME_HEADER_H))loaded_chrome_heights[i]=value; for(unsigned i=0;i<2;++i)if(!strcmp(key,i?NVS_KEY_CHROME_FOOTER_VISIBLE:NVS_KEY_CHROME_HEADER_VISIBLE))loaded_chrome_visible[i]=value; (void)h; if(!strcmp(key,NVS_KEY_SHUTDOWN_MODE)){loaded_shutdown=value;has_shutdown=true;} if(!strcmp(key,NVS_KEY_AUTO_LOCK)){loaded_idle=value;has_idle=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, NVS_KEY_WALLPAPER_MODE)) loaded_wallpaper_mode=value; if (!strcmp(key, NVS_KEY_BOOKMARK_MODE)) loaded_bookmark_mode=value; if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
  if(!strcmp(key,NVS_KEY_DEVICE_NAME)&&loaded_device_name) {
@@ -170,6 +171,9 @@ static char durable_tap[11], pending_tap[11];
 static bool tap_write_fails;
 static int durable_regions = -1, pending_regions = -1;
 static int durable_progress = -1, pending_progress = -1;
+static int pending_chrome_visible[2] = {-1, -1};
+static int chrome_write_fail_bar = -1;
+static int durable_chrome = -1, pending_chrome = -1;
 static int durable_styles = -1, pending_styles = -1;
 static bool styles_write_fails;
 static int durable_touch = -1, pending_touch = -1;
@@ -185,7 +189,9 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     assert(!strcmp(ns, "read_pico"));
     pending_tap[0] = 0;
     pending_regions = -1;
+    pending_chrome = -1;
     pending_progress = -1;
+    pending_chrome_visible[0] = pending_chrome_visible[1] = -1;
     pending_styles = -1;
     pending_touch = -1;
     pending_ticket = -1;
@@ -195,8 +201,12 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     pending_up = -1;
     return nvs_open(ns, mode, h);
 }
-void backup_nvs_close(nvs_handle_t h) { pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; nvs_close(h); }
+void backup_nvs_close(nvs_handle_t h) { pending_chrome=-1; pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; pending_chrome_visible[0] = pending_chrome_visible[1] = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
+        if (durable_chrome < 0) return ESP_ERR_NVS_NOT_FOUND;
+        *value = (uint8_t)durable_chrome; return ESP_OK;
+    }
     if (!strcmp(key, NVS_KEY_NETWORK_ROUTE) || !strcmp(key, NVS_KEY_NETWORK_PRIORITY)) {
         const int loaded = !strcmp(key, NVS_KEY_NETWORK_ROUTE)
             ? loaded_network_route : loaded_network_priority;
@@ -238,6 +248,17 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
+        if (chrome_write_fail_bar >= 0) return ESP_FAIL;
+        pending_chrome = value; return ESP_OK;
+    }
+    for (unsigned bar = 0; bar < 2; ++bar) {
+        if (!strcmp(key, bar ? NVS_KEY_CHROME_FOOTER_VISIBLE : NVS_KEY_CHROME_HEADER_VISIBLE)) {
+            if (chrome_write_fail_bar == (int)bar) return ESP_FAIL;
+            pending_chrome_visible[bar] = value;
+            return ESP_OK;
+        }
+    }
     if (!strcmp(key, NVS_KEY_BOOK_RULE)) { pending_rule = value; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_BOOK_RULE_TEXT)) { pending_rule_follow = value; return ESP_OK; }
     if (!strcmp(key, NVS_KEY_LOCK_FACE)) { if (face_write_fails) return ESP_FAIL; pending_face = value; return ESP_OK; }
@@ -282,6 +303,10 @@ esp_err_t backup_nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_chrome >= 0) durable_chrome = pending_chrome;
+    for (unsigned bar = 0; bar < 2; ++bar)
+        if (err == ESP_OK && pending_chrome_visible[bar] >= 0)
+            loaded_chrome_visible[bar] = pending_chrome_visible[bar];
     if (err == ESP_OK && pending_rule >= 0) durable_rule = pending_rule;
     if (err == ESP_OK && pending_rule_follow >= 0) durable_rule_follow = pending_rule_follow;
     if (err == ESP_OK && pending_tap[0]) memcpy(durable_tap,pending_tap,sizeof(durable_tap));
@@ -308,7 +333,7 @@ static void strip_local_extension_blocks(FILE *f) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
     assert(fseek(f, 0, SEEK_END) == 0);
     const long end = ftell(f);
     assert(end >= local_at + local_band);
@@ -363,7 +388,7 @@ static void test_reader_progress_bar(void) {
     assert(app_settings_set_reader_progress_bar(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long progress_at = ftell(file);
     settings_backup_progress_bar_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -454,7 +479,7 @@ static void test_book_styles(void) {
     assert(app_settings_set_book_styles(false));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long styles_at = ftell(file);
     settings_backup_book_styles_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && !fclose(file));
@@ -544,7 +569,7 @@ static void test_home_regions_backup(void) {
     app_home_components_apply(0x11);
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "rb");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long regions_at = ftell(file);
     settings_backup_home_regions_t valid;
     assert(fread(&valid, 1, sizeof(valid), file) == sizeof(valid) && fclose(file) == 0);
@@ -729,7 +754,7 @@ static void test_reader_touch_lock(void) {
     assert(!app_settings_reader_touch_disabled());
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_touch_t unsafe = {.on = 1};
     uint32_t hash = backup_progress_bar_checksum(&unsafe);
@@ -767,7 +792,7 @@ static void test_reader_touch_lock(void) {
         assert(app_settings_backup_save() == ESP_OK);
         file = fopen(BACKUP_FILE, "r+b");
         settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 42);
+        assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 44);
         assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
         memcpy(header.magic, "PICOSETZ", 8); backup_seal(&header);
@@ -779,7 +804,7 @@ static void test_reader_touch_lock(void) {
         assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header));
         assert(fwrite(extension, 1, sizeof(extension), file) == sizeof(extension));
         assert(fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile));
-        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END));
+        assert(!fseek(file, -(long)(8 + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END));
         long history_at = ftell(file);
         assert(fwrite("RPHIST1", 1, 8, file) == 8 && !fflush(file));
         assert(!ftruncate(fileno(file), history_at + 8) && !fclose(file));
@@ -833,7 +858,7 @@ static void test_ticket_background(void) {
     assert(app_settings_set_ticket_background(APP_TICKET_BACKGROUND_COVER));
     assert(app_settings_backup_save() == ESP_OK);
     FILE *file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8+sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long at = ftell(file);
     settings_backup_ticket_background_t original;
     assert(fread(&original, 1, sizeof(original), file) == sizeof(original) && fclose(file) == 0);
@@ -867,7 +892,7 @@ static void test_ticket_background(void) {
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
     settings_backup_v1_t header; uint8_t extension[7]; settings_backup_profile_t profile;
-    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 42);
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) && backup_version(&header) == 44);
     assert(fread(extension, 1, sizeof(extension), file) == sizeof(extension));
     assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
     memcpy(header.magic, "PICOSETa", 8); backup_seal(&header);
@@ -905,7 +930,7 @@ static void test_clock_style(void) {
         // Reject style 5 in old v39 even with a valid base checksum.
         settings_backup_v1_t header={0};memcpy(header.magic,"PICOSETd",8);
         FILE *f=fopen(BACKUP_FILE,"rb");assert(f&&fread(&header,1,sizeof(header),f)==sizeof(header)&&!fclose(f));
-        assert(backup_version(&header)==42&&backup_valid(&header));
+    assert(backup_version(&header)==44&&backup_valid(&header));
         memcpy(header.magic,"PICOSETd",8);backup_seal(&header);assert(!backup_valid(&header));
         header.flags[BK_LOCK]=4;backup_seal(&header);assert(backup_valid(&header));
     }
@@ -988,7 +1013,7 @@ static void test_calendar_style(void) {
     assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
     for(unsigned corruption=0;corruption<3;++corruption){
         assert(app_settings_backup_save()==ESP_OK);
-        FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
+        FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));
         long at=ftell(f);settings_backup_calendar_t v;assert(fread(&v,1,sizeof(v),f)==sizeof(v));
         if(corruption==0)v.checksum[0]^=1;
         else {v.on=corruption==1?2:255;uint32_t hash=backup_progress_bar_checksum(&v);for(unsigned i=0;i<4;++i)v.checksum[i]=(uint8_t)(hash>>(8*i));}
@@ -997,7 +1022,7 @@ static void test_calendar_style(void) {
         assert(app_settings_lock_style()==4&&app_settings_calendar_style()==APP_CALENDAR_MONTH);
     }
     for(unsigned cut=0;cut<sizeof(settings_backup_calendar_t);++cut){
-        assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
+        assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f&&!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));
         assert(!ftruncate(fileno(f),ftell(f)+cut)&&!fclose(f));commits=commit_count;
         assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&(unsigned)commit_count==commits);
     }
@@ -1011,7 +1036,7 @@ static void test_calendar_style(void) {
     uint32_t hash=backup_shutdown_checksum(&h,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
     hash=backup_profile_checksum(&h,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
     rewind(f);assert(fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(ext,1,sizeof(ext),f)==sizeof(ext)&&fwrite(&profile,1,sizeof(profile),f)==sizeof(profile));
-    assert(!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+    assert(!fseek(f,-(long)(8+sizeof(settings_backup_calendar_t)+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));long at=ftell(f);
     assert(fwrite("RPHIST1",1,8,f)==8&&!fflush(f)&&!ftruncate(fileno(f),at+8)&&!fclose(f));
     assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
     esp_err_t result=app_settings_backup_restore();
@@ -1027,12 +1052,12 @@ static void assert_tap(app_reader_tap_mode_t mode,const uint8_t actions[9]) {
 }
 static void test_tap_grid(void) {
     uint8_t actions[9];
-    const uint8_t order[]={APP_READER_KEY_PREV,APP_READER_KEY_NEXT,APP_READER_KEY_TOOLS,APP_READER_KEY_FULLSCREEN,
+    const uint8_t order[]={APP_READER_KEY_PREV,APP_READER_KEY_NEXT,APP_READER_KEY_TOOLS,
         APP_READER_KEY_HOME,APP_READER_KEY_REFRESH,APP_READER_KEY_FRONTLIGHT,APP_READER_KEY_NONE};
     durable_tap[0]=0;loaded_vertical=1;app_settings_init();assert_tap(APP_READER_TAP_VERTICAL,s_reader_tap_defaults);
     loaded_vertical=0;app_settings_init();assert_tap(APP_READER_TAP_HORIZONTAL,s_reader_tap_defaults);
-    for(unsigned mode=0;mode<3;++mode)for(unsigned shift=0;shift<8;++shift){
-        for(unsigned i=0;i<9;++i)actions[i]=order[(i+shift)%8];
+    for(unsigned mode=0;mode<3;++mode)for(unsigned shift=0;shift<7;++shift){
+        for(unsigned i=0;i<9;++i)actions[i]=order[(i+shift)%7];
         assert(app_settings_set_reader_tap_config((app_reader_tap_mode_t)mode,actions));
         assert_tap((app_reader_tap_mode_t)mode,actions);
         s_reader_tap_mode=APP_READER_TAP_HORIZONTAL;memset(s_reader_tap_actions,0,9);app_settings_init();
@@ -1067,7 +1092,7 @@ static void test_tap_grid(void) {
     // Range checks still reject a correctly re-sealed invalid payload before any NVS/history/WiFi writes.
     for(unsigned fault=0;fault<6;++fault){
         assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f);
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));long at=ftell(f);
         settings_backup_tap_t tap;assert(fread(&tap,1,sizeof(tap),f)==sizeof(tap));
         if(fault==0)tap.mode=3;
         if(fault==1)tap.actions[0]=APP_READER_KEY_LEGACY_BACK;
@@ -1082,9 +1107,9 @@ static void test_tap_grid(void) {
         assert(commits==commit_count&&imports==wifi_imports&&restores==history_restores);
         assert_tap(APP_READER_TAP_GRID,actions);
     }
-    for(unsigned cut=0;cut<sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);++cut){
+    for(unsigned cut=0;cut<sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t);++cut){
         assert(app_settings_backup_save()==ESP_OK);FILE *f=fopen(BACKUP_FILE,"r+b");assert(f);
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));
         assert(!ftruncate(fileno(f),ftell(f)+cut)&&!fclose(f));commits=commit_count;
         assert(app_settings_backup_restore()==ESP_ERR_INVALID_RESPONSE&&commits==commit_count);
     }
@@ -1097,7 +1122,7 @@ static void test_tap_grid(void) {
         uint32_t hash=backup_shutdown_checksum(&h,ext[0],ext[1],ext[2]);for(unsigned i=0;i<4;++i)ext[3+i]=(uint8_t)(hash>>(8*i));
         hash=backup_profile_checksum(&h,ext[0],ext[1],ext[2],&profile);for(unsigned i=0;i<4;++i)profile.checksum[i]=(uint8_t)(hash>>(8*i));
         rewind(f);assert(fwrite(&h,1,sizeof(h),f)==sizeof(h)&&fwrite(ext,1,7,f)==7&&fwrite(&profile,1,sizeof(profile),f)==sizeof(profile));
-        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END));long at=ftell(f);
+        assert(!fseek(f,-(long)(8+sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_chrome_visibility_t)),SEEK_END));long at=ftell(f);
         assert(fwrite("RPHIST1",1,8,f)==8&&!fflush(f)&&!ftruncate(fileno(f),at+8)&&!fclose(f));
         assert(app_settings_set_reader_tap_config(APP_READER_TAP_GRID,actions));
         assert(app_settings_backup_restore()==ESP_OK);assert_tap((app_reader_tap_mode_t)oldmode,s_reader_tap_defaults);
@@ -1122,7 +1147,7 @@ static void test_reading_guides(void) {
         assert(app_settings_backup_save()==ESP_OK);
         FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
         assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && !fclose(file));
-        assert(backup_version(&header)==42 && header.flags[BK_READING_LINE]==(style|(follow?4:0)));
+        assert(backup_version(&header)==44 && header.flags[BK_READING_LINE]==(style|(follow?4:0)));
         app_settings_set_book_reading_line((style+1)%4);
         app_settings_set_book_reading_line_follow_text(!follow);
         commit_fails=true;assert(app_settings_backup_restore()==ESP_FAIL);commit_fails=false;
@@ -1148,7 +1173,7 @@ static void test_reading_guides(void) {
            app_settings_network_route() == NETWORK_ROUTE_CELLULAR &&
            app_settings_network_auto_priority() == NETWORK_AUTO_CELLULAR_FIRST);
     file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     long network_at = ftell(file);
     settings_backup_network_t valid_network;
     assert(fread(&valid_network, 1, sizeof(valid_network), file) == sizeof(valid_network));
@@ -1160,7 +1185,7 @@ static void test_reading_guides(void) {
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == network_commits);
     assert(app_settings_backup_save() == ESP_OK);
     file = fopen(BACKUP_FILE, "r+b");
-    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t)), SEEK_END) == 0);
+    assert(file && fseek(file, -(long)(8 + sizeof(settings_backup_network_t) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END) == 0);
     network_at = ftell(file);
     assert(ftruncate(fileno(file), network_at + (long)sizeof(settings_backup_network_t) - 1) == 0 && !fclose(file));
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == network_commits);
@@ -1176,13 +1201,13 @@ static void test_reading_guides(void) {
     rewind(file);assert(fwrite(&header,1,sizeof(header),file)==sizeof(header) && fwrite(ext,1,7,file)==7 && fwrite(&profile,1,sizeof(profile),file)==sizeof(profile) && !fclose(file));
     file = fopen(BACKUP_FILE, "r+b");
     assert(file && fseek(file, 0, SEEK_END) == 0);
-    long v40_end = ftell(file), v40_network_at = v40_end - 8 - (long)sizeof(settings_backup_network_t);
+    long v40_end = ftell(file), v40_network_at = v40_end - 8 - (long)sizeof(settings_backup_network_t) - (long)sizeof(settings_backup_chrome_visibility_t);
     uint8_t v40_history[8];
-    assert(v40_network_at >= 0 && fseek(file, v40_network_at + sizeof(settings_backup_network_t), SEEK_SET) == 0 &&
+    assert(v40_network_at >= 0 && fseek(file, v40_network_at + sizeof(settings_backup_network_t) + sizeof(settings_backup_chrome_visibility_t), SEEK_SET) == 0 &&
            fread(v40_history, 1, sizeof(v40_history), file) == sizeof(v40_history) &&
            fseek(file, v40_network_at, SEEK_SET) == 0 &&
            fwrite(v40_history, 1, sizeof(v40_history), file) == sizeof(v40_history) &&
-           fflush(file) == 0 && ftruncate(fileno(file), v40_end - (long)sizeof(settings_backup_network_t)) == 0 &&
+           fflush(file) == 0 && ftruncate(fileno(file), v40_end - (long)sizeof(settings_backup_network_t) - (long)sizeof(settings_backup_chrome_visibility_t)) == 0 &&
            !fclose(file));
     app_settings_set_book_reading_line(3);app_settings_set_book_reading_line_follow_text(true);
     assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
@@ -1191,6 +1216,241 @@ static void test_reading_guides(void) {
     durable_rule_follow=2;app_settings_init();assert(!app_settings_book_reading_line_follow_text());
     app_settings_set_book_reading_line(0);durable_rule_follow=-1;
     puts("PASS: all guide styles/follow modes, restart, v42 backup, failed restore, invalid values and v40 migration");
+}
+
+static void assert_chrome_visibility(bool header, bool footer) {
+    assert(app_settings_reader_chrome_visible(0) == header);
+    assert(app_settings_reader_chrome_visible(1) == footer);
+}
+
+static bool test_reader_bars_hidden(void) {
+    return !app_settings_reader_chrome_visible(0) && !app_settings_reader_chrome_visible(1);
+}
+static void test_set_reader_bars_hidden(bool on) {
+    assert(app_settings_set_reader_chrome_visibility(!on, !on));
+}
+static void test_chrome_visibility(void) {
+    loaded_open_full=0;has_open_full=true;
+    for (unsigned bar = 0; bar < 2; ++bar) for (int value = -1; value <= 255; ++value) {
+        durable_chrome=-1;
+        loaded_chrome_visible[bar] = value;
+        loaded_chrome_visible[1 - bar] = 0;
+        app_settings_init();
+        assert(app_settings_reader_chrome_visible(bar) == (value != 0));
+        assert(!app_settings_reader_chrome_visible(1 - bar));
+    }
+    durable_chrome=-1;loaded_chrome_visible[0] = loaded_chrome_visible[1] = -1;
+    app_settings_init();
+    assert_chrome_visibility(true, true);
+    for (unsigned mask = 0; mask < 4; ++mask) {
+        const bool header = (mask & 1) != 0, footer = (mask & 2) != 0;
+        assert(app_settings_set_reader_chrome_visibility(header, footer));
+        app_settings_init();
+        assert_chrome_visibility(header, footer);
+        int commits = commit_count;
+        assert(app_settings_set_reader_chrome_visibility(header, footer) && commit_count == commits);
+        assert(app_settings_backup_save() == ESP_OK);
+        assert(app_settings_set_reader_chrome_visibility(!header, !footer));
+        commit_fails = true;
+        assert(app_settings_backup_restore() == ESP_FAIL);
+        commit_fails = false;
+        assert_chrome_visibility(!header, !footer);
+        app_settings_init();
+        assert_chrome_visibility(!header, !footer);
+        assert(app_settings_backup_restore() == ESP_OK);
+        app_settings_init();
+        assert_chrome_visibility(header, footer);
+    }
+    assert(app_settings_set_reader_chrome_visibility(false, true));
+    for (unsigned fault = 0; fault < 5; ++fault) {
+        chrome_write_fail_bar = fault < 2 ? (int)fault : -1;
+        face_open_fails = fault == 2;
+        commit_fails = fault == 3;
+        flash_failure = fault == 4;
+        assert(!app_settings_set_reader_chrome_visibility(true, false));
+        assert_chrome_visibility(false, true);
+        assert(durable_chrome == 2 && !flash_depth);
+        assert(!app_settings_set_reader_chrome_default());
+        assert_chrome_visibility(false, true);
+        assert(durable_chrome == 2 && !flash_depth);
+    }
+    chrome_write_fail_bar = -1;
+    face_open_fails = commit_fails = flash_failure = false;
+    assert(app_settings_set_reader_chrome_default());
+    app_settings_init();
+    assert_chrome_visibility(true, true);
+
+    for (unsigned fault = 0; fault < 4; ++fault) {
+        assert(app_settings_backup_save() == ESP_OK);
+        FILE *file = fopen(BACKUP_FILE, "r+b");
+        assert(file && !fseek(file, -(long)(8 + sizeof(settings_backup_chrome_visibility_t)), SEEK_END));
+        long at = ftell(file);
+        settings_backup_chrome_visibility_t visibility;
+        assert(fread(&visibility, 1, sizeof(visibility), file) == sizeof(visibility));
+        if (fault < 2) {
+            if (fault == 0) visibility.header = 2;
+            else visibility.footer = 255;
+            uint32_t hash = backup_chrome_visibility_checksum(&visibility);
+            for (unsigned i = 0; i < 4; ++i) visibility.checksum[i] = (uint8_t)(hash >> (8 * i));
+        } else if (fault == 2) visibility.checksum[0] ^= 1;
+        else visibility.header ^= 1;
+        assert(!fseek(file, at, SEEK_SET) &&
+            fwrite(&visibility, 1, sizeof(visibility), file) == sizeof(visibility) && !fclose(file));
+        int commits = commit_count;
+        unsigned imports = wifi_imports, restores = history_restores;
+        assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE);
+        assert(commit_count == commits && wifi_imports == imports && history_restores == restores);
+        assert_chrome_visibility(true, true);
+    }
+    for (unsigned cut = 0; cut < sizeof(settings_backup_chrome_visibility_t); ++cut) {
+        assert(app_settings_backup_save() == ESP_OK);
+        FILE *file = fopen(BACKUP_FILE, "r+b");
+        assert(file && !fseek(file, -(long)(8 + sizeof(settings_backup_chrome_visibility_t)), SEEK_END));
+        assert(!ftruncate(fileno(file), ftell(file) + cut) && !fclose(file));
+        int commits = commit_count;
+        assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits);
+    }
+
+    // v42: remove only the new tail, retain networking/history, and reseal header-dependent checksums.
+    assert(app_settings_set_reader_chrome_visibility(false, false));
+    app_settings_set_network_route(NETWORK_ROUTE_CELLULAR);
+    assert(app_settings_backup_save() == ESP_OK);
+    FILE *file = fopen(BACKUP_FILE, "r+b");
+    settings_backup_v1_t header;
+    uint8_t ext[7], history[8];
+    settings_backup_profile_t profile;
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header) &&
+        fread(ext, 1, sizeof(ext), file) == sizeof(ext) &&
+        fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
+    assert(backup_version(&header) == 44);
+    memcpy(header.magic, "PICOSETg", 8);
+    backup_seal(&header);
+    uint32_t hash = backup_shutdown_checksum(&header, ext[0], ext[1], ext[2]);
+    for (unsigned i = 0; i < 4; ++i) ext[3 + i] = (uint8_t)(hash >> (8 * i));
+    hash = backup_profile_checksum(&header, ext[0], ext[1], ext[2], &profile);
+    for (unsigned i = 0; i < 4; ++i) profile.checksum[i] = (uint8_t)(hash >> (8 * i));
+    rewind(file);
+    assert(fwrite(&header, 1, sizeof(header), file) == sizeof(header) &&
+        fwrite(ext, 1, sizeof(ext), file) == sizeof(ext) &&
+        fwrite(&profile, 1, sizeof(profile), file) == sizeof(profile));
+    assert(!fseek(file, -(long)sizeof(history), SEEK_END) &&
+        fread(history, 1, sizeof(history), file) == sizeof(history));
+    assert(!fseek(file, -(long)(sizeof(history) + sizeof(settings_backup_chrome_visibility_t)), SEEK_END));
+    assert(fwrite(history, 1, sizeof(history), file) == sizeof(history) && !fflush(file));
+    assert(!ftruncate(fileno(file), ftell(file)) && !fclose(file));
+    app_settings_set_network_route(NETWORK_ROUTE_WIFI);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_network_route() == NETWORK_ROUTE_CELLULAR);
+    app_settings_init();
+    assert_chrome_visibility(true, true);
+    puts("PASS: independent chrome visibility defaults, four combinations/restart, atomic failures, v44 backups, corrupt/truncated tails and v42 migration");
+}
+
+// Change only legacy fields in a real exported file and recompute its original seals.
+static void rewrite_reader_legacy_backup(unsigned version, bool full, bool retired_actions) {
+    FILE *file = fopen(BACKUP_FILE, "r+b");
+    settings_backup_v1_t header;
+    uint8_t ext[7];
+    settings_backup_profile_t profile;
+    assert(file && fread(&header, 1, sizeof(header), file) == sizeof(header));
+    assert(fread(ext, 1, sizeof(ext), file) == sizeof(ext));
+    assert(fread(&profile, 1, sizeof(profile), file) == sizeof(profile));
+    header.magic[7] = version == 43 ? 'h' : 'i';
+    backup_seal(&header);
+    uint32_t hash = backup_shutdown_checksum(&header, ext[0], ext[1], ext[2]);
+    for (unsigned i=0;i<4;++i) ext[3+i]=(uint8_t)(hash>>(8*i));
+    hash = backup_profile_checksum(&header,ext[0],ext[1],ext[2],&profile);
+    for (unsigned i=0;i<4;++i) profile.checksum[i]=(uint8_t)(hash>>(8*i));
+    rewind(file);
+    assert(fwrite(&header,1,sizeof(header),file)==sizeof(header));
+    assert(fwrite(ext,1,sizeof(ext),file)==sizeof(ext));
+    assert(fwrite(&profile,1,sizeof(profile),file)==sizeof(profile));
+    const long keys_at=ftell(file);
+    const long open_at=keys_at+sizeof(settings_backup_keys_t)+sizeof(settings_backup_hold_t)+
+        sizeof(settings_backup_indent_adjust_t)+sizeof(settings_backup_weight_t)+sizeof(settings_backup_wifi_t)+
+        2*sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t);
+    settings_backup_open_full_t old={.open_full=full};
+    hash=backup_open_full_checksum(&old);
+    for(unsigned i=0;i<4;++i)old.checksum[i]=(uint8_t)(hash>>(8*i));
+    assert(!fseek(file,open_at,SEEK_SET)&&fwrite(&old,1,sizeof(old),file)==sizeof(old));
+    if(retired_actions){
+        settings_backup_keys_t keys={.actions={3,3,3}};
+        hash=backup_keys_checksum(&keys);
+        for(unsigned i=0;i<4;++i)keys.checksum[i]=(uint8_t)(hash>>(8*i));
+        assert(!fseek(file,keys_at,SEEK_SET)&&fwrite(&keys,1,sizeof(keys),file)==sizeof(keys));
+        settings_backup_hold_t hold={.action=3};
+        hash=backup_hold_checksum(&hold);
+        for(unsigned i=0;i<4;++i)hold.checksum[i]=(uint8_t)(hash>>(8*i));
+        assert(fwrite(&hold,1,sizeof(hold),file)==sizeof(hold));
+        const long double_at=open_at+sizeof(old)+sizeof(settings_backup_title_style_t)+sizeof(settings_backup_title_size_t);
+        settings_backup_double_t dbl={.action=3};
+        hash=backup_double_checksum(&dbl);
+        for(unsigned i=0;i<4;++i)dbl.checksum[i]=(uint8_t)(hash>>(8*i));
+        assert(!fseek(file,double_at,SEEK_SET)&&fwrite(&dbl,1,sizeof(dbl),file)==sizeof(dbl));
+        settings_backup_up_t up={.action=3};
+        hash=backup_up_checksum(&up);
+        for(unsigned i=0;i<4;++i)up.checksum[i]=(uint8_t)(hash>>(8*i));
+        assert(!fseek(file,double_at+sizeof(dbl)+sizeof(settings_backup_volume_t),SEEK_SET));
+        assert(fwrite(&up,1,sizeof(up),file)==sizeof(up));
+        settings_backup_tap_t tap={.mode=APP_READER_TAP_GRID};
+        for(unsigned i=0;i<9;++i)tap.actions[i]=i%2?3:APP_READER_KEY_NEXT;
+        hash=backup_tap_checksum(&tap);
+        for(unsigned i=0;i<4;++i)tap.checksum[i]=(uint8_t)(hash>>(8*i));
+        const long end_tail=8+sizeof(settings_backup_chrome_visibility_t)+sizeof(settings_backup_network_t)+sizeof(tap);
+        assert(!fseek(file,-end_tail,SEEK_END)&&fwrite(&tap,1,sizeof(tap),file)==sizeof(tap));
+    }
+    assert(!fclose(file));
+}
+static void test_unified_reader_migration(void) {
+    // All old actual visibility combinations, including interrupted migration and stale keys.
+    for(unsigned full=0;full<2;++full)for(unsigned mask=0;mask<4;++mask){
+        durable_chrome=-1;loaded_open_full=full;has_open_full=true;
+        loaded_chrome_visible[0]=!!(mask&1);loaded_chrome_visible[1]=!!(mask&2);
+        const unsigned expected=full?0:mask;
+        commit_fails=true;app_settings_init();commit_fails=false;
+        assert(durable_chrome<0);assert_chrome_visibility(expected&1,expected&2);
+        app_settings_init();assert(durable_chrome==(int)expected);
+        const unsigned manual=mask^3;
+        assert(app_settings_set_reader_chrome_visibility(manual&1,manual&2));
+        loaded_open_full=!full;loaded_chrome_visible[0]=loaded_chrome_visible[1]=full;
+        app_settings_init();assert_chrome_visibility(manual&1,manual&2);
+    }
+    // Retired IDs are normalized on NVS load; public setters cannot save them again.
+    for(unsigned i=0;i<3;++i){loaded_keys[i]=3;has_keys[i]=true;}
+    loaded_hold=loaded_double=3;has_hold=has_double=true;durable_up=3;
+    strcpy(durable_tap,"2333333333");app_settings_init();
+    for(unsigned i=0;i<3;++i)assert(app_settings_reader_key_action(i)==APP_READER_KEY_TOOLS);
+    assert(app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
+    assert(app_settings_reader_double_action()==APP_READER_KEY_TOOLS&&app_settings_reader_up_action()==APP_READER_KEY_TOOLS);
+    uint8_t retired_tap[9];memset(retired_tap,3,sizeof(retired_tap));
+    for(unsigned i=0;i<9;++i)assert(app_settings_reader_tap_action(i)==APP_READER_KEY_TOOLS);
+    for(unsigned i=0;i<6;++i)assert(!app_settings_reader_key_action_allowed(i,APP_READER_KEY_LEGACY_FULLSCREEN));
+    assert(!app_settings_set_reader_key_action(0,APP_READER_KEY_LEGACY_FULLSCREEN));
+    assert(!app_settings_set_reader_hold_action(APP_READER_KEY_LEGACY_FULLSCREEN));
+    assert(!app_settings_set_reader_double_action(APP_READER_KEY_LEGACY_FULLSCREEN));
+    assert(!app_settings_set_reader_up_action(APP_READER_KEY_LEGACY_FULLSCREEN));
+    assert(!app_settings_set_reader_tap_config(APP_READER_TAP_GRID,retired_tap));
+    // v43 folds legacy full into visibility; v44 ignores the reserved byte, even when it is 1.
+    for(unsigned version=43;version<=44;++version)for(unsigned full=0;full<2;++full)
+    for(unsigned mask=0;mask<4;++mask){
+        assert(app_settings_set_reader_chrome_visibility(mask&1,mask&2));
+        app_settings_set_reader_statusbar(mask&1);
+        assert(app_settings_backup_save()==ESP_OK);
+        rewrite_reader_legacy_backup(version,full,true);
+        assert(app_settings_set_reader_chrome_visibility(!(mask&1),!(mask&2)));
+        assert(app_settings_backup_restore()==ESP_OK);
+        const unsigned expected=version<44&&full?0:mask;
+        assert_chrome_visibility(expected&1,expected&2);
+        assert(app_settings_reader_statusbar()==!!(mask&1));
+        for(unsigned i=0;i<3;++i)assert(app_settings_reader_key_action(i)==APP_READER_KEY_TOOLS);
+        assert(app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
+        assert(app_settings_reader_double_action()==APP_READER_KEY_TOOLS&&app_settings_reader_up_action()==APP_READER_KEY_TOOLS);
+        for(unsigned i=0;i<9;++i)assert(app_settings_reader_tap_action(i)==(i%2?APP_READER_KEY_TOOLS:APP_READER_KEY_NEXT));
+        app_settings_init();assert_chrome_visibility(expected&1,expected&2);
+        assert(app_settings_backup_save()==ESP_OK&&app_settings_backup_restore()==ESP_OK);
+        assert_chrome_visibility(expected&1,expected&2);
+    }
+    puts("PASS: one-time/failed NVS migration, stale keys, retired ID3 bindings, v43 effective visibility and v44 round trips");
 }
 
 int main(void) {
@@ -1278,11 +1538,22 @@ int main(void) {
     commit_fails=true;assert(!app_settings_set_book_weight(-1)&&app_settings_book_weight()==2);commit_fails=false;
     assert(app_settings_set_book_weight(-1));
     loaded_weight=255;has_fine=false;app_settings_init();assert(app_settings_book_weight()==0);
-    /* Missing rd_open_full keeps the historical full-screen default. */
-    has_open_full=false;app_settings_init();assert(app_settings_reader_open_fullscreen());
-    loaded_open_full=0;has_open_full=true;app_settings_init();assert(!app_settings_reader_open_fullscreen());
-    loaded_open_full=2;app_settings_init();assert(app_settings_reader_open_fullscreen()); /* invalid value falls back */
-    has_open_full=false;app_settings_init();assert(app_settings_reader_open_fullscreen());
+    // Missing/invalid legacy preference preserves the historical hidden bars, once only.
+    for (int legacy=-1;legacy<=2;++legacy) {
+        durable_chrome=-1;has_open_full=legacy>=0;loaded_open_full=legacy;
+        loaded_chrome_visible[0]=loaded_chrome_visible[1]=-1;
+        app_settings_init();
+        assert_chrome_visibility(legacy==0,legacy==0);
+        assert(durable_chrome==(legacy==0?3:0));
+        assert(app_settings_set_reader_chrome_visibility(true,false));
+        loaded_open_full=1;has_open_full=true;app_settings_init();
+        assert_chrome_visibility(true,false); // New switches override the stale fullscreen key.
+    }
+    durable_chrome=-1;loaded_open_full=1;chrome_write_fail_bar=0;app_settings_init();
+    assert_chrome_visibility(false,false);assert(durable_chrome<0);
+    chrome_write_fail_bar=-1;app_settings_init();assert(durable_chrome==0);
+    assert(app_settings_set_reader_chrome_visibility(false,true));
+    app_settings_init();assert_chrome_visibility(false,true);
     assert(app_settings_set_book_weight_fine(1)&&app_settings_book_weight_fine()==1&&loaded_fine==33);
     app_settings_init();assert(app_settings_book_weight_fine()==1);
     assert(!app_settings_set_book_weight_fine(33)&&app_settings_book_weight_fine()==1);
@@ -1347,7 +1618,7 @@ int main(void) {
     card_mounted = true;
     app_settings_set_reader_key_preset(2);
     memset(s_reader_keys,0,sizeof(s_reader_keys));app_settings_init();
-    assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME && app_settings_reader_key_action(1)==APP_READER_KEY_FULLSCREEN && app_settings_reader_key_action(2)==APP_READER_KEY_TOOLS);
+    assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME && app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(2)==APP_READER_KEY_TOOLS);
     app_settings_set_reader_key_preset(99);assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME);
     app_settings_set_reader_key_action(0,APP_READER_KEY_COUNT);assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME);
     int guard_commits=commit_count;
@@ -1362,8 +1633,8 @@ int main(void) {
     assert(app_settings_set_reader_hold_action(APP_READER_KEY_REFRESH));
     assert(app_settings_set_reader_key_action(2,APP_READER_KEY_REFRESH));
     commit_fails=true;assert(!app_settings_set_reader_key_action(1,APP_READER_KEY_HOME));
-    assert(app_settings_reader_key_action(1)==APP_READER_KEY_FULLSCREEN);commit_fails=false;
-    loaded_keys[1]=APP_READER_KEY_FULLSCREEN;
+    assert(app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS);commit_fails=false;
+    loaded_keys[1]=APP_READER_KEY_LEGACY_FULLSCREEN;
 
     assert(app_settings_reader_hold_action()==APP_READER_KEY_REFRESH);
     app_settings_set_reader_hold_action(APP_READER_KEY_HOME);
@@ -1381,7 +1652,7 @@ int main(void) {
     s_reader_volume_turn = true;
     s_reader_up_action = APP_READER_KEY_PREV;
     s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
-    app_settings_set_reader_open_fullscreen(false); /* v18 band remembers windowed entries */
+    test_set_reader_bars_hidden(false); /* v18 band remembers windowed entries */
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_MARK); /* v19 band carries the heading style */
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX); /* v20 band carries the heading size */
     s_shelf_style = 3;
@@ -1519,7 +1790,7 @@ int main(void) {
     s_reader_chrome_heights[0]=80;s_reader_chrome_heights[1]=57;
     s_reader_up_action = APP_READER_KEY_NONE;
     s_reader_statusbar = true;
-    s_reader_open_fullscreen = true; /* dirty value must come back from the backup */
+    s_reader_chrome_visible[0] = s_reader_chrome_visible[1] = false; /* dirty value must come back from the backup */
     s_shelf_style = 2;
     s_shutdown_style = APP_SHUTDOWN_FULL;
     s_auto_lock_minutes = 0;
@@ -1546,7 +1817,7 @@ int main(void) {
     assert(history_restores == 1);
     assert(app_settings_book_weight()==1&&app_settings_book_weight_fine()==16);
     assert(!app_settings_book_antialias()&&loaded_aa==0);
-    assert(app_settings_reader_key_action(0)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(1)==APP_READER_KEY_FULLSCREEN && app_settings_reader_key_action(2)==APP_READER_KEY_REFRESH);
+    assert(app_settings_reader_key_action(0)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(2)==APP_READER_KEY_REFRESH);
     assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER && loaded_main_mode==2);
     assert(app_settings_system_font_size() == 200);
     assert(wifi_imports == 1 && saved_wifi.configured &&
@@ -1561,7 +1832,7 @@ int main(void) {
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
     assert(app_settings_reader_volume_turn());
     assert(app_settings_reader_up_action() == APP_READER_KEY_PREV);
-    assert(!app_settings_reader_open_fullscreen());
+    assert(!test_reader_bars_hidden());
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_MARK);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
     assert(s_shutdown_style == APP_SHUTDOWN_STAGED && app_settings_auto_lock_minutes() == 5);
@@ -1588,18 +1859,18 @@ int main(void) {
     // New v24 format: heading style, heading size, full-screen preference and middle double press round-trip together.
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX);
-    app_settings_set_reader_open_fullscreen(false);
-    app_settings_set_reader_double_action(APP_READER_KEY_FULLSCREEN);
+    test_set_reader_bars_hidden(false);
+    app_settings_set_reader_double_action(APP_READER_KEY_TOOLS);
     assert(app_settings_backup_save() == ESP_OK);
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
-    app_settings_set_reader_open_fullscreen(true);
+    test_set_reader_bars_hidden(true);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_FRAME);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
-    assert(!app_settings_reader_open_fullscreen());
-    assert(app_settings_reader_double_action() == APP_READER_KEY_FULLSCREEN);
+    assert(!test_reader_bars_hidden());
+    assert(app_settings_reader_double_action() == APP_READER_KEY_TOOLS);
     assert(app_settings_backup_save() == ESP_OK);
     // 上游 K=20 备份只有 bookmark，没有本地 21..24 扩展：降级后其余字段照旧，本地扩展回落默认。
     // An upstream K=20 backup has only bookmark, not the local 21..24 extensions; drop them and expect defaults.
@@ -1618,7 +1889,7 @@ int main(void) {
                                    sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                    sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                    sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t));
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long newest_end = ftell(saved);
     size_t newest_tail = (size_t)(newest_end - local_fields_at - local_band);
@@ -1644,13 +1915,13 @@ int main(void) {
     assert(fflush(saved) == 0 && ftruncate(fileno(saved), newest_end - local_band) == 0 && fclose(saved) == 0);
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
-    app_settings_set_reader_open_fullscreen(false);
+    test_set_reader_bars_hidden(false);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     app_settings_set_reader_up_action(APP_READER_KEY_NEXT);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_PLAIN);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_DEFAULT);
-    assert(app_settings_reader_open_fullscreen());
+    assert(test_reader_bars_hidden());
     assert(app_settings_reader_double_action() == APP_READER_KEY_NONE);
     assert(app_settings_reader_up_action() == APP_READER_KEY_NONE);
     assert(app_settings_backup_save() == ESP_OK);
@@ -1658,8 +1929,8 @@ int main(void) {
     // Old local L=21: 18 open_full, 19 title_style, 20 title_size, 21 double_action, without bookmark.
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX);
-    app_settings_set_reader_open_fullscreen(false);
-    app_settings_set_reader_double_action(APP_READER_KEY_FULLSCREEN);
+    test_set_reader_bars_hidden(false);
+    app_settings_set_reader_double_action(APP_READER_KEY_TOOLS);
     app_settings_set_book_margin_left(48);
     app_settings_set_book_margin_right(48);
     app_settings_set_book_margin_top(48);
@@ -1690,7 +1961,7 @@ int main(void) {
                                   sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                                   sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                                   sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
     memmove(legacy_bytes + l_band, legacy_bytes + l_band + dropped_blocks,
             legacy_tail - l_band - dropped_blocks);
     legacy_tail -= dropped_blocks;
@@ -1715,7 +1986,7 @@ int main(void) {
     assert(fflush(saved) == 0 && ftruncate(fileno(saved), legacy_end - (long)sizeof(settings_backup_background_t)) == 0 && fclose(saved) == 0);
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
-    app_settings_set_reader_open_fullscreen(true);
+    test_set_reader_bars_hidden(true);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     app_settings_set_book_margin_left(0);
     app_settings_set_book_margin_right(0);
@@ -1725,8 +1996,8 @@ int main(void) {
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_FRAME);
     assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
-    assert(!app_settings_reader_open_fullscreen());
-    assert(app_settings_reader_double_action() == APP_READER_KEY_FULLSCREEN);
+    assert(!test_reader_bars_hidden());
+    assert(app_settings_reader_double_action() == APP_READER_KEY_TOOLS);
     assert(app_settings_book_margin_left() == 48 && app_settings_book_margin_right() == 48 &&
            app_settings_book_margin_top() == 0 && app_settings_book_margin_bottom() == 0);
     assert(app_settings_book_tracking() == 15);
@@ -1775,7 +2046,7 @@ int main(void) {
     assert(fseek(saved,v10_tail_start,SEEK_SET)==0&&fread(v10_tail,1,v10_tail_size,saved)==v10_tail_size);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
     memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(LEGACY_TAIL_BLOCKS), v10_tail_size-sizeof(settings_backup_wifi_t)-(LEGACY_TAIL_BLOCKS));
-    v10_tail_size-=(LEGACY_TAIL_BLOCKS);v11_end-=(long)(LEGACY_TAIL_BLOCKS);    saved_keys.actions[0]=APP_READER_KEY_HOME;saved_keys.actions[1]=APP_READER_KEY_FULLSCREEN;saved_keys.actions[2]=APP_READER_KEY_REFRESH;
+    v10_tail_size-=(LEGACY_TAIL_BLOCKS);v11_end-=(long)(LEGACY_TAIL_BLOCKS);    saved_keys.actions[0]=APP_READER_KEY_HOME;saved_keys.actions[1]=APP_READER_KEY_LEGACY_FULLSCREEN;saved_keys.actions[2]=APP_READER_KEY_REFRESH;
     uint32_t missing_tools_hash=backup_keys_checksum(&saved_keys);
     for(int i=0;i<4;++i)saved_keys.checksum[i]=(uint8_t)(missing_tools_hash>>(i*8));
     memcpy(legacy_header.magic,"PICOSETA",8);legacy_header.flags[BK_TRACKING]=4;backup_seal(&legacy_header);
@@ -1793,7 +2064,7 @@ int main(void) {
     s_reader_hold_action=APP_READER_KEY_HOME;assert(app_settings_backup_restore()==ESP_OK);
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME && app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER && app_settings_book_indent_adjust()==0);
     assert(wifi_imports==prior_wifi+1&&history_restores==prior_history+1);
-    assert(app_settings_reader_key_action(0)==saved_keys.actions[0]&&app_settings_reader_key_action(1)==saved_keys.actions[1]&&app_settings_reader_key_action(2)==saved_keys.actions[2]);
+    assert(app_settings_reader_key_action(0)==saved_keys.actions[0]&&app_settings_reader_key_action(1)==reader_action_migrate(saved_keys.actions[1])&&app_settings_reader_key_action(2)==saved_keys.actions[2]);
     assert(app_settings_backup_save()==ESP_OK); // Continue v8 conversion from current v11.
     // v8 的旧实验位不启用新模式，既有备份仍可恢复。
     // A v8 retired-test bit cannot enable a new mode; existing backups remain readable.
@@ -1840,14 +2111,14 @@ int main(void) {
     assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME && app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
     // 中键双击与单击/长按一起保存、恢复；提交失败不改内存。
     // The middle double action saves and restores alongside click/hold, and a failed commit keeps RAM unchanged.
-    assert(app_settings_set_reader_double_action(APP_READER_KEY_FULLSCREEN));
-    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    assert(app_settings_set_reader_double_action(APP_READER_KEY_TOOLS));
+    assert(app_settings_reader_double_action()==APP_READER_KEY_TOOLS);
     assert(app_settings_backup_save()==ESP_OK);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     assert(app_settings_backup_restore()==ESP_OK);
-    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    assert(app_settings_reader_double_action()==APP_READER_KEY_TOOLS);
     commit_fails=true;assert(!app_settings_set_reader_double_action(APP_READER_KEY_HOME));commit_fails=false;
-    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    assert(app_settings_reader_double_action()==APP_READER_KEY_TOOLS);
     app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     assert(app_settings_set_reader_hold_action(APP_READER_KEY_NONE));
     // 无工具栏按键的映射在保存、恢复和重启后保持不变；固定上滑入口由阅读控制测试覆盖。
@@ -2110,7 +2381,7 @@ int main(void) {
     const size_t v27_blocks = sizeof(settings_backup_book_fonts_t) + sizeof(settings_backup_book_vertical_t) +
                               sizeof(settings_backup_shutdown_style_t) + sizeof(settings_backup_haptic_t) +
                               sizeof(settings_backup_margins_t) + sizeof(settings_backup_shake_t) +
-                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
+                                  sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t);
     assert(v26_tail > (size_t)v27_at + v27_blocks);
     memmove(v26_bytes + v27_at, v26_bytes + v27_at + v27_blocks, v26_tail - v27_at - v27_blocks);
     v26_tail -= v27_blocks;
@@ -2143,7 +2414,7 @@ int main(void) {
     for(unsigned i=0;i<6;++i)assert(app_settings_set_reader_chrome_item(i/3,i%3,custom_chrome[i]));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
     long chrome_at=ftell(saved);settings_backup_chrome_t valid_chrome;
     assert(fread(&valid_chrome,1,sizeof(valid_chrome),saved)==sizeof(valid_chrome));
     assert(backup_chrome_valid(&valid_chrome)&&!memcmp(valid_chrome.items,custom_chrome,6));
@@ -2171,7 +2442,7 @@ int main(void) {
     assert(app_settings_set_reader_chrome_heights(96,73));
     assert(app_settings_backup_save()==ESP_OK);
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
-    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
+    assert(fseek(saved,-(long)(8+sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_network_t) + sizeof(settings_backup_tap_t)),SEEK_END)==0);
     long height_at=ftell(saved);settings_backup_chrome_heights_t valid_height;
     assert(fread(&valid_height,1,sizeof(valid_height),saved)==sizeof(valid_height)&&fclose(saved)==0);
     for(unsigned fault=0;fault<3;++fault){
@@ -2263,7 +2534,7 @@ int main(void) {
     assert(!backup_shutdown_style_valid(&bad_shutdown));
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
     const long shutdown_tail=(long)(sizeof(settings_backup_shutdown_style_t)+sizeof(settings_backup_haptic_t)+
-        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
+        sizeof(settings_backup_margins_t)+sizeof(settings_backup_shake_t)+sizeof(settings_backup_chrome_t) + sizeof(settings_backup_chrome_heights_t) + sizeof(settings_backup_chrome_visibility_t) + sizeof(settings_backup_home_regions_t) + sizeof(settings_backup_progress_bar_t) + sizeof(settings_backup_book_styles_t) + sizeof(settings_backup_touch_t) + sizeof(settings_backup_ticket_background_t) + sizeof(settings_backup_calendar_t) + sizeof(settings_backup_tap_t) + sizeof(settings_backup_network_t));
     assert(fseek(saved,-shutdown_tail,SEEK_END)==0);
     assert(fwrite(&bad_shutdown,1,sizeof(bad_shutdown),saved)==sizeof(bad_shutdown)&&fclose(saved)==0);
     int commits_before_bad_shutdown=commit_count;
@@ -2282,6 +2553,8 @@ int main(void) {
     test_reading_guides();
     test_clock_style();
     test_tap_grid();
+    test_chrome_visibility();
+    test_unified_reader_migration();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     return 0;
 }

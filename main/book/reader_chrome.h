@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：阅读页页眉与页脚的三段槽位绘制。合成槽位文本、确定性排布与截短都在这里；
- * 页眉页脚共用阅读字体面。页脚进度条、全屏进度线与分隔线
+ * 页眉页脚共用阅读字体面。页脚进度条与分隔线
  * 不属于本文件。
  * English: three-slot painting for the reader header and footer. Slot text composition,
  * deterministic layout and trimming live here; both bars share the reading face.
- * The footer progress bar, full-screen strip and rules stay outside.
+ * The footer progress bar and rules stay outside.
  *
  * 冻结：槽位只读设置与传入数据，不写设置、不读卡、不推屏、不改全局字体状态
  * （页脚系统槽选择在绘制内自恢复）。

@@ -43,7 +43,7 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RI
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_LIGHT 224
 #define UI_GRAY_BLACK 0
-#define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
+#define UI_BAR_MARGIN 24
 #define UI_BAR_H 96
 #define UI_BAR_TOP (UI_LOCK_HEIGHT - 24 - UI_BAR_H)
 #define READER_FOOTER_PROGRESS_SPACE 19
@@ -51,22 +51,23 @@ enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT, EPD_DRAW_ALIGN_CENTER, EPD_DRAW_ALIGN_RI
 #define CHROME_ICON_W 42
 #define CHROME_SLOT_TEXT_MAX 64
 enum {READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW};
-// 正文带固定为窗口化档的行；帧缓冲按旋转后的 684×1216、4bpp 行距取字节。
-// The body band is fixed to the windowed row range; the frame is counted with the rotated
-// 684x1216 footprint at 4bpp row pitch.
-static const int body_y=176,body_height=959;
+// 正文带提取真实几何；帧缓冲按旋转后的 684×1216、4bpp 行距取字节。
+// Extract the real body geometry and use the rotated 684x1216 footprint at 4bpp row pitch.
 static const int row_bytes=UI_LOCK_WIDTH/2;
-static bool s_reader_fullscreen,statusbar_on=true,s_reader_progress_bar=true;
+enum {MARGIN_LEFT,MARGIN_RIGHT,MARGIN_TOP,MARGIN_BOTTOM,MARGIN_COUNT};
+static int s_margin[MARGIN_COUNT]={36,36,0,0};
+static bool statusbar_on=true,s_reader_progress_bar=true;
 static int s_chrome_height[2]={80,57};
+static bool s_chrome_visible[2]={true,true};
 static int s_reader_panel=READER_PANEL_NONE,s_px=48;
 static char s_chapter_heading_title[128]="",s_chapter_heading_label[64]="",s_reader_notice[64]="";
 static int s_chapter_lead_height,s_chapter_lead_width;
 // 桩：只有正文与页眉/页脚/状态栏计数，别的页面函数都不参与。
 // Stubs: only the body and a chrome call count; no other page function takes part.
 static int chrome_calls;
-static int reader_footer_height(void);
-static EpdRect body_rect(void){return (EpdRect){36,body_y,612,1192-reader_footer_height()-body_y};}
+static EpdRect body_rect(void);
 static bool app_settings_reader_statusbar(void){return statusbar_on;}
+static int app_settings_book_tracking(void){return 0;}
 static bool app_settings_book_vertical(void){return false;}
 static unsigned app_settings_system_font_size(void){return 120;}
 static void ui_reader_notice_draw(uint8_t *fb,const char *message,unsigned scale){(void)fb;(void)message;(void)scale;}
@@ -138,7 +139,8 @@ static int ink_bytes(const uint8_t *fb,size_t from,size_t to){
     return count;
 }
 static int body_ink(const uint8_t *fb){
-    return ink_bytes(fb,(size_t)body_y*row_bytes,(size_t)(body_y+body_height)*row_bytes);
+    EpdRect body=body_rect();
+    return ink_bytes(fb,(size_t)body.y*row_bytes,(size_t)(body.y+body.height)*row_bytes);
 }
 '''
 unit += 'int epd_width(void){return 1216;}\n'
@@ -172,7 +174,7 @@ for name in ('clamp_radius', 'ui_fill_round_rect_raw', 'ui_fill_round_rect'):
     if name == 'ui_fill_round_rect_raw':
         unit += function('epd_fill_circle_helper', ROOT / 'components/epdiy/src/epdiy.c') + '\n'
     unit += function(name, KIT) + '\n'
-for name in ('reader_footer_height', 'progress_rect'):
+for name in ('reader_footer_height', 'reader_area', 'body_rect_for_tracking', 'body_rect', 'progress_rect'):
     unit += function(name, BOOK) + '\n'
 unit += function('draw_reader_outer', BOOK) + '\n'
 unit += function('draw_reader', BOOK) + '\n'
@@ -189,7 +191,7 @@ int main(void){
     // One: windowed full page repaint. The body is painted first and the chrome after it;
     // the body text must stay in the frame.
     fb=white_frame();
-    s_reader_fullscreen=false;statusbar_on=true;s_reader_panel=READER_PANEL_NONE;
+    statusbar_on=true;s_reader_panel=READER_PANEL_NONE;
     chrome_calls=0;
     draw_reader(fb,2);
     assert(chrome_calls>0);
@@ -211,7 +213,7 @@ int main(void){
     // Three: with a card face loaded both footer halves use it at a fixed 28 px, independent of
     // the punctuation in the chapter name.
     fb=white_frame();
-    s_reader_fullscreen=false;s_reader_panel=READER_PANEL_NONE;
+    s_reader_panel=READER_PANEL_NONE;
     card_face=true;footer_builtin_draws=footer_card_draws=0;footer_px=0;
     draw_reader_outer(fb,2);
     assert(footer_card_draws==2&&!footer_builtin_draws&&footer_px==28);
@@ -227,33 +229,74 @@ int main(void){
     free(fb);
     // 隐藏后页脚带缩小、文字位置不动；回收给正文的像素不会被外框清掉。
     // Hiding shrinks the footer band without moving text or clearing the pixels reclaimed by the body.
-    for(int full=0;full<2;++full)for(int height=57;height<=121;height+=8){
-        s_reader_fullscreen=full;s_chrome_height[1]=height;
+    for(int height=57;height<=121;height+=8){
+        s_chrome_height[1]=height;
         for(size_t page=0;page<=10;page+=5){
             fb=white_frame();s_reader_progress_bar=true;footer_builtin_draws=footer_card_draws=0;
             draw_reader_outer(fb,page);
-            EpdRect strip=full?(EpdRect){36,READER_FULLSCREEN_PROGRESS_TOP+3,612,3}:
-                (EpdRect){36,1192-height+8,612,6};
+            EpdRect strip={36,1192-height+8,612,6};
             int first=UI_LOCK_HEIGHT,last=-1;
             for(int y=0;y<UI_LOCK_HEIGHT;++y)if(ink_bytes(fb,(size_t)y*row_bytes,(size_t)(y+1)*row_bytes)){
                 if(y<first)first=y;last=y;
             }
             assert(first==strip.y&&last==strip.y+strip.height-1);
             int previous_top=footer_top,previous_draws=footer_builtin_draws;
-            assert(previous_draws==(full?0:2));
-            if(!full)assert(previous_top==1192-height+27&&footer_px==28);
+            assert(previous_draws==2);
+            assert(previous_top==1192-height+27&&footer_px==28);
             free(fb);fb=white_frame();s_reader_progress_bar=false;footer_builtin_draws=footer_card_draws=0;
             draw_reader_outer(fb,page);
             assert(ink_bytes(fb,0,(size_t)UI_LOCK_HEIGHT*row_bytes)==0);
-            assert(footer_builtin_draws==previous_draws&&(full||footer_top==previous_top));
+            assert(footer_builtin_draws==previous_draws&&footer_top==previous_top);
             free(fb);
         }
     }
-    s_chrome_height[1]=57;s_reader_fullscreen=false;s_reader_progress_bar=false;
+    s_chrome_height[1]=57;s_reader_progress_bar=true;
+    EpdRect with_progress=body_rect();
+    s_reader_progress_bar=false;
+    EpdRect without_progress=body_rect();
+    assert(without_progress.height-with_progress.height==19);
     fb=white_frame();book_layout_draw_page(fb,3,body_rect(),s_px);draw_reader_outer(fb,3);
-    assert(body_ink(fb)==body_height*row_bytes);
-    assert(ink_bytes(fb,1135u*row_bytes,1154u*row_bytes)==19*row_bytes);free(fb);
-    puts("PASS: footer bar is 6px at all heights, full-screen line stays 3px, hidden progress preserves footer text and reclaimed body pixels");
+    assert(body_ink(fb)==without_progress.height*row_bytes);
+    assert(ink_bytes(fb,(size_t)(with_progress.y+with_progress.height)*row_bytes,
+                       (size_t)(without_progress.y+without_progress.height)*row_bytes)==19*row_bytes);free(fb);
+    puts("PASS: footer bar is 6px at all heights; hidden progress preserves footer text and all 19 reclaimed body rows");
+    // 整栏隐藏时连进度条也不画，扩大的正文像素完整保留。
+    // Hiding the entire footer suppresses text and progress without touching reclaimed body pixels.
+    s_chrome_visible[1]=false;
+    for(int progress=0;progress<2;++progress)for(int height=57;height<=121;height+=8){
+        s_reader_progress_bar=progress;s_chrome_height[1]=height;
+        fb=white_frame();footer_builtin_draws=footer_card_draws=0;
+        draw_reader_outer(fb,5);
+        assert(!footer_builtin_draws&&!footer_card_draws);
+        assert(ink_bytes(fb,0,(size_t)UI_LOCK_HEIGHT*row_bytes)==0);
+        book_layout_draw_page(fb,5,body_rect(),s_px);
+        draw_reader_outer(fb,5);
+        assert(ink_bytes(fb,(size_t)(1192-height)*row_bytes,1192u*row_bytes)==height*row_bytes);
+        free(fb);
+    }
+    puts("PASS: hidden footer suppresses text and progress and preserves its entire reclaimed body band");
+    // 填满正文排版带后仍留有9行白，预绘补画外框也必须保留这些边界。
+    // Even a fully painted text band leaves nine white rows; prefetched chrome preserves them.
+    for(int status=0;status<2;++status)for(int visible=0;visible<4;++visible)
+    for(int progress=0;progress<2;++progress){
+        statusbar_on=status;s_chrome_visible[0]=visible&1;s_chrome_visible[1]=visible&2;
+        s_chrome_height[1]=57;s_reader_progress_bar=progress;
+        for(int prefetched=0;prefetched<2;++prefetched){
+            fb=white_frame();
+            if(prefetched){book_layout_draw_page(fb,5,body_rect(),s_px);draw_reader_outer(fb,5);}
+            else draw_reader(fb,5);
+            EpdRect area=reader_area(),body=body_rect();
+            assert(body.y-area.y==9&&area.y+area.height-body.y-body.height==9);
+            assert(ink_bytes(fb,(size_t)area.y*row_bytes,(size_t)body.y*row_bytes)==0);
+            assert(ink_bytes(fb,(size_t)(body.y+body.height)*row_bytes,
+                               (size_t)(area.y+area.height)*row_bytes)==0);
+            assert(body_ink(fb)==body.height*row_bytes);
+            if(!s_chrome_visible[1])assert(body.y+body.height==UI_LOCK_HEIGHT-9);
+            if(!status&&!s_chrome_visible[0])assert(body.y==9);
+            free(fb);
+        }
+    }
+    puts("PASS: ordinary and prefetched draws preserve 9px white gaps for every bar/status/progress combination");
     return 0;
 }
 '''

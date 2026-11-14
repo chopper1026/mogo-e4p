@@ -8,8 +8,8 @@ static inline void app_book_request_manage(void) {}
 
 #include <stddef.h>
 bool app_book_reader_body_visible(void);
-bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen);
-bool app_book_request_return_to_body(const char *path, bool fullscreen);
+bool app_book_resume_context(char *path, size_t capacity);
+bool app_book_request_return_to_body(const char *path);
 
 void app_book_cover_mode_changed(void);
 void app_home_cover_mode_changed(void);

@@ -78,6 +78,8 @@ After frontlight and radios stop, board sleep cuts the P14 Bluetooth/amplifier s
 
 ## 依赖规则 / Dependency rules
 
+- 阅读正文由 `app_book` 统一计算信息栏显隐和用户边距，排版、分页、预绘与触摸共用 `body_rect`；上下保留9px基础间距，`reader_area` 清理范围包含留白。显隐改变按当前文字锚点重排，失败回滚；返回和休眠恢复沿用当前显隐设置，无独立全屏状态。/ `app_book` owns one body rectangle for layout, pagination, prefetch and input, with 9px top/bottom base gaps plus user margins and clearing that includes those gaps. Visibility changes reflow around the current text anchor with rollback, and returns/resume use current bar preferences without separate full-screen state.
+
 - 快捷栏刷新与锁屏先提交待保存的前光调节、收起快捷层并恢复底页；刷新随后推屏，锁屏随后交回主循环保存阅读进度并进入锁页。/ Quick-layer refresh and lock first persist pending light changes, close the layer and restore the underlay; refresh then presents, while locking returns to the loop to flush reading state and enter the lock screen.
 
 - 阅读方向由 `app_book` 持有会话状态，与晃动翻页共用传感器采样；`reader_orientation` 只判稳定重力，`display_orientation` 只映射显示方向及触点。UI 任务在绘制锁内交还预绘、更新几何并按字节锚点重排，失败恢复旧布局。阅读正文/工具栏可四向显示，系统菜单、锁屏、目录及设置暂用正常竖屏；离开/关书清空自动状态。`app_desc_t` 的可选回调连接顶部快捷栏与系统遮罩，`render()` 保持纯绘制。/ `app_book` owns session orientation and shares sensor sampling with shake paging; `reader_orientation` only detects stable gravity and `display_orientation` maps direction/contacts. The UI task joins prefetch, changes geometry and reflows around a byte anchor under the draw lock, restoring the old layout on failure. Body/tools support four directions; system menus, lock, TOC and settings temporarily use portrait, and closing/leaving clears auto mode. Optional page callbacks connect quick controls/system overlays while render remains paint-only. See [方向契约](development/guides/READER_ORIENTATION.md).

@@ -14,7 +14,7 @@ def unit():
     code = original_unit().replace('static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_vertical_turn()?1:0;}', 'static unsigned preview_mode;\nstatic unsigned app_settings_reader_tap_mode(void){return preview_mode;}')
     module = (ROOT / 'main/ui/ui_reader_tap_grid.c').read_text()
     module = '\n'.join(line for line in module.splitlines() if not line.startswith('#include "'))
-    code = code.replace('int main(int argc,char **argv){', '#include "book/book_reader_input.h"\n' + module + '\nint main(int argc,char **argv){')
+    code = code.replace('int main(int argc,char **argv){', '#include "book/book_reader_input.h"\n#include "ui_reader_tap_grid.h"\n' + module + '\nint main(int argc,char **argv){')
     marker = re.search(r'\s+printf\("PASS: [^"]*actual reader renders', code)
     assert marker, 'reader toolbar preview pass marker'
     at = marker.start()
@@ -25,7 +25,7 @@ def unit():
    ui_reader_turn_settings_draw(fb,mode,true);
    char path[1024];snprintf(path,sizeof(path),"%s/turn-mode-%u-%u.raw",argv[1],mode,font_scale);save(path,fb);
   }
-  static const char *const names[]={"上一页","下一页","工具栏","切换全屏","返回主页","手动全刷","前光开关","不操作"};
+  static const char *const names[]={"上一页","下一页","工具栏","返回主页","手动全刷","前光开关","不操作"};
   static const char *const labels[]={"上一页","下一页","下一页","上一页","工具栏","下一页","前光开关","手动全刷","不操作"};
   preview_mode=2;background(fb);s_reader_panel=READER_PANEL_REFRESH_SETTINGS;s_reader_settings_group=UI_READER_SETTINGS_INPUT;draw_reader_panel(fb);
   char settings_path[1024];snprintf(settings_path,sizeof(settings_path),"%s/settings-grid-%u.raw",argv[1],font_scale);save(settings_path,fb);
@@ -57,7 +57,7 @@ def run(output):
         draw.text((x, 22), title, font=font, fill='#222222')
         canvas.paste(Image.open(output/(name+'.png')).resize((342,608)), (x,68))
     canvas.save(output/'tap-grid-overview.png')
-    print('PASS: 36 native renders, actual UI fonts at 100/150/200%, all eight action labels, transparent grid and three tap modes')
+    print('PASS: 36 native renders, actual UI fonts at 100/150/200%, all seven action labels, transparent grid and three tap modes')
 
 
 if __name__ == '__main__':

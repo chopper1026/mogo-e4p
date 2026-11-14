@@ -112,7 +112,7 @@ static reader_present_request_t reset(void) {
     return (reader_present_request_t){
         .refresh = READER_PRESENT_AREA, .mode = MODE_GL16, .page_mode = MODE_DU,
         .status_area = {0, 0, 684, 160}, .area = {1, 2, 3, 4}, .body_area = {5, 6, 7, 8}, .footer_area = {9, 10, 11, 12},
-        .progress_area = {13, 14, 15, 16}, .tools_area = {17, 18, 19, 20},
+        .tools_area = {17, 18, 19, 20},
         .screen_area = {0, 0, 684, 1216}, .water_dir = E0470_TURN_BTT,
         .reading = true, .reader_body = true, .prior_reader = true, .turn_pending = true,
     };
@@ -139,14 +139,10 @@ int main(void) {
     reader_present_result_t out = reader_present_output(&hl, &r);
     assert(out.error == 0 && !out.tools_band && !out.footer_updated && count == 1);
     expect(0, DIFF, &text, MODE_GL16, r.area);
-    r = reset(); r.fullscreen = true;
-    reader_present_output(&hl, &r);
-    assert(count == 2); expect(0, DIFF, &text, MODE_GL16, r.area);
-    expect(1, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
     // 隐藏后进度带已回收给正文，不得再次用进度波形驱动这些文字。
     // A hidden strip belongs to the body and must not be driven again with the progress waveform.
     for (int water = 0; water < 2; ++water) {
-        r = reset(); r.fullscreen = true; r.progress_area = (EpdRect){0,1216,684,0};
+        r = reset(); r.footer_pending = false;
         r.area = (EpdRect){0,80,684,1136}; r.water_turn_pending = water;
         r.status_pending = true;
         out = reader_present_output(&hl, &r);
@@ -157,11 +153,9 @@ int main(void) {
         } else expect(0, DIFF, &text, MODE_GL16, r.area);
         expect(count-1, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
     }
-    r = reset(); r.turn_pending = false; r.fullscreen = true;
-    reader_present_output(&hl, &r); expect(0, DIFF, &page, MODE_GL16, r.area);
     r = reset(); r.turn_pending = false;
     reader_present_output(&hl, &r); expect(0, AREA, &page, MODE_GL16, r.area);
-    r = reset(); r.mode = MODE_DU; r.fullscreen = true;
+    r = reset(); r.mode = MODE_DU;
     reader_present_output(&hl, &r); expect(0, AREA, &page, MODE_DU, r.area);
 
     // 正文先输出，随后页脚或进度，顶部最后；背景、状态、全屏及两种效果共用顺序。
@@ -170,7 +164,7 @@ int main(void) {
     for (int water = 0; water < 2; ++water) for (int status = 0; status < 2; ++status)
     for (int strong = 0; strong < 2; ++strong) {
         r = reset(); use_background = bg;
-        r.fullscreen = full; r.water_turn_pending = water;
+        r.water_turn_pending = water;
         r.status_pending = status; r.footer_pending = !full;
         r.footer_strong = strong;
         out = reader_present_output(&hl, &r);
@@ -181,16 +175,15 @@ int main(void) {
             expect(i++, WATER, NULL, E0470_TURN_BTT, r.area);
             assert(calls[i++].kind == TICK && tick == 13579);
         } else expect(i++, DIFF, &text, MODE_GL16, r.area);
-        if (full) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
-        else if (strong) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.footer_area);
-        else expect(i++, AREA, &E0470_FOLLOW_WAVEFORM, MODE_DU, r.footer_area);
+        if (!full && strong) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.footer_area);
+        else if (!full) expect(i++, AREA, &E0470_FOLLOW_WAVEFORM, MODE_DU, r.footer_area);
         if (status) expect(i++, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
         assert(i == count);
     }
     // 正文失败不刷顶底栏；所有失败都短路并保留错误，水波纹始终恢复节拍。
     // Body errors skip chrome; all failures stop later output and propagate, and ripple always restores pacing.
-    for (int water = 0; water < 2; ++water) for (int failure = 0; failure < 4; ++failure) {
-        r = reset(); r.status_pending = r.footer_pending = r.fullscreen = true;
+    for (int water = 0; water < 2; ++water) for (int failure = 0; failure < 3; ++failure) {
+        r = reset(); r.status_pending = r.footer_pending = true;
         r.water_turn_pending = water;
         errors[failure] = EPD_DRAW_OTHER_ERROR;
         out = reader_present_output(&hl, &r);
@@ -201,21 +194,20 @@ int main(void) {
     // 插图正文也优先输出，保留原完整灰阶或插图差分出口。
     // Illustration bodies also present first while retaining full-gray or image-differential output.
     for (int bg = 0; bg < 2; ++bg) for (int water = 0; water < 2; ++water)
-    for (int failure = -1; failure < 4; ++failure) {
+    for (int failure = -1; failure < 3; ++failure) {
         r = reset(); use_background = bg;
-        r.image_gray_refresh = r.image_page = r.fullscreen = r.footer_pending = r.status_pending = true;
+        r.image_gray_refresh = r.image_page = r.footer_pending = r.status_pending = true;
         r.water_effect = water;
         if (failure >= 0) errors[failure] = EPD_DRAW_OTHER_ERROR;
         out = reader_present_output(&hl, &r);
-        assert(count == (failure < 0 ? 4u : (size_t)failure + 1));
+        assert(count == (failure < 0 ? 3u : (size_t)failure + 1));
         assert(out.error == (failure < 0 ? 0 : EPD_DRAW_OTHER_ERROR));
         assert(out.status_updated == (failure < 0));
         assert(out.footer_updated == (failure < 0 || failure > 1));
         expect(0, water ? DIFF : AREA, water ? &image : &E0470_FULL_WAVEFORM,
                water ? MODE_GL16 : MODE_GC16, r.body_area);
         if (count > 1) expect(1, DIFF, &E0470_WAVEFORM, MODE_GL16, r.footer_area);
-        if (count > 2) expect(2, DIFF, &E0470_WAVEFORM, MODE_GL16, r.progress_area);
-        if (count > 3) expect(3, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
+        if (count > 2) expect(2, DIFF, &E0470_WAVEFORM, MODE_GL16, r.status_area);
     }
     r = reset(); r.image_gray_refresh = r.image_page = r.water_effect = true; r.prior_reader = false;
     reader_present_output(&hl, &r); assert(count == 1); expect(0, WHOLE_DIFF, &image, MODE_GL16, none);
@@ -241,12 +233,12 @@ int main(void) {
     r = reset(); r.refresh = READER_PRESENT_PAGE; r.image_page = true;
     reader_present_output(&hl, &r); expect(0, WHOLE_DIFF, &image, MODE_DU, none);
     // 提示收起一次驱动整屏，窗口/全屏/插图和背景都不追加页脚、状态或水波纹。
-    // Notice dismissal drives the whole screen once without extra chrome/ripple across windowed/fullscreen/image/background frames.
+    // Notice dismissal drives the whole screen once without extra chrome/ripple across visible/hidden-footer/image/background frames.
     for (int area = 0; area < 2; ++area) for (int full = 0; full < 2; ++full)
     for (int gray = 0; gray < 2; ++gray) for (int picture = 0; picture < 2; ++picture)
     for (int image_pending = 0; image_pending < 2; ++image_pending) {
         r = reset(); r.refresh = area ? READER_PRESENT_AREA : READER_PRESENT_PAGE;
-        r.closing_notice = true; r.hold_gray = gray; r.image_page = picture; r.fullscreen = full;
+        r.closing_notice = true; r.hold_gray = gray; r.image_page = picture; r.footer_pending = !full;
         r.image_gray_refresh = image_pending;
         r.tools_toggle = r.water_turn_pending = r.status_pending = r.footer_pending = true;
         out = reader_present_output(&hl, &r);
@@ -273,7 +265,7 @@ int main(void) {
     reader_present_output(&hl, &r); expect(0, FAST, NULL, 0, none);
     for (int du = 0; du < 2; ++du) {
         r = reset(); r.reading = false; r.feedback = true; r.mode = du ? MODE_DU : MODE_GL16;
-        r.status_pending = r.water_turn_pending = r.fullscreen = r.footer_pending = true;
+        r.status_pending = r.water_turn_pending = r.footer_pending = true;
         reader_present_output(&hl, &r);
         assert(count == 1 && tick == 13579);
         expect(0, DIFF, du ? &E0470_FOLLOW_WAVEFORM : &E0470_WAVEFORM, r.mode, r.area);

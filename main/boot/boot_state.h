@@ -10,7 +10,8 @@
 
 #define PICO_BOOT_PATH_MAX 288
 typedef struct {
-    uint8_t tab, reader, fullscreen;
+    uint8_t tab, reader;
+    uint8_t fullscreen; ///< 旧记录占位，新恢复不使用。/ Legacy record byte, ignored by reader resume.
     char path[PICO_BOOT_PATH_MAX];
 } pico_resume_t;
 

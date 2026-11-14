@@ -40,7 +40,7 @@ static bool s_bookmark_edit,s_bookmark_delete_confirm,s_bookmark_delete_error;
 static uint32_t s_bookmark_selected;
 static char s_message[64];
 static size_t toc_position;
-static unsigned saved,bookmarked,invalidated,fullscreen;
+static unsigned saved,bookmarked,invalidated;
 static int view;
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static void invalidate_prep(void){++invalidated;}
@@ -49,7 +49,6 @@ static void set_reader_view(int next){view=next;}
 static size_t current_toc_position(void){return toc_position;}
 static bool bookmark_toggle(void){++bookmarked;return true;}
 static int app_settings_book_line_spacing(void){return 135;}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;++fullscreen;s_reader_panel=READER_PANEL_NONE;return APP_REDRAW_FULL;}
 '''
 for name in ('tool_rect', 'reader_more_rect', 'reader_sheet_back_rect'):
     unit += function(name, BOOK) + '\n'
@@ -70,10 +69,10 @@ static void reset(void){
  s_toc_jump_open=s_toc_jump_drag=true;strcpy(s_message,"old message");
  s_bookmark_edit=s_bookmark_delete_confirm=s_bookmark_delete_error=true;
  s_bookmark_page=3;s_bookmark_selected=UINT32_MAX;
- saved=bookmarked=invalidated=fullscreen=0;view=READING;toc_position=19;
+ saved=bookmarked=invalidated=0;view=READING;toc_position=19;
 }
 static void check_tool(app_ctx_t *ctx,int index){
- assert(invalidated==1&&!fullscreen&&!s_reader_tools_toggle);
+ assert(invalidated==1&&!s_reader_tools_toggle);
  assert(saved==(unsigned)(index==0)&&bookmarked==(unsigned)(index==1));
  if(index==0){assert(view==TOC&&ctx->leaf==2&&!s_message[0]&&!s_toc_jump_open&&!s_toc_jump_drag);assert(s_reader_panel==READER_PANEL_NONE);}
  else {
@@ -104,7 +103,7 @@ int main(void){
   assert(s_reader_panel==READER_PANEL_NONE&&s_reader_tools_toggle&&invalidated==1&&!saved&&!bookmarked);
  }
  width=684;height=1216;
- for(int i=0;i<3;++i){
+ for(int i=0;i<2;++i){
   EpdRect r=reader_more_rect(i);
   for(int corner=0;corner<4;++corner){
    reset();s_reader_panel=READER_PANEL_MORE;
@@ -112,7 +111,6 @@ int main(void){
    assert(!saved&&!bookmarked);
    if(i==0)assert(redraw==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_STATS);
    if(i==1)assert(redraw==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_BOOKMARKS&&!s_bookmark_page&&!s_bookmark_edit&&!s_bookmark_delete_confirm&&!s_bookmark_delete_error&&!s_bookmark_selected);
-   if(i==2)assert(redraw==APP_REDRAW_FULL&&fullscreen==1&&s_reader_panel==READER_PANEL_NONE);
   }
   const int gaps[][2]={{35,r.y},{648,r.y},{36,r.y-1},{36,r.y+r.height}};
   for(unsigned point=0;point<sizeof(gaps)/sizeof(gaps[0]);++point){
@@ -121,7 +119,7 @@ int main(void){
   }
  }
  reset();s_reader_panel=READER_PANEL_MORE;tap(&ctx,64,861);assert(s_reader_panel==READER_PANEL_TOOLS&&invalidated==1);
- reset();s_reader_panel=READER_PANEL_MORE;tap(&ctx,342,1170);assert(s_reader_panel==READER_PANEL_NONE&&fullscreen==1);
+ reset();s_reader_panel=READER_PANEL_MORE;assert(tap(&ctx,342,1170)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_MORE&&!invalidated);
  reset();s_reader_panel=READER_PANEL_MORE;assert(tap(&ctx,342,1200)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_MORE&&!invalidated);
  reset();s_reader_panel=READER_PANEL_MORE;tap(&ctx,342,803);assert(s_reader_panel==READER_PANEL_NONE&&invalidated==1);
  puts("PASS: five actual toolbar actions, every portrait/landscape bar pixel, feedback geometry, TOC anchor, typography initialization, More destinations/reset, inert gutters and dismiss without turning");

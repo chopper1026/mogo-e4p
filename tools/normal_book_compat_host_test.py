@@ -65,10 +65,9 @@ static shelf_entry_t s_shelf_storage[8],*s_shelf=s_shelf_storage;
 static int s_count,s_visible_count,s_view=0;
 enum {SHELF};
 static char s_query[65],s_latest_path[288],s_requested_open[288];
-static bool s_recent_sort=true,s_requested_open_home,s_requested_fullscreen;
-static bool app_settings_reader_open_fullscreen(void){return true;}
+static bool s_recent_sort=true,s_requested_open_home;
 typedef struct {shelf_entry_t **entries;int *count;size_t *capacity;} book_shelf_catalog_t;
-typedef struct {book_shelf_catalog_t catalog;const char *query;bool (*favorite_read)(nvs_handle_t,const char*);bool (*hidden_read)(nvs_handle_t,const char*);} book_shelf_scan_t;
+typedef struct {book_shelf_catalog_t catalog;const char *query;bool (*cancel)(void*);void *cancel_ctx;int (*category_add)(const char*);bool (*favorite_read)(nvs_handle_t,const char*);bool (*hidden_read)(nvs_handle_t,const char*);} book_shelf_scan_t;
 typedef struct {const book_shelf_scan_t *scan;nvs_handle_t favorites,hidden;bool truncated;} shelf_backfill_t;
 static bool shelf_reserve(void){++reserves;return s_count<8;}
 static bool book_shelf_catalog_reserve(const book_shelf_catalog_t *catalog){assert(catalog->count==&s_count);return shelf_reserve();}
@@ -120,12 +119,12 @@ int main(int argc,char **argv){
   strcpy(last,oldlast);
  }else{
   assert(app_book_request_open_from_home(records[0].path)&&s_requested_open_home);
-  for(int i=2;i<5;++i){assert(!app_book_request_open(records[i].path));assert(!app_book_request_resume(records[i].path,true));assert(!strcmp(s_requested_open,records[0].path));}
+  for(int i=2;i<5;++i){assert(!app_book_request_open(records[i].path));assert(!app_book_request_resume(records[i].path));assert(!strcmp(s_requested_open,records[0].path));}
   assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
-  assert(app_book_request_resume(records[1].path,false)&&!s_requested_fullscreen&&!strcmp(s_requested_open,records[1].path));
+  assert(app_book_request_resume(records[1].path)&&!strcmp(s_requested_open,records[1].path));
  }
  saved_t saved=records[2];snprintf(records[2].path,288,"%s/cache/third.MOBI",argv[1]);strcpy(last,records[2].path);
- assert(app_book_request_resume(records[2].path,true)&&s_requested_fullscreen&&!strcmp(s_requested_open,records[2].path));
+ assert(app_book_request_resume(records[2].path)&&!strcmp(s_requested_open,records[2].path));
  s_count=s_visible_count=0;bool truncated=false;assert(shelf_backfill_read_books(&truncated)&&!truncated&&s_count==3);
  memset(&s_current,0,sizeof(s_current));memset(s_recent,0,sizeof(s_recent));scan_books();assert(!strcmp(s_current.path,records[2].path)&&s_current.has_progress&&s_current.progress.byte_off==17);
  records[2]=saved;strcpy(last,oldlast);

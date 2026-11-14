@@ -10,8 +10,7 @@
 static const app_desc_t *current;
 static app_ctx_t ctx;
 static app_navigation_history_t history;
-static bool menu_open, body_visible, snapshot_ok = true, snapshot_fullscreen = true;
-static bool captured_fullscreen;
+static bool menu_open, body_visible, snapshot_ok = true;
 static int menu_leaf, enters, reads, restores;
 static app_touch_t raw_touch;
 static esp_err_t read_error;
@@ -88,15 +87,13 @@ void ui_nav_request(app_ctx_t *context, int tab) {
     assert(tab >= 0 && tab < 4); context->request_app = pages[tab];
 }
 bool app_book_reader_body_visible(void) { return body_visible; }
-bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen) {
+bool app_book_resume_context(char *path, size_t capacity) {
     assert(capacity == 256); event('B');
     snprintf(path, capacity, "/sdcard/books/test.epub");
-    *fullscreen = snapshot_fullscreen;
-    captured_fullscreen = *fullscreen;
     return snapshot_ok;
 }
-bool app_book_request_return_to_body(const char *path, bool fullscreen) {
-    assert(!strcmp(path, "/sdcard/books/test.epub") && fullscreen == captured_fullscreen);
+bool app_book_request_return_to_body(const char *path) {
+    assert(!strcmp(path, "/sdcard/books/test.epub"));
     ++restores; event('R'); return true;
 }
 
@@ -229,7 +226,6 @@ static void request_trace(void) {
         ctx.leaf = value % 13; ctx.request_menu = false;
         body_visible = (value & 16) != 0;
         snapshot_ok = value % 11 != 0;
-        snapshot_fullscreen = (value & 32) != 0;
         if (value % 7 == 0) app_navigation_capture_reader_return(current);
         const app_desc_t *next = value % 9 < 6 ? pages[value % 9] : NULL;
         apply(next, value % 5 == 0, (value & 64) != 0);

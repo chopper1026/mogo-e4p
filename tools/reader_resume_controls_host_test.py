@@ -1,4 +1,4 @@
-"""真实翻页与全屏重排回归，确保不跨过未读文字。/ Actual turns/reflow must not skip unread text.
+"""真实翻页、重排与恢复回归，确保不跨过未读文字。/ Actual turns/reflow must not skip unread text.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -33,7 +33,8 @@ static int s_margin[MARGIN_COUNT], s_line_spacing;
 #define TD_LOGI(...) ((void)0)
 #define TD_TIME(tag, expr) ((void)(tag), (expr))
 static char s_requested_open[288];
-static bool s_requested_fullscreen=true,s_requested_open_home;
+static bool s_requested_open_home;
+static bool s_chrome_visible[2]={true,true};
 static const char *s_text="text";
 static size_t s_text_len=900,s_block_count,s_jump_offset;
 static void *s_blocks;
@@ -41,7 +42,7 @@ static struct {bool active;} s_dictionary_selection;
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static int s_px=48,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_view=READING;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
-static bool s_reader_fullscreen,s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;
+static bool s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;
 static bool s_reader_stable_frame,s_reader_footer_strong,s_excerpt_forward;
 static bool s_water_turn_pending,s_reader_cleanup,draw_locked,load_failed;
 static int s_water_turn_dir;
@@ -51,13 +52,9 @@ static void app_reading_journal_record(const char *path,const char *title,uint32
 }
 static int64_t s_last_turn_ms,s_stats_activity_ms;
 static bool s_save_failed;
-static char s_message[128];
 static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
 static const char *app_settings_book_background_path(void){return "";}
-static bool test_open_full=true;
-static bool app_settings_reader_open_fullscreen(void){return test_open_full;}
-static void app_settings_set_reader_open_fullscreen(bool on){test_open_full=on;}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
@@ -67,7 +64,7 @@ static bool book_file_path_supported(const char *path){return path&&*path;}
 // The merged toggle/turn bodies call the heading refresh; this test never asserts it, so stub
 // it out and provide the globals the body touches.
 static void refresh_chapter_lead(void){}
-static EpdRect body_rect(void){return(EpdRect){0,0,684,s_reader_fullscreen?150:100};}
+static EpdRect body_rect(void){return(EpdRect){0,0,684,s_chrome_visible[0]?100:150};}
 static size_t book_layout_page_start_offset(size_t page){return page*layout_span;}
 static size_t book_layout_page_for_offset(size_t off){return off/layout_span;}
 static size_t book_layout_page_count(void){return (s_text_len+layout_span-1)/layout_span;}
@@ -75,12 +72,9 @@ static bool book_layout_build_blocks(const char *text,size_t len,const void *blo
  (void)text;(void)len;(void)blocks;(void)count;(void)px;assert(draw_locked);++reflows;
  if(failed_reflows){--failed_reflows;return false;}layout_span=r.height;return true;
 }
-static void release_page_images(void){}
-static void prepare_inline_image(void){}
 static void save_progress(void){++saves;}
 static unsigned excerpt_repositions;
 static void reader_excerpt_reposition(void){++excerpt_repositions;}
-static void free_book(void){assert(!draw_locked);s_text=NULL;}
 static size_t book_chapter_count(void){return 2;}
 static bool load_chapter(app_ctx_t *ctx,size_t chapter,int off,bool last){(void)ctx;(void)off;if(load_failed)return false;s_chapter=chapter;s_page=last?book_layout_page_count()-1:0;return true;}
 static void set_reader_view(int view){s_view=view;}
@@ -105,10 +99,10 @@ unit += f'\n#include "{ROOT / "main/book/reader_turn.c"}"\n'
 unit += function('reader_turn_save', BOOK) + '\n'
 unit += function('reader_turn_load', BOOK) + '\n'
 from reader_reflow_test_code import reflow_code
-unit += reflow_code("indent", "fullscreen")
+unit += reflow_code("indent")
 unit += function('apply_reader_indent', BOOK) + '\n'
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
-             'toggle_reader_fullscreen', 'reader_turn_chrome', 'turn_page'):
+             'reader_turn_chrome', 'turn_page'):
     if name == 'turn_page':
         unit += '#define turn_page actual_turn_page\n' + function(name, BOOK) + '\n#undef turn_page\n'
         unit += 'static app_redraw_t turn_page(app_ctx_t *ctx,int dir){app_redraw_t result=actual_turn_page(ctx,dir);assert(journal_turns==s_stats_pending_turns);return result;}\n'
@@ -116,7 +110,7 @@ for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_bo
         unit += function(name, BOOK) + '\n'
 unit += r'''
 static void reset(bool full,bool tools,size_t page,size_t chapter){
- s_text="text";s_view=READING;s_reader_fullscreen=full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
+ s_text="text";s_view=READING;s_chrome_visible[0]=s_chrome_visible[1]=!full;layout_span=full?150:100;s_page=page;s_chapter=chapter;
  strcpy(s_reader_session.book.path,"/book.epub");strcpy(s_reader_session.book.title,"Book");s_reader_session.book.file_size=500;journal_turns=0;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=excerpt_repositions=0;
@@ -134,47 +128,19 @@ int main(void){
  assert(book_layout_page_start_offset(s_page)==anchor&&!draw_locked);
  assert(apply_reader_indent(&ctx,2,101)==APP_REDRAW_NONE&&saves==1);
 
- assert(app_book_request_open("/sdcard/book.epub")&&s_requested_fullscreen&&!s_requested_open_home);
- assert(app_book_request_resume("/sdcard/book.epub",false)&&!s_requested_fullscreen&&s_requested_open_home);
- assert(app_book_request_open_from_home("/sdcard/other.epub")&&s_requested_fullscreen);
- assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
- // Shelf entries follow the remembered preference; toggling persists it immediately.
- test_open_full=false;
- assert(app_book_request_open("/sdcard/book.epub")&&!s_requested_fullscreen&&!s_requested_open_home);
- assert(app_book_request_open_from_home("/sdcard/other.epub")&&!s_requested_fullscreen);
- test_open_full=true;
- assert(app_book_request_open("/sdcard/book.epub")&&s_requested_fullscreen);
- reset(false,true,2,0);size_t fs_anchor=book_layout_page_start_offset(s_page);
- assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&s_reader_fullscreen&&test_open_full);
- assert(book_layout_page_start_offset(s_page)<=fs_anchor&&fs_anchor<book_layout_page_start_offset(s_page)+layout_span&&saves==1);
- reset(true,false,2,0);assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&!s_reader_fullscreen&&!test_open_full);
- // 书架点击不经过 request_open，只读 s_requested_fullscreen；切换全屏后这个待开值必须跟着变，
- // 否则关书再进来还是切换前的模式。
- // A shelf tap skips the open request path and reads s_requested_fullscreen alone, so a toggle
- // has to move it too; otherwise reopening after closing the book restores the pre-toggle mode.
- assert(!s_requested_fullscreen);
- // 重排恢复失败才退回书架；失败不落盘，也不清掉原面板和跳转锚点。
- // Fall back to the shelf only when restoration fails; failed toggles neither persist nor clear the original panel/jump anchor.
- for(int full=0;full<2;++full)for(unsigned fail=1;fail<=2;++fail){
-  reset(full,true,2,0);failed_reflows=fail;s_jump_offset=37;
-  test_open_full=!full;s_requested_fullscreen=!full;
-  app_redraw_t expected=fail==1?APP_REDRAW_NONE:APP_REDRAW_PAGE;
-  assert(toggle_reader_fullscreen(&ctx)==expected&&s_reader_fullscreen==!!full);
-  assert(reflows==2&&!draw_locked&&!saves&&s_page==2);
-  assert(test_open_full==!full&&s_requested_fullscreen==!full&&s_jump_offset==37);
-  assert(s_reader_panel==READER_PANEL_TOOLS);
-  assert(fail==1?(s_text&&s_view==READING):(!s_text&&s_view==SHELF));
+ // Reopen/resume preserve their return origin; bar preferences are global and unchanged.
+ for(int hidden=0;hidden<2;++hidden){
+  s_chrome_visible[0]=!hidden;s_chrome_visible[1]=hidden;
+  assert(app_book_request_open("/sdcard/book.epub")&&!s_requested_open_home);
+  assert(app_book_request_resume("/sdcard/book.epub")&&s_requested_open_home);
+  assert(app_book_request_open_from_home("/sdcard/other.epub")&&s_requested_open_home);
+  assert(s_chrome_visible[0]==!hidden&&s_chrome_visible[1]==!!hidden);
  }
- reset(true,true,2,0);s_text=NULL;
- assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_NONE&&!reflows&&!saves&&!draw_locked);
- // 12:55 a+b 之后翻页保持当前模式：非全屏不再自动切全屏；reset 留着 slider=2，
- // 翻页收滑块即返回 PAGE 且不跑水波；水波正路径由下方 slider=-1 的场景覆盖。
- // Since a+b a turn keeps the current mode. reset leaves slider=2, so every turn collapses
- // chrome and returns PAGE without the ripple; the ripple path is covered below with slider=-1.
+ assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
  for(int full=0;full<2;++full)for(int tools=0;tools<2;++tools)for(int dir=-1;dir<=1;dir+=2){
   reset(full,tools,2,0);size_t destination=book_layout_page_start_offset(s_page+dir);
   app_redraw_t r=turn_page(&ctx,dir);
-  assert(s_reader_fullscreen==!!full&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
+  assert(s_chrome_visible[0]==!full&&s_chrome_visible[1]==!full&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
   assert(s_stats_pending_turns==1&&s_session_turns==1&&paints==1);
   assert(s_excerpt_forward==(dir>0));
   assert(excerpt_repositions==(unsigned)(dir<0));
@@ -195,21 +161,21 @@ int main(void){
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
  test_images=0;
  reset(false,true,0,0);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE);
- assert(!s_reader_fullscreen&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns&&!excerpt_repositions);
+ assert(s_chrome_visible[0]&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns&&!excerpt_repositions);
  reset(false,true,8,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
- assert(!s_reader_fullscreen&&!s_toolbar&&s_page==8&&!s_stats_pending_turns);
+ assert(s_chrome_visible[0]&&!s_toolbar&&s_page==8&&!s_stats_pending_turns);
  reset(true,true,5,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&!s_toolbar&&!reflows);
- reset(false,true,8,0);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_chapter==1&&s_page==0&&!s_reader_fullscreen&&!s_toolbar);
- reset(false,true,0,1);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_chapter==0&&s_page==8&&!s_reader_fullscreen&&!s_toolbar);
+ reset(false,true,8,0);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_chapter==1&&s_page==0&&s_chrome_visible[0]&&!s_toolbar);
+ reset(false,true,0,1);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_chapter==0&&s_page==8&&s_chrome_visible[0]&&!s_toolbar);
  assert(excerpt_repositions==1);
  reset(false,true,8,0);load_failed=true;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_view==TOC&&!paints&&!s_stats_pending_turns);
  assert(!excerpt_repositions);
  reset(false,true,0,1);load_failed=true;assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_view==TOC&&!paints&&!excerpt_repositions);
  reset(false,true,2,0);failed_reflows=1;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
- assert(s_text&&!s_reader_fullscreen&&!s_toolbar&&layout_span==100&&s_page==3&&reflows==0);
+ assert(s_text&&s_chrome_visible[0]&&!s_toolbar&&layout_span==100&&s_page==3&&reflows==0);
  reset(false,true,2,0);failed_reflows=2;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
  assert(s_text&&s_view==READING&&s_page==3&&reflows==0&&paints==1&&s_stats_pending_turns==1);
- puts("PASS: full-screen entry follows the remembered preference; toggles persist it; turns keep the current windowed mode; toolbar dismissal; chapter/boundary turns");
+ puts("PASS: open/resume origin and independent visibility; anchored indentation; turns retain bar state, dismiss tools and preserve chapter/boundary positions");
 }
 '''
 from reader_session_test_state import position_state

@@ -228,14 +228,9 @@ bool app_settings_reader_touch_disabled(void);
 bool app_settings_reader_touch_toggle_bound(void);
 /// 保存失败或缺少恢复快捷键时返回 false，保持原值。/ Keep the old value on persistence failure or a missing recovery binding.
 bool app_settings_set_reader_touch_disabled(bool on);
-/// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
+/// 阅读页顶部状态栏显隐；与页眉页脚分别控制。/ Reader status visibility is independent of header and footer.
 bool app_settings_reader_statusbar(void);
 void app_settings_set_reader_statusbar(bool on);
-/// 打开图书时的全屏偏好：记住用户上次的全屏/非全屏模式，从书架进书沿用；默认全屏。
-/// Full-screen preference when opening a book: remember the user's last mode for shelf
-/// entries; full screen by default.
-bool app_settings_reader_open_fullscreen(void);
-void app_settings_set_reader_open_fullscreen(bool on);
 /// 阅读时跳过书内插图页；原图仍保留在 EPUB 中。/ Skip inline illustrations while reading without changing the EPUB.
 bool app_settings_reader_hide_images(void);
 void app_settings_set_reader_hide_images(bool on);
@@ -281,7 +276,7 @@ typedef enum {
     APP_READER_KEY_PREV, ///< 上一页 / Previous page
     APP_READER_KEY_NEXT, ///< 下一页 / Next page
     APP_READER_KEY_TOOLS, ///< 阅读工具栏 / Reader toolbar
-    APP_READER_KEY_FULLSCREEN, ///< 切换全屏 / Toggle full screen
+    APP_READER_KEY_LEGACY_FULLSCREEN, ///< 旧编号3保留，载入时迁移为工具栏。/ Retired ID 3, migrated to tools on load.
     APP_READER_KEY_HOME, ///< 返回主页（本次开书来源） / Return to the opening origin
     APP_READER_KEY_REFRESH, ///< 手动全刷 / Manual full refresh
     APP_READER_KEY_NONE, ///< 不操作 / No action
@@ -322,7 +317,7 @@ bool app_settings_set_reader_double_action(app_reader_key_action_t action);
 /// 上键单击（机身顶部实体键），默认不操作；「开关前光」绑定在阅读正文外的所有页面同样生效，其余动作仍只在阅读正文生效。/ Up-key single press (top physical key), no action by default; the frontlight toggle also works on every page outside the reader body, while other actions stay reader-body-only.
 app_reader_key_action_t app_settings_reader_up_action(void);
 bool app_settings_set_reader_up_action(app_reader_key_action_t action);
-/// 一次提交整套推荐设置，1为翻页，2为首页/全屏/工具栏。/ Commit preset 1 (page turns) or 2 (Home/full screen/tools) together.
+/// 一次提交整套推荐设置，1为翻页，2为首页/工具栏/工具栏。/ Commit preset 1 (page turns) or 2 (Home/tools/tools) together.
 void app_settings_set_reader_key_preset(unsigned preset);
 /// 页眉/页脚槽位内容：两条信息条各分左/中/右三格，每格自选一项。
 /// Header/footer slot content: each bar splits into left/center/right slots, each picking one item.
@@ -356,16 +351,20 @@ bool app_settings_set_reader_chrome_item(unsigned bar, unsigned slot, app_reader
 uint8_t app_settings_reader_chrome_height(unsigned bar);
 /// 同时保存两条高度；无效值或保存失败不改变内存。/ Save both heights; invalid values or failed writes leave memory unchanged.
 bool app_settings_set_reader_chrome_heights(uint8_t header, uint8_t footer);
-/// 页脚及全屏底部进度条，默认显示；阅读页关闭后回收预留带并重排，保留页脚文字与用户边距。
-/// Footer/full-screen progress, shown by default; the reader reclaims its hidden band and reflows while retaining footer text and user margins.
+/// 页眉页脚独立显隐；bar 0=页眉、1=页脚。/ Independent header/footer visibility; bar 0=header, 1=footer.
+bool app_settings_reader_chrome_visible(unsigned bar);
+/// 同时保存两条显隐状态；保存失败不改变内存。/ Save both visibility states; failed writes leave memory unchanged.
+bool app_settings_set_reader_chrome_visibility(bool header, bool footer);
+/// 页脚内进度条，默认显示；关闭后回收预留带并重排，隐藏页脚时整栏一起隐藏。
+/// Footer progress, shown by default; disabling it reclaims its band and reflows, while hiding the footer hides the entire bar.
 bool app_settings_reader_progress_bar(void);
 /// 保存失败返回 false，保持原显示状态。/ Failed persistence returns false and keeps visibility unchanged.
 bool app_settings_set_reader_progress_bar(bool on);
 /// 六槽一次提交恢复默认布局：页眉 书名/时间/电量图标，页脚 章节名/空/页码·进度。
 /// Restore all six slots to the default layout in one commit: header title/clock/battery icon,
 /// footer chapter/blank/page·progress.
-/// 同时恢复默认高度并显示进度条；保存失败返回 false，内存布局不变。
-/// Also restore default heights and show progress; failure preserves the in-memory layout.
+/// 同时恢复默认高度并显示页眉、页脚及进度条；保存失败返回 false，内存布局不变。
+/// Also restore default heights and show both bars and progress; failure preserves the in-memory layout.
 bool app_settings_set_reader_chrome_default(void);
 /// 旧长按设置API保留用于历史备份兼容。/ Retained legacy hold APIs for historical backup compatibility.
 bool app_settings_reader_hold_refresh(void);

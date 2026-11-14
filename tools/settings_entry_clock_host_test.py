@@ -52,7 +52,7 @@ for name in ('settings_main_row_height','settings_fit_text','fit_value','setting
 unit+=r'''
 static int s_view=READING;
 static char *s_text="book";
-static bool s_reader_fullscreen,statusbar=true,wallpaper;
+static bool statusbar=true,wallpaper;
 static int64_t s_reader_clock_minute=-1,minute=100;
 static int s_reader_power=-1;
 static uint32_t chrome=1,s_reader_chrome_fp;
@@ -67,32 +67,36 @@ static int s_reader_panel;
 static uint8_t fb[684*1216],next_fb[684*1216];
 static bool locked;
 static unsigned status_paints,background_paints,header_paints;
-// Clock-band height follows the mode: 80 for full screen or the top-hugging header, 160 when
-// the windowed header joins the status bar. Assertions track the painted band, not a constant.
-static int expected_band(void){return !s_reader_fullscreen&&statusbar?160:80;}
+// The top band combines only visible status/header heights.
 static bool app_settings_reader_statusbar(void){return statusbar;}
 static int s_chrome_height[2]={80,57};
+static bool s_chrome_visible[2]={true,true};
+typedef struct {uint32_t value;} reader_chrome_data_t;
+static unsigned chrome_data_reads;
+static void reader_chrome_data(reader_chrome_data_t *data){++chrome_data_reads;data->value=chrome;}
+static uint32_t reader_chrome_header_fingerprint(const reader_chrome_data_t *data){return data->value;}
+static int expected_band(void){return (statusbar?80:0)+(s_chrome_visible[0]?s_chrome_height[0]:0);}
 static const char *app_settings_book_background_path(void){return wallpaper?"/sdcard/pictures/bg.jpg":"";}
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
 static void epd_fill_rect(EpdRect r,int color,uint8_t *frame){assert(r.x==0&&r.y==0&&r.width==684&&r.height==expected_band());memset(frame,color,684*expected_band());}
 static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *frame){epd_fill_rect(r,color,frame);}
 static void ui_nav_status(uint8_t *frame){assert(statusbar);++status_paints;frame[20*684+36]=(uint8_t)minute;}
-static void draw_reader_header(uint8_t *frame){(void)frame;++header_paints;}
+static void draw_reader_header(uint8_t *frame){(void)frame;if(s_chrome_visible[0])++header_paints;}
 static void ui_reader_background_paint(uint8_t *frame,EpdRect r,bool blend){assert(r.height==expected_band()&&blend);++background_paints;frame[0]=29;}
 enum EpdDrawError {OK=0,FAULT=1};
 static EpdRect s_area;
 static EpdRect reader_area(void);
 static bool s_reader_cleanup,s_water_turn_pending,s_reader_turn_pending,s_reader_image_refresh_pending,s_toolbar,s_clear_confirm,s_reader_footer_pending;
 '''
-for name in ('reader_status_area','reader_status_visible','reader_status_paint','reader_status_power','reader_status_prepare'):
+for name in ('reader_chrome_fingerprint','reader_status_area','reader_status_visible','reader_status_paint','reader_status_power','reader_status_prepare'):
  code=function(name,book)
  if name=='reader_status_prepare':code=code.replace('reader_status_prepare(', 'reader_status_prepare_actual(', 1)
  unit+=code+'\n'
-unit+='static bool reader_status_prepare(app_ctx_t *ctx,app_redraw_t redraw,int64_t minute,int power){return reader_status_prepare_actual(ctx,redraw,minute,power,chrome);}\n'
+unit+='static bool reader_status_prepare(app_ctx_t *ctx,app_redraw_t redraw,int64_t minute,int power){return reader_status_prepare_actual(ctx,redraw,minute,power,reader_chrome_fingerprint());}\n'
 present=function('present',book)
 ack=present[present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()'):present.index('    const bool reader_frame_ok')]
-unit+='static void frame_ack(int err,app_redraw_t redraw,bool tools_band,bool status_updated,int64_t frame_minute,int frame_power){\nuint32_t frame_chrome=chrome;struct {bool status_updated;} output={status_updated};\n'+ack+'}\n'
+unit+='static void frame_ack(int err,app_redraw_t redraw,bool tools_band,bool status_updated,int64_t frame_minute,int frame_power){\nuint32_t frame_chrome=reader_chrome_fingerprint();struct {bool status_updated;} output={status_updated};\n'+ack+'}\n'
 # Actual prefetched-page path; freshness is checked after copying, before any push.
 unit+=r'''
 static uint8_t *s_page_images;
@@ -108,7 +112,7 @@ static bool app_settings_reader_hide_images(void){return false;}
 static int book_layout_page_image_count(int p){(void)p;return 0;}
 static size_t fb_bytes(void){return sizeof(fb);}
 static void draw_reader(uint8_t *f,int p){(void)f;(void)p;assert(false);}
-static EpdRect reader_area(void){return (EpdRect){0,160,684,900};}
+static EpdRect reader_area(void){return (EpdRect){0,expected_band(),684,1216-expected_band()};}
 '''
 unit+=function('paint_reading',book)+'\n'
 files=ROOT/'main/apps/app_files.c'
@@ -180,33 +184,52 @@ int main(void){
  ++minute;frame_ack(FAULT,APP_REDRAW_PAGE,false,false,minute,reader_status_power());assert(s_reader_clock_minute!=minute);
  frame_ack(OK,APP_REDRAW_PAGE,false,false,minute,reader_status_power());assert(s_reader_clock_minute==minute);
  ++minute;frame_ack(OK,APP_REDRAW_FULL,false,false,minute,reader_status_power());assert(s_reader_clock_minute==minute);
- // 各全屏/状态栏组合保留80/160px边界；背景重画不越入正文。
- // All fullscreen/status-bar combinations preserve 80/160px bounds and background painting stays above body.
- for(int full=0;full<2;++full)for(int bar=0;bar<2;++bar)for(int bg=0;bg<2;++bg){
-  s_reader_fullscreen=full;statusbar=bar;wallpaper=bg;++minute;memset(fb,77,sizeof(fb));
+ // 状态栏与页眉分别控制顶部边界；背景重画不越入正文。
+ // Status/header combinations determine the top band and background painting stays above body.
+ for(int bar=0;bar<2;++bar)for(int bg=0;bg<2;++bg)for(int header=0;header<2;++header){
+  s_chrome_visible[0]=header;
+  statusbar=bar;wallpaper=bg;++minute;memset(fb,77,sizeof(fb));
   unsigned before=header_paints,bg_before=background_paints;
-  bool visible=bar||!full;
+  bool visible=bar||header;
+  assert(reader_status_area().height==expected_band());
   s_area=reader_area();
   assert(reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power())==visible);
   if(visible){
    assert(fb[expected_band()*684]==77&&fb[(expected_band()-1)*684]==255);
-   assert(header_paints==before+!full&&background_paints==bg_before+bg);
+   assert(header_paints==before+header&&background_paints==bg_before+bg);
    assert(fb[0]==(bg?29:255));
    frame_ack(OK,APP_REDRAW_AREA,false,true,minute,reader_status_power());
   }else assert(fb[0]==77&&header_paints==before);
  }
- // 全屏图页返回文字不依赖纯文字效果标记；局部设置区域不能触发顶部。
- // Image-to-text full-screen turns need no pure-text effect flag; local settings regions never prepare status.
- s_reader_fullscreen=true;statusbar=true;++minute;
+ // 隐藏页眉后，其页码变化不再刷新可见状态栏；重新显示后恢复变化检测。
+ // Hidden header content cannot refresh a visible status bar; showing it restores change detection.
+ s_chrome_visible[0]=false;statusbar=true;s_area=reader_area();
+ frame_ack(OK,APP_REDRAW_AREA,false,true,minute,reader_status_power());
+ unsigned chrome_reads_before=chrome_data_reads,status_before=status_paints;
+ ++chrome;
+ assert(reader_chrome_fingerprint()==0&&!reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
+ assert(chrome_data_reads==chrome_reads_before&&status_paints==status_before);
+ s_chrome_visible[0]=true;s_area=reader_area();
+ assert(reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
+ frame_ack(OK,APP_REDRAW_AREA,false,true,minute,reader_status_power());
+ // 图页返回文字不依赖纯文字效果标记；局部设置区域不能触发顶部。
+ // Image-to-text turns need no pure-text effect flag; local settings regions never prepare status.
+ s_chrome_visible[0]=false;statusbar=true;++minute;
  s_reader_turn_pending=s_water_turn_pending=s_reader_image_refresh_pending=s_reader_footer_pending=false;
  s_area=reader_area();assert(reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
  s_area.height=20;assert(!reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
- s_reader_fullscreen=false;statusbar=true;wallpaper=false;
+ s_chrome_visible[0]=true;statusbar=true;wallpaper=false;
  memset(next_fb,15,sizeof(next_fb));next_fb[20*684+36]=1;minute=110;
  assert(paint_reading(&ctx,MODE_GL16)==APP_REDRAW_AREA);
  assert(fb[20*684+36]==110&&fb[160*684]==15&&fb[159*684]==255&&s_area.y==160);
  assert(reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
  frame_ack(OK,APP_REDRAW_AREA,false,true,minute,reader_status_power());
+ for(int footer=0;footer<2;++footer){
+  s_chrome_visible[1]=footer;
+  assert(paint_reading(&ctx,MODE_GL16)==APP_REDRAW_AREA);
+  assert(s_reader_footer_pending==(bool)footer);
+ }
+ s_chrome_visible[1]=true;
  s_view=SHELF;++minute;assert(!reader_status_prepare(&ctx,APP_REDRAW_AREA,minute,reader_status_power()));
  board_sd_info_t info={.mounted=true,.space_valid=true,.filesystem_bytes=128ULL*1024*1024*1024,.free_bytes=100ULL*1024*1024*1024,.capacity_bytes=256ULL*1024*1024*1024};
  char total[32],usage[96];storage_usage(&info,total,sizeof(total),usage,sizeof(usage));

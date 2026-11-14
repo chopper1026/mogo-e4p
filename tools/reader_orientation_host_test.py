@@ -107,7 +107,6 @@ layout += r'''
 #define READER_WIDTH (display_orientation_get()%2?1216:684)
 #define READER_HEIGHT (display_orientation_get()%2?684:1216)
 #define READER_BAR_TOP (READER_HEIGHT-UI_BAR_MARGIN-UI_BAR_H)
-#define READER_FULLSCREEN_PROGRESS_TOP (READER_HEIGHT-12)
 #define READER_FOOTER_PROGRESS_SPACE 19
 enum {MARGIN_LEFT,MARGIN_RIGHT,MARGIN_TOP,MARGIN_BOTTOM,MARGIN_COUNT};
 enum {READING,SHELF,TOC};
@@ -123,11 +122,12 @@ static int64_t s_orientation_retry_ms;
 static book_shake_gate_t s_shake_gate;
 static const char *s_text;
 static size_t s_jump_offset=SIZE_MAX,s_jump_page,s_selected_toc;
-static bool s_reader_fullscreen,s_reader_progress_bar=true,s_clear_confirm;
+static bool s_reader_progress_bar=true,s_clear_confirm;
 static bool s_reader_chrome_fp_valid,s_reader_footer_pending,s_reader_image_refresh_pending;
 static bool s_reader_footer_strong,s_water_turn_pending,s_reader_turn_pending;
 static bool s_reader_text_frame,s_reader_stable_frame,s_excerpt_forward;
 static int s_chrome_height[2]={80,57},s_margin[4]={36,36,0,0},s_px=36;
+static bool s_chrome_visible[2]={true,true};
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;
 static int s_chapter_lead_skip,s_chapter_lead_height,s_chapter_lead_width;
 static char s_chapter_heading_title[128],s_chapter_heading_label[128];
@@ -160,7 +160,7 @@ static reader_dims_ctx_t s_reader_dims_ctx;
 static void reader_bind_chapter(void){s_text=s_reader_session.content.utf8;}
 static void app_font_activate_system(void){}
 '''
-for name in ("reader_footer_height", "body_rect_for_tracking", "body_rect", "reader_area",
+for name in ("reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect",
              "reader_status_area", "progress_rect", "reader_tools_area", "reader_page_offset",
              "free_book", "reader_reflow_build", "reader_orientation_apply", "reader_orientation_portrait",
              "reader_orientation_sync", "rotation_available", "rotation_enabled", "on_rotation_toggle", "on_system_overlay"):
@@ -182,17 +182,17 @@ int main(void){
  // 多次换向及临时系统竖屏往返不漂移字节锚点，覆盖横排/竖排、全屏/窗口及状态栏。
  // Repeated rotation and temporary system portrait preserve the byte anchor across writing modes, fullscreen and status-bar modes.
  for(int vertical=0;vertical<2;++vertical)for(int full=0;full<2;++full)for(int status=0;status<2;++status){
-  book_layout_set_vertical(vertical);s_reader_fullscreen=full;statusbar=status;
+  book_layout_set_vertical(vertical);s_chrome_visible[0]=s_chrome_visible[1]=!full;statusbar=status;
   for(int d=1;d<=4;++d){
    display_orientation_t next=(display_orientation_t)(d%4);assert(reader_orientation_apply(next));s_orientation.locked=next;
    assert(!locks&&reader_page_offset(s_reader_session.position.page)==anchor);
    size_t page=s_reader_session.position.page;assert(book_layout_page_start_offset(page)<=anchor&&book_layout_page_start_offset(page+1)>anchor);
-   in_screen(body_rect());in_screen(reader_area());in_screen(reader_status_area());in_screen(progress_rect());in_screen(reader_tools_area());
+   in_screen(body_rect());in_screen(reader_area());if(status||!full)in_screen(reader_status_area());if(!full)in_screen(progress_rect());in_screen(reader_tools_area());
    if(next){int before=rendered;on_system_overlay(&ctx);assert(direction==0&&rendered==before+1&&s_orientation.locked==next&&s_orientation.automatic);
     assert(reader_orientation_sync()&&direction==next&&reader_page_offset(s_reader_session.position.page)==anchor);}
   }
  }
- s_reader_fullscreen=false;statusbar=true;book_layout_set_vertical(false);
+ s_chrome_visible[0]=s_chrome_visible[1]=true;statusbar=true;book_layout_set_vertical(false);
  assert(reader_orientation_apply(DISPLAY_ORIENTATION_RIGHT));s_orientation.locked=DISPLAY_ORIENTATION_RIGHT;
  on_rotation_toggle(&ctx);assert(!s_orientation.automatic&&s_orientation.locked==DISPLAY_ORIENTATION_RIGHT);
  s_reader_panel=READER_PANEL_SETTINGS;assert(!rotation_available(&ctx)&&reader_orientation_sync()&&direction==0);

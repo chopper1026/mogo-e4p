@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""中文：真实九格几何、编辑事务与正文八动作回归。/ Real grid geometry, editing transactions and eight body actions."""
+"""中文：真实九格几何、编辑事务与正文七动作回归。/ Real grid geometry, editing transactions and seven body actions."""
 from pathlib import Path
 import re
 import subprocess
@@ -22,6 +22,7 @@ unit = position_state(page=0) + r'''
 #include <string.h>
 #include "book_reader_input.h"
 #include "settings.h"
+#include "ui_reader_tap_grid.h"
 enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_TURN_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TAP_GRID};
 typedef struct {int64_t now_ms;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
@@ -39,7 +40,7 @@ static int screen_width=684;
 static EpdRect body_rect(void){return current_body;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
 static EpdRect reader_sheet_back_rect(int top){return (EpdRect){36,top+20,64,64};}
-static unsigned invalidates,saves,turns,homes,fullscreens,refreshes,lights,panel_calls,links;
+static unsigned invalidates,saves,turns,homes,refreshes,lights,panel_calls,links;
 static bool fail_save,shake,light_on,light_ready=true,image_slots,rtl;
 static int last_direction,link_at=-1;
 static app_reader_tap_mode_t configured_mode;
@@ -59,7 +60,6 @@ static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;assert(0);retu
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;++turns;last_direction=direction;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_return(app_ctx_t *ctx){(void)ctx;++homes;return APP_REDRAW_PAGE;}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;++fullscreens;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;++refreshes;return APP_REDRAW_FULL;}
 static bool frontlight_ready(void){return light_ready;}
 bool app_settings_frontlight_on(void){return light_on;}
@@ -81,7 +81,7 @@ static EpdRect ui_rect_union(EpdRect a,EpdRect b){
 unit += re.search(r'^#define s_toolbar .*', source, re.M)[0]+'\n'
 unit += re.search(r'static uint8_t s_tap_draft\[[^;]+;', source)[0]+'\n'
 unit += 'static int s_tap_selected=-1;static bool s_tap_picker;static char s_tap_error[64];\n'
-unit += re.search(r'static const app_reader_key_action_t s_tap_order\[8\] = \{[\s\S]*?\};', source)[0]+'\n'
+unit += re.search(r'static const app_reader_key_action_t s_tap_order\[UI_READER_TAP_ACTION_COUNT\] = \{[\s\S]*?\};', source)[0]+'\n'
 for name in ('ui_reader_tap_cancel_rect','ui_reader_tap_save_rect','ui_reader_tap_picker_back_rect','ui_reader_tap_option_rect'):
     unit += function(name,UI)+'\n'
 for name in ('ui_reader_turn_mode_rect','ui_reader_turn_shake_rect'):
@@ -161,7 +161,7 @@ int main(void){
  assert(!book_reader_grid_cell(current_body,9).width&&book_reader_grid_hit((EpdRect){0},0,0)==-1);
  for(unsigned i=0;i<9;++i)configured[i]=APP_READER_KEY_NEXT;
  enter(&ctx);assert(!saves&&configured_mode==APP_READER_TAP_HORIZONTAL);
- for(unsigned cell=0;cell<9;++cell)for(unsigned option=0;option<8;++option){
+ for(unsigned cell=0;cell<9;++cell)for(unsigned option=0;option<UI_READER_TAP_ACTION_COUNT;++option){
   EpdRect r=book_reader_grid_cell(current_body,cell);tap(&ctx,r);assert(s_tap_picker&&s_tap_selected==(int)cell);
   unsigned before=saves;
   assert(reader_tap_grid_action(&ctx,342,640)==APP_REDRAW_NONE&&s_tap_picker);
@@ -180,15 +180,15 @@ int main(void){
  EpdRect r=ui_reader_turn_shake_rect();reader_turn_settings_action(&ctx,r.x,r.y);assert(shake);
  unsigned before=saves;assert(reader_turn_settings_action(&ctx,342,1160)==APP_REDRAW_NONE&&before==saves);
  configured_mode=APP_READER_TAP_GRID;
- for(unsigned cell=0;cell<9;++cell)for(unsigned option=0;option<8;++option){
+ for(unsigned cell=0;cell<9;++cell)for(unsigned option=0;option<UI_READER_TAP_ACTION_COUNT;++option){
   s_reader_panel=READER_PANEL_NONE;s_reader_tools_toggle=false;configured[cell]=s_tap_order[option];
-  turns=homes=fullscreens=refreshes=lights=0;light_on=false;
+  turns=homes=refreshes=lights=0;light_on=false;
   EpdRect r=book_reader_grid_cell(current_body,cell);app_redraw_t result=reading_tap(&ctx,r.x+r.width/2,r.y+r.height/2);
   assert(turns==(option<2));if(option<2)assert(last_direction==(option==0?-1:1));
-  assert(homes==(option==4)&&fullscreens==(option==3)&&refreshes==(option==5)&&lights==(option==6));
+  assert(homes==(option==3)&&refreshes==(option==4)&&lights==(option==5));
   if(option==2)assert(s_reader_panel==READER_PANEL_TOOLS&&s_reader_tools_toggle);
-  if(option==5)assert(result==APP_REDRAW_FULL);
-  if(option>=6)assert(result==APP_REDRAW_NONE);
+  if(option==4)assert(result==APP_REDRAW_FULL);
+  if(option>=5)assert(result==APP_REDRAW_NONE);
  }
  s_reader_panel=READER_PANEL_NONE;turns=0;configured[0]=APP_READER_KEY_PREV;rtl=true;
  assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&last_direction==-1); // Explicit actions do not mirror for vertical text.
@@ -197,7 +197,7 @@ int main(void){
  link_at=0;turns=0;assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&links==1&&!turns);link_at=-1;
  enter(&ctx);turns=0;assert(reading_tap(&ctx,100,200)==APP_REDRAW_PAGE&&s_tap_picker&&!turns);
  test_reader_edges(&ctx);
- puts("PASS: exhaustive grid boundaries/rotation/margins, 72 draft edits and real body dispatches, gaps, Back/Cancel, failed saves, mode switches, footnotes and panel isolation");
+ puts("PASS: exhaustive grid boundaries/rotation/margins, 63 draft edits and real body dispatches, gaps, Back/Cancel, failed saves, mode switches, footnotes and panel isolation");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='reader-tap-grid-') as directory:
@@ -206,5 +206,5 @@ with tempfile.TemporaryDirectory(prefix='reader-tap-grid-') as directory:
     c=folder/'test.c';binary=folder/'test';c.write_text(unit)
     subprocess.run(compiler+['-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-omit-frame-pointer',
         '-I'+str(ROOT/'tools/reader_settings_stubs'),'-I'+str(ROOT/'tools/settings_backup_stubs'),
-        '-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'main/settings'),str(c),'-o',str(binary)],env=env,check=True)
+        '-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/book'),'-I'+str(ROOT/'main/settings'),str(c),'-o',str(binary)],env=env,check=True)
     subprocess.run([str(binary)],env=env,check=True)

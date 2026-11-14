@@ -67,7 +67,6 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
 }
 static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
 static int s_px=36,s_reader_preview_px=36,s_reader_slider=-1;
-static bool s_reader_fullscreen=true;
 static ui_reader_settings_group_t s_reader_settings_group;
 static int app_settings_book_weight_fine(void){return 0;}
 static int app_settings_book_title_style(void){return 3;}
