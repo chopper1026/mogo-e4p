@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 from run_reader_baseline import toolchain
+from network_http_host_test import build_objects
 
 ROOT = Path(__file__).resolve().parents[1]
 service_source = (ROOT / "main/services/weather_service.c").read_text()
@@ -48,8 +49,7 @@ typedef int esp_err_t;
 #ifndef ESP_ERR_NOT_FOUND
 #define ESP_ERR_NOT_FOUND 2
 #endif
-typedef enum { NETWORK_BEARER_NONE = 0, NETWORK_BEARER_WIFI, NETWORK_BEARER_CELLULAR } network_bearer_t;
-typedef enum { NETWORK_USE_TIME = 0, NETWORK_USE_WEATHER, NETWORK_USE_OTA } network_use_t;
+#include "network_policy.h"
 typedef struct { int bearer; bool owns_wifi, owns_cellular, active; } network_lease_t;
 esp_err_t network_service_acquire(network_use_t use, network_lease_t *lease);
 bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms);
@@ -95,9 +95,10 @@ void network_service_release(network_lease_t *lease) {
     with (stubs / "esp_http_client.h").open("a") as output:
         output.write("\nesp_err_t esp_http_client_close(esp_http_client_handle_t);\n")
     binary = work / "service"
+    http_objects = build_objects(work, env, compiler, flags)
     subprocess.run(compiler + flags + ["-I" + str(stubs)] + includes + ["-Imain/time", "-Imain/ota",
         "tools/weather_service_host_test.c", str(network_stub), "main/services/weather_model.c", str(cjson),
-        "-lm", "-o", str(binary)], cwd=ROOT, env=env, check=True)
+        *http_objects, "-lm", "-o", str(binary)], cwd=ROOT, env=env, check=True)
     subprocess.run([str(binary)], env=env, check=True)
     subprocess.run([os.sys.executable, str(ROOT / "tools/weather_raster_host_test.py")], cwd=ROOT, env=env, check=True)
     subprocess.run([os.sys.executable, str(ROOT / "tools/weather_navigation_host_test.py")], cwd=ROOT, env=env, check=True)

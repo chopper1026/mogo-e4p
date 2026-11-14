@@ -41,6 +41,7 @@
 
 static bool s_status_reading;
 static int s_status_power = -1;
+static int s_status_network = -1;
 
 // 只比较屏幕实际显示的电量和充电标志，不让原始采样抖动触发刷新。
 // Compare only the displayed percentage and charging mark, avoiding refreshes from raw sample jitter.
@@ -51,6 +52,18 @@ static int status_power(void) {
 
 bool ui_nav_status_power_changed(void) {
     return s_status_power != status_power();
+}
+
+static int status_network(void) {
+    network_status_t bearer = {0};
+    network_service_get_status(&bearer);
+    return (bearer.wifi_ready ? 1 : 0) |
+           (bearer.cellular_ready ? 2 : 0) |
+           (app_settings_ble_turner() ? 4 : 0);
+}
+
+bool ui_nav_status_changed(void) {
+    return s_status_power != status_power() || s_status_network != status_network();
 }
 
 static struct {
@@ -268,6 +281,9 @@ void ui_nav_status(uint8_t *fb) {
     ui_nav_battery_draw(fb, width - 78, status_center_y);
     ui_text_fixed_vc(fb, width - 89, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
     s_status_power = status_power();
+    s_status_network = (wifi_visible ? 1 : 0) |
+                       (cellular_visible ? 2 : 0) |
+                       (bluetooth_visible ? 4 : 0);
 }
 
 int ui_nav_hit(uint16_t x, uint16_t y) {

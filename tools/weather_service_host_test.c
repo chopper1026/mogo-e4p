@@ -4,6 +4,7 @@
  */
 #include "weather_test_data.h"
 #include "cJSON.h"
+#include "network_http_test_dns.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,9 @@ static int io_timeout_ms;
 static char *alphanumeric_forecast;
 static bool stall_http_connect,cancel_http_connect;
 static unsigned failed_opens,open_calls;
+static unsigned partial_response_failures;
+static bool trace_endpoints;
+static unsigned endpoints[8], endpoint_count;
 static const char *forecast_date,*catalog_date,*forecast_override;
 static bool duplicate_date,cancel_forecast_read,incomplete_forecast;
 static int64_t forecast_progress_us;
@@ -39,7 +43,7 @@ static size_t prefs_size,cache_size;
 static pmu_snapshot_t battery={80};
 struct FakeHttp {
     const char *body,*date;size_t size,at;int status;char payload[WEATHER_BODY_LIMIT+1];
-    bool forecast,headers_sent;
+    bool forecast,headers_sent,partial_failure;
     int (*event_handler)(esp_http_client_event_t *);
     void *user_data;
 };
@@ -99,8 +103,17 @@ int esp_crt_bundle_attach(void *p){(void)p;return 0;}
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c){
     assert(worker&&c->disable_auto_redirect&&c->crt_bundle_attach&&
         c->timeout_ms==(weather_test_cellular?20000:6000)&&c->is_async);
-    assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
+    if(weather_test_cellular) {
+        assert(c->common_name&&!strcmp(c->common_name,"mogo.mantake.shop")&&!c->skip_cert_common_name_check);
+        unsigned endpoint=strstr(c->url,"https://" NETWORK_HTTP_TEST_FIRST ":443/")?1:2;
+        assert(endpoint==1||strstr(c->url,"https://" NETWORK_HTTP_TEST_SECOND ":443/"));
+        if(trace_endpoints){assert(endpoint_count<8);endpoints[endpoint_count++]=endpoint;}
+    } else {
+        assert(!c->common_name);
+        assert(!strncmp(c->url,"https://mogo.mantake.shop/api/v2/components",strlen("https://mogo.mantake.shop/api/v2/components")));
+    }
     struct FakeHttp *h=calloc(1,sizeof(*h));h->status=200;++requests;
+    if(partial_response_failures){--partial_response_failures;h->partial_failure=true;}
     h->event_handler=c->event_handler;h->user_data=c->user_data;
     if(strstr(c->url,"/auto-location")) {
         ++auto_calls;h->body=WEATHER_TEST_CITY;
@@ -132,7 +145,8 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
     h->size=strlen(h->body);return h;
 }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t h,const char*k,const char*v){
-    (void)h;assert((!strcmp(k,"Accept")&&!strcmp(v,"application/json"))||(!strcmp(k,"Accept-Encoding")&&!strcmp(v,"identity")));return ESP_OK;
+    (void)h;assert((!strcmp(k,"Accept")&&!strcmp(v,"application/json"))||(!strcmp(k,"Accept-Encoding")&&!strcmp(v,"identity"))||
+        (!strcmp(k,"Host")&&!strcmp(v,"mogo.mantake.shop")));return ESP_OK;
 }
 esp_err_t esp_http_client_open(esp_http_client_handle_t h,int n){
     (void)h;assert(n==0);++open_calls;
@@ -166,7 +180,7 @@ int esp_http_client_read(esp_http_client_handle_t h,char *out,int size){
     if(clear_during_read){app_weather_clear_search();clear_during_read=false;}
     if(body_eagain||stall_body){if(body_eagain)--body_eagain;monotonic+=(int64_t)io_timeout_ms*1000;return -ESP_ERR_HTTP_EAGAIN;}
     if(h->at&&fail_body)return ESP_FAIL;
-    if(h->at&&incomplete_body)return 0;
+    if(h->at&&(incomplete_body||h->partial_failure))return 0;
     size_t n=h->size-h->at;if(n>(size_t)size)n=(size_t)size;if(n>97)n=97;
     if(n)monotonic+=body_progress_us+(h->forecast?forecast_progress_us:0);
     memcpy(out,h->body+h->at,n);h->at+=n;return (int)n;
@@ -417,20 +431,44 @@ int main(void) {
     assert(starts==wifi_starts&&stops==wifi_stops);
     // Cellular transient failures retry once with a fresh handle on the same bearer.
     unsigned requests_before=requests,opens_before=open_calls;
+    endpoint_count=0;trace_endpoints=true;
     failed_opens=1;request(APP_WEATHER_FETCH,NULL);
+    trace_endpoints=false;
+    assert(endpoint_count==3&&endpoints[0]!=endpoints[1]&&endpoints[1]==endpoints[2]);
     assert(!failed_opens&&s_view.state==APP_WEATHER_READY&&requests==requests_before+3&&open_calls==opens_before+3);
     assert(starts==wifi_starts&&stops==wifi_stops);
+    // A response closing after some bytes is also a transport failure.
+    // Retry exactly once; discard the partial body before parsing or caching.
+    requests_before=requests;partial_response_failures=1;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(!partial_response_failures&&s_view.state==APP_WEATHER_READY&&requests==requests_before+3);
+    requests_before=requests;partial_response_failures=3;connect_started=monotonic;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(partial_response_failures==1&&s_view.state==APP_WEATHER_FAILED&&requests==requests_before+2);
+    assert(monotonic-connect_started<WEATHER_SESSION_US&&starts==wifi_starts&&stops==wifi_stops);
+    partial_response_failures=0;
     failed_opens=3;requests_before=requests;
     request(APP_WEATHER_FETCH,NULL);
     assert(failed_opens==1&&s_view.state==APP_WEATHER_FAILED&&requests==requests_before+2);
     failed_opens=0;
     scenario=5;requests_before=requests;request(APP_WEATHER_FETCH,NULL);scenario=0;
+    assert(!s_http_session.failed_address);
     assert(s_view.state==APP_WEATHER_UNAVAILABLE&&requests==requests_before+2);
+    unsigned dns_before=network_http_test_dns_calls;
+    requests_before=requests;network_http_test_dns_error=EAI_FAIL;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_FAILED&&requests==requests_before&&network_http_test_dns_calls==dns_before+2);
+    dns_before=network_http_test_dns_calls;network_http_test_dns_error=EAI_MEMORY;
+    request(APP_WEATHER_FETCH,NULL);
+    assert(s_view.state==APP_WEATHER_FAILED&&requests==requests_before&&network_http_test_dns_calls==dns_before+1);
+    network_http_test_dns_reset();
     header_eagain=35;connect_started=monotonic;
     request(APP_WEATHER_FETCH,NULL);
     assert(!header_eagain&&s_view.state==APP_WEATHER_READY&&monotonic-connect_started>=7000000);
+    uint32_t preferred=s_http_session.preferred_address;
     cancel_http_connect=true;connect_started=monotonic;
     request(APP_WEATHER_FETCH,NULL);cancel_http_connect=false;
+    assert(s_http_session.preferred_address==preferred&&!s_http_session.failed_address);
     assert(monotonic-connect_started<=20000&&starts==wifi_starts&&stops==wifi_stops);
     stall_http_connect=true;connect_started=monotonic;
     request(APP_WEATHER_FETCH,NULL);stall_http_connect=false;

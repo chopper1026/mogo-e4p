@@ -35,6 +35,11 @@ typedef enum {
     WEATHER_SCENE_DUST, WEATHER_SCENE_SLEET, WEATHER_SCENE_OVERCAST,
     WEATHER_SCENE_COUNT
 } weather_scene_t;
+typedef enum {
+    WEATHER_PARSE_OK, WEATHER_PARSE_DOCUMENT, WEATHER_PARSE_SCHEMA,
+    WEATHER_PARSE_LOCATION, WEATHER_PARSE_TIMESTAMPS, WEATHER_PARSE_DAYS,
+    WEATHER_PARSE_CLOCK, WEATHER_PARSE_EXPIRED, WEATHER_PARSE_VALIDITY
+} weather_parse_result_t;
 
 bool weather_location_valid(const weather_location_t *location);
 bool weather_location_parse(const char *json, size_t length, weather_location_t *location);
@@ -45,6 +50,11 @@ bool weather_catalog_parse(const char *json, size_t length, bool *enabled, bool 
 void weather_error_code(const char *json, size_t length, char *code, size_t capacity);
 bool weather_forecast_parse(const char *json, size_t length, int64_t now,
                            const weather_location_t *location, weather_forecast_t *forecast);
+/// 与布尔入口使用同一解析与校验，仅返回拒收原因，不额外分配正文副本。
+/// Shares the boolean parser and validation, reporting rejection without copying the body.
+weather_parse_result_t weather_forecast_parse_result(const char *json, size_t length, int64_t now,
+                           const weather_location_t *location, weather_forecast_t *forecast);
+const char *weather_parse_result_name(weather_parse_result_t result);
 bool weather_forecast_valid(const weather_forecast_t *forecast, int64_t now);
 const weather_day_t *weather_day_for(const weather_forecast_t *forecast, int64_t now, bool tomorrow);
 bool weather_clock_valid(int64_t now);

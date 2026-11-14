@@ -481,7 +481,7 @@ typedef struct {
 } network_status_t;
 static pmu_snapshot_t pmu;
 static int pct;
-static bool wifi,bluetooth,s_system_ttf,charging;
+static bool wifi,cellular,bluetooth,s_system_ttf,charging;
 #define TTF_FONT_PATH_MAX 160
 static bool chosen_system,reading_context;
 static const char *app_settings_system_font_path(void){return chosen_system?"system.ttf":"";}
@@ -492,7 +492,7 @@ static const pmu_snapshot_t *device_power_get(void){return &pmu;}
 static int pmu_battery_percent(const pmu_snapshot_t *snapshot){(void)snapshot;return pct;}
 static bool pmu_battery_charging(const pmu_snapshot_t *snapshot){(void)snapshot;return charging;}
 static void __attribute__((unused)) wifi_transfer_get_status(wifi_transfer_status_t *status){*status=(wifi_transfer_status_t){wifi,WIFI_TRANSFER_MODE_STA};}
-static void network_service_get_status(network_status_t *status){memset(status,0,sizeof(*status));status->wifi_ready=wifi;}
+static void network_service_get_status(network_status_t *status){memset(status,0,sizeof(*status));status->wifi_ready=wifi;status->cellular_ready=cellular;}
 static bool app_settings_ble_turner(void){return bluetooth;}
 static const char *app_settings_status_signature(void){return signature;}
 static int letters(const char *s){int n=0;for(;*s;++s)if(((unsigned char)*s&0xc0)!=0x80)++n;return n;}
@@ -532,8 +532,8 @@ status += r'''
 int main(void){
  uint8_t fb=0;const int percentages[]={0,9,78,100,-1};
  for(screen_width=684;screen_width<=1216;screen_width+=532){
- for(int font=0;font<2;++font)for(int mask=0;mask<4;++mask)for(unsigned p=0;p<5;++p){
-   reading_context=false;chosen_system=s_system_ttf=font;wifi=mask&1;bluetooth=mask&2;pct=percentages[p];text_count=0;network_left=1000;
+ for(int font=0;font<2;++font)for(int mask=0;mask<8;++mask)for(unsigned p=0;p<5;++p){
+   reading_context=false;chosen_system=s_system_ttf=font;wifi=mask&1;bluetooth=mask&2;cellular=mask&4;pct=percentages[p];text_count=0;network_left=1000;
    snprintf(signature,sizeof(signature),"时间统一 · 正在阅读我的收藏书籍，保持热爱 ABCabc");
    ui_nav_status_font_context(false,true);
    ui_nav_status(&fb);assert(text_count==3&&texts[0].px==28&&texts[1].px==26&&texts[2].px==28);
@@ -561,7 +561,13 @@ int main(void){
  charging=true;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
  charging=false;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
  pct=49;assert(ui_nav_status_power_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_power_changed());
- puts("PASS: larger status text shares the icon centerline with builtin/custom metrics; simultaneous radios, 100% and long UTF-8 signatures do not overlap");
+ // 网络就绪边沿也必须独立于电量变化触发状态栏重绘；快捷栏的“开启”不参与这里的已连接判断。
+ // Network-ready edges must trigger status repaint independently of power changes; quick-bar "enabled" is not the connected state here.
+ wifi=cellular=bluetooth=false;text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_changed());
+ cellular=true;assert(ui_nav_status_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_changed());
+ cellular=false;wifi=true;assert(ui_nav_status_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_changed());
+ wifi=false;assert(ui_nav_status_changed());text_count=0;ui_nav_status(&fb);assert(!ui_nav_status_changed());
+ puts("PASS: larger status text shares the icon centerline with builtin/custom metrics; simultaneous radios, network-ready edges, 100% and long UTF-8 signatures do not overlap");
 }
 '''
 

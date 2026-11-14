@@ -5,6 +5,7 @@ if(NOT IDF_TARGET STREQUAL "esp32s31")
 endif()
 
 set(main_requires
+    http_parser
     board_support
     frontlight
     wifi_transfer
@@ -43,6 +44,7 @@ set(main_requires
     esp_app_format
     app_update
     esp_http_client
+    esp-tls
     mbedtls
     espressif__cjson
     78__uart-uhci
@@ -89,6 +91,7 @@ idf_component_register(
         "display/display_refresh_context.c"
         "display/display_waveform_catalog.c"
         "diagnostics/reader_perf.c"
+        "diagnostics/network_diagnostics.c"
         "diagnostics/lock_sleep_trace.c"
         "display/display_main_waveform.c"
         "display/display_reader_waveform.c"
@@ -98,6 +101,7 @@ idf_component_register(
         "services/storage_jobs.c"
         "services/network_policy.c"
         "services/network_service.c"
+        "services/network_http.c"
         ${cellular_sources}
         "services/lock_style_images.c"
         "services/weather_model.c"
@@ -240,6 +244,13 @@ idf_component_register(
         "assets/ui-hanzi.bin"
         "assets/display-test.png"
 )
+
+# 连接失败后 IDF 会关闭 socket；按需保留解析地址和连接阶段，正式默认关闭。
+# Failed sockets are closed inside IDF; opt in to address/progress logs locally.
+if(CONFIG_APP_NETWORK_CONNECT_TRACE)
+    idf_component_get_property(network_tls_lib esp-tls COMPONENT_LIB)
+    target_compile_definitions(${network_tls_lib} PRIVATE LOG_LOCAL_LEVEL=ESP_LOG_DEBUG)
+endif()
 
 # 包住 IDF 的 panic 处理器：崩溃现场在重启前落进 RTC，没有串口时那是唯一的现场。
 # 链接选项挂在 main 上，INTERFACE 会带到最终链接；写在 project() 之后的全局属性则太晚。

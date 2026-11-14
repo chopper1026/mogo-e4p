@@ -31,6 +31,8 @@ static atomic_bool s_cellular_control;
 static cellular_service_status_t cellular;
 static wifi_transfer_status_t wifi;
 static bool configured, deny_registration, fail_wifi, cell_recovers;
+static bool missing_wifi_netif, missing_cell_netif, fail_default;
+static unsigned default_calls, cell_status_reads, ready_on_cell_read;
 static unsigned wifi_starts, wifi_stops, cell_starts, cell_stops;
 static int64_t now_us;
 static int wifi_marker, cell_marker;
@@ -38,7 +40,11 @@ static void *default_netif;
 static int64_t esp_timer_get_time(void) { return now_us; }
 #define pdMS_TO_TICKS(ms) (ms)
 static void vTaskDelay(unsigned ms) { now_us += (int64_t)ms * 1000; }
-static int esp_netif_set_default_netif(void *netif) { default_netif = netif; return ESP_OK; }
+static int esp_netif_set_default_netif(void *netif) {
+    ++default_calls;
+    if (fail_default) return ESP_ERR_INVALID_STATE;
+    default_netif = netif; return ESP_OK;
+}
 static void wifi_transfer_get_status(wifi_transfer_status_t *out) { *out = wifi; }
 static int wifi_transfer_get_saved_wifi(char *ssid, bool *saved) {
     strcpy(ssid, configured ? "saved-network" : ""); *saved = configured; return ESP_OK;
@@ -51,9 +57,12 @@ static int wifi_transfer_start(const wifi_transfer_cfg_t *cfg) {
     return ESP_OK;
 }
 static void wifi_transfer_stop(void) { ++wifi_stops; wifi = (wifi_transfer_status_t){0}; }
-static void *wifi_transfer_netif(void) { return &wifi_marker; }
-void *cellular_service_netif(void) { return &cell_marker; }
-void cellular_service_get_status(cellular_service_status_t *out) { *out = cellular; }
+static void *wifi_transfer_netif(void) { return missing_wifi_netif ? NULL : &wifi_marker; }
+void *cellular_service_netif(void) { return missing_cell_netif ? NULL : &cell_marker; }
+void cellular_service_get_status(cellular_service_status_t *out) {
+    if (++cell_status_reads == ready_on_cell_read) cellular.ready = true;
+    *out = cellular;
+}
 static void app_settings_set_network_route(network_route_t route) { (void)route; }
 esp_err_t cellular_service_set_enabled(bool enabled) {
     if (enabled) ++cell_starts; else ++cell_stops;
@@ -73,6 +82,8 @@ static void reset(network_route_t route, network_auto_priority_t priority) {
         .enabled=true, .state=CELLULAR_SERVICE_STARTING};
     wifi = (wifi_transfer_status_t){0};
     configured = true; deny_registration = fail_wifi = cell_recovers = false;
+    missing_wifi_netif = missing_cell_netif = fail_default = false;
+    default_calls = cell_status_reads = ready_on_cell_read = 0;
     wifi_starts = wifi_stops = cell_starts = cell_stops = 0; default_netif = NULL;
 }
 '''
@@ -80,6 +91,32 @@ static void reset(network_route_t route, network_auto_priority_t priority) {
 CASES = r'''
 int main(void) {
     network_lease_t lease;
+    // No ready bearer must leave an existing route alone, including at acquire.
+    reset(NETWORK_ROUTE_CELLULAR, NETWORK_AUTO_WIFI_FIRST);
+    default_netif = &wifi_marker;
+    network_service_poll();
+    assert(default_calls == 0 && default_netif == &wifi_marker);
+    assert(network_service_acquire(NETWORK_USE_WEATHER, &lease) == ESP_OK);
+    assert(default_calls == 0 && default_netif == &wifi_marker);
+    // IP may arrive between poll's snapshot and wait_ready's second snapshot.
+    cell_status_reads = 0; ready_on_cell_read = 2;
+    assert(network_service_wait_ready(&lease, 300));
+    assert(now_us == 0 && default_netif == &cell_marker && default_calls == 1);
+    network_service_release(&lease);
+    // A ready flag alone is insufficient without a usable/default interface.
+    for (int missing = 0; missing < 2; ++missing) {
+        reset(NETWORK_ROUTE_CELLULAR, NETWORK_AUTO_WIFI_FIRST);
+        cellular.ready = true; missing_cell_netif = missing; fail_default = !missing;
+        assert(network_service_acquire(NETWORK_USE_OTA, &lease) == ESP_OK);
+        assert(!network_service_wait_ready(&lease, 300));
+        assert(!default_netif && now_us == 300000);
+        network_service_release(&lease);
+    }
+    reset(NETWORK_ROUTE_WIFI, NETWORK_AUTO_WIFI_FIRST);
+    missing_wifi_netif = true;
+    assert(network_service_acquire(NETWORK_USE_OTA, &lease) == ESP_OK);
+    assert(!network_service_wait_ready(&lease, 300) && !default_netif);
+    network_service_release(&lease);
     // Capability probes never rewrite Auto or a user's explicit route.
     for (int route = NETWORK_ROUTE_WIFI; route <= NETWORK_ROUTE_AUTO; ++route) {
         reset((network_route_t)route, NETWORK_AUTO_WIFI_FIRST);
@@ -109,9 +146,15 @@ int main(void) {
     assert(lease.bearer == NETWORK_BEARER_WIFI && lease.owns_wifi);
     assert(wifi_starts == 1 && default_netif == &wifi_marker);
     assert(atomic_load(&s_cellular_leases) == 0 && atomic_load(&s_wifi_leases) == 1);
+    // Recovery of the preferred 4G bearer cannot steal the fallback Wi-Fi lease.
+    deny_registration = false; cellular.ready = true;
+    network_service_poll();
+    assert(default_netif == &wifi_marker);
     network_service_release(&lease);
     assert(wifi_stops == 1 && !lease.active && cellular.enabled);
     assert(atomic_load(&s_wifi_leases) == 0);
+    network_service_poll();
+    assert(default_netif == &cell_marker);
 
     // An explicitly selected 4G route reports failure and never starts Wi-Fi.
     reset(NETWORK_ROUTE_CELLULAR, NETWORK_AUTO_CELLULAR_FIRST);
@@ -144,8 +187,16 @@ int main(void) {
     assert(network_service_wait_ready(&lease, 30000));
     assert(lease.bearer == NETWORK_BEARER_CELLULAR && default_netif == &cell_marker);
     assert(wifi_stops == 1 && cell_starts == 1);
+    // Likewise, a recovered preferred Wi-Fi bearer waits for the 4G lease to end.
+    fail_wifi = false;
+    wifi = (wifi_transfer_status_t){.state=WIFI_TRANSFER_READY,
+        .mode=WIFI_TRANSFER_MODE_STA, .network_ready=true};
+    network_service_poll();
+    assert(default_netif == &cell_marker);
     network_service_release(&lease);
     assert(!atomic_load(&s_wifi_leases) && !atomic_load(&s_cellular_leases));
+    network_service_poll();
+    assert(default_netif == &wifi_marker);
 
     // Forced Wi-Fi never silently borrows a connected cellular bearer.
     reset(NETWORK_ROUTE_WIFI, NETWORK_AUTO_WIFI_FIRST);
@@ -169,7 +220,7 @@ int main(void) {
     assert(network_service_set_enabled(NETWORK_BEARER_CELLULAR, false) == ESP_ERR_INVALID_STATE);
     assert(network_service_acquire(NETWORK_USE_OTA, &lease) == ESP_ERR_INVALID_STATE);
     assert(!atomic_load(&s_cellular_leases) && !cell_stops);
-    puts("PASS: bearer fallback, forced routes, lease cleanup and radio exclusion");
+    puts("PASS: bearer fallback, readiness races, route failures, lease route stability and radio exclusion");
 }
 '''
 
@@ -183,7 +234,8 @@ def main():
             "#define ESP_ERR_NOT_FOUND -1\n#define ESP_ERR_INVALID_ARG -2\n#define ESP_ERR_INVALID_STATE -3\n")
         unit = MODEL
         for name in ("resolve_ready_bearer", "saved_wifi", "start_wifi_for_lease",
-                     "start_cellular_for_lease", "reserve_cellular_lease", "acquire_bearer", "network_service_poll",
+                     "start_cellular_for_lease", "reserve_cellular_lease", "select_bearer_netif",
+                     "acquire_bearer", "network_service_poll",
                      "network_service_get_status", "network_service_acquire",
                      "network_service_wait_ready", "network_service_release", "network_service_set_enabled"):
             unit += function(name, SOURCE) + "\n"

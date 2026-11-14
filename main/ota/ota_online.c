@@ -23,6 +23,8 @@
 #include "storage_jobs.h"
 #include "time_service.h"
 #include "weather_service.h"
+#include "../diagnostics/network_diagnostics.h"
+#include "network_http.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -38,6 +40,7 @@ static pico_update_status_t *s_status;
 static atomic_bool s_cancel;
 static bool s_joinable, s_download;
 static const esp_partition_t *s_verified;
+static network_http_session_t s_http_session;
 #ifdef ESP_PLATFORM
 static network_lease_t s_network_lease;
 static bool s_network_lease_active;
@@ -52,6 +55,23 @@ static const size_t kOtaNetworkInternalBlock = 8192;
 static const size_t kOtaExternalFree = 262144;
 
 static void state(pico_update_state_t value, const char *message);
+
+static int ota_bearer(void) {
+#ifdef ESP_PLATFORM
+    return s_network_lease_active ? s_network_lease.bearer : NETWORK_BEARER_NONE;
+#else
+    return 0;
+#endif
+}
+
+static void http_failure(esp_http_client_handle_t client, const char *phase, long result) {
+    if (!atomic_load(&s_cancel))
+        network_diagnostics_http_failure("ota", client, phase, result, ota_bearer());
+}
+
+static void http_result(bool connected) {
+    if (!atomic_load(&s_cancel)) network_http_note_result(&s_http_session, connected);
+}
 
 static bool initialize(void) {
     if (!s_status) s_status = heap_caps_calloc(1, sizeof(*s_status), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -178,6 +198,7 @@ static bool online(bool *owned) {
         }
         app_time_service_note_success(utc);
     }
+    network_diagnostics_snapshot("ota", ota_bearer());
     return !atomic_load(&s_cancel);
 #else
     // 升级独占无线：在途的后台对时先取消，下面停服/起服才不会被它拖住。
@@ -248,22 +269,35 @@ static esp_http_client_handle_t open_http_range(const char *url, uint32_t offset
 #if defined(CONFIG_MBEDTLS_DYNAMIC_BUFFER) && CONFIG_MBEDTLS_DYNAMIC_BUFFER
     cfg.tls_dyn_buf_strategy = HTTP_TLS_DYN_BUF_RX_STATIC;
 #endif
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) return NULL;
+    esp_err_t init_error;
+    esp_http_client_handle_t client = network_http_client_init(&cfg, ota_bearer(), &s_http_session, &init_error);
+    if (!client) {
+        http_failure(NULL, "init", init_error);
+        return NULL;
+    }
+    const char *phase = "range-header";
+    long result = ESP_OK;
     esp_http_client_set_header(client, "User-Agent", PICO_OTA_CAPABILITY);
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     esp_http_client_set_header(client, "Cache-Control", "no-cache");
     if (offset) {
         char value[48]; snprintf(value, sizeof(value), "bytes=%lu-", (unsigned long)offset);
-        if (esp_http_client_set_header(client, "Range", value) != ESP_OK) goto fail;
+        result = esp_http_client_set_header(client, "Range", value);
+        if (result != ESP_OK) goto fail;
     }
-    if (esp_http_client_open(client, 0) != ESP_OK || atomic_load(&s_cancel)) goto fail;
+    phase = "open";
+    result = esp_http_client_open(client, 0);
+    if (result != ESP_OK || atomic_load(&s_cancel)) goto fail;
+    phase = "headers";
     *length = esp_http_client_fetch_headers(client);
+    result = (long)*length;
     if (*length < 0 || atomic_load(&s_cancel)) goto fail;
     *status = esp_http_client_get_status_code(client);
     esp_http_client_set_timeout_ms(client, 1000);
     return client;
 fail:
+    if (!strcmp(phase, "open") || !strcmp(phase, "headers")) http_result(false);
+    http_failure(client, phase, result);
     esp_http_client_cleanup(client);
     return NULL;
 }
@@ -300,42 +334,58 @@ static int read_chunk(esp_http_client_handle_t client, uint8_t *buffer, int cap,
 #endif
         int n = esp_http_client_read(client, (char *)buffer, cap);
         if (n > 0) { *idle = esp_timer_get_time() + 30000000; return n; }
-        if (!n && esp_http_client_is_complete_data_received(client)) return 0;
-        if (n < 0 && n != -ESP_ERR_HTTP_EAGAIN) return -1;
+        if (!n && esp_http_client_is_complete_data_received(client)) {
+            http_result(true);
+            return 0;
+        }
+        if (n < 0 && n != -ESP_ERR_HTTP_EAGAIN) {
+            http_result(false);
+            http_failure(client, "body", n);
+            return -1;
+        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+    http_result(false);
+    http_failure(client, "body-timeout", ESP_ERR_TIMEOUT);
     return -1;
 }
 static bool check_feed(void) {
     char *json = heap_caps_malloc(8193, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     pico_release_t *release = heap_caps_calloc(1, sizeof(*release), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!json || !release) { state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试"); goto failed; }
-    // 主站失败后回退已有 GitHub 更新源；同一缓冲区顺序请求，无并发 TLS 连接。
-    // Fall back to the existing GitHub source, reusing one buffer and one TLS connection at a time.
-    static const char *const feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
-    bool valid = false;
-    for (size_t source = 0; source < sizeof(feeds) / sizeof(feeds[0]) && !atomic_load(&s_cancel); ++source) {
-        char url[192]; snprintf(url, sizeof(url), "%s?t=%lld", feeds[source], (long long)time(NULL));
-        int code = -1; int64_t length = -1;
-        esp_http_client_handle_t client = NULL;
-        for (int i = 0; i < 2 && !atomic_load(&s_cancel); ++i) {
-            if (wait_network()) client = open_http(url, &code, &length);
-            if (client) break;
-            vTaskDelay(pdMS_TO_TICKS(250));
-        }
-        if (!client) continue;
-        if (code != 200 || length > 8192) { esp_http_client_cleanup(client); continue; }
-        size_t received = 0;
-        int64_t idle = esp_timer_get_time() + 30000000;
-        int n = -1;
-        while (received < 8192 && (n = read_chunk(client, (uint8_t *)json + received, (int)(8192 - received), &idle)) > 0)
-            received += n;
-        bool complete = esp_http_client_is_complete_data_received(client);
-        esp_http_client_cleanup(client);
-        json[received] = 0;
-        if (n >= 0 && complete && pico_release_parse(json, received, release) == ESP_OK) { valid = true; break; }
+    char url[192]; snprintf(url, sizeof(url), "%s?t=%lld", PICO_OTA_FEED_URL, (long long)time(NULL));
+    int code = -1; int64_t length = -1;
+    esp_http_client_handle_t client = NULL;
+    for (int i = 0; i < 2 && !atomic_load(&s_cancel); ++i) {
+        if (wait_network()) client = open_http(url, &code, &length);
+        if (client) break;
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
-    if (!valid) { state(PICO_UPDATE_FAILED, "更新服务器连接失败或清单无效，请稍后重试"); goto failed; }
+    if (!client) goto invalid_feed;
+    if (code != 200 || length > 8192) {
+        http_result(true);
+        http_failure(client, code != 200 ? "feed-status" : "feed-size",
+                     code != 200 ? code : (long)length);
+        esp_http_client_cleanup(client);
+        goto invalid_feed;
+    }
+    size_t received = 0;
+    int64_t idle = esp_timer_get_time() + 30000000;
+    int n = -1;
+    while (received < 8192 && (n = read_chunk(client, (uint8_t *)json + received, (int)(8192 - received), &idle)) > 0)
+        received += n;
+    bool complete = esp_http_client_is_complete_data_received(client);
+    http_result(n >= 0 && complete);
+    json[received] = 0;
+    bool valid = false;
+    if (n >= 0 && complete) {
+        network_diagnostics_http_response("ota", client, received);
+        esp_err_t parsed = pico_release_parse(json, received, release);
+        valid = parsed == ESP_OK;
+        if (!valid) http_failure(client, "feed-parse", parsed);
+    } else if (n >= 0) http_failure(client, "feed-incomplete", (long)received);
+    esp_http_client_cleanup(client);
+    if (!valid) goto invalid_feed;
     const esp_app_desc_t *running = esp_app_get_description();
     if (strcmp(release->project, running->project_name) || !layout_valid() ||
         pico_version_compare(running->version, release->minimum_base_version) < 0) {
@@ -348,6 +398,8 @@ static bool check_feed(void) {
           pico_version_compare(release->version, running->version) > 0 ? "发现新版本，可下载安装" : "当前已是最新版本");
     heap_caps_free(json); heap_caps_free(release);
     return true;
+invalid_feed:
+    state(PICO_UPDATE_FAILED, "更新服务器连接失败或清单无效，请稍后重试");
 failed:
     heap_caps_free(json); heap_caps_free(release);
     return false;
@@ -401,6 +453,8 @@ static bool download(void) {
             bool response_ok = total ? code == 206 && range.valid && range.start == total &&
                 range.size == release->size && range.end == release->size - 1 : code == 200;
             if (!response_ok || (length > 0 && (uint64_t)length != release->size - total)) {
+                http_result(true);
+                http_failure(client, "range-response", ESP_ERR_INVALID_RESPONSE);
                 error = ESP_ERR_INVALID_RESPONSE; break;
             }
             idle = esp_timer_get_time() + 30000000;
@@ -436,7 +490,10 @@ static bool download(void) {
         xSemaphoreGive(s_mutex);
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    if (client) esp_http_client_cleanup(client);
+    if (client) {
+        http_result(true);
+        esp_http_client_cleanup(client);
+    }
     uint8_t digest[32]; size_t digest_size = 0; char hex[65];
     if (error == ESP_OK && (!begun || n < 0 || !complete || total != release->size || atomic_load(&s_cancel))) error = ESP_FAIL;
     if (error == ESP_OK && psa_hash_finish(&hash, digest, sizeof(digest), &digest_size) != PSA_SUCCESS) error = ESP_FAIL;

@@ -127,6 +127,12 @@ static bool reserve_cellular_lease(void) {
     return false;
 }
 
+static bool select_bearer_netif(network_bearer_t bearer) {
+    void *netif = bearer == NETWORK_BEARER_CELLULAR ? cellular_service_netif()
+        : bearer == NETWORK_BEARER_WIFI ? wifi_transfer_netif() : NULL;
+    return netif && esp_netif_set_default_netif((esp_netif_t *)netif) == ESP_OK;
+}
+
 static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease) {
     if (!lease) return ESP_ERR_INVALID_ARG;
     *lease = (network_lease_t){0};
@@ -150,9 +156,9 @@ static esp_err_t acquire_bearer(network_bearer_t bearer, network_lease_t *lease)
         return ESP_ERR_NOT_FOUND;
     }
     if (lease->bearer == NETWORK_BEARER_WIFI) atomic_fetch_add(&s_wifi_leases, 1);
-    void *netif = lease->bearer == NETWORK_BEARER_CELLULAR
-        ? cellular_service_netif() : wifi_transfer_netif();
-    if (netif) (void)esp_netif_set_default_netif((esp_netif_t *)netif);
+    if ((lease->bearer == NETWORK_BEARER_WIFI && status.wifi_ready) ||
+        (lease->bearer == NETWORK_BEARER_CELLULAR && status.cellular_ready))
+        (void)select_bearer_netif(lease->bearer);
     return ESP_OK;
 }
 
@@ -173,9 +179,13 @@ void network_service_poll(void) {
     cellular_service_poll();
     network_status_t status;
     network_service_get_status(&status);
-    void *netif = status.active_bearer == NETWORK_BEARER_CELLULAR
-        ? cellular_service_netif() : wifi_transfer_netif();
-    if (netif) (void)esp_netif_set_default_netif((esp_netif_t *)netif);
+    // A recovered preferred radio must not replace an in-flight business route.
+    network_bearer_t bearer = status.active_bearer;
+    if (atomic_load(&s_cellular_leases))
+        bearer = status.cellular_ready ? NETWORK_BEARER_CELLULAR : NETWORK_BEARER_NONE;
+    else if (atomic_load(&s_wifi_leases))
+        bearer = status.wifi_ready ? NETWORK_BEARER_WIFI : NETWORK_BEARER_NONE;
+    (void)select_bearer_netif(bearer);
 }
 
 void network_service_get_status(network_status_t *out) {
@@ -318,7 +328,11 @@ bool network_service_wait_ready(network_lease_t *lease, uint32_t timeout_ms) {
             network_status_t status;
             network_service_get_status(&status);
             if ((lease->bearer == NETWORK_BEARER_WIFI && status.wifi_ready) ||
-                (lease->bearer == NETWORK_BEARER_CELLULAR && status.cellular_ready)) return true;
+                (lease->bearer == NETWORK_BEARER_CELLULAR && status.cellular_ready)) {
+                // Readiness can change between poll() and the snapshot above.
+                // Establish the lease's route before any DNS/TCP/TLS operation.
+                if (select_bearer_netif(lease->bearer)) return true;
+            }
             if (lease->bearer == NETWORK_BEARER_CELLULAR &&
                 (status.cellular_state == CELLULAR_SERVICE_NO_SIM ||
                  status.cellular_state == CELLULAR_SERVICE_SIM_NOT_READY ||

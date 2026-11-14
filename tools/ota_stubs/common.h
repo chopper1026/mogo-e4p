@@ -41,7 +41,7 @@ typedef struct {uint32_t address,size;} esp_partition_t;
 typedef struct FakeHttp *esp_http_client_handle_t;
 #define HTTP_EVENT_ON_HEADER 1
 typedef struct {int event_id; void *user_data; char *header_key, *header_value;} esp_http_client_event_t;
-typedef struct {const char *url;int timeout_ms,buffer_size,buffer_size_tx;int (*crt_bundle_attach)(void*);bool disable_auto_redirect,keep_alive_enable,is_async; int (*event_handler)(esp_http_client_event_t*);void *user_data;} esp_http_client_config_t;
+typedef struct {const char *url,*common_name,*cert_pem;int timeout_ms,buffer_size,buffer_size_tx;int (*crt_bundle_attach)(void*);bool disable_auto_redirect,keep_alive_enable,is_async,skip_cert_common_name_check,use_global_ca_store; int (*event_handler)(esp_http_client_event_t*);void *user_data;} esp_http_client_config_t;
 typedef int wifi_ps_type_t;
 #define WIFI_PS_MIN_MODEM 1
 #define WIFI_PS_NONE 0

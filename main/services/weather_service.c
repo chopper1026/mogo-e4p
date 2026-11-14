@@ -8,6 +8,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "esp_tls_errors.h"
 #include "esp_timer.h"
 #include "epdiy.h"
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,8 @@
 #include "time_service.h"
 #include "wifi_transfer.h"
 #include "network_service.h"
+#include "network_http.h"
+#include "../diagnostics/network_diagnostics.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -86,6 +89,7 @@ static int64_t s_next_attempt, s_deadline;
 static int32_t s_display_day;
 static bool s_display_valid;
 static weather_clock_t s_clock, s_requested_clock;
+static network_http_session_t s_http_session;
 
 static int64_t clock_now(const weather_clock_t *clock) {
     if (!clock->utc) return time(NULL);
@@ -195,12 +199,19 @@ static bool http_get_once(const char *path, char *body, weather_clock_t *respons
         .disable_auto_redirect = true, .buffer_size = 1024, .buffer_size_tx = 1024,
         .event_handler = response_clock ? weather_date_header : NULL, .user_data = &header,
     };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return false;
+    esp_err_t init_error;
+    esp_http_client_handle_t client = network_http_client_init(&config, bearer, &s_http_session, &init_error);
+    if (!client) {
+        *retryable = init_error == ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME && !cancelled();
+        network_diagnostics_http_failure("weather", NULL, "init", init_error, bearer);
+        return false;
+    }
     esp_http_client_set_header(client, "Accept", "application/json");
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     bool ok = false;
     bool transport_error;
+    const char *phase = "open";
+    long result = ESP_FAIL;
     esp_err_t opened = ESP_FAIL;
     while (!cancelled() && esp_timer_get_time() - started < connect_us) {
         opened = esp_http_client_open(client, 0);
@@ -208,30 +219,38 @@ static bool http_get_once(const char *path, char *body, weather_clock_t *respons
         vTaskDelay(pdMS_TO_TICKS(20));
     }
     transport_error = opened != ESP_OK;
+    result = opened;
     if (!cancelled() && opened == ESP_OK) {
+        phase = "headers";
         int64_t until = esp_timer_get_time() + response_us;
         int64_t length = -1;
         // 短等待读取可取消，EAGAIN仅在当前承载的响应窗口内重试。
         // Short I/O waits stay cancellable within the selected bearer's response window.
         while (!cancelled()) {
             int wait = http_wait_ms(until);
-            if (wait <= 0 || esp_http_client_set_timeout_ms(client, wait) != ESP_OK) break;
+            if (wait <= 0) { result = ESP_ERR_TIMEOUT; break; }
+            esp_err_t timeout_result = esp_http_client_set_timeout_ms(client, wait);
+            if (timeout_result != ESP_OK) { result = timeout_result; break; }
             length = esp_http_client_fetch_headers(client);
+            result = (long)length;
             if (length != -ESP_ERR_HTTP_EAGAIN) break;
             vTaskDelay(pdMS_TO_TICKS(20));
         }
-        transport_error = length < 0;
+        transport_error = length < 0 || esp_timer_get_time() >= until;
         if (!cancelled() && esp_timer_get_time() < until && length >= 0 && length <= WEATHER_BODY_LIMIT) {
-            transport_error = false;
+            phase = "body";
+            transport_error = true;
             size_t used = 0;
             until = esp_timer_get_time() + response_us;
             while (!cancelled() && used < WEATHER_BODY_LIMIT) {
                 int wait = http_wait_ms(until);
-                if (wait <= 0 || esp_http_client_set_timeout_ms(client, wait) != ESP_OK) break;
+                if (wait <= 0) { result = ESP_ERR_TIMEOUT; break; }
+                esp_err_t timeout_result = esp_http_client_set_timeout_ms(client, wait);
+                if (timeout_result != ESP_OK) { result = timeout_result; break; }
                 size_t chunk = WEATHER_BODY_LIMIT - used;
                 if (chunk > 512) chunk = 512;
                 int n = esp_http_client_read(client, body + used, (int)chunk);
-                transport_error = n < 0;
+                result = n;
                 if (n == -ESP_ERR_HTTP_EAGAIN) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
                 if (n < 0) break;
                 if (!n) { ok = esp_http_client_is_complete_data_received(client); break; }
@@ -240,14 +259,22 @@ static bool http_get_once(const char *path, char *body, weather_clock_t *respons
             }
             body[used] = 0;
             if (used == WEATHER_BODY_LIMIT) ok = esp_http_client_is_complete_data_received(client);
+            if (ok) transport_error = false;
             if (ok && !cancelled() && !memchr(body, 0, used)) {
                 int status = esp_http_client_get_status_code(client);
-                if (status != 200) { api_error(status, body); ok = false; }
+                if (status != 200) {
+                    phase = "status"; result = status;
+                    api_error(status, body); ok = false;
+                }
             } else ok = false;
         }
     }
     ok = ok && !cancelled();
     *retryable = !ok && !cancelled() && transport_error;
+    if (!cancelled()) network_http_note_result(&s_http_session, !transport_error);
+    if (!ok && !atomic_load(&s_cancel))
+        network_diagnostics_http_failure("weather", client, phase, result, bearer);
+    if (ok) network_diagnostics_http_response("weather", client, strlen(body));
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     if (ok && response_clock) *response_clock = header.clock;
@@ -313,9 +340,14 @@ static void weather_worker(void *arg) {
         result_notice(APP_WEATHER_UNAVAILABLE, "当前联网方式不可用，请检查网络设置");
         goto done;
     }
+    network_diagnostics_snapshot("weather", lease.bearer);
     if (cancelled() || !http_get("/components", body, NULL, lease.bearer)) goto done;
     bool enabled, available;
-    if (!weather_catalog_parse(body, strlen(body), &enabled, &available)) goto done;
+    if (!weather_catalog_parse(body, strlen(body), &enabled, &available)) {
+        network_diagnostics_data_failure("weather", "catalog-parse", "invalid-catalog",
+                                        strlen(body), 0, lease.bearer);
+        goto done;
+    }
     if (!enabled) {
         s_result.clear_cache = true; result_notice(APP_WEATHER_DISABLED, "天气服务暂未开放"); goto done;
     }
@@ -348,6 +380,8 @@ static void weather_worker(void *arg) {
             goto done;
         }
         if (!weather_location_parse(body, strlen(body), &city)) {
+            network_diagnostics_data_failure("weather", "location-parse", "invalid-location",
+                                            strlen(body), 0, lease.bearer);
             result_notice(APP_WEATHER_CITY_REQUIRED, "识别结果不支持，请手动选择"); goto done;
         }
         s_result.has_city = true; s_result.city = city;
@@ -359,7 +393,13 @@ static void weather_worker(void *arg) {
     // 仅接受同一可信HTTPS预报的时间；旧响应不能倒退参照或延长原始有效期。
     // Trust time only from the same HTTPS forecast; older responses cannot roll back time or extend expiry.
     if (response_clock.utc && (!clock.utc || clock_now(&response_clock) > clock_now(&clock))) clock = response_clock;
-    if (!weather_forecast_parse(body, strlen(body), clock_now(&clock), &city, &s_result.forecast)) goto done;
+    weather_parse_result_t parsed = weather_forecast_parse_result(body, strlen(body), clock_now(&clock),
+                                                                &city, &s_result.forecast);
+    if (parsed != WEATHER_PARSE_OK) {
+        network_diagnostics_data_failure("weather", "forecast-parse", weather_parse_result_name(parsed),
+                                        strlen(body), clock_now(&clock), lease.bearer);
+        goto done;
+    }
     s_result.clock = clock;
     s_result.has_forecast = true; result_notice(APP_WEATHER_READY, "");
 done:

@@ -29,7 +29,6 @@ UartEthModem::UartEthModem(const Config& config) : config_(config) {
     event_group_ = xEventGroupCreate();
     if (!event_group_) {
         ESP_LOGE(kTag, "Failed to create event group");
-        abort();  // Constructor cannot fail gracefully
     }
 
     // Initialize driver structure
@@ -95,10 +94,15 @@ esp_err_t UartEthModem::Start() {
         ESP_LOGW(kTag, "Already started");
         return ESP_ERR_INVALID_STATE;
     }
+    if (!event_group_) {
+        ESP_LOGE(kTag, "Cannot start without event group");
+        return ESP_ERR_NO_MEM;
+    }
 
     stop_flag_ = false;
     handshake_done_ = false;
     initializing_ = true;
+    rx_event_drops_.store(0);
     xEventGroupClearBits(event_group_, kEventAllTasksDone | kEventStop | kEventStart);
 
     // Create event queue FIRST (before GPIO init, since ISR uses it)
@@ -167,22 +171,28 @@ esp_err_t UartEthModem::Start() {
     // Note: Don't start DMA receive here, will be started when entering Active state
 
     // Create main task (handles all events, no blocking operations)
-    xTaskCreate([](void* arg) {
+    if (xTaskCreate([](void* arg) {
         static_cast<UartEthModem*>(arg)->MainTaskRun();
         vTaskDelete(nullptr);
-    }, "uart_eth_main", 4096, this, 10, &main_task_);
+    }, "uart_eth_main", 4096, this, 10, &main_task_) != pdPASS) {
+        main_task_ = nullptr;
+    }
 
     // Create init task
-    xTaskCreate([](void* arg) {
+    if (xTaskCreate([](void* arg) {
         static_cast<UartEthModem*>(arg)->InitTaskRun();
         vTaskDelete(nullptr);
-    }, "uart_eth_init", 4096, this, 4, &init_task_);
+    }, "uart_eth_init", 4096, this, 4, &init_task_) != pdPASS) {
+        init_task_ = nullptr;
+    }
 
     // Create TX task (dedicated for non-blocking transmit from LWIP)
-    xTaskCreate([](void* arg) {
+    if (xTaskCreate([](void* arg) {
         static_cast<UartEthModem*>(arg)->TxTaskRun();
         vTaskDelete(nullptr);
-    }, "uart_eth_tx", 3072, this, 9, &tx_task_);  // Priority slightly lower than main
+    }, "uart_eth_tx", 3072, this, 9, &tx_task_) != pdPASS) {
+        tx_task_ = nullptr;
+    }  // Priority slightly lower than main
 
     if (!main_task_ || !init_task_ || !tx_task_) {
         ESP_LOGE(kTag, "Failed to create tasks");
@@ -803,10 +813,12 @@ void UartEthModem::TxTaskRun() {
             // Update activity time
             last_activity_time_us_ = esp_timer_get_time();
 
-            // Clear event bits before sending
-            gpio_set_intr_type(config_.srdy_pin, GPIO_INTR_NEGEDGE);
-            gpio_intr_enable(config_.srdy_pin);
+            // Arm the high ACK edge before transmitting; a low busy edge must
+            // not disable the ISR while the sender is waiting for the ACK.
+            gpio_intr_disable(config_.srdy_pin);
             xEventGroupClearBits(event_group_, kEventSrdyHigh);
+            gpio_set_intr_type(config_.srdy_pin, GPIO_INTR_POSEDGE);
+            gpio_intr_enable(config_.srdy_pin);
 
             // Transmit via UHCI (Synchronous FIFO mode)
             ret = uart_uhci_.Transmit(frame.data, frame.length);
@@ -863,9 +875,11 @@ void UartEthModem::MainTaskRun() {
         Event event;
         if (xQueueReceive(event_queue_, &event, wait_ticks) == pdTRUE) {
             HandleEvent(event);
+            uart_uhci_.RecoverOverflowIfReady();
         } else {
             // Timeout occurred
             HandleIdleTimeout();
+            uart_uhci_.RecoverOverflowIfReady();
         }
     }
 
@@ -889,7 +903,13 @@ bool IRAM_ATTR UartEthModem::UhciRxCallbackStatic(const UartUhci::RxEventData& d
         .rx_buffer = data.buffer,
     };
 
-    xQueueSendFromISR(self->event_queue_, &event, &xHigherPriorityTaskWoken);
+    if (xQueueSendFromISR(self->event_queue_, &event, &xHigherPriorityTaskWoken) != pdTRUE) {
+        // The DMA buffer is owned by the callback until the event reaches the
+        // main task. Returning it here prevents one full event queue from
+        // permanently consuming a pool slot and eventually stopping UHCI.
+        self->uart_uhci_.ReturnBufferFromISR(data.buffer);
+        self->rx_event_drops_.fetch_add(1, std::memory_order_relaxed);
+    }
 
     return xHigherPriorityTaskWoken == pdTRUE;
 }
@@ -1920,7 +1940,7 @@ void UartEthModem::ConfigureSrdyInterrupt(bool for_wakeup) {
         // LOW_LEVEL trigger for light sleep wakeup
         gpio_set_intr_type(config_.srdy_pin, GPIO_INTR_LOW_LEVEL);
     } else {
-        // Use POSEDGE to detect SRDY going high (slave ACK or entering sleep)
+        // Idle transitions need both the modem wakeup and sleep edges.
         gpio_set_intr_type(config_.srdy_pin, GPIO_INTR_ANYEDGE);
     }
     gpio_intr_enable(config_.srdy_pin);
@@ -2021,6 +2041,11 @@ void UartEthModem::CleanupResources(bool cleanup_iot_eth) {
 
     // Cleanup event queue
     if (event_queue_) {
+        const uint32_t dropped = rx_event_drops_.exchange(0, std::memory_order_relaxed);
+        if (dropped != 0) {
+            ESP_LOGW(kTag, "Dropped %lu RX events because the modem event queue was full",
+                     static_cast<unsigned long>(dropped));
+        }
         Event event;
         while (xQueueReceive(event_queue_, &event, 0) == pdTRUE) {
             // No dynamic data in events now

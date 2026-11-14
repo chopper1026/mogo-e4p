@@ -360,6 +360,7 @@ private:
 
     // UHCI DMA
     UartUhci uart_uhci_;
+    std::atomic<uint32_t> rx_event_drops_{0};
 
     // Frame reassembly buffer for incomplete frames
     // 用于不完整帧的重组缓冲区

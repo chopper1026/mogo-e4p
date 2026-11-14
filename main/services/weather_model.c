@@ -230,33 +230,59 @@ bool weather_forecast_valid(const weather_forecast_t *f, int64_t now) {
     }
     return true;
 }
-bool weather_forecast_parse(const char *json, size_t length, int64_t now,
+weather_parse_result_t weather_forecast_parse_result(const char *json, size_t length, int64_t now,
                            const weather_location_t *selected, weather_forecast_t *out) {
     cJSON *root = document(json, length); weather_forecast_t f = {0}; int schema; bool stale = false;
     cJSON *days = cJSON_GetObjectItemCaseSensitive(root, "days");
     char source[16];
-    bool ok = root && weather_location_valid(selected) && integer(root, "schemaVersion", 1, 1, &schema) &&
-        string_field(root, "source", source, sizeof(source), false) && !strcmp(source, "QWeather") &&
-        point(cJSON_GetObjectItemCaseSensitive(root, "location"), &f.location) &&
-        !strcmp(f.location.id, selected->id) &&
-        !strcmp(f.location.timezone, selected->timezone) &&
-        fabs(f.location.lat - selected->lat) <= .011 && fabs(f.location.lon - selected->lon) <= .011 &&
-        cJSON_IsArray(days) && cJSON_GetArraySize(days) == 2 &&
-        timestamp_field(root, "fetchedAt", false, &f.fetched) && timestamp_field(root, "freshUntil", false, &f.fresh) &&
-        timestamp_field(root, "serveUntil", false, &f.serve) && boolean(root, "stale", &stale);
-    if (ok) { f.location = *selected; f.stale = stale; }
-    for (int i = 0; ok && i < 2; ++i) {
+    weather_parse_result_t result = WEATHER_PARSE_DOCUMENT;
+    if (!root) goto done;
+    result = WEATHER_PARSE_LOCATION;
+    if (!weather_location_valid(selected)) goto done;
+    result = WEATHER_PARSE_SCHEMA;
+    if (!integer(root, "schemaVersion", 1, 1, &schema) ||
+        !string_field(root, "source", source, sizeof(source), false) || strcmp(source, "QWeather")) goto done;
+    result = WEATHER_PARSE_LOCATION;
+    if (!point(cJSON_GetObjectItemCaseSensitive(root, "location"), &f.location) ||
+        strcmp(f.location.id, selected->id) || strcmp(f.location.timezone, selected->timezone) ||
+        fabs(f.location.lat - selected->lat) > .011 || fabs(f.location.lon - selected->lon) > .011) goto done;
+    result = WEATHER_PARSE_DAYS;
+    if (!cJSON_IsArray(days) || cJSON_GetArraySize(days) != 2) goto done;
+    result = WEATHER_PARSE_TIMESTAMPS;
+    if (!timestamp_field(root, "fetchedAt", false, &f.fetched) ||
+        !timestamp_field(root, "freshUntil", false, &f.fresh) ||
+        !timestamp_field(root, "serveUntil", false, &f.serve) || !boolean(root, "stale", &stale)) goto done;
+    f.location = *selected; f.stale = stale;
+    result = WEATHER_PARSE_DAYS;
+    for (int i = 0; i < 2; ++i) {
         cJSON *item = cJSON_GetArrayItem(days, i); char date[11], code[4]; weather_day_t *d = &f.days[i];
-        ok = string_field(item, "date", date, sizeof(date), false) && (d->date = parse_date(date)) >= 0 &&
+        bool ok = string_field(item, "date", date, sizeof(date), false) && (d->date = parse_date(date)) >= 0 &&
             number(item, "minC", -90, 65, &d->min_c) && number(item, "maxC", -90, 65, &d->max_c) &&
             integer(item, "dayHumidityPct", 0, 100, &d->humidity) &&
             string_field(item, "conditionCode", code, sizeof(code), false) && strlen(code) == 3 &&
             (d->code = digits(code, 3)) >= 100 && string_field(item, "conditionText", d->condition, sizeof(d->condition), false) &&
             timestamp_field(item, "sunrise", true, &d->sunrise) && timestamp_field(item, "sunset", true, &d->sunset);
+        if (!ok) goto done;
     }
-    ok = ok && weather_forecast_valid(&f, now);
-    if (ok) *out = f;
-    cJSON_Delete(root); return ok;
+    result = WEATHER_PARSE_CLOCK;
+    if (!weather_clock_valid(now) || f.fetched > now + 120) goto done;
+    result = WEATHER_PARSE_EXPIRED;
+    if (now >= f.serve) goto done;
+    result = WEATHER_PARSE_VALIDITY;
+    if (!weather_forecast_valid(&f, now)) goto done;
+    *out = f;
+    result = WEATHER_PARSE_OK;
+done:
+    cJSON_Delete(root); return result;
+}
+bool weather_forecast_parse(const char *json, size_t length, int64_t now,
+                           const weather_location_t *selected, weather_forecast_t *out) {
+    return weather_forecast_parse_result(json, length, now, selected, out) == WEATHER_PARSE_OK;
+}
+const char *weather_parse_result_name(weather_parse_result_t result) {
+    static const char *const names[] = {"ok", "document", "schema", "location", "timestamps",
+        "days", "clock", "expired", "validity"};
+    return (unsigned)result < sizeof(names) / sizeof(names[0]) ? names[result] : "unknown";
 }
 const weather_day_t *weather_day_for(const weather_forecast_t *f, int64_t now, bool tomorrow) {
     if (!weather_forecast_valid(f, now)) return NULL;

@@ -28,7 +28,13 @@ cc $san $flags -DOTA_TEST_EXTRA_ORIGIN \
   tools/ota_release_host_test.c main/ota/ota_release.c "$out/cjson.o" -o "$out/release_extra"
 "$out/release_extra"
 
+if [ "${OTA_TEST_NO_SANITIZE:-0}" = 1 ]; then
+  python3 tools/network_http_host_test.py --object-dir "$out" --no-sanitize
+else
+  python3 tools/network_http_host_test.py --object-dir "$out"
+fi
 cc $san $flags tools/ota_online_host_test.c main/ota/ota_release.c "$out/cjson.o" \
+  "$out/network_http.o" "$out/network_http_dns.o" "$out/http_parser.o" \
   -o "$out/online" -lpthread
 "$out/online"
 

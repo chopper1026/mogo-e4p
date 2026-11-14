@@ -11,7 +11,7 @@
 > **使用与授权：** 今后明确标注适用[个人学习许可](licenses/kiikoread-Personal-Study-1.0.txt)的新增原创内容，允许个人学习，未经单独书面授权不得商用。**此政策不重新许可 rc93 及以前的代码或固件，不撤销既有 Apache-2.0 授权，也不覆盖第三方许可。** 完整范围见 [LICENSE](LICENSE)。
 
 项目对外名称统一为 **mogo**，网页对设备使用「墨水屏」。保留原 GitHub 仓库网址、升级地址与备份文件名；固件界面也统一使用 mogo。纯白官网包含界面预览、功能介绍、版本选择、网页刷机、Bin 下载和[在线使用说明](flash/manual.html)。运行 `python3 tools/stage_public_flash.py _site` 生成公开网站，GitHub Pages 或 Cloudflare Pages 均可使用 `_site` 作为发布目录。说明书从 `docs/user-manual.zh-CN.json` 同源生成，运行 `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` 可更新 HTML 与 PDF（需要 Python ReportLab）。
-正式固件 Bin 发布到当前远端仓库的 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases)。版本标签推送后，构建将同一批固件提交到 OTA 平台草稿，须经管理员审核后上线。设备优先读取 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json`，仅接受平台 `/files/firmware/ota/` 下的 HTTPS 镜像及已有 GitHub 来源，主源失败后回退原 GitHub 更新源。已发布的固定下载与升级地址保留；天气接口也使用 `https://mogo.mantake.shop`。
+正式固件 Bin 发布到当前远端仓库的 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases)。版本标签推送后，构建将同一批固件提交到 OTA 平台草稿，须经管理员审核后上线。设备仅从 `https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json` 读取升级清单，连接失败或清单无效时直接提示失败；清单中的镜像仍只接受平台 `/files/firmware/ota/` 下的 HTTPS 镜像及已有 GitHub 来源。已发布的固定下载与升级地址保留；天气接口也使用 `https://mogo.mantake.shop`。
 
 
 [English](README.md) · [日本語](README.ja-JP.md) · [第三方许可](THIRD_PARTY_NOTICES.md)

@@ -1217,13 +1217,16 @@ static esp_err_t info_handler(httpd_req_t *req) {
     wifi_transfer_get_status(&status);
     cJSON *json = cJSON_CreateObject();
     if (!json) return ESP_ERR_NO_MEM;
-    cJSON_AddBoolToObject(json, "is_flash", s_cfg.is_flash);
-    cJSON_AddNumberToObject(json, "free_bytes", (double)s_cfg.free_bytes_cb(s_cfg.free_bytes_ctx));
-    cJSON_AddNumberToObject(json, "file_limit", (double)s_cfg.file_limit);
-    cJSON_AddStringToObject(json, "mode", status.mode == WIFI_TRANSFER_MODE_AP ? "ap" : "sta");
-    cJSON_AddBoolToObject(json, "wifi_configured", status.wifi_configured);
-    cJSON_AddStringToObject(json, "wifi_ssid", status.wifi_ssid);
-    cJSON_AddStringToObject(json, "root", s_root);
+    if (!cJSON_AddBoolToObject(json, "is_flash", s_cfg.is_flash) ||
+        !cJSON_AddNumberToObject(json, "free_bytes", (double)s_cfg.free_bytes_cb(s_cfg.free_bytes_ctx)) ||
+        !cJSON_AddNumberToObject(json, "file_limit", (double)s_cfg.file_limit) ||
+        !cJSON_AddStringToObject(json, "mode", status.mode == WIFI_TRANSFER_MODE_AP ? "ap" : "sta") ||
+        !cJSON_AddBoolToObject(json, "wifi_configured", status.wifi_configured) ||
+        !cJSON_AddStringToObject(json, "wifi_ssid", status.wifi_ssid) ||
+        !cJSON_AddStringToObject(json, "root", s_root)) {
+        cJSON_Delete(json);
+        return ESP_ERR_NO_MEM;
+    }
     char *body = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
     if (!body) return ESP_ERR_NO_MEM;
@@ -1352,18 +1355,27 @@ static esp_err_t file_response(httpd_req_t *req, file_result_t result, bool dele
         cJSON *json = cJSON_CreateObject();
         if (!json) return ESP_ERR_NO_MEM;
         const char *name = strrchr(path, '/');
-        cJSON_AddStringToObject(json, "name", name ? name + 1 : path);
-        cJSON_AddBoolToObject(json, deletion ? "deleted" : "committed", true);
-        cJSON_AddBoolToObject(json, "ok", !result.progress_cleanup_failed);
+        if (!cJSON_AddStringToObject(json, "name", name ? name + 1 : path) ||
+            !cJSON_AddBoolToObject(json, deletion ? "deleted" : "committed", true) ||
+            !cJSON_AddBoolToObject(json, "ok", !result.progress_cleanup_failed)) {
+            cJSON_Delete(json);
+            return ESP_ERR_NO_MEM;
+        }
         if (result.progress_cleanup_failed) {
-            cJSON_AddBoolToObject(json, "progress_cleanup_failed", true);
-            cJSON_AddStringToObject(json, "error", deletion ? "文件已删除，但阅读进度清理失败；请重试清理进度" :
-                "文件已保存，但旧阅读进度清理失败；请重试清理进度");
+            if (!cJSON_AddBoolToObject(json, "progress_cleanup_failed", true) ||
+                !cJSON_AddStringToObject(json, "error", deletion ? "文件已删除，但阅读进度清理失败；请重试清理进度" :
+                    "文件已保存，但旧阅读进度清理失败；请重试清理进度")) {
+                cJSON_Delete(json);
+                return ESP_ERR_NO_MEM;
+            }
             httpd_resp_set_status(req, "500 Internal Server Error");
         }
         if (result.storage_cleanup_failed) {
-            cJSON_AddBoolToObject(json, "storage_cleanup_failed", true);
-            cJSON_AddStringToObject(json, "warning", "新书已保存，旧书备份清理失败；备份已保留，请勿重复上传");
+            if (!cJSON_AddBoolToObject(json, "storage_cleanup_failed", true) ||
+                !cJSON_AddStringToObject(json, "warning", "新书已保存，旧书备份清理失败；备份已保留，请勿重复上传")) {
+                cJSON_Delete(json);
+                return ESP_ERR_NO_MEM;
+            }
             ESP_LOGW("transfer", "committed with retained backup");
         }
         return send_json(req, json);
@@ -1386,8 +1398,11 @@ static esp_err_t books_handler(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
         cJSON *json = cJSON_CreateObject();
         if (!json) return ESP_ERR_NO_MEM;
-        cJSON_AddStringToObject(json, "root", s_root);
-        cJSON_AddStringToObject(json, "root_label", s_cfg.is_flash ? "内置存储" : "TF 卡");
+        if (!cJSON_AddStringToObject(json, "root", s_root) ||
+            !cJSON_AddStringToObject(json, "root_label", s_cfg.is_flash ? "内置存储" : "TF 卡")) {
+            cJSON_Delete(json);
+            return ESP_ERR_NO_MEM;
+        }
         if (named) {
             struct stat st;
             if (stat(path, &st)) {
@@ -1397,7 +1412,11 @@ static esp_err_t books_handler(httpd_req_t *req) {
             }
             if (!S_ISREG(st.st_mode)) { cJSON_Delete(json); return respond_error(req, 400); }
             cJSON *item = cJSON_AddObjectToObject(json, "item");
-            cJSON_AddStringToObject(item, "name", name); cJSON_AddNumberToObject(item, "size", (double)st.st_size);
+            if (!item || !cJSON_AddStringToObject(item, "name", name) ||
+                !cJSON_AddNumberToObject(item, "size", (double)st.st_size)) {
+                cJSON_Delete(json);
+                return ESP_ERR_NO_MEM;
+            }
         } else {
             char search[121] = {0}, page_text[16] = "0";
             esp_err_t search_err = httpd_query_key_value(query, "q", encoded, sizeof(encoded));
@@ -1412,12 +1431,22 @@ static esp_err_t books_handler(httpd_req_t *req) {
             if (!entries) { cJSON_Delete(json); return ESP_ERR_NO_MEM; }
             int result = list_books(s_root, search, page, entries);
             if (result) { free(entries); cJSON_Delete(json); return respond_error(req, result); }
-            cJSON_AddNumberToObject(json, "page", page); cJSON_AddNumberToObject(json, "total", entries->total);
-            cJSON_AddNumberToObject(json, "pages", (entries->total + BOOK_LIST_PAGE_SIZE - 1) / BOOK_LIST_PAGE_SIZE);
+            if (!cJSON_AddNumberToObject(json, "page", page) ||
+                !cJSON_AddNumberToObject(json, "total", entries->total) ||
+                !cJSON_AddNumberToObject(json, "pages", (entries->total + BOOK_LIST_PAGE_SIZE - 1) / BOOK_LIST_PAGE_SIZE)) {
+                free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+            }
             cJSON *items = cJSON_AddArrayToObject(json, "items");
+            if (!items) { free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM; }
             for (size_t i = 0; i < entries->count; ++i) {
-                cJSON *item = cJSON_CreateObject(); cJSON_AddItemToArray(items, item);
-                cJSON_AddStringToObject(item, "name", entries->items[i].name); cJSON_AddNumberToObject(item, "size", (double)entries->items[i].size);
+                cJSON *item = cJSON_CreateObject();
+                if (!item || !cJSON_AddStringToObject(item, "name", entries->items[i].name) ||
+                    !cJSON_AddNumberToObject(item, "size", (double)entries->items[i].size)) {
+                    cJSON_Delete(item); free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+                }
+                if (!cJSON_AddItemToArray(items, item)) {
+                    cJSON_Delete(item); free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+                }
             }
             free(entries);
         }
@@ -1480,8 +1509,11 @@ static esp_err_t signature_handler(httpd_req_t *req) {
     if (err != ESP_OK) return wifi_response(req, "500 Internal Server Error", "{\"error\":\"签名保存或读取失败，请重试\"}");
     cJSON *json = cJSON_CreateObject();
     if (!json) return ESP_ERR_NO_MEM;
-    cJSON_AddStringToObject(json, "signature", text);
-    cJSON_AddBoolToObject(json, "ok", true);
+    if (!cJSON_AddStringToObject(json, "signature", text) ||
+        !cJSON_AddBoolToObject(json, "ok", true)) {
+        cJSON_Delete(json);
+        return ESP_ERR_NO_MEM;
+    }
     return send_json(req, json);
 }
 
@@ -1522,9 +1554,11 @@ static esp_err_t titles_handler(httpd_req_t *req) {
         if (result) { heap_caps_free(entries); return respond_error(req, result); }
         cJSON *json = cJSON_CreateObject();
         if (!json) { heap_caps_free(entries); return ESP_ERR_NO_MEM; }
-        cJSON_AddNumberToObject(json, "total", entries->total);
-        cJSON_AddNumberToObject(json, "page", page);
-        cJSON_AddNumberToObject(json, "pages", (entries->total + BOOK_LIST_PAGE_SIZE - 1) / BOOK_LIST_PAGE_SIZE);
+        if (!cJSON_AddNumberToObject(json, "total", entries->total) ||
+            !cJSON_AddNumberToObject(json, "page", page) ||
+            !cJSON_AddNumberToObject(json, "pages", (entries->total + BOOK_LIST_PAGE_SIZE - 1) / BOOK_LIST_PAGE_SIZE)) {
+            heap_caps_free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+        }
         cJSON *items = cJSON_AddArrayToObject(json, "items");
         if (!items) { heap_caps_free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM; }
         for (size_t i = 0; i < entries->count; ++i) {
@@ -1533,9 +1567,13 @@ static esp_err_t titles_handler(httpd_req_t *req) {
             s_cfg.title_get_cb(path, title, sizeof(title));
             cJSON *item = cJSON_CreateObject();
             if (!item) { heap_caps_free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM; }
-            cJSON_AddItemToArray(items, item);
-            cJSON_AddStringToObject(item, "name", entries->items[i].name);
-            cJSON_AddStringToObject(item, "title", title);
+            if (!cJSON_AddStringToObject(item, "name", entries->items[i].name) ||
+                !cJSON_AddStringToObject(item, "title", title)) {
+                cJSON_Delete(item); heap_caps_free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+            }
+            if (!cJSON_AddItemToArray(items, item)) {
+                cJSON_Delete(item); heap_caps_free(entries); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+            }
         }
         heap_caps_free(entries);
         return send_json(req, json);
@@ -1731,21 +1769,31 @@ static esp_err_t files_list_handler(httpd_req_t *req) {
     }
     closedir(dir);
     cJSON *json = cJSON_CreateObject(), *array = cJSON_CreateArray();
-    if (!json || !array) { cJSON_Delete(json); cJSON_Delete(array); free(items); return ESP_ERR_NO_MEM; }
-    cJSON_AddStringToObject(json, "path", relative);
-    cJSON_AddNumberToObject(json, "total", total);
-    cJSON_AddNumberToObject(json, "page", page);
-    cJSON_AddNumberToObject(json, "pages", (total + TRANSFER_FILE_PAGE_SIZE - 1) / TRANSFER_FILE_PAGE_SIZE);
-    cJSON_AddItemToObject(json, "items", array);
+    if (!json || !array) { cJSON_Delete(json); cJSON_Delete(array); heap_caps_free(items); return ESP_ERR_NO_MEM; }
+    if (!cJSON_AddStringToObject(json, "path", relative) ||
+        !cJSON_AddNumberToObject(json, "total", total) ||
+        !cJSON_AddNumberToObject(json, "page", page) ||
+        !cJSON_AddNumberToObject(json, "pages", (total + TRANSFER_FILE_PAGE_SIZE - 1) / TRANSFER_FILE_PAGE_SIZE)) {
+        cJSON_Delete(json); cJSON_Delete(array); heap_caps_free(items); return ESP_ERR_NO_MEM;
+    }
+    if (!cJSON_AddItemToObject(json, "items", array)) {
+        cJSON_Delete(array);
+        heap_caps_free(items);
+        cJSON_Delete(json);
+        return ESP_ERR_NO_MEM;
+    }
     for (size_t i = 0; i < count; ++i) {
         cJSON *entry = cJSON_CreateObject();
-        if (!entry) continue;
-        cJSON_AddStringToObject(entry, "name", items[i].name);
-        cJSON_AddBoolToObject(entry, "directory", items[i].directory);
-        cJSON_AddNumberToObject(entry, "size", (double)items[i].size);
-        cJSON_AddItemToArray(array, entry);
+        if (!entry || !cJSON_AddStringToObject(entry, "name", items[i].name) ||
+            !cJSON_AddBoolToObject(entry, "directory", items[i].directory) ||
+            !cJSON_AddNumberToObject(entry, "size", (double)items[i].size)) {
+            cJSON_Delete(entry); heap_caps_free(items); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+        }
+        if (!cJSON_AddItemToArray(array, entry)) {
+            cJSON_Delete(entry); heap_caps_free(items); cJSON_Delete(json); return ESP_ERR_NO_MEM;
+        }
     }
-    free(items);
+    heap_caps_free(items);
     return send_json(req, json);
 }
 

@@ -12,7 +12,9 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <string>
+#include <utility>
 
 #include "board_hardware.h"
 #include "esp_event.h"
@@ -35,7 +37,7 @@ constexpr gpio_num_t kSrdy = (gpio_num_t)BOARD_CELLULAR_SRDY_GPIO;
 struct Service {
     std::mutex mutex;
     std::recursive_mutex lifecycle;
-    std::shared_ptr<UartEthModem> modem;
+    std::unique_ptr<UartEthModem> modem;
     cellular_service_status_t status = {};
     bool user_enabled = false;
     bool probe_active = false;
@@ -118,7 +120,7 @@ esp_err_t ensure_netif_runtime(void) {
     return ESP_OK;
 }
 
-std::shared_ptr<UartEthModem> make_modem() {
+std::unique_ptr<UartEthModem> make_modem() {
     UartEthModem::Config config = {
         .uart_num = UART_NUM_2,
         .baud_rate = 2000000,
@@ -127,7 +129,9 @@ std::shared_ptr<UartEthModem> make_modem() {
         .mrdy_pin = kMrdy,
         .srdy_pin = kSrdy,
     };
-    auto modem = std::make_shared<UartEthModem>(config);
+    auto* raw = new (std::nothrow) UartEthModem(config);
+    if (!raw) return {};
+    std::unique_ptr<UartEthModem> modem(raw);
     modem->SetNetworkEventCallback(on_modem_event);
     return modem;
 }
@@ -143,12 +147,23 @@ esp_err_t start_modem(bool enabled, bool probing) {
     if (board_ioe_wake() != ESP_OK) return ESP_ERR_INVALID_STATE;
 
     auto modem = make_modem();
+    if (!modem) {
+        std::lock_guard<std::mutex> lock(s_service.mutex);
+        s_service.status.enabled = false;
+        s_service.status.ready = false;
+        s_service.status.state = CELLULAR_SERVICE_ERROR;
+        s_service.probe_active = false;
+        s_service.stop_after_probe = false;
+        set_detail(&s_service.status, "移动网络驱动内存不足");
+        return ESP_ERR_NO_MEM;
+    }
+    UartEthModem *raw_modem = modem.get();
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
         // A concurrent wake/lease may have won the start race after the first
         // check; let the temporary object clean itself up before returning.
         if (s_service.modem) return ESP_OK;
-        s_service.modem = modem;
+        s_service.modem = std::move(modem);
         s_service.status.enabled = enabled;
         s_service.status.ready = false;
         s_service.status.state = probing ? CELLULAR_SERVICE_PROBING : CELLULAR_SERVICE_STARTING;
@@ -159,12 +174,12 @@ esp_err_t start_modem(bool enabled, bool probing) {
         s_service.probe_deadline_us = esp_timer_get_time() + kProbeTimeoutUs;
     }
 
-    err = modem->Start();
+    err = raw_modem->Start();
     if (err == ESP_OK) return ESP_OK;
-    (void)modem->Stop();
+    (void)raw_modem->Stop();
     std::lock_guard<std::mutex> lock(s_service.mutex);
     const bool keep_known_capability = s_service.status.capability_known && s_service.status.capable;
-    if (s_service.modem == modem) s_service.modem.reset();
+    if (s_service.modem.get() == raw_modem) s_service.modem.reset();
     s_service.status.capability_known = true;
     s_service.status.capable = keep_known_capability;
     s_service.status.enabled = false;
@@ -178,11 +193,10 @@ esp_err_t start_modem(bool enabled, bool probing) {
 
 bool stop_modem(bool preserve_status) {
     std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
-    std::shared_ptr<UartEthModem> modem;
+    std::unique_ptr<UartEthModem> modem;
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
-        modem = s_service.modem;
-        s_service.modem.reset();
+        modem = std::move(s_service.modem);
         // `enabled` is the user's bearer preference, while `modem` is the
         // live transport. Sleep/probe handoff can stop the latter without
         // making a saved-on radio look permanently disabled.
@@ -198,7 +212,7 @@ bool stop_modem(bool preserve_status) {
     const bool stopped = !modem || modem->Stop() == ESP_OK;
     if (!stopped) {
         std::lock_guard<std::mutex> lock(s_service.mutex);
-        if (!s_service.modem) s_service.modem = modem;
+        if (!s_service.modem) s_service.modem = std::move(modem);
         s_service.status.enabled = preserve_status ? s_service.user_enabled : false;
         s_service.status.ready = false;
     }
@@ -311,7 +325,7 @@ extern "C" void cellular_service_resume_after_sleep(void) {
 
 extern "C" void cellular_service_poll(void) {
     std::lock_guard<std::recursive_mutex> lifecycle_lock(s_service.lifecycle);
-    std::shared_ptr<UartEthModem> modem;
+    UartEthModem *modem = nullptr;
     bool stop_pending = false;
     bool probe_timed_out = false;
     bool sample_signal = false;
@@ -319,7 +333,7 @@ extern "C" void cellular_service_poll(void) {
     bool capability = false;
     {
         std::lock_guard<std::mutex> lock(s_service.mutex);
-        modem = s_service.modem;
+        modem = s_service.modem.get();
         stop_pending = s_service.stop_after_probe;
         probe_timed_out = s_service.probe_active && esp_timer_get_time() >= s_service.probe_deadline_us;
         const int64_t now = esp_timer_get_time();

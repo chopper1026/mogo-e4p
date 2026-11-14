@@ -77,6 +77,18 @@ endmenu
 # Panel self-test for bring-up; keep disabled in production images.
 menu "Bring-up diagnostics"
 
+    config APP_NETWORK_CONNECT_TRACE
+        bool "Log resolved server addresses and TCP/TLS connection progress"
+        depends on LOG_DYNAMIC_LEVEL_CONTROL
+        default n
+        help
+            仅用于本地排查间歇连接失败：启用 esp-tls 的 DEBUG 日志，
+            在 socket 关闭前记录实际解析地址和连接阶段；不启用 HTTP
+            请求头、响应正文或 mbedTLS 密钥调试。正式固件保持关闭。
+            Enable esp-tls DEBUG logs for local connection investigations.
+            Record resolved addresses before failed sockets are closed, without
+            enabling HTTP headers, response bodies or mbedTLS key debugging.
+
     config APP_LOCK_SLEEP_TRACE
         bool "Retain lock, sleep and clock-refresh stages across resets"
         default n
@@ -141,24 +153,17 @@ menu "Bring-up diagnostics"
 endmenu
 
 # 联网升级源；保持默认即沿用正式站点，填自建前缀即可接入自己的 OTA 平台。
-# Online update sources; keep the defaults for the public sites, or point at a self-hosted platform.
+# Online update source; keep the default public site, or point at a self-hosted platform.
 menu "Online update (OTA)"
 
     config PICO_OTA_FEED_URL
-        string "Primary manifest URL"
+        string "Manifest URL"
         default "https://mogo.mantake.shop/api/v2/ota/devices/mogo-e4p/update.json"
         help
-            设备优先读取的 JSON 清单地址。必须是 HTTPS，服务器不得重定向，
+            设备读取的唯一 JSON 清单地址。必须是 HTTPS，服务器不得重定向，
             响应体不超过 8 KB。
-            Primary manifest URL. Must be HTTPS, the server must not redirect,
+            The only manifest URL. Must be HTTPS, the server must not redirect,
             and the body must stay under 8 KB.
-
-    config PICO_OTA_FEED_FALLBACK_URL
-        string "Fallback manifest URL"
-        default "https://wegooo-cell.github.io/read-pico-reader/update.json"
-        help
-            主源失败后读取的清单地址，要求同上。
-            Manifest read when the primary source fails; same requirements.
 
     config PICO_OTA_EXTRA_ORIGIN
         string "Extra download origin prefix (empty disables)"

@@ -396,6 +396,40 @@ void UartUhci::ReturnBuffer(RxBuffer* buffer) {
     }
 }
 
+void UartUhci::ReturnBufferFromISR(RxBuffer* buffer) {
+    if (!buffer || buffer->index >= rx_pool_size_ || !rx_dma_link_) {
+        return;
+    }
+
+    buffer->size = 0;
+    gdma_link_set_owner(rx_dma_link_, buffer->index, GDMA_LLI_OWNER_DMA);
+
+    // A descriptor error requires task-context recovery because
+    // RemountAndRestartDma() uses a temporary vector and resets GDMA. Do not
+    // attempt that work from the ISR; queued buffers will trigger the normal
+    // ReturnBuffer() recovery path after the main task drains the queue.
+    if (rx_running_.load() && !buffer_overflow_.load()) {
+        gdma_append(rx_dma_chan_);
+    }
+}
+
+void UartUhci::RecoverOverflowIfReady() {
+    if (!rx_running_.load() || !buffer_overflow_.load() || !rx_dma_link_) {
+        return;
+    }
+
+    for (size_t i = 0; i < rx_pool_size_; i++) {
+        gdma_lli_owner_t owner;
+        if (gdma_link_get_owner(rx_dma_link_, i, &owner) == ESP_OK &&
+            owner == GDMA_LLI_OWNER_CPU) {
+            return;
+        }
+    }
+
+    buffer_overflow_.store(false);
+    RemountAndRestartDma(true);
+}
+
 esp_err_t UartUhci::Transmit(const uint8_t* buffer, size_t size) {
     ESP_RETURN_ON_FALSE(buffer && size > 0, ESP_ERR_INVALID_ARG, kTag, "invalid arguments");
 

@@ -21,6 +21,43 @@ static void invalid_field(const char *field,const char *value) {
     cJSON_ReplaceItemInObjectCaseSensitive(root,field,cJSON_CreateString(value));
     assert(!parse(root));cJSON_Delete(root);
 }
+static weather_parse_result_t parse_result(cJSON *root, int64_t reference) {
+    char *json=cJSON_PrintUnformatted(root);
+    weather_forecast_t f;
+    memset(&f,0xa5,sizeof(f));
+    weather_forecast_t unchanged=f;
+    weather_parse_result_t result=weather_forecast_parse_result(json,strlen(json),reference,&city,&f);
+    if(result!=WEATHER_PARSE_OK)assert(!memcmp(&f,&unchanged,sizeof(f)));
+    free(json);return result;
+}
+static void forecast_rejections(void) {
+    weather_forecast_t f;
+    assert(weather_forecast_parse_result("<!doctype html>",15,now,&city,&f)==WEATHER_PARSE_DOCUMENT);
+    assert(!strcmp(weather_parse_result_name(WEATHER_PARSE_DOCUMENT),"document"));
+    assert(!strcmp(weather_parse_result_name((weather_parse_result_t)-1),"unknown"));
+    const char *fields[]={"source","fetchedAt","days","freshUntil"};
+    const char *values[]={"Other","bad-timestamp","bad-days","2026-11-01T00:00:00Z"};
+    const weather_parse_result_t expected[]={WEATHER_PARSE_SCHEMA,WEATHER_PARSE_TIMESTAMPS,
+        WEATHER_PARSE_DAYS,WEATHER_PARSE_VALIDITY};
+    for(unsigned i=0;i<4;++i) {
+        cJSON *root=cJSON_Parse(WEATHER_TEST_FORECAST);
+        cJSON_ReplaceItemInObject(root,fields[i],cJSON_CreateString(values[i]));
+        assert(parse_result(root,now)==expected[i]);cJSON_Delete(root);
+    }
+    cJSON *root=cJSON_Parse(WEATHER_TEST_FORECAST);
+    cJSON *location=cJSON_GetObjectItem(root,"location");
+    cJSON_SetNumberValue(cJSON_GetObjectItem(location,"lon"),city.lon+1);
+    assert(parse_result(root,now)==WEATHER_PARSE_LOCATION);cJSON_Delete(root);
+    root=cJSON_Parse(WEATHER_TEST_FORECAST);
+    int64_t fetched=weather_timestamp("2026-11-02T00:20:00Z");
+    assert(parse_result(root,fetched-121)==WEATHER_PARSE_CLOCK);
+    assert(parse_result(root,fetched+21600)==WEATHER_PARSE_EXPIRED);
+    // Production timestamps may contain all nine nanosecond digits.
+    cJSON_ReplaceItemInObject(root,"fetchedAt",cJSON_CreateString("2026-11-02T00:20:00.835869030Z"));
+    cJSON_ReplaceItemInObject(root,"freshUntil",cJSON_CreateString("2026-11-02T06:20:00.835869030Z"));
+    cJSON_ReplaceItemInObject(root,"serveUntil",cJSON_CreateString("2026-11-02T06:20:00.835869030Z"));
+    assert(parse_result(root,now)==WEATHER_PARSE_OK);cJSON_Delete(root);
+}
 static void http_dates(void) {
     const char *dates[]={
         "Thu, 01 Jan 2026 00:30:00 GMT", "Sun, 01 Feb 2026 00:30:00 GMT",
@@ -59,6 +96,7 @@ int main(void) {
     assert(weather_location_parse(WEATHER_TEST_CITY,strlen(WEATHER_TEST_CITY),&city));
     weather_forecast_t f={0};
     assert(weather_forecast_parse(WEATHER_TEST_FORECAST,strlen(WEATHER_TEST_FORECAST),now,&city,&f));
+    forecast_rejections();
     assert(weather_day_for(&f,now,false)->humidity==68&&weather_day_for(&f,now,true)->min_c==16);
     char text[193];
     weather_date_text(weather_local_day(now),text,sizeof(text));assert(!strcmp(text,"11月02日  星期一"));

@@ -105,6 +105,12 @@ public:
     // 必须对每个通过 RxCallback 收到的缓冲区调用
     void ReturnBuffer(RxBuffer* buffer);
 
+    // Return a buffer directly from an ISR when the consumer event queue is
+    // full. This path never allocates or performs overflow recovery; the
+    // normal task-context ReturnBuffer() remains responsible for restarting
+    // DMA after an actual pool exhaustion.
+    void IRAM_ATTR ReturnBufferFromISR(RxBuffer* buffer);
+
     // Check if RX is currently running
     // 检查 RX 是否正在运行
     bool IsReceiving() const { return rx_running_.load(); }
@@ -118,6 +124,11 @@ public:
     // Check if overflow occurred (without clearing)
     // 检查是否发生溢出（不清除）
     bool HasOverflow() const { return buffer_overflow_.load(); }
+
+    // Recover a descriptor-error pause after all CPU-owned buffers have been
+    // returned. Must run from task context because recovery resets GDMA and
+    // flushes the UART FIFO.
+    void RecoverOverflowIfReady();
 
     // Transmit data (blocking until FIFO is written)
     // 通过 FIFO 发送数据（同步阻塞）

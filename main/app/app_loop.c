@@ -1144,12 +1144,12 @@ void app_loop_run(const app_loop_config_t* config) {
             if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) key_hold.key = -1;
             present_page(&ctx, current, &gesture, redraw);
         }
-        // 主页面和快捷层共享白底状态栏；只在电量变化且没有输入覆盖时局部推屏。
-        // Main roots and the quick layer share a white status strip; present power changes locally when input is uncovered.
+        // 主页面和快捷层共享白底状态栏；电量或网络标志变化且没有输入覆盖时局部推屏。
+        // Main roots and the quick layer share a white status strip; present power or network changes locally when input is uncovered.
         if (!power_dialog_open && !menu_open && (!quick_input_owned || app_quick_layer_is_open()) && !touch.touched &&
             !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
             (app_quick_layer_is_open() || app_navigation_main_page_ready(&ctx, current)) &&
-            ui_nav_status_power_changed()) {
+            ui_nav_status_changed()) {
             EpdRect area = {0, 0, epd_rotated_display_width(), 76};
             if (app_quick_layer_is_open()) ui_quick_menu_draw_status(ctx.fb);
             else {

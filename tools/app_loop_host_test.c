@@ -183,8 +183,18 @@ static bool main_source_visible, main_target_visible;
 static bool battery_test;
 static int battery_samples[32], battery_cached, battery_shown, battery_boot, battery_first_frame;
 static int battery_refreshes, battery_status_draws;
+static bool network_test, network_samples[32], network_cached, network_shown;
+bool ui_nav_status_changed(void) {
+    return (battery_test && battery_cached != battery_shown) ||
+           (network_test && network_cached != network_shown);
+}
 bool ui_nav_status_power_changed(void) {return battery_test && battery_cached != battery_shown;}
-void ui_nav_status(uint8_t *fb) {(void)fb;battery_shown=battery_cached;++battery_status_draws;}
+void ui_nav_status(uint8_t *fb) {
+    (void)fb;
+    battery_shown=battery_cached;
+    network_shown=network_cached;
+    ++battery_status_draws;
+}
 void ui_fill_rect_fast(EpdRect area,uint8_t gray,uint8_t *fb) {
     (void)fb;assert(area.x==0&&area.y==0&&area.width==684&&area.height==76&&gray==255);
 }
@@ -258,7 +268,7 @@ void ui_quick_menu_draw(uint8_t *fb,const ui_quick_menu_t *menu,bool wifi,bool b
 void ui_quick_menu_end(void) {}
 void ui_quick_menu_draw_status(uint8_t *fb) {
     (void)fb;++quick_status_draws;
-    if(battery_test)ui_nav_status(fb);
+    if(battery_test || network_test)ui_nav_status(fb);
 }
 EpdRect ui_quick_menu_rect(const ui_quick_menu_t *menu) {
     return (EpdRect){0,0,684,menu->frontlight&&menu->fl_on?UI_QUICK_FRONTLIGHT_HEIGHT:UI_QUICK_HEIGHT};
@@ -317,6 +327,7 @@ void haptics_pulse(void) {++haptic_pulses;}
 void haptics_stop(void) {++haptic_stops;}
 int cst836u_read(void* h, cst836u_touch_t* t) {
     (void)h;
+    if (network_test) network_cached = network_samples[step];
     sample_t s = samples[step];
     *t = (cst836u_touch_t){ .touched=s.count>0, .count=s.count, .x=s.x, .y=s.y };
     t->points[0].active=s.count>0;
@@ -430,6 +441,7 @@ static void reset(void) {
     power_key_test_usb_active=false;
 #endif
     battery_test=false;battery_cached=battery_shown=battery_boot=battery_first_frame=-1;
+    network_test=false;network_cached=network_shown=false;memset(network_samples,0,sizeof(network_samples));
     battery_refreshes=battery_status_draws=0;memset(battery_samples,0,sizeof(battery_samples));
     quick_button_draws=quick_status_draws=quick_press_draws=quick_recent_requests=base_renders=0;
     power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=false;
@@ -713,6 +725,12 @@ int main(void) {
     reset();enable_main_tabs();battery_test=true;time_step=200000;battery_boot=50;
     for(int i=0;i<3;++i){battery_samples[i]=50;add(0,0,0,0);}run();
     assert(battery_first_frame==50&&battery_refreshes==1&&!battery_status_draws&&!gl_areas);
+    // 网络连接边沿使用同一局部状态栏闸门，不依赖电量采样或切页。
+    // Network connection edges use the same local status-bar gate without power sampling or page switches.
+    reset();enable_main_tabs();network_test=true;time_step=200000;
+    network_samples[0]=false;network_samples[1]=true;network_samples[2]=true;
+    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(network_shown&&battery_status_draws==1&&gl_areas==1&&base_renders==1);
     // 状态栏隐藏或菜单占用时不盖正文；触摸结束后再补一次局刷。
     // Never cover a hidden status bar or an owned menu; defer one local update until touch ends.
     reset();enable_main_tabs();battery_test=true;time_step=200000;main_source_visible=false;
