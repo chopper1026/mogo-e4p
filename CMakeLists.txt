@@ -13,7 +13,8 @@ if(DEFINED ENV{PICO_PROJECT_VER} AND NOT "$ENV{PICO_PROJECT_VER}" STREQUAL "")
 else()
     set(PROJECT_VER "1.1.8")
 endif()
-# 仅正式发布构建允许注入 CloudZao 接入 ID。/ Only release builds may inject the CloudZao integration ID.
+# 正式发布单独使用 Actions Secret，不读取本机 CloudZao 配置。
+# Public releases use the Actions secret and never read local CloudZao configuration.
 option(MOGO_PUBLIC_RELEASE "Build firmware for public distribution" OFF)
 project(Read_Pico)
 

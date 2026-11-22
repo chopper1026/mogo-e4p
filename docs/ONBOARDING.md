@@ -28,6 +28,8 @@ idf.py --preview build
   sdkconfig.defaults defines the product: 80 MHz flash and 200 MHz octal PSRAM. sdkconfig.ci only adds compiler warnings and must not be used alone.
 - sdkconfig 与 build 被忽略；本地配置会保留旧值，修改 defaults 后需要核对实际生成配置。
   sdkconfig and build are ignored. Existing local values persist, so verify generated configuration after changing defaults.
+- 需要在本地开发固件中使用 CloudZao 时，按[本机开发包配置](development/guides/CLOUDZAO_TRANSFER.md#本机开发包--local-development-builds)设置一次本机接入 ID；它与正式发布独立。
+  To use CloudZao in local firmware, set up the [local integration ID](development/guides/CLOUDZAO_TRANSFER.md#本机开发包--local-development-builds) once; it is separate from official releases.
 - 日常本地测试沿用当前正式版本号，通过测试日期和说明区分；构建默认版本与 PICO_PROJECT_VER 的覆盖逻辑见根 CMakeLists.txt。
   Local tests retain the current published version and use dates/notes for identification; root CMakeLists.txt defines the fallback and PICO_PROJECT_VER override.
 - 本地包不得覆盖已发布的固定下载文件；创建新 OTA 版本标签前先提交准确的更新日志，详见[正式发布契约](development/guides/RELEASE.md)。

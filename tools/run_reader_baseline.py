@@ -73,6 +73,7 @@ SUITES = {
     "ota_auto_ui": [sys.executable, "tools/ota_auto_ui_host_test.py"],
     "storage": ["bash", "tools/run_storage_host_tests.sh"],
     "cloudzao": [sys.executable, "tools/cloudzao_host_test.py"],
+    "cloudzao_build_config": [sys.executable, "tools/cloudzao_build_config_test.py"],
     "transfer_storage": ["sh", "tools/run_transfer_storage_host_test.sh"],
     "transfer_web": ["node", "tools/transfer_web_host_test.js"],
     "transfer_assets": [sys.executable, "tools/transfer_assets_host_test.py"],
