@@ -1892,6 +1892,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     snprintf(background_value,sizeof(background_value),"%s",
         background_path[0]?(background_base?background_base+1:background_path):"无");
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+        app_settings_lock_style()==APP_LOCK_STYLE_BOOK_COVER?"书籍封面":
         app_settings_lock_style()==APP_LOCK_STYLE_CLOCK?"简约时钟":app_settings_lock_style()==4?"日历":app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value,"","显示与排序"};
     const int personal_icons[]={4,5,16,10,18,19,21,15};

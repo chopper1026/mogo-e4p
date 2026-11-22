@@ -8032,7 +8032,8 @@ static void before_lock(app_ctx_t* ctx) {
     lock_draw();
     invalidate_prep();
     unlock_draw();
-    // 锁屏票根始终以当前正在阅读的书为准；不要依赖书架最近项是否已经同步。
+    // 票根和封面壁纸以当前正在阅读的书为准，不依赖书架最近项是否已同步。
+    // Ticket and cover wallpaper follow the current book without waiting for the shelf to sync.
     if (s_text && s_reader_session.book.path[0]) book_progress_set_last_path(s_reader_session.book.path);
     flush_ticket_stats();
     (void)app_reading_journal_flush();

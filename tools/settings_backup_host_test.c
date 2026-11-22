@@ -1084,7 +1084,7 @@ static void test_clock_style(void) {
         memcpy(header.magic,"PICOSETd",8);backup_seal(&header);assert(!backup_valid(&header));
         header.flags[BK_LOCK]=4;backup_seal(&header);assert(backup_valid(&header));
     }
-    unsigned commits=commit_count;app_settings_set_lock_style(6);app_settings_set_lock_style(255);
+    unsigned commits=commit_count;app_settings_set_lock_style(APP_LOCK_STYLE_BOOK_COVER+1);app_settings_set_lock_style(255);
     assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK&&(unsigned)commit_count==commits);
     app_settings_set_lock_style(2); // Leave legacy-format tests with a representable pre-v40 style.
     puts("PASS: v40 clock persistence/backup, preserved calendar variant, save failures, and v39 style rejection");
@@ -1104,7 +1104,7 @@ static void test_inline_lock_selection(void) {
     }
     face_write_fails=face_open_fails=commit_fails=flash_failure=false;
     assert(!app_settings_select_lock(1,NULL,0)&&!app_settings_select_lock(3,"/sdcard/pictures/next.gif",0));
-    assert(!app_settings_select_lock(6,NULL,0)&&!app_settings_select_lock(4,NULL,2));
+    assert(!app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER+1,NULL,0)&&!app_settings_select_lock(4,NULL,2));
     assert(app_settings_select_lock(1,next,0)&&!strcmp(app_settings_wallpaper_path(),next));
     assert(app_settings_select_lock(1,next,APP_WALLPAPER_MODE_FIT)&&app_settings_wallpaper_mode()==APP_WALLPAPER_MODE_FIT);
     assert(loaded_wallpaper_mode==APP_WALLPAPER_MODE_FIT);
@@ -1867,6 +1867,71 @@ static void test_portable_backup(void) {
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_auto_time_sync() && !app_settings_shelf_show_titles(1));
     puts("PASS: v48 portable preference and multi-network round trip, preflight, corruption and v47 preservation");
+}
+
+static void test_cover_wallpaper_backup(void) {
+    assert(app_settings_set_calendar_style(APP_CALENDAR_MONTH));
+    assert(!app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 2));
+    commit_fails = true;
+    assert(!app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));
+    commit_fails = false;
+    app_settings_init();
+    assert(app_settings_lock_style() == 4);
+    assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));
+    app_shutdown_wallpaper_t off = {.style=APP_OFF_BOOK_COVER,.show_hint=1,
+        .calendar_style=1,.ticket_background=1,.fit=1};
+    assert(app_settings_set_shutdown_wallpaper(&off));
+    assert(durable_face==13&&durable_off[1]=='7');
+    durable_face |= 16;
+    durable_off[1]='f';
+    app_settings_init();
+    assert(app_settings_lock_style()==APP_LOCK_STYLE_BOOK_COVER && app_settings_calendar_style()==APP_CALENDAR_MONTH);
+    assert(app_settings_shutdown_wallpaper()->style==APP_OFF_BOOK_COVER);
+    assert((app_settings_backup_save)() == ESP_OK);
+    FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
+    assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
+    assert(!memcmp(header.magic,"PICOSETn",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
+    app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
+    assert(app_settings_shutdown_wallpaper()->style==APP_OFF_BOOK_COVER);
+    off.style=APP_OFF_SYSTEM;
+    assert(app_settings_set_shutdown_wallpaper(&off));
+    assert(app_settings_backup_restore() == ESP_OK);
+    app_settings_init();
+    assert(app_settings_lock_style() == APP_LOCK_STYLE_BOOK_COVER && app_settings_calendar_style() == APP_CALENDAR_MONTH);
+    const app_shutdown_wallpaper_t *saved = app_settings_shutdown_wallpaper();
+    assert(saved->style == APP_OFF_BOOK_COVER && saved->fit && saved->ticket_background && saved->calendar_style && saved->show_hint);
+    assert(durable_face==13&&durable_off[1]=='7');
+    assert(!app_settings_lock_cover_crop() && !saved->cover_crop);
+    commit_fails = true;
+    assert(!app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 1));
+    commit_fails = false;
+    assert(!app_settings_lock_cover_crop());
+    assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 1));
+    app_settings_init();
+    assert(app_settings_lock_cover_crop() && !app_settings_shutdown_wallpaper()->cover_crop);
+    assert(durable_face==45 && app_settings_calendar_style()==APP_CALENDAR_MONTH);
+    off=*app_settings_shutdown_wallpaper();off.cover_crop=1;
+    assert(app_settings_set_shutdown_wallpaper(&off));
+    assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));
+    app_settings_init();
+    assert(!app_settings_lock_cover_crop() && app_settings_shutdown_wallpaper()->cover_crop);
+    assert(app_settings_shutdown_wallpaper()->fit && durable_off[1]=='n');
+    assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 1));
+    app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
+    off.style=APP_OFF_SYSTEM;
+    assert(app_settings_set_shutdown_wallpaper(&off));
+    assert((app_settings_backup_save)() == ESP_OK);
+    file=fopen(BACKUP_FILE,"rb");
+    assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
+    assert(!memcmp(header.magic,"PICOSETn",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
+    off.cover_crop=0;
+    assert(app_settings_set_shutdown_wallpaper(&off));
+    assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));
+    assert(app_settings_backup_restore() == ESP_OK);
+    app_settings_init();
+    assert(app_settings_lock_style()==APP_LOCK_STYLE_CLOCK && app_settings_lock_cover_crop());
+    assert(app_settings_shutdown_wallpaper()->style==APP_OFF_SYSTEM && app_settings_shutdown_wallpaper()->cover_crop);
+    puts("PASS: v49 cover wallpaper and independent crop options round trip, legacy/prototype defaults and failed commit");
 }
 
 int main(void) {
@@ -3002,5 +3067,6 @@ int main(void) {
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     test_shelf_titles();
     test_portable_backup();
+    test_cover_wallpaper_backup();
     return 0;
 }

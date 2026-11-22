@@ -56,10 +56,11 @@
 #define NVS_KEY_OFF_ART "off_art"
 #define OFF_CONFIG_BYTES 301
 static app_shutdown_wallpaper_t s_off_art = {.show_hint = 1};
+static const char s_off_options[] = "0123456789abcdefghijklmnopqrstuv";
 
 bool app_settings_shutdown_wallpaper_valid(const app_shutdown_wallpaper_t *value) {
-    if (!value || value->style > APP_OFF_CALENDAR || value->style == 2 || value->fit > 1 || value->show_hint > 1 ||
-        value->ticket_background > 1 || value->calendar_style > 1 ||
+    if (!value || value->style > APP_OFF_BOOK_COVER || value->style == 2 || value->fit > 1 || value->show_hint > 1 ||
+        value->ticket_background > 1 || value->calendar_style > 1 || value->cover_crop > 1 ||
         value->slot > 1 || strnlen(value->path, sizeof(value->path)) >= sizeof(value->path)) return false;
     if (!value->path[0]) return value->style != APP_OFF_CUSTOM && !value->image_id;
     const char *ext = strrchr(value->path, '.');
@@ -68,7 +69,8 @@ bool app_settings_shutdown_wallpaper_valid(const app_shutdown_wallpaper_t *value
 }
 static void off_art_encode(const app_shutdown_wallpaper_t *value, char encoded[OFF_CONFIG_BYTES]) {
     encoded[0] = (char)('0' + value->style);
-    encoded[1] = (char)('0' + value->fit + 2u * value->ticket_background + 4u * value->calendar_style);
+    encoded[1] = s_off_options[value->fit + 2u * value->ticket_background +
+                               4u * value->calendar_style + 16u * value->cover_crop];
     encoded[2] = (char)('0' + value->show_hint); encoded[3] = (char)('0' + value->slot);
     snprintf(encoded + 4, 9, "%08x", (unsigned)value->image_id);
     encoded[12] = '|';
@@ -77,11 +79,14 @@ static void off_art_encode(const app_shutdown_wallpaper_t *value, char encoded[O
 static bool off_art_decode(const char *encoded, app_shutdown_wallpaper_t *value) {
     size_t length = strnlen(encoded, OFF_CONFIG_BYTES);
     if (length < 13 || length >= OFF_CONFIG_BYTES || encoded[12] != '|') return false;
-    unsigned options = (unsigned)(encoded[1] - '0');
-    if (options > 7) return false;
+    // 兼容含废弃高位的本地试验配置，只读取仍支持的显示选项。
+    // Accept local prototype records with the retired high bit, but only read supported options.
+    const char *option = encoded[1] ? strchr(s_off_options, encoded[1]) : NULL;
+    if (!option) return false;
+    const unsigned options = (unsigned)(option - s_off_options);
     app_shutdown_wallpaper_t candidate = {.style = (uint8_t)(encoded[0] - '0'),
         .fit = options & 1u, .ticket_background = (options >> 1u) & 1u,
-        .calendar_style = (options >> 2u) & 1u, .show_hint = (uint8_t)(encoded[2] - '0'),
+        .calendar_style = (options >> 2u) & 1u, .cover_crop = (options >> 4u) & 1u, .show_hint = (uint8_t)(encoded[2] - '0'),
         .slot = (uint8_t)(encoded[3] - '0')};
     // 已移除的留白迁移为系统默认，保留此前保存的图片身份。
     // Migrate retired white to the built-in face while retaining the saved image identity.
@@ -305,6 +310,12 @@ static char s_system_font[FONT_PATH_MAX];
 static uint8_t s_system_size = 120;
 static uint8_t s_system_contrast = 100;
 static uint8_t s_lock_style;
+enum { LOCK_FACE_PROTOTYPE_BIT = 16, LOCK_FACE_COVER_CROP_BIT = 32,
+       BACKUP_LOCK_COVER_CROP_BIT = 64, BACKUP_LOCK_PROTOTYPE_BIT = 128 };
+static uint8_t lock_face_encode(unsigned style, unsigned calendar, bool cover_crop) {
+    return (uint8_t)((style * 2u + calendar) | (cover_crop ? LOCK_FACE_COVER_CROP_BIT : 0));
+}
+static bool s_lock_cover_crop;
 static app_calendar_style_t s_calendar_style = APP_CALENDAR_ALMANAC;
 static app_ticket_background_t s_ticket_background = APP_TICKET_BACKGROUND_TRANSPARENT;
 static char s_wallpaper[288];
@@ -611,13 +622,18 @@ void app_settings_init(void) {
     s_lock_style = 0;
     if (nvs_get_u8(h, NVS_KEY_LOCK_STYLE, &lock_style) == ESP_OK && lock_style <= 3)
         s_lock_style = lock_style;
-    // 主样式与日历子样式共用一个原子NVS值；缺省兼容旧lock_ui。
-    // One atomic NVS value holds style and calendar variant; absent values retain legacy lock_ui.
+    // 主样式与日历共用一个NVS值；忽略本地试验用高位，缺省兼容旧 lock_ui。
+    // One NVS value holds style and calendar; ignore the retired prototype bit and retain legacy lock_ui fallback.
     uint8_t lock_face = 0;
     s_calendar_style = APP_CALENDAR_ALMANAC;
-    if (nvs_get_u8(h, NVS_KEY_LOCK_FACE, &lock_face) == ESP_OK && lock_face <= 11) {
-        s_lock_style = lock_face / 2;
-        s_calendar_style = (app_calendar_style_t)(lock_face % 2);
+    s_lock_cover_crop = false;
+    if (nvs_get_u8(h, NVS_KEY_LOCK_FACE, &lock_face) == ESP_OK) {
+        unsigned face = lock_face & ~(LOCK_FACE_PROTOTYPE_BIT | LOCK_FACE_COVER_CROP_BIT);
+        if (face <= APP_LOCK_STYLE_BOOK_COVER * 2 + 1) {
+            s_lock_style = face / 2;
+            s_calendar_style = (app_calendar_style_t)(face % 2);
+            s_lock_cover_crop = (lock_face & LOCK_FACE_COVER_CROP_BIT) != 0;
+        }
     }
     uint8_t ticket_background = APP_TICKET_BACKGROUND_TRANSPARENT;
     s_ticket_background = nvs_get_u8(h, NVS_KEY_TICKET_BACKGROUND, &ticket_background) == ESP_OK &&
@@ -1101,11 +1117,12 @@ void app_settings_set_system_contrast(uint8_t percent) {
     nvs_put_u8(NVS_KEY_SYS_CONTRAST, percent);
 }
 uint8_t app_settings_lock_style(void) { return s_lock_style; }
+bool app_settings_lock_cover_crop(void) { return s_lock_cover_crop; }
 void app_settings_set_lock_style(uint8_t style) {
-    if (style > APP_LOCK_STYLE_CLOCK || style == s_lock_style) return;
+    if (style > APP_LOCK_STYLE_BOOK_COVER || style == s_lock_style) return;
     nvs_handle_t h;
     if (settings_write_open(&h) != ESP_OK) return;
-    esp_err_t err = nvs_set_u8(h, NVS_KEY_LOCK_FACE, (uint8_t)(style * 2 + s_calendar_style));
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_LOCK_FACE, lock_face_encode(style, s_calendar_style, s_lock_cover_crop));
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
     if (err == ESP_OK) s_lock_style = style;
@@ -1130,7 +1147,7 @@ bool app_settings_set_calendar_style(app_calendar_style_t style) {
     if (style == s_calendar_style && s_lock_style == 4) return true;
     nvs_handle_t h;
     if (settings_write_open(&h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_u8(h, NVS_KEY_LOCK_FACE, (uint8_t)(8 + style));
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_LOCK_FACE, lock_face_encode(4, style, s_lock_cover_crop));
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
     if (err != ESP_OK) return false;
@@ -1188,9 +1205,9 @@ bool app_settings_set_wallpaper_mode(app_wallpaper_mode_t mode) {
     return true;
 }
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
-    if(style>APP_LOCK_STYLE_CLOCK ||
+    if(style>APP_LOCK_STYLE_BOOK_COVER ||
        (style == 1 ? option > APP_WALLPAPER_MODE_FIT :
-        style == 3 ? option > APP_BOOKMARK_MODE_FIT : option > 1)) return false;
+        style == 3 ? option > APP_BOOKMARK_MODE_FIT : option > 1u)) return false;
     if(style==1||style==3){
         const char *ext=image?strrchr(image,'.'):NULL;
         if(!image||strncmp(image,"/sdcard/",8)||strnlen(image,sizeof(s_wallpaper))>=sizeof(s_wallpaper)||!ext||
@@ -1199,7 +1216,8 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     unsigned calendar=style==4?option:(unsigned)s_calendar_style;
     unsigned wallpaper_mode=style==1?option:(unsigned)s_wallpaper_mode;
     unsigned bookmark_mode=style==3?option:(unsigned)s_bookmark_mode;
-    bool same=style==s_lock_style && (style!=0||option==(unsigned)s_ticket_background) &&
+    bool cover_crop=style==APP_LOCK_STYLE_BOOK_COVER?option!=0:s_lock_cover_crop;
+    bool same=style==s_lock_style && cover_crop==s_lock_cover_crop && (style!=0||option==(unsigned)s_ticket_background) &&
         (style!=4||option==(unsigned)s_calendar_style) && (style!=1||!strcmp(image,s_wallpaper)) &&
         (style!=1||wallpaper_mode==(unsigned)s_wallpaper_mode) &&
         (style!=3||bookmark_mode==(unsigned)s_bookmark_mode) &&
@@ -1212,7 +1230,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     if(err==ESP_OK&&style==1)err=nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)wallpaper_mode);
     if(err==ESP_OK&&style==3)err=nvs_set_u8(h,NVS_KEY_BOOKMARK_MODE,(uint8_t)bookmark_mode);
     if(style==0)err=nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,option);
-    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,style*2+calendar);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,lock_face_encode(style,calendar,cover_crop));
     if(err==ESP_OK)err=nvs_commit(h);
     if(err!=ESP_OK){
         // NVS逐项立即写入；后续字段失败时尽力恢复已写副项，运行态始终保持旧值。
@@ -1221,12 +1239,12 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
         if(style==1)(void)nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)s_wallpaper_mode);
         if(style==3)(void)nvs_set_u8(h,NVS_KEY_BOOKMARK_MODE,(uint8_t)s_bookmark_mode);
         if(style==0)(void)nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,s_ticket_background);
-        (void)nvs_set_u8(h,NVS_KEY_LOCK_FACE,s_lock_style*2+s_calendar_style);
+        (void)nvs_set_u8(h,NVS_KEY_LOCK_FACE,lock_face_encode(s_lock_style,s_calendar_style,s_lock_cover_crop));
         (void)nvs_commit(h);
     }
     settings_write_close(h);
     if(err!=ESP_OK)return false;
-    s_lock_style=style;s_calendar_style=(app_calendar_style_t)calendar;
+    s_lock_style=style;s_calendar_style=(app_calendar_style_t)calendar;s_lock_cover_crop=cover_crop;
     if(style==0)s_ticket_background=(app_ticket_background_t)option;
     if(style==1){strlcpy(s_wallpaper,image,sizeof(s_wallpaper));s_wallpaper_mode=(app_wallpaper_mode_t)wallpaper_mode;}
     if(style==3){strlcpy(s_bookmark,image,sizeof(s_bookmark));s_bookmark_mode=(app_bookmark_mode_t)bookmark_mode;}
@@ -2198,8 +2216,9 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // j appends v45 quick-bar ordering. A-F are legacy; G/H are rc9x; K is upstream rc96/97; L is the old local layout; M/N/O/P/Q are this merge; R appends v27; S appends v28; T appends v29; U appends v30; V appends v31; g appends v42 network settings; h appends v43 chrome visibility; i marks v44 independent visibility semantics.
     // k追加v46关机配置；l扩展v47票根/日历，复用取景字节的位，图片像素不备份。
     // k adds v46 shutdown config; l extends v47 ticket/calendar options in the framing byte, excluding pixels.
-    // m追加可迁移的偏好、天气和全量WiFi块。/ m appends portable preferences, weather and all saved WiFi profiles.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : 0;
+    // m追加可迁移的偏好、天气和全量WiFi块；n在既有字段内记录书籍封面样式。
+    // m appends portable preferences, weather and WiFi; n records the book-cover style in existing fields.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : 0;
 }
 
 typedef struct { char encoded[OFF_CONFIG_BYTES]; uint8_t checksum[4]; } settings_backup_off_art_t;
@@ -2390,13 +2409,16 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
-    memcpy(backup.magic, portable_format ? "PICOSETm" : "PICOSETl", sizeof(backup.magic));
+    const bool cover_format = s_lock_style == APP_LOCK_STYLE_BOOK_COVER || s_off_art.style == APP_OFF_BOOK_COVER ||
+                              s_lock_cover_crop || s_off_art.cover_crop;
+    memcpy(backup.magic, portable_format ? (cover_format ? "PICOSETn" : "PICOSETm") : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
     f[BK_SYS_SIZE] = s_system_size;
     f[BK_SYS_CONTRAST] = s_system_contrast;
-    f[BK_LOCK] = s_lock_style;
+    f[BK_LOCK] = !portable_format && s_lock_style == APP_LOCK_STYLE_BOOK_COVER ? 0 : s_lock_style;
+    if (portable_format && s_lock_cover_crop) f[BK_LOCK] |= BACKUP_LOCK_COVER_CROP_BIT;
     f[BK_BOOK_PX] = s_book_px;
     // v15复用已退役的晃动标志保存关闭抗锯齿；旧备份始终恢复开启。
     // v15 reuses the retired shake flag for disabled AA; older backups always restore AA on.
@@ -2598,7 +2620,12 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     for (unsigned i = 0; i < 4; ++i) quick.checksum[i] = (uint8_t)(quick_hash >> (8 * i));
     if (ok) ok = fwrite(&quick, 1, sizeof(quick), file) == sizeof(quick);
     settings_backup_off_art_t off_art = {0};
-    off_art_encode(&s_off_art, off_art.encoded);
+    app_shutdown_wallpaper_t backup_art = s_off_art;
+    if (!portable_format) {
+        if (backup_art.style == APP_OFF_BOOK_COVER) backup_art.style = APP_OFF_SYSTEM;
+        backup_art.cover_crop = 0;
+    }
+    off_art_encode(&backup_art, off_art.encoded);
     uint32_t off_hash = backup_off_art_checksum(&off_art);
     for (unsigned i = 0; i < 4; ++i) off_art.checksum[i] = (uint8_t)(off_hash >> (8u * i));
     if (ok) ok = fwrite(&off_art, 1, sizeof(off_art), file) == sizeof(off_art);
@@ -2657,10 +2684,11 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
     // 旧本地 L=21 备份仍可能带 49..60 px 的边距；恢复时统一夹到 48。
     // Old local L=21 backups may carry a 49..60 px margin; restore clamps it to 48.
     const bool legacy_local_layout = version == 21 && backup->magic[7] == 'L';
+    unsigned lock_style = version >= 49 ? f[BK_LOCK] & ~(BACKUP_LOCK_PROTOTYPE_BIT | BACKUP_LOCK_COVER_CROP_BIT) : f[BK_LOCK];
     if (f[BK_SLEEP] > APP_SLEEP_OFF || f[BK_PICKUP] > 1 ||
         f[BK_SYS_SIZE] < 100 || f[BK_SYS_SIZE] > 200 || f[BK_SYS_SIZE] % 10 ||
         f[BK_SYS_CONTRAST] < 100 || f[BK_SYS_CONTRAST] > 140 || f[BK_SYS_CONTRAST] % 10 ||
-        f[BK_LOCK] > (version >= 40 ? APP_LOCK_STYLE_CLOCK : version >= 38 ? 4 : 3) || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
+        lock_style > (version >= 49 ? APP_LOCK_STYLE_BOOK_COVER : version >= 40 ? APP_LOCK_STYLE_CLOCK : version >= 38 ? 4 : 3) || f[BK_BOOK_PX] < BOOK_READER_PX_MIN || f[BK_BOOK_PX] > BOOK_READER_PX_MAX ||
         f[BK_SHAKE] > 1 || (f[BK_FULL_PAGES] != 0 && f[BK_FULL_PAGES] != 5 &&
                             f[BK_FULL_PAGES] != 10 && f[BK_FULL_PAGES] != 15 &&
                             f[BK_FULL_PAGES] != 30) ||
@@ -2846,6 +2874,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 45) ok = fread(&quick, 1, sizeof(quick), file) == sizeof(quick) && backup_quick_valid(&quick);
     if (ok && version >= 46) ok = fread(&off_art, 1, sizeof(off_art), file) == sizeof(off_art) &&
         backup_off_art_valid(&off_art, &restored_off_art) &&
+        (version >= 49 || (restored_off_art.style != APP_OFF_BOOK_COVER && off_art.encoded[1] >= '0' && off_art.encoded[1] <= '7')) &&
         (version >= 47 || (off_art.encoded[0] >= '0' && off_art.encoded[0] <= '2' &&
                            off_art.encoded[1] >= '0' && off_art.encoded[1] <= '1'));
     if (ok && version >= 48) ok = fread(&portable, 1, BACKUP_PORTABLE_BYTES, file) == BACKUP_PORTABLE_BYTES &&
@@ -2869,6 +2898,9 @@ esp_err_t app_settings_backup_restore(void) {
         backup_erase_secret(&wifi, sizeof(wifi)); backup_erase_secret(&portable, sizeof(portable));
         return ESP_ERR_INVALID_RESPONSE;
     }
+
+    bool lock_cover_crop = version >= 49 && (backup.flags[BK_LOCK] & BACKUP_LOCK_COVER_CROP_BIT) != 0;
+    backup.flags[BK_LOCK] &= ~(BACKUP_LOCK_PROTOTYPE_BIT | BACKUP_LOCK_COVER_CROP_BIT);
 
     if (version >= 48 && book_store_prepare_data() != ESP_OK) {
         backup_erase_secret(&wifi, sizeof(wifi));
@@ -3049,7 +3081,7 @@ esp_err_t app_settings_backup_restore(void) {
     if(!bookmark.path[0] && backup.flags[BK_LOCK]==3)backup.flags[BK_LOCK]=0;
     BACKUP_SET_STR(NVS_KEY_BOOKMARK, bookmark.path);
     if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_STYLE,backup.flags[BK_LOCK]);
-    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,(uint8_t)(backup.flags[BK_LOCK]*2+calendar_style.on));
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,lock_face_encode(backup.flags[BK_LOCK],calendar_style.on,lock_cover_crop));
     BACKUP_SET_STR(NVS_KEY_WALLPAPER, backup.wallpaper);
     char off_encoded[OFF_CONFIG_BYTES];
     off_art_encode(&restored_off_art, off_encoded);
@@ -3123,6 +3155,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_system_size = f[BK_SYS_SIZE];
     s_system_contrast = f[BK_SYS_CONTRAST];
     s_lock_style = f[BK_LOCK];
+    s_lock_cover_crop = lock_cover_crop;
     s_ticket_background = (app_ticket_background_t)ticket_background.on;
     s_calendar_style = (app_calendar_style_t)calendar_style.on;
     s_book_px = f[BK_BOOK_PX];

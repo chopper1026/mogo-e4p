@@ -15,6 +15,7 @@ def unit(assets=None):
     code=native.unit().split('typedef struct {char path[288];',1)[0]
     code+='\n#define HOST_ASSETS '+json.dumps(str(assets.resolve()) if assets else '')+'\n'
     code+='\n'+re.sub(r'^#(?:include|pragma)[^\n]*\n','',(ROOT/'main/services/lock_style_images.h').read_text(),flags=re.M)
+    code+='\n#include "book/book_lock_cover.h"\n'
     settings_header=(ROOT/'main/settings/settings.h').read_text()
     code+='\n'+settings_header[settings_header.index('typedef enum {\n    APP_OFF_SYSTEM'):settings_header.index('/// 与浅睡锁屏独立')]
     code+=r'''
@@ -35,8 +36,18 @@ static void book_lock_bookmark_prepare_mode(const char *path,bool crop_to_fill){
  (void)path;++bookmark_prepares;bookmark_prepare_crop=crop_to_fill;
 }
 static uint8_t selected_style=1;
+enum {APP_LOCK_STYLE_BOOK_COVER=6};
 static unsigned ticket_choice,calendar_choice,writes,requests,revision,cache_epoch,progress_revision,collage_revision;
-static unsigned face_prepares,pauses,scans;
+static unsigned face_prepares,pauses,scans,cover_prepares;
+static unsigned cover_labels,cover_main,cover_contain,cover_fill,unrelated_labels;
+static bool cover_missing;
+bool book_lock_cover_preview(uint8_t *pixels,bool crop){
+ ++cover_prepares;if(cover_missing)return false;
+ if(crop)memset(pixels,0x88,BOOK_LOCK_PREVIEW_BYTES);
+ else{memset(pixels,255,BOOK_LOCK_PREVIEW_BYTES);
+ for(int y=30;y<240;++y)memset(pixels+y*80+9,0x66,62);}
+ return true;
+}
 static unsigned state_calls,complete_on_state_call,complete_ready_mask;
 static unsigned ready_mask=~0u;
 static bool catalogue_changed,ticket_preview_failed;
@@ -67,6 +78,8 @@ static int app_settings_ticket_background(void){return ticket_choice;}
 static int app_settings_calendar_style(void){return calendar_choice;}
 static uint8_t app_settings_lock_style(void){return selected_style;}
 static unsigned wallpaper_mode;
+static bool lock_cover_crop;
+static bool app_settings_lock_cover_crop(void){return lock_cover_crop;}
 typedef int app_wallpaper_mode_t;
 static const char *app_settings_wallpaper_path(void){return wallpaper;}
 static int app_settings_wallpaper_mode(void){return (int)wallpaper_mode;}
@@ -79,6 +92,7 @@ static bool app_settings_set_bookmark_mode(int mode){if(mode>1||failed_save)retu
 static bool app_settings_select_lock(uint8_t style,const char *path,unsigned option){
  ++writes;if(failed_save)return false;selected_style=style;
  if(style==0)ticket_choice=option;if(style==4)calendar_choice=option;
+ if(style==APP_LOCK_STYLE_BOOK_COVER)lock_cover_crop=option!=0;
  if(style==1){snprintf(wallpaper,sizeof(wallpaper),"%s",path);wallpaper_mode=option;}
  if(style==3){snprintf(bookmark,sizeof(bookmark),"%s",path);bookmark_mode=option;}
  return true;
@@ -124,7 +138,16 @@ static void ui_lock_clock_draw(uint8_t *fb,const ui_lock_clock_face_t *f){(void)
     src=src.replace('    ui_text_fixed_context_aa_vc(fb,center?', '''    int above=0,below=0;ui_font_measure_line_px(px,fit,&above,&below);
     assert(ui_text_fixed_width_px(px,fit)<=r.width);assert(above+below<=r.height);
     ui_text_fixed_context_aa_vc(fb,center?''')
+    src=src.replace('    char fit[288];', '''    if(r.y>=680){
+        if(!strcmp(text,"书籍封面"))++cover_labels;
+        if(!strcmp(text,"最近阅读的封面"))++cover_main;
+        if(!strcmp(text,"保留封面全图，不裁剪"))++cover_contain;
+        if(!strcmp(text,"居中裁剪，铺满屏幕"))++cover_fill;
+        if(!strcmp(text,"你的书架，自动拼贴")||!strcmp(text,"系统默认")||!strcmp(text,"显示关机状态"))++unrelated_labels;
+    }
+    char fit[288];''')
     code+=src
+    code+=host.function("draw_shutdown_hint", ROOT/"main/ui/ui_power_dialog.c")+"\n"
     code+=r'''
 enum {SETTINGS_MAIN,SETTINGS_LOCK_STYLE};
 static int s_page,nav=-1,profile_refresh;
@@ -142,18 +165,55 @@ static void settings_prepare_profile(void){++profile_refresh;}
 static bool tap(int x,int y){ui_gesture_event_t e={.type=UI_GESTURE_TAP,.x0=x,.y0=y};return ui_lock_style_gesture(&e);}
 static bool hold(int x,int y){ui_gesture_event_t e={.type=UI_GESTURE_LONG_PRESS,.x0=x,.y0=y};return ui_lock_style_gesture(&e);}
 static unsigned pump(void){unsigned paints=0;for(int i=0;i<12;++i)paints+=ui_lock_style_tick(200*(i+1));return paints;}
+static void check_cover_panel(uint8_t *fb,bool shutdown,bool has_cover){
+ bool crop=shutdown?off_value.cover_crop:lock_cover_crop;
+ unsigned tone=crop?0x80:0x60;
+ cover_labels=cover_main=cover_contain=cover_fill=unrelated_labels=0;
+ ui_lock_style_render(fb);
+ assert(cover_labels==1&&cover_main==1&&cover_contain==!crop&&cover_fill==crop&&!unrelated_labels);
+ EpdRect card=shutdown?off_style_rect(4):card_rect(TAB_BOOK_COVER);
+ assert((pixel_at(fb,card.x+card.width/2,card.y+34)==tone)==has_cover);
+ assert((pixel_at(fb,90,810)==tone)==has_cover);
+}
+static void check_shutdown_hint(uint8_t *fb){
+ const char *hint="已关机 · 长按电源键开机";
+ int above=0,below=0;assert(ui_font_has_text(hint));
+ ui_font_measure_line_px(36,hint,&above,&below);
+ assert(above+below>0&&above+below<=36);
+ const int width=ui_text_fixed_width_px(36,hint)+16, x0=(684-width)/2;
+ memset(fb,0x55,684*1216/2);draw_shutdown_hint(fb);
+ unsigned ink=0;
+ for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
+  unsigned tone=pixel_at(fb,x,y);
+  if(y<1180||x<x0||x>=x0+width)assert(tone==0x50);
+  else if(tone<0xf0)++ink;
+ }
+ assert(ink>100);
+}
 int main(int argc,char **argv){
- assert(argc==2&&ttf_font_open_builtin()==ESP_OK);uint8_t *fb=malloc(684*1216/2);assert(fb);memset(fb,255,684*1216/2);
+ assert(argc==2&&ttf_font_open_builtin()==ESP_OK);uint8_t *fb=malloc(684*1216/2);assert(fb);check_shutdown_hint(fb);memset(fb,255,684*1216/2);
  for(unsigned i=0;i<sizeof(fixture);++i)fixture[i]=(uint8_t)(i/160);
  for(int b=0;b<2;++b)for(int i=0;i<3;++i){char name[64];snprintf(name,sizeof(name),b?"bookmark-%d":"wall-%d",i);if(!fixture_read(name,small_fixture[b][i],160,284))memset(small_fixture[b][i],(i+4)*17,160*284/2);}
  fixture_read("wall-0",fixture,342,608);
  for(font_percent=100;font_percent<=200;font_percent+=10){
   ui_lock_style_open(fb);assert(pump()==1);
   assert(s_count==7&&s_catalogue_ready);
-  for(int tab=0;tab<6;++tab){
+  for(int tab=0;tab<STANDBY_STYLE_COUNT;++tab){
    EpdRect r=card_rect(tab);assert(tap(r.x,r.y)&&s_tab==tab);
    if(tab==0||tab==3)assert(tap(36,758));
    if(tab==1||tab==4)assert(tap(36,762));
+   if(tab==TAB_BOOK_COVER){
+    assert(selected_style==APP_LOCK_STYLE_BOOK_COVER && !tap(352,762) && !tap(36,762));
+    assert(tap(card_rect(5).x,card_rect(5).y) && selected_style==APP_LOCK_STYLE_CLOCK);
+    failed_save=true;assert(tap(r.x,r.y)&&selected_style==APP_LOCK_STYLE_CLOCK);failed_save=false;
+    assert(tap(r.x,r.y)&&selected_style==APP_LOCK_STYLE_BOOK_COVER);
+    check_cover_panel(fb,false,true);
+    const unsigned before_mode=wallpaper_mode;
+    assert(tap(408,110)&&lock_cover_crop&&wallpaper_mode==before_mode);
+    pump();check_cover_panel(fb,false,true);
+    assert(tap(card_rect(5).x,card_rect(5).y)&&tap(r.x,r.y)&&lock_cover_crop);
+    assert(tap(538,110)&&!lock_cover_crop);
+   }
    ui_lock_style_render(fb);char file[1024];snprintf(file,sizeof(file),"%s/inline-%d-%u.raw",argv[1],tab,font_percent);save(file,fb);
   }
   off_value.fit=0;unsigned lock_before=selected_style,writes_before=writes;
@@ -164,15 +224,24 @@ int main(int argc,char **argv){
   assert(off_value.style==APP_OFF_CUSTOM&&off_value.image_id==42&&!s_off_loading);
   ui_lock_style_render(fb);char off_file[1024];snprintf(off_file,sizeof(off_file),"%s/shutdown-custom-%u.raw",argv[1],font_percent);save(off_file,fb);
   unsigned ticket_before=ticket_choice,calendar_before=calendar_choice;
-  for(int mode=1;mode<5;++mode){
+  for(int mode=1;mode<OFF_STYLE_COUNT;++mode){
    EpdRect r=off_style_rect(mode);assert(tap(r.x,r.y)&&s_off_browse==off_values[mode]);
    if(mode==1||mode==3){
-    unsigned original=off_value.style;assert(original!=off_values[mode]);
+    assert(off_value.style!=off_values[mode]);
     assert(tap(352,762)&&off_value.style==off_values[mode]);
-    if(mode==1)assert(off_value.ticket_background==1);else assert(off_value.calendar_style==1);
+    assert((mode==1?off_value.ticket_background:off_value.calendar_style)==1);
     off_commit_failure=true;assert(tap(36,762));off_commit_failure=false;
     assert((mode==1?off_value.ticket_background:off_value.calendar_style)==1);
-   }else assert(off_value.style==off_values[mode]);
+   }else{
+    assert(off_value.style==off_values[mode]);
+    if(off_value.style==APP_OFF_BOOK_COVER){
+     assert(!tap(36,762)&&!tap(352,762));check_cover_panel(fb,true,true);
+     off_commit_failure=true;assert(tap(408,110)&&!off_value.cover_crop);off_commit_failure=false;
+     assert(tap(408,110)&&off_value.cover_crop&&!off_value.fit&&!lock_cover_crop&&!off_job);
+     pump();check_cover_panel(fb,true,true);
+     assert(tap(538,110)&&!off_value.cover_crop);
+    }
+   }
    assert(ticket_choice==ticket_before&&calendar_choice==calendar_before&&selected_style==lock_before);
    ui_lock_style_render(fb);snprintf(off_file,sizeof(off_file),"%s/shutdown-%d-%u.raw",argv[1],mode,font_percent);save(off_file,fb);
   }
@@ -184,11 +253,11 @@ int main(int argc,char **argv){
   assert(off_value.style==APP_OFF_SYSTEM&&strstr(s_notice,"TF卡未就绪"));off_result_ok=true;
   assert(tap(36,758)&&off_job);assert(tap(36,148)&&!s_off_tab&&!off_job);
   assert(selected_style==lock_before&&writes==writes_before);
-  assert(tap(246,468)&&s_tab==4);unsigned before=writes;
+  assert(tap(card_rect(4).x,card_rect(4).y)&&s_tab==4);unsigned before=writes;
   assert(!tap(35,762)&&!tap(648,762)&&writes==before);
   assert(tap(352,762)&&selected_style==4&&calendar_choice==1);
   failed_save=true;assert(tap(36,762)&&calendar_choice==1&&strstr(s_notice,"保存失败"));failed_save=false;
-  assert(tap(246,258)&&s_tab==1);assert(tap(352,762)&&selected_style==0&&ticket_choice==1);
+  assert(tap(card_rect(1).x,card_rect(1).y)&&s_tab==1);assert(tap(352,762)&&selected_style==0&&ticket_choice==1);
   assert(tap(36,258)&&s_tab==0);assert(tap(528,110)&&wallpaper_mode==1);
   failed_save=true;assert(tap(398,110)&&wallpaper_mode==1&&strstr(s_notice,"保存失败"));failed_save=false;
   assert(tap(398,110)&&wallpaper_mode==0);assert(tap(36,758)&&selected_style==1);
@@ -202,7 +271,7 @@ int main(int argc,char **argv){
   assert(tap(246,758)&&s_pending==-1&&strstr(wallpaper,"04.png"));before=writes;ui_lock_style_tick(3500);assert(writes==before);
   images_fail=true;assert(tap(36,758)&&strstr(s_notice,"无法加载")&&writes==before);images_fail=false;
   images_ready=false;assert(tap(36,758)&&s_pending==3);images_ready=true;ui_lock_style_tick(4000);assert(selected_style==1&&strstr(wallpaper,"03.png"));
-  assert(tap(36,468)&&s_tab==3);assert(image_count()==7);unsigned prepared=bookmark_prepares;
+  assert(tap(card_rect(3).x,card_rect(3).y)&&s_tab==3);assert(image_count()==7);unsigned prepared=bookmark_prepares;
   assert(tap(36,758)&&selected_style==3&&bookmark_prepares==prepared+1);
   assert(tap(528,110)&&bookmark_mode==1);
   assert(bookmark_prepares==prepared+2&&!bookmark_prepare_crop);
@@ -253,6 +322,18 @@ int main(int argc,char **argv){
  ui_lock_style_close();++cache_epoch;ui_lock_style_open(fb);assert(!s_items&&!s_faces[2]);assert(pump()==1);
  // 延迟扫描只报告一次目录变化，失败图片也可结束批次等待。 / A late scan discovers a changed catalogue once; failed image slots still settle the batch.
  ui_lock_style_close();catalogue_changed=true;images_fail=true;ui_lock_style_open(fb);assert(pump()==1);images_fail=false;
+ // 新阅读或无书时不沿用旧封面，失败占位也会完成一轮定稿。
+ // Changing or losing the latest book retires the prior cover and settles the empty state once.
+ unsigned prior_cover=cover_prepares;
+ ui_lock_style_close();++progress_revision;cover_missing=true;selected_style=APP_LOCK_STYLE_BOOK_COVER;
+ ui_lock_style_open(fb);assert(!s_faces[FACE_BOOK_COVER]);assert(pump()==1&&cover_prepares==prior_cover+1);
+ assert(s_face_done[FACE_BOOK_COVER]&&!s_faces[FACE_BOOK_COVER]);check_cover_panel(fb,false,false);
+ assert(tap(352,148)&&s_off_tab);
+ EpdRect cover_card=off_style_rect(4);assert(tap(cover_card.x,cover_card.y));
+ check_cover_panel(fb,true,false);assert(pump()==1&&cover_prepares==prior_cover+1&&!pump());
+ ui_lock_style_close();cover_missing=false;ui_lock_style_open(fb);
+ assert(pump()==1&&cover_prepares==prior_cover+2);check_cover_panel(fb,false,true);
+ ui_lock_style_media_lost();assert(!s_faces[FACE_BOOK_COVER]);assert(pump()==1&&cover_prepares==prior_cover+2);
  ui_lock_style_close();ui_lock_style_media_lost();assert(!s_items&&!s_faces[2]);
  free(fb);ttf_font_unload();puts("PASS: inline styles, paging/hold, cancellation, failures/media, 100–200% font bounds, cached reentry, dependency invalidation and one full settle per visible batch");
 }

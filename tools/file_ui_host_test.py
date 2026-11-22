@@ -119,7 +119,7 @@ static const char *esp_err_to_name(esp_err_t err){(void)err;return "ERROR";}
     return code
 
 
-def run(output, source=None, cloudzao_configured=False):
+def run(output, source=None, cloudzao_configured=False, *, require_black=True):
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="files-raster-") as directory:
         work = Path(directory)
@@ -158,7 +158,8 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
         subprocess.run([str(work / "test"), str(output)], env=env, check=True)
     for raw in output.glob("*.raw"):
         image = Image.frombytes("L", (684, 1216), raw.read_bytes()).point(lambda v: v * 17 // 16)
-        assert image.getextrema() == (0, 255) and len(image.getcolors()) <= 16
+        low, high = image.getextrema()
+        assert high == 255 and low <= (0 if require_black else 51) and len(image.getcolors()) <= 16
         image.save(raw.with_suffix(".png"))
         raw.unlink()
     print(f"PASS: native 684x1216, 16-gray product render; deterministic sample data only: {output}")

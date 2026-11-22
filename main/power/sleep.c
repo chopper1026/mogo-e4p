@@ -56,6 +56,7 @@
 #include "app_font_context.h"
 #include "book_cover.h"
 #include "book_lock_collage.h"
+#include "book_lock_cover.h"
 #include "book_lock_bookmark.h"
 #include "book_ticket.h"
 #include "cache_wake_restore.h"
@@ -790,7 +791,8 @@ void enter_lock_and_sleep(
     bool ticket = lock_style == 0;
     bool overlay = light_only && ((ticket && app_settings_ticket_background() == APP_TICKET_BACKGROUND_TRANSPARENT) || lock_style == 3);
     if (!overlay) epd_hl_set_all_white(hl);
-    bool system_lock = ticket || lock_style == 2 || lock_style == 4 || lock_style == APP_LOCK_STYLE_CLOCK || lock_pin_enabled();
+    bool system_lock = ticket || lock_style == 2 || lock_style == 4 || lock_style == APP_LOCK_STYLE_CLOCK ||
+        lock_style == APP_LOCK_STYLE_BOOK_COVER || lock_pin_enabled();
     app_lock_font_t lock_font = {0};
     if (system_lock) app_font_begin_lock(&lock_font);
     const int64_t lock_t_font = esp_timer_get_time();
@@ -802,7 +804,8 @@ void enter_lock_and_sleep(
           lock_style == 3 ? book_lock_bookmark_draw_mode(framebuffer,app_settings_bookmark_path(),
               app_settings_bookmark_mode() == APP_BOOKMARK_MODE_CROP) :
           lock_style == 4 ? lock_calendar_draw(framebuffer) :
-          lock_style == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(framebuffer) : draw_wallpaper(framebuffer);
+          lock_style == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(framebuffer) :
+          lock_style == APP_LOCK_STYLE_BOOK_COVER ? book_lock_cover_draw(framebuffer, app_settings_lock_cover_crop()) : draw_wallpaper(framebuffer);
     if (!lock_drawn) {
         epd_hl_set_all_white(hl);
         (void)ui_builtin_image_draw(framebuffer, UI_BUILTIN_IMAGE_LOCK);
@@ -891,7 +894,9 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         vTaskDelay(pdMS_TO_TICKS(20));
     app_lock_font_t saved; app_font_begin_lock(&saved);
     uint8_t *fb = epd_hl_get_framebuffer(hl);
-    if (!lock_screen_restore(fb)) {
+    // 冷启动重新读取最近阅读的封面，不复用上次的密码背景。
+    // Rebuild the last-read cover on cold PIN boot instead of reusing the previous backdrop.
+    if (app_settings_lock_style() == APP_LOCK_STYLE_BOOK_COVER || !lock_screen_restore(fb)) {
         // 冷启动丢失锁屏缓存时没有当前页面，用干净底图并继续密码校验。
         // A cold start with no retained art has no current page; use a clean base and keep authentication.
         if (app_settings_lock_style() == 0 || app_settings_lock_style() == 3 || app_settings_lock_style() == APP_LOCK_STYLE_CLOCK)
@@ -901,7 +906,8 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             app_settings_lock_style() == 3 ? book_lock_bookmark_draw_mode(fb,app_settings_bookmark_path(),
                 app_settings_bookmark_mode() == APP_BOOKMARK_MODE_CROP) :
             app_settings_lock_style() == 4 ? lock_calendar_draw(fb) :
-            app_settings_lock_style() == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(fb) : draw_wallpaper(fb);
+            app_settings_lock_style() == APP_LOCK_STYLE_CLOCK ? lock_clock_draw(fb) :
+            app_settings_lock_style() == APP_LOCK_STYLE_BOOK_COVER ? book_lock_cover_draw(fb, app_settings_lock_cover_crop()) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); (void)ui_builtin_image_draw(fb, UI_BUILTIN_IMAGE_LOCK); }
     }
     lock_screen_authenticate(hl, touch, acc, true);

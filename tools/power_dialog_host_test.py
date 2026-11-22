@@ -71,6 +71,11 @@ static bool generated(uint8_t *p,unsigned kind,bool variant){
 static bool book_ticket_preview(uint8_t *p,bool cover){return generated(p,4,cover);}
 static bool book_lock_collage_prepare(uint8_t *p){return generated(p,5,false);}
 static bool lock_calendar_draw_variant(uint8_t *p,bool month){return generated(p,6,month);}
+static bool book_lock_cover_draw(uint8_t *p,bool crop){return generated(p,7,crop);}
+int ui_text_fixed_width_px(int px,const char *text){assert(px==36&&text[0]);return 396;}
+void ui_text_fixed_vc(uint8_t *p,int x,int y,int px,const char *text,enum EpdFontFlags flags,bool inverted){
+ assert(px==36 && flags==EPD_DRAW_ALIGN_LEFT && !inverted && !strcmp(text,"已关机 · 长按电源键开机"));epd_draw_pixel(x,y,0,p);
+}
 '''
 code+=re.sub(r'^#include[^\n]*\n','',power,flags=re.M)
 code+=r'''
@@ -90,18 +95,26 @@ static void raster_check(void){
 }
 int main(int argc,char **argv){
  off_config.style=APP_OFF_SYSTEM;ui_power_shutdown_prepare(fb);assert(fb[0]==255);
- const unsigned styles[]={APP_OFF_TICKET,APP_OFF_COLLAGE,APP_OFF_CALENDAR};
- for(unsigned i=0;i<3;++i)for(unsigned variant=0;variant<2;++variant){
-  off_config.style=styles[i];off_config.ticket_background=off_config.calendar_style=variant;
+ const unsigned styles[]={APP_OFF_TICKET,APP_OFF_COLLAGE,APP_OFF_CALENDAR,APP_OFF_BOOK_COVER};
+ for(unsigned i=0;i<sizeof(styles)/sizeof(styles[0]);++i)for(unsigned variant=0;variant<2;++variant){
+  off_config.style=styles[i];off_config.ticket_background=off_config.calendar_style=off_config.cover_crop=variant;
   app_shutdown_wallpaper_t saved=off_config;memset(fb,0x11,sizeof(fb));ui_power_shutdown_prepare(fb);
-  assert(generated_kind==i+4&&fb[0]==(i+4)*17&&last_variant==(i==1?false:(bool)variant));
+  assert(generated_kind==i+4&&fb[0]==(i+4)*17&&last_variant==(i!=1&&(bool)variant));
   assert(!memcmp(&saved,&off_config,sizeof(saved)));
   generated_ok=false;ui_power_shutdown_prepare(fb);assert(fb[0]==255);generated_ok=true;
  }
  off_config.style=APP_OFF_CUSTOM;off_config.show_hint=false;ui_power_shutdown_prepare(fb);for(unsigned i=0;i<sizeof(fb);++i)assert(fb[i]==0x33);
  off_cache_ok=false;ui_power_shutdown_prepare(fb);assert(fb[0]==255);off_cache_ok=true;
  off_oom=true;ui_power_shutdown_prepare(fb);assert(fb[0]==255);off_oom=false;
- off_config.show_hint=true;ui_power_shutdown_prepare(fb);assert(fb[0]==0x33&&epd_get_pixel(342,1120,W,H,fb)==240);
+ off_config.style=APP_OFF_COLLAGE;off_config.show_hint=true;ui_power_shutdown_prepare(fb);
+ unsigned changed=0;
+ const int tag_width=412, tag_x=(W-tag_width)/2;
+ // 拼贴书籍数量的白描边止于 y=1179；逐像素检查字签以外不变。
+ // The collage count outline ends at y=1179; check every pixel outside the label.
+ for(int y=0;y<H;++y)for(int x=0;x<W;++x)if(epd_get_pixel(x,y,W,H,fb)!=0x50){
+  assert(x>=tag_x&&x<tag_x+tag_width&&y>=1180&&y<H);++changed;
+ }
+ assert(changed==tag_width*36);
  ui_power_dialog_draw(fb,&dialog);press();
  assert(feed(UI_POWER_THUMB_X+1,UI_POWER_THUMB_Y,1,false,false)==UI_POWER_ACTION_NONE&&dialog.position==1);raster_check();
  assert(feed(UI_POWER_THUMB_X+1,UI_POWER_THUMB_Y,1,false,false)==UI_POWER_ACTION_NONE&&!dirty.height);

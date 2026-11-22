@@ -1,6 +1,6 @@
 # 壁纸 / Wallpaper
 
-设置 → 个性化功能 → 壁纸提供「待机壁纸」「关机壁纸」两个页签；切换页签不修改任何已保存选择。待机壁纸将壁纸、阅读票根、书架拼贴、透明书封、日历、简约时钟放在同一页。上方黑色边框表示正在浏览的分类，勾选表示已启用的样式；下方直接选择图片、票根背景或日历版式，保存成功才更新勾选。壁纸、书封和日历的分类点击仅展开选项，不替换当前样式。票根分类使用记住的背景，拼贴和时钟点选即启用。
+设置 → 个性化功能 → 壁纸提供「待机壁纸」「关机壁纸」两个页签；切换页签不修改任何已保存选择。待机壁纸将壁纸、阅读票根、书架拼贴、透明书封、日历、简约时钟和书籍封面放在同一页。上方黑色边框表示正在浏览的分类，勾选表示已启用的样式；下方直接选择图片、票根背景或日历版式，保存成功才更新勾选。壁纸、透明书封和日历分类点击仅展开选项，不替换当前样式。票根分类使用记住的背景，拼贴、时钟和书籍封面点选即启用。
 
 浏览壁纸或透明书封时，标题右侧可选择「裁剪填满」或「完整显示」。裁剪填满按屏幕比例铺满并裁掉超出边缘的部分；完整显示保持图片原比例，缩放到屏幕内并在四周留下当前页面，适合高分辨率或尺寸较大的图片。两种显示方式分别保存，切换图片或重启后仍保留；壁纸旧设置默认使用裁剪填满，透明书封默认完整显示以保持既有行为。
 
@@ -12,13 +12,23 @@ Custom standby and shutdown wallpaper deepens midtones and widens the separation
 
 目录沿用 `/sdcard/pictures`、`/sdcard/images`、`/sdcard`，扫描全部 JPG/JPEG/PNG，不设64张固定上限并按文件名排序；目录数组按可用PSRAM动态扩展，内存不足时返回已经成功扫描的项目。透明书封列出 PNG/JPG/JPEG。PNG保留原alpha；JPG/JPEG和不透明PNG按画布四角的主灰度估计纯色背景，再只从四角沿四邻接移除连通区域，因此黑色、灰色和彩色纯底也能透明，封闭的同色主体和只贴边不贴角的白色主体会保留。含真实alpha的PNG跳过颜色键控。由于设备最终显示灰阶，彩色背景按解码后的亮度处理；渐变或复杂纹理不承诺自动抠图。跳过隐藏文件、AppleDouble、目录、空文件、超过50 MiB的文件。透明书封可选择保留完整画布或按屏幕比例居中裁切；缩图棋盘代表透明区域，实际锁屏仍叠加当前页面。显示方式写入NVS，图层缓存按图片、旋转、画布尺寸、显示方式和键控算法版本区分，算法更新后自动重建旧缓存。阅读票根预览使用真实最近阅读数据，优先读取完整封面缓存，缺失时读取列表封面缓存并居中，不在锁屏入口解码EPUB；无记录显示占位。拼贴预览为上次生成且校验有效的整帧快照，不为浏览设置扫描或解码整个书库；首次锁屏前可无预览。日历与时钟预览使用打开时的当前日期/时间，实际锁屏仍按各自现有规则生成。
 
+## 书籍封面 / Book Cover
+
+在待机或关机页签点「书籍封面」即可启用，两页独立保存。显示当前或最后阅读的书的封面，不叠加书名、作者或书摘。点右上「裁剪填满」可按原比例居中裁切铺满屏幕；「完整显示」保留整张封面，为默认选项。取景与自定义图片互不影响。顶部卡片和下方详情共用当前取景的真实缩图；已准备的缩图可跨页签复用，与其他缩图同批定稿。封面不可用时显示「暂无封面」，不借用书架拼贴或系统默认的预览。关机提示仍可独立开关，开启时显示在屏幕底部中央。
+
+Select Book Cover on either tab to enable it independently for standby or shutdown. The current or last-read cover has no title, author or excerpt overlays. Use the top-right controls to center-crop to fill the screen or contain the entire cover (default); both preserve its aspect ratio and are independent of custom image framing. The card and detail panel use the selected framing, reuse prepared thumbnails across tabs and settle with the other thumbnails. Missing covers show their own unavailable state. The optional shutdown notice remains at the bottom center.
+
+EPUB/MOBI 优先读取书内封面；灰阶解码限制为 560×1000（完整显示）或一屏 684×1216（裁剪填满），回退到已有完整比例封面缓存或生成封面（如 TXT）。读取前后核对书源；无最近记录、书源消失或准备失败时，待机显示内建锁屏，关机显示系统默认，不修改选择。PIN 冷启动重新读取封面，不沿用上次的密码背景。第一张真实封面可能需要读卡和解码。
+
+EPUB/MOBI prefer embedded artwork, with grayscale output bounded to 560×1000 (contain) or one 684×1216 panel (crop to fill), then an existing proportional thumbnail or a generated cover (such as TXT). A missing/changed source or preparation failure uses the built-in standby/shutdown face without changing the saved choice. Cold PIN boot rebuilds the cover instead of reusing an old frame. First display may require card I/O and image decoding.
+
 ## 独立关机壁纸 / Independent Shutdown Art
 
-「关机壁纸」提供壁纸、阅读票根、书架拼贴、日历、系统默认五种样式，不再提供留白；旧留白配置自动迁移为系统默认。系统默认显示「mogo 已关机」及开机提示。其余样式可开关关机提示，使用与待机壁纸分别保存的选择。票根背景可选纯白或封面背景，日历可选老黄历或万年历，两项均不修改待机页设置。关机时使用最新阅读记录、书架封面或当前日期生成；无可用素材或生成失败时使用系统画面。拼贴预览沿用上次成功生成的快照。
-The shutdown tab offers custom wallpaper, reading ticket, shelf collage, calendar and the built-in face. Retired white settings migrate to the built-in face. Ticket backgrounds and calendar variants are saved independently of standby art. Shutdown generates current content and falls back to the built-in face if unavailable; collage previews use the last valid snapshot.
+「关机壁纸」提供壁纸、阅读票根、书架拼贴、日历、书籍封面和系统默认六种样式，不再提供留白；旧留白配置自动迁移为系统默认。系统默认显示「mogo 已关机」及开机提示。其余样式可开关关机提示，开启时在底部居中显示 36 px 单行提示，避开拼贴右下角书籍数量及其描边。使用与待机壁纸分别保存的选择。票根背景可选纯白或封面背景，日历可选老黄历或万年历，两项均不修改待机页设置。关机时使用最新阅读记录、书架封面或当前日期生成；无可用素材或生成失败时使用系统画面。拼贴预览沿用上次成功生成的快照。
+The shutdown tab offers custom wallpaper, reading ticket, shelf collage, calendar, book cover and the built-in face. The optional 36 px single-line bottom-center notice leaves the collage count and outline untouched. Retired white settings migrate to the built-in face. Ticket backgrounds and calendar variants are saved independently of standby art. Shutdown generates current content and falls back to the built-in face if unavailable; collage previews use the last valid snapshot.
 
-自定义壁纸可选裁剪填满或完整显示；完整显示按原比例缩放、四周留白。浏览分类不启用，点选图片且TF缓存和设置保存成功后才应用；票根与日历在下方点选背景或版式后启用，拼贴和系统默认点选即启用。更换图片、翻页、长按预览、切换页签、离页或失卡取消尚未提交的选择；失败保留原选择。
-Custom art supports independent crop/contain framing. Browsing does not enable it; completed image preparation and a successful save apply it. Ticket/calendar require an explicit inline option; collage/default activate directly. Navigation and media loss cancel unpublished work; failures retain the prior selection.
+自定义壁纸可选裁剪填满或完整显示；完整显示按原比例缩放、四周留白。浏览分类不启用，点选图片且TF缓存和设置保存成功后才应用；票根和日历在下方点选选项后启用，拼贴、书籍封面和系统默认点选即启用。更换图片、翻页、长按预览、切换页签、离页或失卡取消尚未提交的选择；失败保留原选择。
+Custom art supports independent crop/contain framing. Browsing does not enable it; completed image preparation and a successful save apply it. Ticket and calendar require an inline option; collage, book cover and the built-in face activate directly. Navigation and media loss cancel unpublished work; failures retain the prior selection.
 
 电源菜单关机和待机方式「彻底关机」直接显示关机画面；仅浅睡继续显示原锁屏，定时浅睡在10/30/60分钟到期后切换关机画面再断电，提前唤醒取消本轮倒计时。时钟在浅睡中更新，关机后使用静态关机图；重启沿用重启画面。关机画面推屏失败不执行断电；断电交接失败时，菜单关机返回可操作原页，锁屏/定时入口恢复受密码保护的锁屏等待，不因超时解锁。
 Menu shutdown and immediate-off standby present shutdown art directly. Light sleep retains its lock; timed sleep switches to shutdown art at expiry before powering off, while early wake cancels that countdown. Restart retains its own face. A failed present blocks power-off; failed handoff restores the current page or protected locked waiting, never an unlocked timeout.
@@ -32,7 +42,7 @@ An independent cancellable worker prepares a canonical portrait frame and writes
 Before loading or preparing art, check that the card is present and mounted; never remount, format or redirect images to internal storage. Create cache directories only for writes. Distinguish card readiness/space, directory access, memory, source decoding, write/sync and settings failures while retaining the saved choice; worker warnings support device diagnosis.
 
 自定义图片保存后，重启可从同卡缓存恢复，关机前直接读取成品，不重复解码原图；原图删除不影响已经保存的成品。拔卡、换入没有匹配缓存的卡或缓存损坏时使用系统关机画面，不改已保存选择；恢复可用缓存后继续显示原图。票根与拼贴生成可读取TF上的阅读素材，日历使用本机时间。切换裁剪方式须重新读取原图；原图缺失时保留先前画面及方式。缩图可从TF画布后台恢复，绘图回调不读文件。USB、重挂和睡眠通过 `storage_jobs_quiesce` 先收齐关机图片任务。旧开发版机内缓存不再读取或迁移，更新后重新选图保存到TF卡；旧机内文件不由此服务自动删除。v47设置备份格式不变，包含选择、取景、票根背景、日历版式、提示开关、源路径和缓存身份，不包含像素；恢复后缓存不匹配时回落系统画面，重新选图可重建。
-Saved custom art reloads from the same card after reboot and uses its prepared frame at shutdown without decoding the source again; deleting the source does not invalidate saved art. Missing, mismatched or corrupt card caches use the built-in face without changing settings and recover when the valid cache returns. Ticket/collage may read card sources; calendar uses local time. Reframing needs the source, and failure retains prior art and fit. UI painting remains file-free and storage handoffs join the worker. Old development-only internal caches are neither read, migrated nor automatically deleted: reselect once to save on SD. The v47 config-only backup format remains unchanged; absent/mismatched pixels fall back safely until reselected.
+Saved custom art reloads from the same card after reboot and uses its prepared frame at shutdown without decoding the source again; deleting the source does not invalidate saved art. Missing, mismatched or corrupt card caches use the built-in face without changing settings and recover when the valid cache returns. Ticket/collage may read card sources; calendar uses local time. Reframing needs the source, and failure retains prior art and fit. UI painting remains file-free and storage handoffs join the worker. Old development-only internal caches are neither read, migrated nor automatically deleted: reselect once to save on SD. Settings backups omit image pixels; absent/mismatched pixels fall back safely until reselected.
 
 ## 加载与缓存
 
@@ -52,7 +62,7 @@ Saved custom art reloads from the same card after reboot and uses its prepared f
 ## 验证
 
 ```sh
-python3 tools/run_reader_baseline.py wallpaper_cache shutdown_wallpaper lock_style_images lock_style_ui image_stream settings_backup lifecycle storage media lock_style sleep_power loop lock lock_clock font_policy
+python3 tools/run_reader_baseline.py wallpaper_cache shutdown_wallpaper power_dialog lock_cover lock_style_images lock_style_ui image_stream settings_backup lifecycle storage media lock_style sleep_power loop lock lock_clock font_policy
 python3 tools/lock_style_ui_host_test.py --output build/lock-style-ui
 idf.py --preview build
 ```

@@ -151,16 +151,19 @@ void app_settings_set_system_font_size(uint8_t percent);
 uint8_t app_settings_system_contrast(void);
 void app_settings_set_system_contrast(uint8_t percent);
 /// 锁屏样式和壁纸路径。/ Lock style and wallpaper image path.
-/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封、4日历、5简约时钟。/ Lock: ticket (0), wallpaper (1), collage (2), PNG/JPG cover (3), calendar (4), clock (5).
-enum { APP_LOCK_STYLE_CLOCK = 5 };
+/// 锁屏：0阅读票根、1壁纸、2书架拼贴、3透明书封、4日历、5简约时钟、6书籍封面。/ Lock: ticket (0), wallpaper (1), collage (2), transparent cover (3), calendar (4), clock (5), book cover (6).
+enum { APP_LOCK_STYLE_CLOCK = 5, APP_LOCK_STYLE_BOOK_COVER = 6 };
 uint8_t app_settings_lock_style(void);
 void app_settings_set_lock_style(uint8_t style);
+/// 待机封面是否居中裁剪铺满；旧配置默认完整显示。/ Whether standby covers center-crop to fill; older settings default to contain.
+bool app_settings_lock_cover_crop(void);
 typedef enum {
     APP_OFF_SYSTEM = 0, ///< 系统关机画面 / Built-in shutdown face
     APP_OFF_CUSTOM,     ///< 独立关机壁纸 / Independent shutdown wallpaper
     APP_OFF_TICKET = 3, ///< 阅读票根；编号2为已移除的留白 / Reading ticket; retired white uses ID 2
     APP_OFF_COLLAGE,    ///< 书架拼贴 / Library collage
     APP_OFF_CALENDAR,   ///< 日历 / Calendar
+    APP_OFF_BOOK_COVER, ///< 书籍封面 / Book cover
 } app_off_style_t;
 typedef struct app_shutdown_wallpaper {
     uint8_t style;      ///< 关机样式 / Shutdown style
@@ -169,6 +172,7 @@ typedef struct app_shutdown_wallpaper {
     uint8_t slot;       ///< TF双槽之一 / SD cache slot
     uint8_t ticket_background; ///< 关机票根背景，独立记忆 / Independently remembered shutdown ticket background
     uint8_t calendar_style; ///< 关机日历版式，独立记忆 / Independently remembered shutdown calendar face
+    uint8_t cover_crop; ///< 关机封面取景，独立于自定义图片 / Shutdown cover cropping, independent of custom images
     uint32_t image_id;  ///< 已保存像素身份 / Saved pixel identity
     char path[288];    ///< 原始图片路径，用于重新选择 / Original path for reselection
 } app_shutdown_wallpaper_t;
@@ -492,7 +496,8 @@ esp_err_t app_settings_backup_save(void);
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);
 
-/// 同页选择保存成功后才发布；壁纸样式的 option 是显示方式。/ Publish the inline selection only after saving; wallpaper style uses option for its fit mode.
+/// 同页选择保存成功后才发布；书籍封面的 option 为 0 完整显示、1 裁剪填满。
+/// Publish an inline selection only after saving; Book Cover uses option 0 to contain or 1 to crop.
 bool app_settings_select_lock(uint8_t style,const char *image,unsigned option);
 
 #ifdef __cplusplus

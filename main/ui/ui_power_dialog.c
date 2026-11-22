@@ -11,6 +11,7 @@
 #include "memory_manager.h"
 #include "book_ticket.h"
 #include "book_lock_collage.h"
+#include "book_lock_cover.h"
 #include "lock_calendar.h"
 #include <stdlib.h>
 #include <string.h>
@@ -188,6 +189,22 @@ void ui_power_final_draw(uint8_t *fb, bool restarting) {
     if (!restarting) ui_text(fb, cx, 624, 26, "长按电源键开机", EPD_DRAW_ALIGN_CENTER, false);
 }
 
+static void draw_shutdown_hint(uint8_t *fb) {
+    // 底部居中的小字签低于书籍数量的白描边。
+    // The compact bottom-center label sits below the book count outline.
+    const char *hint = "已关机 · 长按电源键开机";
+    const int px = 36, max_width = UI_LOCK_WIDTH - 32;
+    int width = ui_text_fixed_width_px(px, hint);
+    if (width > max_width) {
+        hint = "已关机";
+        width = ui_text_fixed_width_px(px, hint);
+    }
+    const int tag_width = width + 16;
+    EpdRect tag = {(UI_LOCK_WIDTH - tag_width) / 2, UI_LOCK_HEIGHT - 36, tag_width, 36};
+    epd_fill_rect(tag, 0xff, fb);
+    ui_text_fixed_vc(fb, tag.x+8, tag.y+tag.height/2, px, hint, EPD_DRAW_ALIGN_LEFT, false);
+}
+
 void ui_power_shutdown_prepare(uint8_t *fb) {
     const app_shutdown_wallpaper_t *value = app_settings_shutdown_wallpaper();
     if (value->style == APP_OFF_SYSTEM) { ui_power_final_draw(fb, false); return; }
@@ -195,6 +212,7 @@ void ui_power_shutdown_prepare(uint8_t *fb) {
     bool ok = false;
     if (value->style == APP_OFF_TICKET) ok = book_ticket_preview(fb, value->ticket_background == 1);
     else if (value->style == APP_OFF_COLLAGE) ok = book_lock_collage_prepare(fb);
+    else if (value->style == APP_OFF_BOOK_COVER) ok = book_lock_cover_draw(fb, value->cover_crop);
     else if (value->style == APP_OFF_CALENDAR) ok = lock_calendar_draw_variant(fb, value->calendar_style == 1);
     else if (value->style == APP_OFF_CUSTOM) {
         uint8_t *pixels = mm_alloc(MM_OWNER_FILE_JOB, MM_POOL_PSRAM, SHUTDOWN_ART_BYTES, 0, 0);
@@ -206,9 +224,5 @@ void ui_power_shutdown_prepare(uint8_t *fb) {
         mm_free(pixels);
     }
     if (!ok) { ui_power_final_draw(fb, false); return; }
-    if (value->show_hint) {
-        epd_fill_rect((EpdRect){132, 1080, 420, 100}, 255, fb);
-        ui_text(fb, 342, 1096, 27, "mogo 已关机", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text(fb, 342, 1140, 24, "长按电源键开机", EPD_DRAW_ALIGN_CENTER, false);
-    }
+    if (value->show_hint) draw_shutdown_hint(fb);
 }

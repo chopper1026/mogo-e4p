@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 关机提示改为底部居中的 36 px 单行提示，避开书架拼贴右下角的书籍数量。/ Show a 36 px single-line shutdown notice at the bottom center, clear of the shelf collage count.
+- 待机与关机壁纸新增「书籍封面」，显示当前或最后阅读的书的封面，可分别选择裁剪填满或完整显示，并在设置页预览。/ Show the current or last-read book cover on standby and shutdown wallpapers, with independent crop-to-fill and contain settings and live previews.
+
 ## v1.1.8 · 2026-11-22
 
 - CloudZao 暂未获取到绑定码时提示：若设备已绑定，先在 CloudZao App 或小程序解绑再试。/ If CloudZao cannot issue a pairing code, the device suggests unlinking it in the CloudZao app or mini-program if already linked.
