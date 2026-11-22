@@ -84,6 +84,29 @@ static bool extras_valid(zip_reader_t* z, uint32_t pos, uint16_t len) {
     return true;
 }
 
+// 兼容误把空目录的直存长度写成 2 的打包器；确认目录头后没有数据。
+// Some packagers write a stored size of 2 for an empty directory; verify that no data follows its header.
+static bool empty_directory_size_quirk(zip_reader_t *z, const zip_entry_t *entry, uint16_t name_len) {
+    if (entry->name[name_len - 1] != '/' || entry->unpacked || entry->packed != 2 ||
+        entry->crc || (entry->flags & 8)) return false;
+    uint8_t h[30];
+    if (!read_at(z, entry->offset, h, sizeof(h)) || u32(h) != UINT32_C(0x04034b50) ||
+        u16(h + 6) != entry->flags || u16(h + 8) != 0 || u32(h + 14) != 0 ||
+        u32(h + 18) != 2 || u32(h + 22) != 0 || u16(h + 26) != name_len) return false;
+    uint16_t extra_len = u16(h + 28);
+    uint32_t after_name = entry->offset + 30U + name_len;
+    if (after_name > z->directory || extra_len > z->directory - after_name ||
+        !extras_valid(z, after_name, extra_len)) return false;
+    for (size_t i = 0; i < name_len;) {
+        size_t n = name_len - i < sizeof(h) ? name_len - i : sizeof(h);
+        if (!read_at(z, entry->offset + 30U + (uint32_t)i, h, n) || memcmp(h, entry->name + i, n)) return false;
+        i += n;
+    }
+    uint32_t next = after_name + extra_len;
+    return next == z->directory || (z->directory - next >= sizeof(h) &&
+        read_at(z, next, h, 4) && u32(h) == UINT32_C(0x04034b50));
+}
+
 static uint32_t zip_crc32(const uint8_t* data, size_t len) {
     uint32_t crc = UINT32_MAX;
     while (len--) {
@@ -186,12 +209,13 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
         err = ESP_ERR_INVALID_SIZE;
         if (!name_len || name_len > NAME_MAX_BYTES || record_len > eocd_pos - pos ||
             entry->offset >= z->directory || z->directory - entry->offset < 30 ||
-            entry->packed > z->directory - entry->offset - 30 ||
-            (entry->method == 0 && entry->packed != entry->unpacked)) goto fail;
+            entry->packed > z->directory - entry->offset - 30) goto fail;
         entry->name = heap_caps_malloc((size_t)name_len + 1, PSRAM);
         if (!entry->name) { err = ESP_ERR_NO_MEM; goto fail; }
         if (!dir_read(z, pos + 46, entry->name, name_len) || memchr(entry->name, 0, name_len)) goto fail;
         entry->name[name_len] = 0;
+        if (entry->method == 0 && entry->packed != entry->unpacked &&
+            !empty_directory_size_quirk(z, entry, name_len)) goto fail;
         uint16_t slot = (uint16_t)(name_hash(entry->name) & z->slot_mask);
         while (z->slots[slot]) {
             if (!strcmp(entry->name, z->entries[z->slots[slot] - 1].name)) goto fail;
@@ -240,6 +264,8 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
 #endif
     if (!z || index < 0 || index >= z->count) return ESP_ERR_INVALID_ARG;
     const zip_entry_t* entry = &z->entries[index];
+    // 容错目录只用于索引，禁止提取其虚报的数据。/ Tolerated directories are index-only; never extract their claimed data.
+    if (entry->method == 0 && entry->packed != entry->unpacked) return ESP_ERR_INVALID_SIZE;
     if ((!prefix && (entry->unpacked > ZIP_OUTPUT_MAX || entry->packed > ZIP_INPUT_MAX)) ||
         (!prefix && cap < entry->unpacked) || (prefix && (!cap || cap > 65536)) || (!dst && entry->unpacked)) return ESP_ERR_INVALID_SIZE;
     uint8_t h[30];

@@ -27,6 +27,12 @@ int main(int argc, char** argv) {
     int index = zip_find(zip, argv[3]);
     assert(index >= 0);
     size_t size = zip_entry_size(zip, index);
+    if (!strcmp(argv[1], "reject-prefix")) {
+        unsigned char byte = 0xcc;
+        assert(zip_extract_prefix(zip, index, &byte, 1) != ESP_OK && byte == 0xcc);
+        zip_close(zip);
+        return 0;
+    }
     if (!strcmp(argv[1], "prefix")) {
         unsigned char bounded[257 + 16];
         memset(bounded, 0xcc, sizeof(bounded));

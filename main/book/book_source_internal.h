@@ -10,15 +10,23 @@
 #include <stdbool.h>
 #include <stdio.h>
 #define BOOK_CHAPTER_MAX 2048
+#define BOOK_TXT_NAV_MAX 4096
 #define BOOK_CHAPTER_BYTES_MAX (96 * 1024)
 typedef struct {
     uint32_t offset; ///< 原文件偏移 / Original file offset
     char title[128]; ///< UTF-8 标题，长标题按字符边界截断 / UTF-8 title, truncated at a character boundary
 } book_entry_t;
 typedef struct {
+    uint32_t part; ///< 存量排版分段 / Existing layout segment
+    uint32_t text_offset; ///< 分段内的 UTF-8 字节偏移 / UTF-8 byte offset within the segment
+    char title[128]; ///< 目录标题 / TOC title
+} book_txt_nav_t;
+typedef struct {
     FILE *file; ///< 文件句柄 / File handle
     book_entry_t *entries; ///< PSRAM 目录 / PSRAM index
-    size_t count; ///< 目录条数 / Entry count
+    size_t count; ///< 排版分段数 / Layout segment count
+    book_txt_nav_t *nav; ///< 仅 Part 回退时构建的逻辑目录 / Logical TOC built only for Part fallback
+    size_t nav_count, nav_capacity; ///< 逻辑目录条数及容量 / Logical TOC count and capacity
     uint32_t total; ///< 文件长度 / File length
     bool gbk; ///< GBK 编码 / GBK encoding
     uint32_t bom; ///< BOM 字节数 / BOM size

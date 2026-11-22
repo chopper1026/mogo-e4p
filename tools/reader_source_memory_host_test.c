@@ -66,7 +66,7 @@ static void closed(void) {
     assert(!capacity(s)&&!s.open_files&&!live);
 }
 int main(int argc,char **argv) {
-    assert(argc==5);closed();assert(!queries);
+    assert(argc==6);closed();assert(!queries);
     for(unsigned round=0;round<20;++round)for(int book=1;book<=4;++book) {
         assert(book_open(argv[book])==ESP_OK);
         reader_source_memory_stats_t before=snapshot();
@@ -99,6 +99,22 @@ int main(int argc,char **argv) {
         closed();
     }
     }
+    // 目录分配失败必须丢弃不完整的索引，原分段仍能读。/ A failed TOC allocation drops the partial index and keeps Parts readable.
+    calls=0;assert(book_open(argv[5])==ESP_OK && book_navigation_count()==80);
+    size_t txt_open_calls=calls;assert(capacity(snapshot())==live);closed();
+    size_t optional_failures=0;
+    for(size_t i=0;i<txt_open_calls;++i) {
+        calls=0;fail_at=(long)i;esp_err_t error=book_open(argv[5]);fail_at=-1;
+        if(error==ESP_OK) {
+            ++optional_failures;
+            assert(book_navigation_count()==book_chapter_count() && book_chapter_count()==1);
+            assert(capacity(snapshot())==live);
+            html_text_t part={0};assert(book_chapter_load_blocks(0,&part)==ESP_OK);
+            assert(part.len>0);html_text_free(&part);
+        } else assert(error==ESP_ERR_NO_MEM);
+        closed();
+    }
+    assert(optional_failures>=2);failures+=txt_open_calls;
     assert(book_open(argv[4])==ESP_OK);
     calls=0;html_text_t text={0};assert(book_chapter_load_blocks(1,&text)==ESP_OK);
     size_t load_calls=calls;html_text_free(&text);

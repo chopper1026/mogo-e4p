@@ -29,13 +29,17 @@ void book_close(void);
 void book_set_embedded_fonts(bool on);
 /// 返回章节数。/ Return the chapter count.
 size_t book_chapter_count(void);
-/// 目录映射到原书源章节：EPUB 为 spine，MOBI 为固定分段，TXT 为源章节。
-/// Navigation maps to source chapters: EPUB spine entries, fixed MOBI segments, or TXT chapters.
+/// 目录映射到原书源章节：EPUB 为 spine，MOBI 为固定分段，TXT 为原有章节或 Part。
+/// Navigation maps to source chapters: EPUB spine entries, fixed MOBI segments, or original TXT chapters/parts.
 size_t book_navigation_count(void);
 size_t book_navigation_chapter(size_t position);
 esp_err_t book_navigation_title(size_t position, char *buf, size_t cap);
 const char *book_navigation_anchor(size_t position);
+/// 目录目标偏移；TXT 的逻辑目录返回 Part 内 UTF-8 偏移。/ TOC target offset; logical TXT entries use UTF-8 bytes within a Part.
 size_t book_navigation_source_offset(size_t position);
+/// 有独立 TXT 目录时返回 true；首个题头前将 position 设为 SIZE_MAX。
+/// Return true for independent TXT navigation; set position to SIZE_MAX before the first heading.
+bool book_navigation_txt_position(size_t chapter, size_t text_offset, size_t *position);
 /// 复制 UTF-8 标题，空间不足返回错误。/ Copy a UTF-8 title, failing if capacity is insufficient.
 esp_err_t book_chapter_title(size_t i, char *buf, size_t cap);
 /// 复制该章在容器里的文件名（不含目录）；用于判断正文链接是否指向本章。

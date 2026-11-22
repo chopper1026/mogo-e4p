@@ -111,8 +111,74 @@ static void txt_heading_regressions(void) {
     write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
     assert(book_open(path) == ESP_OK && book_chapter_count() == 2); book_close();
 }
+// 长书目录与续读分段分开验证。/ Check the long-book TOC independently of resume segments.
+static void txt_long_toc_regressions(void) {
+    FILE *f = fopen(path, "wb"); assert(f);
+    const char *preface = "\xef\xbb\xbf书前说明\r\n";
+    assert(fputs(preface, f) >= 0);
+    size_t legacy[16] = {0}, parts = 1;
+    size_t expected_part[2200], expected_text[2200];
+    for (size_t i = 0; i < 2200; ++i) {
+        size_t start = (size_t)ftell(f);
+        expected_part[i] = parts - 1;
+        expected_text[i] = start - (parts == 1 ? 3 : legacy[parts - 1]);
+        for (size_t row = 0; row < 3; ++row) {
+            if (row == 2) fprintf(f, "正文：飞流直下三千尺。\r\n");
+            else if (i >= 2149) fprintf(f, "  %zu. 第%zu章 测试\r\n", i + 3, i + 1);
+            else fprintf(f, "第%zu章 测试\r\n", i + 1);
+            size_t end = (size_t)ftell(f);
+            if (end - legacy[parts - 1] >= 48 * 1024 && !(i == 2199 && row == 2)) {
+                assert(parts < sizeof(legacy) / sizeof(legacy[0]));
+                legacy[parts++] = end;
+            }
+        }
+    }
+    assert(!fclose(f)); assert(book_open(path) == ESP_OK);
+    assert(parts > 1 && book_chapter_count() == parts && book_navigation_count() == 2200);
+    for (size_t i = 0; i < parts; ++i) assert(book_chapter_byte_offset(i) == legacy[i]);
+    size_t selected;
+    assert(book_navigation_txt_position(0, 0, &selected) && selected == SIZE_MAX);
+    for (size_t i = 0; i < 2200; ++i) {
+        char title[128], expected[128]; snprintf(expected, sizeof(expected), "第%zu章 测试", i + 1);
+        assert(book_navigation_title(i, title, sizeof(title)) == ESP_OK && !strcmp(title, expected));
+        size_t part = book_navigation_chapter(i), offset = book_navigation_source_offset(i);
+        assert(part == expected_part[i] && offset == expected_text[i]);
+        assert(book_navigation_txt_position(part, offset, &selected) && selected == i);
+        if (offset && i) assert(book_navigation_txt_position(part, offset - 1, &selected) && selected == i - 1);
+        if (i == 0 || i == 2149 || i == 2199) {
+            html_text_t text = {0}; size_t target = SIZE_MAX;
+            assert(book_chapter_load_blocks_target(part, NULL, offset, &target, &text) == ESP_OK);
+            const char *heading = strstr(text.utf8 + target, expected);
+            const char *newline = strchr(text.utf8 + target, '\n');
+            assert(target == offset && heading && newline && heading < newline);
+            html_text_free(&text);
+        }
+    }
+    book_close();
+
+    // GBK 的目录目标必须使用转码后的字节数，不可直接沿用原文件偏移。
+    // GBK targets must use converted byte counts, not offsets from the original file.
+    const char *gbk = "\xd6\xd0\xce\xc4\r\n8.\xb5\xda" "1\xd5\xc2" "\r\n"
+                      "\xd6\xd0\xce\xc4\r\n9.\xb5\xda" "2\xd5\xc2";
+    write_bytes(gbk, strlen(gbk)); assert(book_open(path) == ESP_OK);
+    assert(book_chapter_count() == 1 && book_navigation_count() == 2);
+    html_text_t text = {0}; size_t target;
+    assert(book_navigation_source_offset(1) == strlen("中文\r\n8.第1章\r\n中文\r\n"));
+    assert(book_chapter_load_blocks_target(0, NULL, book_navigation_source_offset(1), &target, &text) == ESP_OK);
+    assert(!strcmp(text.utf8 + target, "9.第2章")); html_text_free(&text);
+    assert(book_chapter_load_blocks_target(0, NULL, target + 3, &target, &text) == ESP_ERR_INVALID_SIZE);
+    book_close();
+
+    const char *list = "列表\n1. 准备\n2. 开始\n3. 结束";
+    write_bytes(list, strlen(list)); assert(book_open(path) == ESP_OK);
+    char title[128];
+    assert(book_navigation_count() == 1 && !book_navigation_txt_position(0, 0, &selected));
+    assert(book_navigation_title(0, title, sizeof(title)) == ESP_OK && !strcmp(title, "Part 1"));
+    book_close();
+}
 int main(int argc, char **argv) {
     txt_heading_regressions();
+    txt_long_toc_regressions();
     const char *s = "Chapter 1 Start\nhello\nChapter 2 End\nworld\n";
     write_bytes(s, strlen(s)); assert(book_open(path) == ESP_OK);
     assert(book_chapter_count() == 2); char title[256];
@@ -142,9 +208,6 @@ int main(int argc, char **argv) {
     write_bytes(large, 65538); assert(book_open(path) == ESP_OK);
     assert(book_chapter_load(0, &out, &len) == ESP_OK); assert(len == 65539);
     assert(!memcmp(out + 65535, "中\n", 4)); free(out); free(large); book_close();
-    FILE *f = fopen(path, "wb"); assert(f);
-    for (size_t i = 0; i < 2200; ++i) fprintf(f, "Chapter %zu\nbody\n", i);
-    fclose(f); assert(book_open(path) == ESP_OK); assert(book_chapter_count() <= 2048); book_close();
     s = "preface\nChapter 1\nbody\nChapter 2\nend";
     write_bytes(s, strlen(s)); roundtrip(s, strlen(s));
     write_bytes("", 0); assert(book_open(path) == ESP_OK); assert(book_chapter_count() == 1); book_close();

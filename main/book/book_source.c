@@ -38,29 +38,51 @@ void book_close(void) {
     book_epub_close(s_epub); s_epub = NULL;
     book_mobi_close(s_mobi); s_mobi = NULL;
     if (s_book.file) fclose(s_book.file);
-    free(s_book.entries); memset(&s_book, 0, sizeof(s_book));
+    free(s_book.entries); free(s_book.nav); memset(&s_book, 0, sizeof(s_book));
 }
 void book_set_embedded_fonts(bool on) {
     if (s_epub) book_epub_set_fonts_enabled(s_epub, on);
 }
 size_t book_chapter_count(void) { return s_mobi ? book_mobi_chapter_count(s_mobi) : s_epub ? book_epub_chapter_count(s_epub) : s_book.count; }
-size_t book_navigation_count(void) { return s_mobi ? book_mobi_navigation_count(s_mobi) : s_epub ? book_epub_navigation_count(s_epub) : s_book.count; }
+size_t book_navigation_count(void) {
+    return s_mobi ? book_mobi_navigation_count(s_mobi) : s_epub ? book_epub_navigation_count(s_epub) :
+        s_book.nav_count ? s_book.nav_count : s_book.count;
+}
 size_t book_navigation_chapter(size_t position) {
     if (s_mobi) return book_mobi_navigation_chapter(s_mobi, position);
-    return s_epub ? book_epub_navigation_chapter(s_epub, position) :
-                    position < s_book.count ? position : SIZE_MAX;
+    if (s_epub) return book_epub_navigation_chapter(s_epub, position);
+    if (s_book.nav_count) return position < s_book.nav_count ? s_book.nav[position].part : SIZE_MAX;
+    return position < s_book.count ? position : SIZE_MAX;
 }
 esp_err_t book_navigation_title(size_t position, char *buf, size_t cap) {
     if (s_mobi) return book_mobi_navigation_title(s_mobi, position, buf, cap);
     if (s_epub) return book_epub_navigation_title(s_epub, position, buf, cap);
-    return book_chapter_title(position, buf, cap);
+    if (!s_book.nav_count) return book_chapter_title(position, buf, cap);
+    if (!buf || !cap || position >= s_book.nav_count) return ESP_ERR_INVALID_ARG;
+    const char *title = s_book.nav[position].title;
+    size_t n = strlen(title);
+    if (n >= cap) { buf[0] = 0; return ESP_ERR_INVALID_SIZE; }
+    memcpy(buf, title, n + 1); return ESP_OK;
 }
 const char *book_navigation_anchor(size_t position) {
     return s_epub ? book_epub_navigation_anchor(s_epub, position) : NULL;
 }
 size_t book_navigation_source_offset(size_t position) {
     if (s_mobi) return book_mobi_navigation_source_offset(s_mobi, position);
-    return s_epub ? book_epub_navigation_source_offset(s_epub, position) : SIZE_MAX;
+    if (s_epub) return book_epub_navigation_source_offset(s_epub, position);
+    return position < s_book.nav_count ? s_book.nav[position].text_offset : SIZE_MAX;
+}
+bool book_navigation_txt_position(size_t chapter, size_t text_offset, size_t *position) {
+    if (!s_book.nav_count) return false;
+    size_t lo = 0, hi = s_book.nav_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        const book_txt_nav_t *e = &s_book.nav[mid];
+        if (e->part < chapter || (e->part == chapter && e->text_offset <= text_offset)) lo = mid + 1;
+        else hi = mid;
+    }
+    *position = lo ? lo - 1 : SIZE_MAX;
+    return true;
 }
 esp_err_t book_chapter_title(size_t i, char *buf, size_t cap) {
     if (s_mobi) return book_mobi_chapter_title(s_mobi, i, buf, cap);
@@ -109,7 +131,16 @@ esp_err_t book_chapter_load_blocks_target(size_t i, const char *anchor,
     if (text_offset) *text_offset = 0;
     if (s_mobi) return book_mobi_load_target(s_mobi, i, anchor, source_offset, text_offset, out);
     if (s_epub) return book_epub_load_target(s_epub, i, anchor, source_offset, text_offset, out);
-    return book_chapter_load_blocks(i, out);
+    esp_err_t err = book_chapter_load_blocks(i, out);
+    // TXT 目录目标已是 UTF-8 字节偏移；不把它当成原文件字节再次转码。
+    // TXT navigation targets already use UTF-8 offsets; do not interpret them as source bytes.
+    if (err == ESP_OK && s_book.nav_count && source_offset != SIZE_MAX) {
+        if (source_offset >= out->len || ((unsigned char)out->utf8[source_offset] & 0xc0) == 0x80) {
+            html_text_free(out); return ESP_ERR_INVALID_SIZE;
+        }
+        if (text_offset) *text_offset = source_offset;
+    }
+    return err;
 }
 uint32_t book_total_bytes(void) { return s_mobi ? book_mobi_total_bytes(s_mobi) : s_epub ? book_epub_total_bytes(s_epub) : s_book.total; }
 uint32_t book_chapter_byte_offset(size_t i) {
@@ -130,7 +161,7 @@ esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigne
 #if CONFIG_READER_PERF && CONFIG_READER_MEMORY
 void book_source_memory_stats(reader_source_memory_stats_t *stats) {
     *stats = (reader_source_memory_stats_t){0};
-    stats->txt_index = reader_memory_owned(s_book.entries);
+    stats->txt_index = reader_memory_owned(s_book.entries) + reader_memory_owned(s_book.nav);
     stats->open_files = s_book.file != NULL;
     book_epub_memory_stats(s_epub, stats);
     book_mobi_memory_stats(s_mobi, stats);

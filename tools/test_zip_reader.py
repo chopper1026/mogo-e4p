@@ -14,6 +14,25 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def stored_size_offsets(data, name):
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        pos = archive.start_dir
+        for info in archive.infolist():
+            assert data[pos:pos + 4] == b"PK\x01\x02"
+            if info.filename == name:
+                assert info.compress_type == zipfile.ZIP_STORED
+                return info.header_offset + 18, pos + 20
+            pos += 46 + sum(struct.unpack_from("<3H", data, pos + 28))
+    raise ValueError(name)
+
+
+def empty_stored_size_quirk(data, name):
+    data = bytearray(data)
+    for offset in stored_size_offsets(data, name):
+        struct.pack_into("<I", data, offset, 2)
+    return data
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="zip-reader-") as temp:
         work = Path(temp)
@@ -85,6 +104,37 @@ def main():
         for offset, fmt, value in ((0, "<I", 0), (8, "<H", 0), (26, "<H", 500),
                                    (28, "<H", 65535), (14, "<I", 0), (30, "<B", 33)):
             run("reject-extract", changed(offset, fmt, value))
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("dir/", b"")
+            z.writestr("empty.txt", b"")
+            z.writestr("entry.txt", payload)
+            z.writestr("last/", b"")
+        original = buffer.getvalue()
+        patched = empty_stored_size_quirk(empty_stored_size_quirk(original, "dir/"), "last/")
+        run("read", original, name="dir/", expected=b"")
+        run("read", patched, expected=payload)
+        for name in ("dir/", "last/"):
+            run("reject-extract", patched, name=name)
+            run("reject-prefix", patched, name=name)
+        run("reject-open", empty_stored_size_quirk(original, "empty.txt"))
+        local, central = stored_size_offsets(original, "dir/")
+        for offset, value in ((local, 0), (central, 3), (central + 4, 1), (central - 4, 1)):
+            invalid = bytearray(patched)
+            struct.pack_into("<I", invalid, offset, value)
+            run("reject-open", invalid)
+        wrong_local_name = bytearray(patched)
+        wrong_local_name[local + 12] = ord("x")
+        run("reject-open", wrong_local_name)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("dir/", b"xx")
+            z.writestr("entry.txt", payload)
+        data = bytearray(buffer.getvalue())
+        local, central = stored_size_offsets(data, "dir/")
+        for offset in (local, central):
+            struct.pack_into("<III", data, offset - 4, 0, 2, 0)
+        run("reject-open", data)
         damaged = bytearray(good)
         damaged[40] ^= 0xff
         run("reject-extract", damaged)

@@ -51,6 +51,9 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strstr(argv[a], "good_bounded_cover")) {
+            html_text_t text = {0};
+            assert(book_epub_load(book, 0, &text) == ESP_OK && text.len > 0);
+            html_text_free(&text);
             book_epub_close(book);
             uint8_t *cover = NULL; size_t size = 0; bool png = false;
             for (size_t budget = 0; budget < 128; budget += 127) {

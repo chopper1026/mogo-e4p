@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  * 中文：流式 TXT 编码识别、目录与按章转码。
  * English: Streaming TXT encoding detection, indexing and chapter conversion.
- * 冻结：原始偏移用于进度；目录上限 2048；不加载整本书。
- * Frozen: Progress uses source offsets; at most 2048 entries; never load the whole book.
+ * 冻结：原始偏移用于进度；排版分段上限 2048；长书可另建最多 4096 项目录；不加载整本书。
+ * Frozen: Keep source offsets and at most 2048 layout segments. Long books may add up to
+ * 4096 independent TOC entries; never load the whole book.
  */
 #include "../diagnostics/reader_perf.h"
 #include "book_source_internal.h"
@@ -19,13 +20,14 @@
 #define READ_BLOCK (64 * 1024)
 #define PART_TARGET (48 * 1024)
 #define HEADING_LINE_BYTES 256
-#define TXT_CACHE_VERSION 2u
+#define TXT_CACHE_VERSION 3u
 typedef struct {
     uint32_t total;
     uint32_t bom;
     uint32_t count;
     uint8_t gbk;
     uint8_t reserved[3];
+    uint32_t nav_count;
 } txt_cache_payload_t;
 typedef struct {
     FILE *file; ///< 只读句柄 / Read-only handle
@@ -133,18 +135,20 @@ static bool heading(const char *s, char key[HEADING_LINE_BYTES + 1]) {
     key[used] = 0;
     return boundary || chapter;
 }
+static void copy_title(char *dst, size_t cap, const char *title) {
+    size_t used = 0, bytes = strlen(title);
+    while (used < bytes) {
+        uint32_t cp;
+        size_t n = utf8_one((const unsigned char *)title + used, bytes - used, &cp);
+        if (used + n >= cap) break;
+        used += n;
+    }
+    memcpy(dst, title, used); dst[used] = 0;
+}
 static bool add(book_txt_t *b, uint32_t offset, const char *title) {
     if (b->count == BOOK_CHAPTER_MAX) return false;
     book_entry_t *e = &b->entries[b->count++]; e->offset = offset;
-    if (title) {
-        size_t used = 0, bytes = strlen(title);
-        while (used < bytes) {
-            uint32_t cp; size_t n = utf8_one((const unsigned char *)title + used, bytes - used, &cp);
-            if (used + n >= sizeof(e->title)) break;
-            used += n;
-        }
-        memcpy(e->title, title, used); e->title[used] = 0;
-    }
+    if (title) copy_title(e->title, sizeof(e->title), title);
     else snprintf(e->title, sizeof(e->title), "Part %u", (unsigned)b->count);
     return true;
 }
@@ -152,73 +156,146 @@ typedef struct {
     char key[HEADING_LINE_BYTES + 1]; ///< 上个题头的编号序列 / Previous heading's numbered markers
     bool before_body; ///< 尚未遇到正文 / No body text encountered yet
 } heading_state_t;
+typedef struct {
+    char text[HEADING_LINE_BYTES + 1];
+    size_t len;
+    bool overflow;
+} heading_line_t;
 
-static bool index_line(book_txt_t *b, uint32_t start, char *line, bool overflow, heading_state_t *state) {
+static void append_heading_char(heading_line_t *line, uint32_t cp) {
+    if (line->overflow) return;
+    // 缩进不占题头预算，内部空白折成一个空格；原文件与偏移不变。
+    // Indentation uses no heading budget; fold internal whitespace while preserving source offsets.
+    if (cp == ' ' || cp == '\t' || cp == 0x3000 || cp == 0xa0) {
+        if (!line->len || line->text[line->len - 1] == ' ') return;
+        cp = ' ';
+    }
+    char bytes[4]; size_t n = encode(cp, bytes);
+    if (line->len + n <= HEADING_LINE_BYTES) {
+        memcpy(line->text + line->len, bytes, n); line->len += n; line->text[line->len] = 0;
+    } else line->overflow = true;
+}
+static void clear_heading_line(heading_line_t *line) {
+    line->len = 0; line->text[0] = 0; line->overflow = false;
+}
+
+// 只剥离“序号.第N章”中的外层序号；普通编号列表不是章节。
+// Strip the outer list number from “N.第N章” only; ordinary numbered lists are not chapters.
+static const char *skip_outer_number(const char *line) {
+    size_t digits = strspn(line, "0123456789");
+    if (!digits || digits > 6 || line[digits] != '.') return line;
+    const char *inner = line + digits + 1;
+    if (*inner == ' ') ++inner;
+    uint32_t unit;
+    return heading_marker(inner, &unit) && unit == 0x7ae0 ? inner : line;
+}
+
+static const char *distinct_heading(heading_line_t *line, heading_state_t *state, bool outer_number) {
     char key[HEADING_LINE_BYTES + 1];
-    size_t len = strlen(line);
-    if (len && line[len - 1] == ' ') line[len - 1] = 0;
-    if (!overflow && heading(line, key)) {
-        if (state->before_body) {
-            if (!strcmp(key, state->key)) return true;
-            // 重复题头可省略篇卷前缀；两边都带前缀时仍须区分篇卷。
-            // Repeated headings may omit a volume prefix; retain distinct volumes when both specify one.
-            const char *last = strstr(key, "第"), *previous = strstr(state->key, "第");
-            if (last && previous) {
-                const char *next;
-                while ((next = strstr(last + 3, "第"))) last = next;
-                while ((next = strstr(previous + 3, "第"))) previous = next;
-                if ((last == key || previous == state->key) && !strcmp(last, previous)) return true;
-            }
+    if (line->len && line->text[line->len - 1] == ' ') line->text[line->len - 1] = 0;
+    const char *text = outer_number ? skip_outer_number(line->text) : line->text;
+    if (line->overflow || !heading(text, key)) {
+        if (line->overflow || *text) state->before_body = false;
+        return NULL;
+    }
+    if (state->before_body) {
+        if (!strcmp(key, state->key)) return NULL;
+        // 重复题头可省略篇卷前缀；两边都带前缀时仍须区分篇卷。
+        // Repeated headings may omit a volume prefix; retain distinct volumes when both specify one.
+        const char *last = strstr(key, "第"), *previous = strstr(state->key, "第");
+        if (last && previous) {
+            const char *next;
+            while ((next = strstr(last + 3, "第"))) last = next;
+            while ((next = strstr(previous + 3, "第"))) previous = next;
+            if ((last == key || previous == state->key) && !strcmp(last, previous)) return NULL;
         }
-        if (!add(b, start, line)) return false;
-        strcpy(state->key, key); state->before_body = true;
-    } else if (overflow || *line) state->before_body = false;
+    }
+    strcpy(state->key, key); state->before_body = true;
+    return text;
+}
+
+static void clear_navigation(book_txt_t *b) {
+    free(b->nav); b->nav = NULL; b->nav_count = b->nav_capacity = 0;
+}
+static bool reserve_navigation(book_txt_t *b, size_t capacity) {
+    if (capacity <= b->nav_capacity) return true;
+    book_txt_nav_t *nav = heap_caps_realloc(b->nav, capacity * sizeof(*nav), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!nav) return false;
+    b->nav = nav; b->nav_capacity = capacity;
     return true;
 }
-static esp_err_t index_book(reader_t *r, book_txt_t *b) {
+static esp_err_t add_navigation(book_txt_t *b, uint32_t part, uint32_t text_offset, const char *title) {
+    if (b->nav_count == BOOK_TXT_NAV_MAX) return ESP_ERR_INVALID_SIZE;
+    if (b->nav_count == b->nav_capacity && !reserve_navigation(b, b->nav_capacity ? b->nav_capacity * 2 : 64))
+        return ESP_ERR_NO_MEM;
+    book_txt_nav_t *entry = &b->nav[b->nav_count++];
+    *entry = (book_txt_nav_t){.part = part, .text_offset = text_offset};
+    copy_title(entry->title, sizeof(entry->title), title);
+    return ESP_OK;
+}
+
+static esp_err_t index_parts(reader_t *r, book_txt_t *b, bool *cacheable) {
+    b->count = 0; add(b, 0, NULL);
     esp_err_t err = reset(r, b, b->bom); if (err) return err;
-    char line[HEADING_LINE_BYTES + 1] = {0}; size_t len = 0;
-    bool overflow = false, too_many = false, cr = false;
-    heading_state_t state = {0};
+    heading_line_t line = {0}; heading_state_t state = {0};
+    bool cr = false;
+    esp_err_t nav_err = ESP_OK;
+    uint32_t part = 0, part_text = 0, line_part = 0, line_text = 0, cp;
+    while (next(r, &cp)) {
+        bool followed_cr = cp == '\n' && cr;
+        cr = cp == '\r';
+        if (!nav_err && !followed_cr) {
+            if (cp == '\n' || cr) {
+                const char *title = distinct_heading(&line, &state, true);
+                if (title) nav_err = add_navigation(b, line_part, line_text, title);
+                clear_heading_line(&line);
+            } else append_heading_char(&line, cp);
+        }
+        // 与旧版 Part 切分完全一致，书签及续读记录无需重映射。
+        // Keep the legacy Part boundaries so bookmarks and resume data need no remapping.
+        uint32_t size = r->offset - part;
+        if (r->offset < b->total && ((size >= PART_TARGET && cp == '\n') || size >= BOOK_CHAPTER_BYTES_MAX - 4)) {
+            if (!add(b, r->offset, NULL)) return ESP_ERR_INVALID_SIZE;
+            part = r->offset; part_text = 0;
+        } else if (!nav_err) {
+            char bytes[4]; part_text += (uint32_t)encode(cp, bytes);
+        }
+        if (cr || cp == '\n') { line_part = (uint32_t)b->count - 1; line_text = part_text; }
+    }
+    if (ferror(b->file)) return ESP_FAIL;
+    if (!nav_err) {
+        const char *title = distinct_heading(&line, &state, true);
+        if (title) nav_err = add_navigation(b, line_part, line_text, title);
+    }
+    if (nav_err || b->nav_count < 2) clear_navigation(b);
+    if (nav_err == ESP_ERR_NO_MEM) *cacheable = false;
+    return ESP_OK;
+}
+
+static esp_err_t index_book(reader_t *r, book_txt_t *b, bool *cacheable) {
+    esp_err_t err = reset(r, b, b->bom); if (err) return err;
+    heading_line_t line = {0}; heading_state_t state = {0};
+    bool cr = false;
     uint32_t start = b->bom, cp;
     while (next(r, &cp)) {
         if (cp == '\n' && cr) { start = r->offset; cr = false; continue; }
         cr = cp == '\r';
         if (cp == '\n' || cr) {
-            if (!index_line(b, start, line, overflow, &state)) too_many = true;
-            start = r->offset; len = 0; line[0] = 0; overflow = false;
-        } else {
-            // 缩进不占题头预算，内部空白折成一个空格；原文件与偏移不变。
-            // Indentation uses no heading budget; fold internal whitespace while preserving source offsets.
-            if (cp == ' ' || cp == '\t' || cp == 0x3000 || cp == 0xa0) {
-                if (!len || line[len - 1] == ' ') continue;
-                cp = ' ';
-            }
-            char bytes[4]; size_t n = encode(cp, bytes);
-            if (len + n <= HEADING_LINE_BYTES && !overflow) { memcpy(line + len, bytes, n); len += n; line[len] = 0; }
-            else overflow = true;
-        }
+            const char *title = distinct_heading(&line, &state, false);
+            if (title && !add(b, start, title)) return index_parts(r, b, cacheable);
+            start = r->offset; clear_heading_line(&line);
+        } else append_heading_char(&line, cp);
     }
     if (ferror(b->file)) return ESP_FAIL;
-    if (!index_line(b, start, line, overflow, &state)) too_many = true;
-    bool fallback = !b->count || too_many;
+    const char *title = distinct_heading(&line, &state, false);
+    if (title && !add(b, start, title)) return index_parts(r, b, cacheable);
+    bool fallback = !b->count;
     if (b->count) b->entries[0].offset = 0;
     for (size_t i = 0; i < b->count; ++i) {
         uint32_t end = i + 1 < b->count ? b->entries[i + 1].offset : b->total;
         if (end - b->entries[i].offset > BOOK_CHAPTER_BYTES_MAX) fallback = true;
     }
-    if (!fallback) return ESP_OK;
-    b->count = 0; add(b, 0, NULL); err = reset(r, b, b->bom); if (err) return err;
-    uint32_t part = 0;
-    while (next(r, &cp)) {
-        uint32_t size = r->offset - part;
-        // 目标后首个换行切段；无换行时在硬上限前按字符切。/ Split at the first newline after the target, or before the hard cap at a character boundary.
-        if (r->offset < b->total && ((size >= PART_TARGET && cp == '\n') || size >= BOOK_CHAPTER_BYTES_MAX - 4)) {
-            if (!add(b, r->offset, NULL)) return ESP_ERR_INVALID_SIZE;
-            part = r->offset;
-        }
-    }
-    return ferror(b->file) ? ESP_FAIL : ESP_OK;
+    return fallback ? index_parts(r, b, cacheable) : ESP_OK;
 }
 
 static bool txt_cache_load(const char* source, book_txt_t* b) {
@@ -226,11 +303,14 @@ static bool txt_cache_load(const char* source, book_txt_t* b) {
     if (!book_index_cache_prepare(source, "txt", TXT_CACHE_VERSION, path, sizeof(path), &key)) return false;
     FILE* cache = book_index_cache_open_read(path, &key);
     if (!cache) return false;
-    txt_cache_payload_t payload;
+    txt_cache_payload_t payload = {0};
     bool ok = fread(&payload, 1, sizeof(payload), cache) == sizeof(payload) &&
         payload.total == b->total && payload.bom <= 3 && payload.bom <= payload.total &&
         payload.count > 0 && payload.count <= BOOK_CHAPTER_MAX && payload.gbk <= 1 &&
+        payload.nav_count <= BOOK_TXT_NAV_MAX && payload.nav_count != 1 &&
         fread(b->entries, sizeof(b->entries[0]), payload.count, cache) == payload.count &&
+        (!payload.nav_count || (reserve_navigation(b, payload.nav_count) &&
+            fread(b->nav, sizeof(b->nav[0]), payload.nav_count, cache) == payload.nav_count)) &&
         fgetc(cache) == EOF;
     fclose(cache);
     uint32_t previous = 0;
@@ -240,8 +320,19 @@ static bool txt_cache_load(const char* source, book_txt_t* b) {
             memchr(entry->title, 0, sizeof(entry->title)) != NULL;
         previous = entry->offset;
     }
-    if (!ok) return false;
-    b->bom = payload.bom; b->gbk = payload.gbk != 0; b->count = payload.count;
+    for (size_t i = 0; ok && i < payload.nav_count; ++i) {
+        const book_txt_nav_t *entry = &b->nav[i];
+        if (entry->part >= payload.count || !entry->title[0] ||
+            !memchr(entry->title, 0, sizeof(entry->title))) { ok = false; break; }
+        uint32_t start = b->entries[entry->part].offset;
+        uint32_t end = entry->part + 1 < payload.count ? b->entries[entry->part + 1].offset : b->total;
+        ok = entry->text_offset < (uint64_t)(end - start) * 3 &&
+            (!i || b->nav[i - 1].part < entry->part || (b->nav[i - 1].part == entry->part &&
+                b->nav[i - 1].text_offset < entry->text_offset));
+    }
+    if (!ok) { clear_navigation(b); return false; }
+    b->bom = payload.bom; b->gbk = payload.gbk != 0;
+    b->count = payload.count; b->nav_count = payload.nav_count;
     return true;
 }
 
@@ -252,9 +343,11 @@ static void txt_cache_save(const char* source, const book_txt_t* b) {
     if (!cache) return;
     txt_cache_payload_t payload = {
         .total = b->total, .bom = b->bom, .count = (uint32_t)b->count, .gbk = b->gbk,
+        .nav_count = (uint32_t)b->nav_count,
     };
     bool ok = fwrite(&payload, 1, sizeof(payload), cache) == sizeof(payload) &&
-        fwrite(b->entries, sizeof(b->entries[0]), b->count, cache) == b->count;
+        fwrite(b->entries, sizeof(b->entries[0]), b->count, cache) == b->count &&
+        (!b->nav_count || fwrite(b->nav, sizeof(b->nav[0]), b->nav_count, cache) == b->nav_count);
     (void)book_index_cache_finish_write(cache, temp, path, ok);
 }
 
@@ -279,8 +372,9 @@ esp_err_t book_txt_open(book_txt_t *b, const char *path) {
             if (k == 1 && r->bytes[i] >= 0x80) { b->gbk = true; break; } i += k;
         }
     }
-    if (!err) err = index_book(r, b);
-    if (!err) txt_cache_save(path, b);
+    bool cacheable = true;
+    if (!err) err = index_book(r, b, &cacheable);
+    if (!err && cacheable) txt_cache_save(path, b);
     free(r); return err;
 }
 esp_err_t book_txt_load(book_txt_t *b, size_t i, char **utf8, size_t *len) {

@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复部分长篇 TXT 目录只显示 Part 的问题：使用原文章号和标题，保留旧有续读与书签位置。/ Restore original chapter numbers and titles in affected long TXT books without changing existing resume or bookmark positions.
+- 阅读页眉和页脚的「章节名」在原书只有章号时直接显示原章号，不再显示「未命名章节」。/ Header and footer chapter slots show the original chapter number when there is no separate title.
+- 修复部分 EPUB 因空目录大小记录错误而无法打开、封面不显示的问题；开书失败改用带「确定」的居中弹框。/ Tolerate a specific empty-directory size error in EPUBs so affected books and covers open. Book-open failures now use a centered dialog with an OK button.
 - 修复 CloudZao 在手机解绑后仍显示「授权可用」的问题；设备设置页点「检查授权」即可联网验证并申请新的绑定码，无需先获取推送列表。/ Fix stale CloudZao authorization after unlinking on the phone. Check Authorization verifies online and requests a new pairing code without opening the transfer list.
 - CloudZao 授权刷新中断时显示明确状态，只有手动选择「重新绑定」才申请新码，不再把刷新中断当作未绑定。/ Show interrupted CloudZao token refresh separately from an unpaired device; request a new code only when Re-pair is selected.
 - 关机提示改为底部居中的 36 px 单行提示，避开书架拼贴右下角的书籍数量。/ Show a 36 px single-line shutdown notice at the bottom center, clear of the shelf collage count.

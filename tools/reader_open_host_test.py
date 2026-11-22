@@ -78,6 +78,7 @@ static const char *background_path = "";
 void display_orientation_set(display_orientation_t value){display_orientation=value;}
 void book_layout_set_image_bleed_width(int width){assert(width>=0);image_bleed_width=(unsigned)width;}
 static const char *app_settings_book_background_path(void){return background_path;}
+static char s_open_error[128];
 static char s_message[256],s_latest_path[BOOK_STORE_PATH_MAX],s_reader_notice[128];
 static char s_chapter_heading_title[128],s_chapter_heading_label[32];
 static bool s_reader_return_home,s_book_fonts_applied;
@@ -199,13 +200,15 @@ static void save_progress(void){event('S');if(!*s_reader_session.book.path)retur
 CASES = r'''
 static bool open_checked(app_ctx_t *ctx,const char *path){
     unsigned before=journal_records, excerpts=excerpt_begins;bool opened=open_book(ctx,path);
-    assert(journal_records-before==(unsigned)opened&&excerpt_begins-excerpts==(unsigned)opened);return opened;
+    assert(journal_records-before==(unsigned)opened&&excerpt_begins-excerpts==(unsigned)opened);
+    if (!opened) assert(s_open_error[0] && !s_message[0]);
+    return opened;
 }
 static bool pending_reserve(const char *path){++reserve_calls;event('R');fail_alloc=fail_reserve==(int)reserve_calls;bool ok=pending_reserve_actual(path);fail_alloc=false;return ok;}
 static void reset(void){
     prefetch_borrowed=false;free_book();while(s_pending)pending_discard(s_pending->path);
     assert(!watch_count&&!reader_session_has_source(&s_reader_session));
-    s_reader_session=(reader_session_t){0};s_text=NULL;s_message[0]=s_latest_path[0]=0;
+    s_reader_session=(reader_session_t){0};s_text=NULL;s_open_error[0]=s_message[0]=s_latest_path[0]=0;
     supported=sd_present=sd_mounted=regular=true;deleted=unreadable=false;
     embedded=true;hide_images=hidden=save_fails=load_fails=skip_loses=fail_watch=false;
     global_px=59;fail_reserve=source_error=0;file_size=2000;chapters=12;
@@ -216,7 +219,7 @@ static void reset(void){
     cover_busy=draw_busy=false;
     peak_heap=after_covers=after_prefetch=after_glyphs=ample;
 }
-static void report(const char *name){printf("%s:%s:%u/%u/%u:%zu/%zu:%d:%s\n",name,events,reserve_calls,persist_calls,watch_count,loaded_chapter,loaded_offset,s_px,s_message);}
+static void report(const char *name){printf("%s:%s:%u/%u/%u:%zu/%zu:%d:%s\n",name,events,reserve_calls,persist_calls,watch_count,loaded_chapter,loaded_offset,s_px,s_open_error);}
 static void seed(const char *path,bool dirty,uint32_t size){
     assert(pending_reserve(path));pending_progress_t *p=pending_find(path);p->dirty=dirty;
     p->value=(book_progress_t){.file_size=size,.chapter=4,.byte_off=321,.px=20};
@@ -234,6 +237,7 @@ int main(void){
     peak_busy=true;
     assert(app_book_request_resume(a));
     assert(!open_requested_book(&ctx) && s_requested_resume && !source_opens && !*events);
+    assert(!s_open_error[0] && !s_message[0]);
     peak_busy=false;
     ctx.now_ms += 499;
     assert(!open_requested_book(&ctx) && !source_opens && !*events);
@@ -254,6 +258,7 @@ int main(void){
     assert(!open_requested_book(&ctx) && !s_requested_resume && !source_opens);
     deleted=true;
     assert(app_book_request_resume(a) && !open_requested_book(&ctx) && !s_requested_resume);
+    assert(s_open_error[0] && !s_message[0]);
     // 回收分级：每次只回收至够用，并在写检查点前验证硬需求。
     // Reclaim only until sufficient, checking hard needs before writing the checkpoint.
     reset(); cover_busy=true; assert(!open_checked(&ctx,b));
@@ -282,14 +287,15 @@ int main(void){
     // 同书重开会交还干净预留；第二次预留不能合并。/ Reopening drops a clean reservation, so the second reserve cannot be merged.
     reserve_calls=0;fail_reserve=2;events[0]=0;assert(!open_checked(&ctx,a));
     assert(!reader_session_has_source(&s_reader_session)&&!pending_find(a)&&reserve_calls==2);
-    assert(strstr(s_message,"无法打开图书"));report("second-reserve");
+    assert(strstr(s_open_error,"无法打开图书"));report("second-reserve");
     reset();assert(open_checked(&ctx,a));reserve_calls=0;source_opens=0;fail_reserve=1;events[0]=0;
     assert(!open_checked(&ctx,b));assert(reader_session_has_source(&s_reader_session)&&!strcmp(s_reader_session.book.path,a));
-    assert(!source_opens&&strstr(s_message,"保留待保存进度"));report("first-reserve");
+    assert(!source_opens&&strstr(s_open_error,"保留待保存进度"));report("first-reserve");
     reset();fail_watch=true;assert(!open_checked(&ctx,a));assert(!watch_count&&!source_opens);report("watch-oom");
     for(int error=0;error<4;++error)for(int dirty=0;dirty<2;++dirty){
         reset();seed(a,dirty,2000);source_error=(int[]){ESP_ERR_NOT_SUPPORTED,ESP_ERR_NO_MEM,ESP_ERR_INVALID_SIZE,ESP_FAIL}[error];
         assert(!open_checked(&ctx,a));assert(!reader_session_has_source(&s_reader_session));
+        if (source_error == ESP_ERR_INVALID_SIZE) assert(strstr(s_open_error, "文件结构异常"));
         assert((pending_find(a)!=NULL)==(bool)dirty&&watch_count==(unsigned)dirty);
         assert(!strchr(events,'E')&&!strchr(events,'T')&&!strchr(events,'L')&&events[strlen(events)-1]=='Y');report("source-error");
     }
@@ -346,7 +352,7 @@ def main():
                   if re.search(r'^static [^\n]+\b' + name + r'\(', source, re.M)]
     functions.extend(['cancel_auto_resume', 'app_book_request_open', 'app_book_request_open_from_home',
                       'app_book_request_resume', 'open_book_preflight', 'open_book_impl',
-                      'open_book_attempt', 'open_book', 'open_requested_book'])
+                      'open_book_attempt', 'show_open_error', 'open_book', 'open_requested_book'])
     code = HARNESS
     if '#include "reader_open.h"' in source:
         code += '\n#include "reader_open.h"\n'

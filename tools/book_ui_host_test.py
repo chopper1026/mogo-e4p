@@ -85,6 +85,7 @@ typedef struct app_desc {int unused;} app_desc_t;
 typedef struct {bool touched;} test_touch_t;
 typedef struct {int leaf;bool request_menu,consumed;int64_t now_ms;uint8_t *fb;const app_desc_t *request_app;test_touch_t *touch;void *acc;} app_ctx_t;
 typedef enum {APP_REDRAW_PAGE,APP_REDRAW_AREA,APP_REDRAW_NONE,APP_REDRAW_FULL} app_redraw_t;
+typedef struct {ui_gesture_type_t type;int x0,y0;} ui_gesture_event_t;
 static struct {bool active;} s_dictionary_selection;
 static void dictionary_cancel(void){s_dictionary_selection.active=false;}
 static app_redraw_t dictionary_dismiss(void){dictionary_cancel();return APP_REDRAW_PAGE;}
@@ -162,7 +163,7 @@ static int nvs_commit(nvs_handle_t h){assert(h==1||h==2);return ESP_OK;}
 static shelf_entry_t* s_shelf;
 static size_t s_shelf_capacity;
 static int s_count,s_visible_count;
-static char s_message[128],s_shelf_warning[128],s_storage[128];
+static char s_message[128],s_shelf_warning[128],s_storage[128],s_open_error[128];
 static bool s_pending_invalidated,test_oom,test_degraded;
 static bool pico_boot_asset_allowed(const char *path){(void)path;return true;}
 static unsigned s_store_revision;
@@ -459,6 +460,19 @@ static char test_wrapped[512];
 #define BOOK_PX_MIN 18
 #define BOOK_PX_MAX 90
 #define EPD_DRAW_ALIGN_LEFT 0
+#define EPD_DRAW_ALIGN_CENTER 1
+#define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
+static unsigned test_modal_labels;
+static bool test_modal_inverted;
+static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int gray){(void)fb;(void)r;(void)radius;(void)gray;}
+static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int gray){(void)fb;(void)r;(void)radius;(void)gray;}
+static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *str,int align,bool inverted){
+    (void)fb;
+    assert(r.x>=0&&r.x+r.width<=UI_LOCK_WIDTH&&r.y>=0&&r.y+r.height<=UI_LOCK_HEIGHT);
+    assert(px>=32&&align==EPD_DRAW_ALIGN_CENTER&&str[0]);
+    ++test_modal_labels;test_modal_inverted=inverted;
+}
 static int ui_content_width(void){return 604;}
 static int ttf_text_width_px(int px,const char* text){int width=0;for(;*text;text++)if(((unsigned char)*text&0xc0)!=0x80)width+=px;return width;}
 static void ui_text(uint8_t* fb,int x,int y,int px,const char* text,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)align;(void)inv;assert(strlen(test_wrapped)+strlen(text)<sizeof(test_wrapped));strcat(test_wrapped,text);}
@@ -517,7 +531,7 @@ from book_shelf_test_code import shelf_hooks, service_hooks, service_unhooks, sh
 unit += shelf_hooks
 unit += "\nbool book_shelf_hidden_read(nvs_handle_t, const char *);\n"
 for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "open_error_button", "dismiss_open_error", "open_error_gesture", "open_error_input_owned", "draw_open_error", "show_open_error", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
@@ -684,14 +698,17 @@ int main(void) {
     s_chrome_visible[0]=s_chrome_visible[1]=true;
     s_chrome_height[0]=80;s_chrome_height[1]=57;test_reader_statusbar=true;
     char footer_name[72];
-    reader_footer_strip_number(footer_name,sizeof(footer_name),"第一章：海边的信");
-    assert(!strcmp(footer_name,"海边的信"));
-    reader_footer_strip_number(footer_name,sizeof(footer_name),"第 3 章 · 雨后的港口");
-    assert(!strcmp(footer_name,"雨后的港口"));
-    reader_footer_strip_number(footer_name,sizeof(footer_name),"扉页");
-    assert(!strcmp(footer_name,"扉页"));
-    reader_footer_strip_number(footer_name,sizeof(footer_name),"第1章");
-    assert(!strcmp(footer_name,"未命名章节"));
+    const char *const chapter_names[][2]={
+        {"第一章：海边的信","海边的信"}, {"第 3 章·雨后的港口","雨后的港口"},
+        {"第七百三十一章 东海","东海"}, {"扉页","扉页"},
+        {"第一章","第一章"}, {"第1章","第1章"}, {"  第 3 章 · \t","第 3 章"},
+        {"第六百九十九章：","第六百九十九章"}, {"第9章 章节","第9章"},
+        {"本章","未命名章节"}, {"", "未命名章节"}, {NULL,"未命名章节"},
+    };
+    for(size_t i=0;i<sizeof(chapter_names)/sizeof(*chapter_names);++i){
+        reader_footer_strip_number(footer_name,sizeof(footer_name),chapter_names[i][0]);
+        assert(!strcmp(footer_name,chapter_names[i][1]));
+    }
     s_jump_page=1;s_jump_offset=145;
     assert(reader_page_offset(1)==145&&reader_page_offset(2)==200);
     s_jump_offset=SIZE_MAX;
@@ -1027,6 +1044,22 @@ int main(void) {
     free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
+    s_view=SHELF;
+    strcpy(s_message,"文件结构异常，或资源超出上限");
+    show_open_error();
+    assert(!s_message[0]&&open_error_input_owned(&ctx));
+    uint8_t modal_fb=0;
+    draw_open_error(&modal_fb);
+    assert(test_modal_labels==3&&test_modal_inverted);
+    EpdRect confirm=open_error_button();
+    assert(open_error_gesture(&(ui_gesture_event_t){UI_GESTURE_TAP,12,12})==APP_REDRAW_NONE);
+    assert(open_error_gesture(&(ui_gesture_event_t){UI_GESTURE_SWIPE_L,confirm.x,confirm.y})==APP_REDRAW_NONE);
+    assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_NONE&&on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE);
+    assert(open_error_input_owned(&ctx));
+    assert(open_error_gesture(&(ui_gesture_event_t){UI_GESTURE_TAP,confirm.x,confirm.y})==APP_REDRAW_PAGE);
+    assert(!open_error_input_owned(&ctx));
+    show_open_error();
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&!open_error_input_owned(&ctx));
     puts("book_ui_host_test: PASS");
 }
 '''

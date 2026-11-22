@@ -33,7 +33,7 @@ bool book_index_cache_prepare(const char *source, const char *tag, uint32_t vers
     return n > 0 && (size_t)n < cap;
 }
 static void close_book(book_txt_t *b) {
-    fclose(b->file); free(b->entries); *b = (book_txt_t){0};
+    fclose(b->file); free(b->entries); free(b->nav); *b = (book_txt_t){0};
 }
 static void open_book(book_txt_t *b, const char *source) {
     assert(book_txt_open(b, source) == ESP_OK && b->count == 2);
@@ -47,35 +47,52 @@ int main(int argc, char **argv) {
     for (unsigned i=0; i<60; ++i) fprintf(f, "中");
     fprintf(f, "\n正文\n　　第2章 结束\n正文"); assert(!fclose(f));
     char path[512]; book_index_cache_header_t header;
-    assert(book_index_cache_prepare(source, "txt", 1, path, sizeof(path), &header));
+    assert(book_index_cache_prepare(source, "txt", 2, path, sizeof(path), &header));
     // 构造完整旧版 Part 缓存，升级必须重扫，不能继续返回旧标题。
-    // A complete v1 Part cache must be rebuilt rather than returning old titles.
+    // A complete v2 Part cache must be rebuilt rather than returning old titles.
     f = fopen(path, "wb"); assert(f);
     assert(fwrite(&header, sizeof(header), 1, f) == 1);
     uint32_t payload[4] = {header.source_size, 0, 1, 0};
     assert(fwrite(payload, sizeof(payload), 1, f) == 1);
-    struct {uint32_t offset; char title[41];} old = {.title="Part 1"};
+    book_entry_t old = {.title="Part 1"};
     assert(fwrite(&old, sizeof(old), 1, f) == 1); assert(!fclose(f));
     book_txt_t book = {0}; open_book(&book, source);
     assert(!strncmp(book.entries[0].title, "第1章 ", strlen("第1章 ")));
     assert(strlen(book.entries[0].title) == strlen("第1章 ") + 39 * 3);
     assert(!strcmp(book.entries[1].title, "第2章 结束")); close_book(&book);
     f = fopen(path, "r+b"); assert(f);
-    assert(fread(&header, sizeof(header), 1, f) == 1 && header.version == 2);
-    assert(!fseek(f, (long)sizeof(header) + 16, SEEK_SET));
+    assert(fread(&header, sizeof(header), 1, f) == 1 && header.version == 3);
+    assert(!fseek(f, (long)sizeof(header) + 20, SEEK_SET));
     book_entry_t entry = {.title="cached heading"};
     assert(fwrite(&entry, sizeof(entry), 1, f) == 1); assert(!fclose(f));
     open_book(&book, source);
     assert(!strcmp(book.entries[0].title, "cached heading")); close_book(&book);
     f = fopen(path, "r+b"); assert(f);
-    assert(!fseek(f, (long)sizeof(header) + 16 + sizeof(uint32_t), SEEK_SET));
+    assert(!fseek(f, (long)sizeof(header) + 20 + sizeof(uint32_t), SEEK_SET));
     char invalid[sizeof(entry.title)]; memset(invalid, 'x', sizeof(invalid));
     assert(fwrite(invalid, sizeof(invalid), 1, f) == 1); assert(!fclose(f));
     open_book(&book, source);
     assert(!strncmp(book.entries[0].title, "第1章 ", strlen("第1章 "))); close_book(&book);
     f = fopen(path, "wb"); assert(f); assert(!fclose(f));
     open_book(&book, source); close_book(&book);
-    puts("TXT cache: v1 rebuild, v2 hit, UTF-8 truncation and corruption recovery passed");
+    f = fopen(source, "wb"); assert(f);
+    assert(fputs("序\n1.第1章 开始\n正文\n3.第2章 结束", f) >= 0 && !fclose(f));
+    assert(book_txt_open(&book, source) == ESP_OK && book.count == 1 && book.nav_count == 2);
+    assert(book.nav[0].text_offset == strlen("序\n") && !strcmp(book.nav[1].title, "第2章 结束"));
+    book_txt_nav_t last = book.nav[1]; close_book(&book);
+    long nav2 = (long)(sizeof(header) + 20 + sizeof(book_entry_t) + sizeof(book_txt_nav_t));
+    f = fopen(path, "r+b"); assert(f && !fseek(f, nav2, SEEK_SET));
+    strcpy(last.title, "cached logical heading");
+    assert(fwrite(&last, sizeof(last), 1, f) == 1 && !fclose(f));
+    assert(book_txt_open(&book, source) == ESP_OK && book.nav_count == 2);
+    assert(!strcmp(book.nav[1].title, last.title)); close_book(&book);
+    f = fopen(path, "r+b"); assert(f && !fseek(f, nav2, SEEK_SET));
+    last.text_offset = 0;
+    assert(fwrite(&last, sizeof(last), 1, f) == 1 && !fclose(f));
+    assert(book_txt_open(&book, source) == ESP_OK && book.nav_count == 2);
+    assert(!strcmp(book.nav[1].title, "第2章 结束") && book.nav[1].text_offset > book.nav[0].text_offset);
+    close_book(&book);
+    puts("TXT cache: v2 rebuild, v3 logical TOC hit, UTF-8 truncation and corruption recovery passed");
     return 0;
 }
 '''

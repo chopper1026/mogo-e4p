@@ -467,6 +467,7 @@ static int s_reader_power = -1;
 static uint32_t s_reader_chrome_fp;
 static bool s_reader_chrome_fp_valid;
 static char s_message[128], s_storage[128];
+static char s_open_error[128];
 static char s_chapter_heading_title[READER_HEADING_TITLE_BYTES], s_chapter_heading_label[READER_HEADING_LABEL_BYTES];
 static size_t s_chapter_lead_skip;
 static unsigned s_chapter_lead_height;
@@ -628,6 +629,7 @@ static const char* reader_title_style_name(int style);
 static void scan_shelf(app_ctx_t* ctx);
 static void rescan_shelf(app_ctx_t* ctx);
 static void copy_text(char* dst, size_t cap, const char* src);
+static size_t reader_page_offset(size_t page);
 static void fit_text(char* text, int px, int width);
 static void fit_fixed_text(char* text, int px, int width);
 static void free_book(void);
@@ -1279,36 +1281,43 @@ static void fit_fixed_text(char* text, int px, int width) {
     }
 }
 
+// 有标题时去掉章号，仅有章号时沿用原书编号。/ Strip numbering only when the book supplies a title.
 static void reader_footer_strip_number(char *dst, size_t cap, const char *source) {
     char title[128];
     copy_text(title, sizeof(title), source ? source : "");
-// name 只被读取，但下面会把字符串字面量赋给它。CI 的 sdkconfig.ci 开了
-// CONFIG_COMPILER_WARN_WRITE_STRINGS，字面量因此是 const char[]，赋给 char* 会丢 const 并在
-// -Werror 下报错。声明成 const 指针即可。
-// name is only read from, but it is assigned a string literal below. CI's sdkconfig.ci enables
-// CONFIG_COMPILER_WARN_WRITE_STRINGS, which makes literals const char[], so assigning one to a
-// char* discards the qualifier and fails under -Werror. A const pointer is enough.
     const char *name = title;
     while (*name == ' ' || *name == '\t') ++name;
+    const char *number = name;
+    char *number_end = NULL;
     char *chapter_mark = !strncmp(name, "第", strlen("第")) ? strstr(name, "章") : NULL;
     if (chapter_mark && chapter_mark - name < 24) {
-        char *after = chapter_mark + strlen("章");
-        while (*after == ' ' || *after == '\t' || *after == ':' || *after == '-' ||
-               !strncmp(after, "：", strlen("：")) || !strncmp(after, "、", strlen("、")) ||
-               !strncmp(after, "·", strlen("·"))) {
-            if (*after == ' ' || *after == '\t' || *after == ':' || *after == '-') ++after;
-            else after += strlen("：");
+        number_end = chapter_mark + strlen("章");
+        const char *after = number_end;
+        for (;;) {
+            after += strspn(after, " \t:-");
+            if (!strncmp(after, "：", strlen("：")) || !strncmp(after, "、", strlen("、"))) after += strlen("：");
+            else if (!strncmp(after, "·", strlen("·"))) after += strlen("·");
+            else break;
         }
         name = after;
     }
-    if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) name = "未命名章节";
+    if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) {
+        if (number_end) {
+            *number_end = 0;
+            name = number;
+        } else name = "未命名章节";
+    }
     copy_text(dst, cap, name);
 }
 static void reader_footer_chapter_name(char *dst, size_t cap) {
     char source[128] = {0};
-    bool selected = s_selected_toc < book_navigation_count() &&
-        book_navigation_chapter(s_selected_toc) == s_reader_session.position.chapter &&
-        book_navigation_title(s_selected_toc, source, sizeof(source)) == ESP_OK && source[0];
+    size_t toc = SIZE_MAX;
+    if (!book_navigation_txt_position(s_reader_session.position.chapter,
+            reader_page_offset(s_reader_session.position.page), &toc) &&
+        s_selected_toc < book_navigation_count() &&
+        book_navigation_chapter(s_selected_toc) == s_reader_session.position.chapter) toc = s_selected_toc;
+    bool selected = toc != SIZE_MAX &&
+        book_navigation_title(toc, source, sizeof(source)) == ESP_OK && source[0];
     if (!selected) {
         if (s_chapter_heading_title[0]) copy_text(source, sizeof(source), s_chapter_heading_title);
         else if (book_chapter_title(s_reader_session.position.chapter, source, sizeof(source)) != ESP_OK) source[0] = 0;
@@ -3618,6 +3627,9 @@ static void reader_prefetch_idle(app_ctx_t *ctx) {
     reader_prefetch_work_idle(s_reader_session.position.page + 1);
 }
 static size_t current_toc_position(void) {
+    size_t txt;
+    if (book_navigation_txt_position(s_reader_session.position.chapter,
+            reader_page_offset(s_reader_session.position.page), &txt)) return txt;
     size_t count = book_navigation_count();
     if (s_selected_toc < count && book_navigation_chapter(s_selected_toc) == s_reader_session.position.chapter)
         return s_selected_toc;
@@ -3629,6 +3641,33 @@ static size_t current_toc_position(void) {
         if (selected == SIZE_MAX || chapter > best_chapter) { selected = i; best_chapter = chapter; }
     }
     return selected;
+}
+static EpdRect open_error_button(void) {
+    return (EpdRect){(UI_LOCK_WIDTH - 256) / 2, UI_LOCK_HEIGHT / 2 + 45, 256, 78};
+}
+static app_redraw_t dismiss_open_error(void) {
+    s_open_error[0] = 0;
+    return APP_REDRAW_PAGE;
+}
+static app_redraw_t open_error_gesture(const ui_gesture_event_t *ev) {
+    return ev->type == UI_GESTURE_TAP && ui_rect_hit(open_error_button(), ev->x0, ev->y0)
+        ? dismiss_open_error() : APP_REDRAW_NONE;
+}
+static bool open_error_input_owned(app_ctx_t *ctx) {
+    (void)ctx;
+    return s_open_error[0] != 0;
+}
+static void draw_open_error(uint8_t *fb) {
+    const EpdRect panel = {40, (UI_LOCK_HEIGHT - 300) / 2, UI_LOCK_WIDTH - 80, 300};
+    ui_fill_round_rect(fb, panel, 18, UI_GRAY_WHITE);
+    ui_draw_control_frame(fb, panel, 18, UI_GRAY_BLACK);
+    ui_text_box(fb, (EpdRect){panel.x + 32, panel.y + 25, panel.width - 64, 64},
+                40, "无法打开图书", EPD_DRAW_ALIGN_CENTER, false);
+    ui_text_box(fb, (EpdRect){panel.x + 28, panel.y + 93, panel.width - 56, 80},
+                32, s_open_error, EPD_DRAW_ALIGN_CENTER, false);
+    EpdRect button = open_error_button();
+    ui_fill_round_rect(fb, button, 14, UI_GRAY_BLACK);
+    ui_text_box(fb, button, 32, "确定", EPD_DRAW_ALIGN_CENTER, true);
 }
 static void render(app_ctx_t* ctx, uint8_t* fb) {
 #if CONFIG_READER_PERF
@@ -3749,6 +3788,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     }
     if(!s_shelf_selecting)ui_nav_draw(fb,1);
     if (book_shelf_categories_menu_is_open(&s_shelf_categories)) draw_category_menu(fb);
+    if (s_open_error[0]) draw_open_error(fb);
     unlock_draw();
 }
 static EpdRect reader_status_area(void) {
@@ -4452,8 +4492,8 @@ static bool open_book_impl(app_ctx_t *ctx, const char *path, uint32_t size) {
         copy_text(s_message, sizeof(s_message),
                   err == ESP_ERR_NOT_SUPPORTED ? "文件格式或压缩方式暂不支持" :
                   err == ESP_ERR_NO_MEM ? "内存不足，请稍后重试" :
-                  err == ESP_ERR_INVALID_SIZE ? "图书资源过大或章节过多" :
-                  "无法打开图书，请检查文件");
+                  err == ESP_ERR_INVALID_SIZE ? "文件结构异常，或资源超出上限" :
+                  "请检查图书文件后重试");
         ESP_LOGW(TAG, "open failed: %s internal=%u/%u psram=%u/%u", esp_err_to_name(err),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
@@ -4549,9 +4589,15 @@ static bool open_book_attempt(app_ctx_t *ctx, const char *path, bool *retry) {
     memory_peak_finish(peak);
     return ok;
 }
+static void show_open_error(void) {
+    copy_text(s_open_error, sizeof(s_open_error), s_message[0] ? s_message : "请检查图书文件后重试");
+    s_message[0] = 0;
+}
 static bool open_book(app_ctx_t *ctx, const char *path) {
     bool retry;
-    return open_book_attempt(ctx, path, &retry);
+    bool opened = open_book_attempt(ctx, path, &retry);
+    if (!opened) show_open_error();
+    return opened;
 }
 
 static bool open_requested_book(app_ctx_t* ctx) {
@@ -4569,10 +4615,12 @@ static bool open_requested_book(app_ctx_t* ctx) {
     bool retry;
     const bool opened = open_book_attempt(ctx, s_requested_open, &retry);
     if (s_requested_resume && retry) {
+        s_message[0] = 0;
         s_resume_next_ms = ctx->now_ms + 500;
         return false;
     }
     if (opened) s_reader_return_home = s_requested_open_home;
+    else show_open_error();
     s_requested_open[0] = 0;
     s_requested_open_home = s_requested_resume = false;
     return opened;
@@ -6755,6 +6803,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     return APP_REDRAW_NONE;
 }
 static void on_enter(app_ctx_t* ctx) {
+    s_open_error[0] = 0;
     s_reader_progress_bar = app_settings_reader_progress_bar();
     book_layout_enable_selection(true);
     category_reset();
@@ -6867,6 +6916,7 @@ static void on_enter(app_ctx_t* ctx) {
 
 }
 static void book_on_exit(app_ctx_t* ctx) {
+    s_open_error[0] = 0;
     cancel_auto_resume();
     category_reset();
     s_shelf_selecting=false;clear_selection();
@@ -6902,6 +6952,7 @@ static void book_on_exit(app_ctx_t* ctx) {
 // 先停止使用旧卡句柄与字体预渲染，主循环随后切换内置字体。
 // Stop old-card handles and font preparation before the loop switches to the builtin font.
 static void book_on_media_lost(app_ctx_t* ctx) {
+    s_open_error[0] = 0;
     cancel_auto_resume();
     book_excerpt_reset(); s_excerpt_forward = false;
     category_reset();
@@ -7293,6 +7344,7 @@ static app_redraw_t dictionary_tick(app_ctx_t *ctx) {
 }
 
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    if (s_open_error[0]) return open_error_gesture(ev);
     if (ev->type == UI_GESTURE_PRESS || ev->type == UI_GESTURE_TAP) cancel_auto_resume();
     bool dictionary_handled = false;
     app_redraw_t dictionary = dictionary_gesture(ctx, ev, &dictionary_handled);
@@ -7591,6 +7643,7 @@ static app_redraw_t middle_pending_tick(app_ctx_t *ctx) {
     return reader_key_action(ctx, s_middle_pending_action);
 }
 static app_redraw_t on_key(app_ctx_t* ctx, int key) {
+    if (s_open_error[0]) return key == UI_KEY_1 || key == UI_KEY_2 ? dismiss_open_error() : APP_REDRAW_NONE;
     cancel_auto_resume();
     if (s_dictionary_selection.active) return dictionary_dismiss();
     reader_indent_hold_cancel();
@@ -7668,6 +7721,7 @@ static app_redraw_t on_power_short(app_ctx_t* ctx) {
     return result == APP_REDRAW_NONE ? APP_REDRAW_DONE : result;
 }
 static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
+    if (s_open_error[0]) return APP_REDRAW_NONE;
     cancel_auto_resume();
     if (s_dictionary_selection.active) return dictionary_dismiss();
     reader_indent_hold_cancel();
@@ -7897,6 +7951,7 @@ static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
     return turn_page(ctx, dir);
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    if (s_open_error[0]) return APP_REDRAW_NONE;
     app_redraw_t dictionary = dictionary_tick(ctx);
     if (dictionary != APP_REDRAW_NONE) return dictionary;
     if (s_view == CATEGORIES) return category_tick(ctx);
@@ -7950,9 +8005,12 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (failed != s_save_failed) { invalidate_prep(); return APP_REDRAW_PAGE; }
     }
     if (s_requested_resume && s_view == SHELF && !ctx->request_app && !ctx->request_menu && !ctx->request_return &&
-        ctx->now_ms >= s_resume_next_ms && open_requested_book(ctx)) {
-        s_scan_pending = false;
-        return APP_REDRAW_PAGE;
+        ctx->now_ms >= s_resume_next_ms) {
+        if (open_requested_book(ctx)) {
+            s_scan_pending = false;
+            return APP_REDRAW_PAGE;
+        }
+        if (s_open_error[0]) return APP_REDRAW_PAGE;
     }
     if (s_scan_pending && ctx->now_ms - s_poll_ms >= 500) {
         s_poll_ms = ctx->now_ms;
@@ -8044,13 +8102,14 @@ static void before_lock(app_ctx_t* ctx) {
 static display_rect_t area_hint(app_ctx_t* ctx) { (void)ctx; return display_rect_from_epd(s_area); }
 static bool main_page_visible(app_ctx_t* ctx) {
     (void)ctx;
-    return s_view == SHELF && !s_shelf_selecting && !s_clear_confirm && !s_batch_confirm;
+    return s_view == SHELF && !s_shelf_selecting && !s_clear_confirm && !s_batch_confirm && !s_open_error[0];
 }
 
 const app_desc_t app_book = {
     .title = "图书 Books", .detail = "TF 卡 txt / epub 阅读", .enter_full = false, .owns_keys = true,
     .defer_middle_short = true,
     .menu_handle_enabled = menu_handle_enabled,
+    .modal_input_owned = open_error_input_owned,
     .main_page_visible = main_page_visible,
     .normalize_hold_gray = normalize_hold_gray,
     .rotation_available = rotation_available, .rotation_enabled = rotation_enabled,

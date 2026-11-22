@@ -54,6 +54,8 @@ def main():
         make_large_book(folder / 'large.epub', 256)
         (folder / 'sample.txt').write_text('第一章 开始\n正文\n第二章 返回\n正文\n')
         make_mobi(folder / 'sample.mobi', hybrid=True)
+        (folder / 'parts.txt').write_text(''.join(f'{n+2}.第{n}章 测试\n正文\n'
+                                                 for n in range(1, 81)))
         (folder / 'sdkconfig.h').write_text('#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 1\n')
         heap = (ROOT / 'tools/book_epub_stubs/esp_heap_caps.h').read_text()
         (folder / 'esp_heap_caps.h').write_text(heap + '\nsize_t heap_caps_get_allocated_size(void *pointer);\n')
@@ -75,7 +77,8 @@ def main():
         subprocess.run(flags + ['tools/reader_source_memory_host_test.c', *objects, '-lz', '-o', str(exe)],
                        cwd=ROOT, check=True)
         subprocess.run([str(exe), str(folder/'sample.txt'), str(folder/'small.epub'),
-                        str(folder/'large.epub'), str(folder/'sample.mobi')], cwd=ROOT, check=True)
+                        str(folder/'large.epub'), str(folder/'sample.mobi'), str(folder/'parts.txt')],
+                       cwd=ROOT, check=True)
         # 产品和纯计时配置不得引入资源遍历符号。/ Product and timing-only configurations must not introduce resource-walk symbols.
         for config in ('#define CONFIG_READER_PERF 0\n',
                        '#define CONFIG_READER_PERF 1\n#define CONFIG_READER_MEMORY 0\n'):

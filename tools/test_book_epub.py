@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import zipfile
 
+from test_zip_reader import empty_stored_size_quirk
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -38,7 +40,7 @@ def make_large_book(path, chapters=5000):
                              f'<html><body><h1>第{i}章 {title}</h1><p>正文 {i}</p></body></html>')
 
 
-def make_book(path, change=None):
+def make_book(path, change=None, directory_quirk=False):
     container = '<container><rootfiles><rootfile full-path="OPS/pkg/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
     items = ''.join(f'<item id="c{i}" href="../text/part%20{i}%26x.xhtml#start" media-type="application/xhtml+xml"/>' for i in range(1, 5))
     items += '<item id="toc" href="../toc/book.ncx" media-type="application/x-dtbncx+xml"/><item id="nav" href="../toc/nav.xhtml" media-type="application/xhtml+xml" properties="cover nav"/>'
@@ -56,8 +58,12 @@ def make_book(path, change=None):
         change(files)
     with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('mimetype', 'application/epub+zip')
+        if directory_quirk:
+            archive.writestr('META-INF/', b'', compress_type=zipfile.ZIP_STORED)
         for name, content in files.items():
             archive.writestr(name, content)
+    if directory_quirk:
+        path.write_bytes(empty_stored_size_quirk(path.read_bytes(), 'META-INF/'))
 
 
 def main():
@@ -98,6 +104,9 @@ def main():
                 'media-type="image/png" properties="cover-image"/></manifest>')
             files['OPS/covers/test.png'] = bytes(range(128))
         case('good_bounded_cover', bounded_cover)
+        directory_quirk = work / 'good_bounded_cover_directory_quirk.epub'
+        make_book(directory_quirk, bounded_cover, directory_quirk=True)
+        cases.append(directory_quirk)
         case('good_no_cover', lambda f: f.__setitem__(
             'OPS/pkg/book.opf', f['OPS/pkg/book.opf'].replace('properties="cover nav"', 'properties="nav"')))
         case('good_navfallback', lambda f: f.__setitem__('OPS/toc/book.ncx', '<ncx><broken></ncx>'))
