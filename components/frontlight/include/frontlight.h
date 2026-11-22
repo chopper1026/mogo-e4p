@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * 中文：冷/暖双路前光，两路 LEDC PWM。亮度是较强通道的目标值，色温按百分比在
- * 两路之间分配；0=全暖，50=冷暖同开，100=全冷。输出再乘 10% 上限，滑杆拉满
- * 也不到原厂满亮度。不涉及 EPD 电源轨或面板时序。
+ * 两路之间分配；0=全暖，50=冷暖同开，100=全冷。输出受 PWM 满量程的 15% 上限
+ * 限制。不涉及 EPD 电源轨或面板时序。
  *
  * English: Dual cold/warm frontlight driven by two LEDC PWM channels. Brightness
  * is the target of the stronger channel and colour temperature shares it between
  * the two channels by percent: 0 = warm only, 50 = both, 100 = cool only. Output
- * then passes a 10% ceiling, so a full slider stays below the vendor's full
- * brightness. EPD rails and panel timing are out of scope.
+ * is capped at 15% of full-scale PWM duty. EPD rails and panel timing are out
+ * of scope.
  *
  * 冻结：不得改用 GPIO 开关或改动 PWM 频率；不得在这里碰 VCOM / EPD 轨。
  * Frozen: do not fall back to plain GPIO switching or change the PWM frequency;
@@ -31,10 +31,10 @@ extern "C" {
 /// 亮度下限；开关关闭由独立的 on 状态负责。/ Lower brightness bound; the on flag owns "off".
 #define FRONTLIGHT_BRIGHTNESS_MIN 1
 #define FRONTLIGHT_BRIGHTNESS_MAX 100
-/// 输出上限：滑杆拉满只到原厂满亮度的 10%，百分比与 NVS 仍保持 1..100。
-/// Output ceiling: a full slider reaches 10% of the factory full duty; percentages and NVS
-/// keep their 1..100 range.
-#define FRONTLIGHT_OUTPUT_CEILING_PERCENT 10
+/// 输出上限：滑杆拉满时较强通道为 PWM 满量程的 15%，滑杆与 NVS 仍保持 1..100。
+/// Output ceiling: at full slider, the stronger channel reaches 15% of full-scale PWM duty;
+/// slider and NVS values keep their 1..100 range.
+#define FRONTLIGHT_OUTPUT_CEILING_PERCENT 15
 /// 色温百分比端点：暖、中性、冷。/ Colour-temperature endpoints: warm, neutral, cool.
 #define FRONTLIGHT_CCT_WARM 0
 #define FRONTLIGHT_CCT_NEUTRAL 50
