@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复 CloudZao 在手机解绑后仍显示「授权可用」的问题；设备设置页点「检查授权」即可联网验证并申请新的绑定码，无需先获取推送列表。/ Fix stale CloudZao authorization after unlinking on the phone. Check Authorization verifies online and requests a new pairing code without opening the transfer list.
+- CloudZao 授权刷新中断时显示明确状态，只有手动选择「重新绑定」才申请新码，不再把刷新中断当作未绑定。/ Show interrupted CloudZao token refresh separately from an unpaired device; request a new code only when Re-pair is selected.
 - 关机提示改为底部居中的 36 px 单行提示，避开书架拼贴右下角的书籍数量。/ Show a 36 px single-line shutdown notice at the bottom center, clear of the shelf collage count.
 - 待机与关机壁纸新增「书籍封面」，显示当前或最后阅读的书的封面，可分别选择裁剪填满或完整显示，并在设置页预览。/ Show the current or last-read book cover on standby and shutdown wallpapers, with independent crop-to-fill and contain settings and live previews.
 

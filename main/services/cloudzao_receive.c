@@ -508,7 +508,8 @@ cz_status_t cloudzao_run(const cz_ops_t *ops, cz_job_t job, cz_queue_t *queue, c
                     status.item_error = error;
                     status.item_request = operation;
                 }
-                if (error == CZ_AUTH || error == CZ_CREDENTIAL_STORAGE || error == CZ_CLOCK || error == CZ_REFRESH_REUSED)
+                if (error == CZ_AUTH || error == CZ_CREDENTIAL_STORAGE || error == CZ_CLOCK ||
+                    error == CZ_REFRESH_REUSED || error == CZ_REFRESH_INTERRUPTED)
                     status.error = error;
             }
             if (ops->row) ops->row(ops->context, status.processed, &row, false);

@@ -99,6 +99,7 @@ static cz_error_t ensure_access(cz_partner_t *p, bool force) {
     int64_t now = p->raw->now(p->raw->context);
     if (!now) return CZ_CLOCK;
     const cz_session_record_t *r = &p->record;
+    if (r->state == CZ_SESSION_ROTATING) return CZ_REFRESH_INTERRUPTED;
     if (r->state != CZ_SESSION_AUTHORIZED || now < r->issued_at || now >= r->refresh_expires_at) return CZ_AUTH;
     int64_t ahead = (r->expires_at - r->issued_at) / 2;
     if (ahead > REFRESH_AHEAD_SECONDS) ahead = REFRESH_AHEAD_SECONDS;
@@ -107,13 +108,13 @@ static cz_error_t ensure_access(cz_partner_t *p, bool force) {
     cz_session_record_t previous = *r;
     cz_error_t error = p->raw->stop(p->raw->context);
     if (error == CZ_OK && !store(p, &rotating)) error = CZ_CREDENTIAL_STORAGE;
+    bool maybe_sent = false;
     if (error == CZ_OK) {
         // 回包丢失时保留已轮换标记，防止重启后重发可能作废的令牌。
         // Keep a rotation marker on an ambiguous result so reboot cannot replay a possibly spent token.
         char body[CLOUDZAO_TOKEN_MAX + 24];
         snprintf(body, sizeof(body), "{\"refreshToken\":\"%s\"}", previous.refresh);
         cJSON *root = NULL;
-        bool maybe_sent = false;
         error = json_request(p, CZ_REFRESH, body, &root, &maybe_sent);
         cloudzao_partner_wipe(body, sizeof(body));
         if (error == CZ_OK) {
@@ -130,7 +131,17 @@ static cz_error_t ensure_access(cz_partner_t *p, bool force) {
         delete_reply(root);
     }
     cloudzao_partner_wipe(&previous, sizeof(previous));
-    return error;
+    const bool rebind_required = p->record.state == CZ_SESSION_ROTATING;
+    if (error != CZ_OK && p->refresh_failed)
+        p->refresh_failed(p->raw->context, error, maybe_sent, rebind_required);
+    return rebind_required && error != CZ_CANCELLED && error != CZ_MEDIA ? CZ_REFRESH_INTERRUPTED : error;
+}
+
+static bool discard_list_body(void *context, const void *data, size_t size) {
+    (void)context;
+    (void)data;
+    (void)size;
+    return true;
 }
 
 static void pending_status(cz_status_t *status, const cz_session_record_t *record, int64_t now, uint32_t delay) {
@@ -140,18 +151,37 @@ static void pending_status(cz_status_t *status, const cz_session_record_t *recor
     status->poll_after_s = delay < remaining ? delay : (uint32_t)remaining;
 }
 
-cz_status_t cloudzao_partner_pair(cz_partner_t *p, bool poll, const char *integration, const char *mac, const char *version) {
-    cz_status_t status = {0};
+cz_status_t cloudzao_partner_pair(cz_partner_t *p, cz_job_t job, const char *integration, const char *mac, const char *version) {
+    const bool poll = job == CZ_JOB_POLL;
+    cz_status_t status = {.rebind_retry = job == CZ_JOB_REBIND};
+    if (job != CZ_JOB_BIND && !poll && !status.rebind_retry) { status.error = CZ_INVALID; return status; }
+    const cz_session_record_t *r = &p->record;
+    if (r->state == CZ_SESSION_ROTATING && !status.rebind_retry) {
+        status.error = CZ_REFRESH_INTERRUPTED;
+        return status;
+    }
     int64_t now = p->raw->now(p->raw->context);
     if (!now) { status.error = CZ_CLOCK; return status; }
-    const cz_session_record_t *r = &p->record;
     if (!poll && r->state == CZ_SESSION_AUTHORIZED && now >= r->issued_at && now < r->refresh_expires_at) {
-        status.error = ensure_access(p, false);
-        status.authorized = status.error == CZ_OK;
-        return status;
+        // 本机有效期不能反映 App 解绑；只用清单请求验证授权，不保存清单。
+        // Local expiry cannot detect app unlinking; verify through the list endpoint without retaining its body.
+        const cz_http_request_t request = {.limit = CLOUDZAO_JSON_MAX};
+        status.error = cloudzao_partner_request(p, CZ_LIST, &request, discard_list_body, NULL);
+        if (status.error != CZ_AUTH && status.error != CZ_REFRESH_REUSED) {
+            status.authorized = status.error == CZ_OK;
+            if (status.authorized) status.rebind_retry = false;
+            return status;
+        }
+        if (r->state != CZ_SESSION_EMPTY && !store(p, &empty)) {
+            status.error = CZ_CREDENTIAL_STORAGE;
+            return status;
+        }
+        now = p->raw->now(p->raw->context);
+        if (!now) { status.error = CZ_CLOCK; return status; }
     }
     if (r->state == CZ_SESSION_PAIRING && now >= r->issued_at && now < r->expires_at) {
         if (!poll || now < r->retry_at) {
+            status.rebind_retry = false;
             status.error = CZ_PAIR_PENDING;
             uint32_t delay = r->poll_interval;
             if (now < r->retry_at && r->retry_at - now > delay) delay = (uint32_t)(r->retry_at - now);
@@ -191,6 +221,8 @@ cz_status_t cloudzao_partner_pair(cz_partner_t *p, bool poll, const char *integr
         return status;
     }
     if (poll) { status.error = CZ_PAIR_EXPIRED; return status; }
+    status.error = p->raw->stop(p->raw->context);
+    if (status.error != CZ_OK) return status;
     if (!cloudzao_token_valid(integration)) { status.error = CZ_INTEGRATION; return status; }
     if (!version || !*version || strlen(version) > 31 || !cloudzao_token_valid(version) ||
         !mac || strlen(mac) != 17 || strspn(mac, "0123456789ABCDEFabcdef:") != 17) {
@@ -211,8 +243,10 @@ cz_status_t cloudzao_partner_pair(cz_partner_t *p, bool poll, const char *integr
                 .expires_at = now + life, .poll_interval = interval, .retry_at = now + interval};
             memcpy(next.code, code, sizeof(next.code));
             strcpy(next.credential, device);
-            if (store(p, &next)) pending_status(&status, &next, now, interval);
-            else status.error = CZ_CREDENTIAL_STORAGE;
+            if (store(p, &next)) {
+                status.rebind_retry = false;
+                pending_status(&status, &next, now, interval);
+            } else status.error = CZ_CREDENTIAL_STORAGE;
             cloudzao_partner_wipe(&next, sizeof(next));
         }
     }

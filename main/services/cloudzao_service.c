@@ -12,6 +12,7 @@
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_tls.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
@@ -33,7 +34,7 @@
 
 #define CZ_JOB_US (300LL * 1000000)
 #define CZ_IDLE_US (8LL * 1000000)
-#define CZ_EXCHANGE_REPLY_IDLE_US (20LL * 1000000)
+#define CZ_TOKEN_REPLY_IDLE_US (20LL * 1000000)
 #define CZ_STACK 8192u
 
 extern const uint8_t oss_root_r3_start[] asm("_binary_cloudzao_oss_root_r3_pem_start");
@@ -59,7 +60,7 @@ typedef struct {
     int64_t deadline, next_check;
     cz_error_t link;
     cz_job_t job;
-    uint16_t preview_http_error;
+    uint16_t preview_http_error, refresh_http_status;
     unsigned char *chunk;
     int64_t rate_from_us;
     uint32_t rate_from_bytes, history_next;
@@ -323,8 +324,10 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
             }
             mbedtls_platform_zeroize(worker->chunk, CLOUDZAO_CHUNK);
             if (sent == length) {
-                // 令牌只能领取一次，给回包更长的无进展时限。/ Allow more reply time for single-use token exchange.
-                const int64_t reply_idle_us = operation == CZ_EXCHANGE ? CZ_EXCHANGE_REPLY_IDLE_US : CZ_IDLE_US;
+                // 单次兑换与轮换刷新均给令牌回包更长的无进展时限。
+                // Allow more reply time for both single-use exchange and refresh rotation.
+                const bool token_reply = operation == CZ_EXCHANGE || operation == CZ_REFRESH;
+                const int64_t reply_idle_us = token_reply ? CZ_TOKEN_REPLY_IDLE_US : CZ_IDLE_US;
                 cz_response_t response;
                 cloudzao_wire_begin(&response, operation, req->limit, sink, sink_context);
                 idle = esp_timer_get_time() + reply_idle_us;
@@ -345,6 +348,7 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
     // 请求缓冲区可能仍含未发送的请求头；每条请求统一擦除。/ Wipe any unsent headers on every request exit.
     mbedtls_platform_zeroize(worker->chunk, CLOUDZAO_CHUNK);
     cz_error_t interrupted = stop(worker);
+    if (operation == CZ_REFRESH) worker->refresh_http_status = http_status;
     if (worker->job == CZ_JOB_PREVIEW)
         worker->preview_http_error = interrupted == CZ_OK && error == CZ_SERVER &&
             http_status >= 300 && http_status < 600 ? (uint16_t)http_status : 0;
@@ -409,7 +413,24 @@ static int64_t current_utc(void *context) {
     return now > 0 && (uint64_t)now <= UINT32_MAX && app_time_sync_clock_valid((uint32_t)now) ? now : 0;
 }
 
-static bool pair_job(cz_job_t job) { return job == CZ_JOB_BIND || job == CZ_JOB_POLL; }
+static bool pair_job(cz_job_t job) { return job == CZ_JOB_BIND || job == CZ_JOB_POLL || job == CZ_JOB_REBIND; }
+
+static void log_refresh_failure(void *context, cz_error_t cause, bool maybe_sent, bool rebind_required) {
+    worker_t *worker = context;
+    const char *reason;
+    switch (cause) {
+        case CZ_TIMEOUT: reason = "timeout"; break;
+        case CZ_INVALID: reason = "invalid_response"; break;
+        case CZ_CREDENTIAL_STORAGE: reason = "storage"; break;
+        case CZ_AUTH: case CZ_REFRESH_REUSED: reason = "rejected"; break;
+        case CZ_SLOW_DOWN: reason = "rate_limit"; break;
+        case CZ_CANCELLED: case CZ_MEDIA: reason = "interrupted"; break;
+        default: reason = "request_failed"; break;
+    }
+    ESP_LOGW("cloudzao", "refresh: reason=%s cause=%d http=%u maybe_sent=%u rebind_required=%u",
+             reason, (int)cause, maybe_sent ? (unsigned)worker->refresh_http_status : 0u,
+             (unsigned)maybe_sent, (unsigned)rebind_required);
+}
 
 static cz_error_t partner_request(void *context, cz_request_t operation, const cz_http_request_t *req,
                                   cz_sink_t sink, void *sink_context) {
@@ -423,7 +444,7 @@ static void run(void *argument) {
     char mac[18];
     uint8_t bytes[6];
     network_lease_t lease = {0};
-    cz_status_t result = {.error = stop(&worker)};
+    cz_status_t result = {.error = stop(&worker), .rebind_retry = worker.job == CZ_JOB_REBIND};
     char *json = NULL;
     if (result.error == CZ_OK && !cloudzao_token_valid(s_integration_id)) result.error = CZ_INTEGRATION;
     if (result.error == CZ_OK && !current_utc(NULL)) result.error = CZ_CLOCK;
@@ -441,9 +462,10 @@ static void run(void *argument) {
         worker.partner.raw = &raw;
         worker.partner.response = (char *)worker.chunk + CLOUDZAO_CHUNK;
         worker.partner.persist = persist_session;
+        worker.partner.refresh_failed = log_refresh_failure;
         if (pair_job(worker.job)) {
             snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
-            result = cloudzao_partner_pair(&worker.partner, worker.job == CZ_JOB_POLL, s_integration_id,
+            result = cloudzao_partner_pair(&worker.partner, worker.job, s_integration_id,
                                            mac, esp_app_get_description()->version);
         } else {
             const cz_ops_t ops = {.context = &worker, .root = "/sdcard", .stop = stop, .request = partner_request,

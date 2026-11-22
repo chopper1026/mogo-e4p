@@ -497,6 +497,7 @@ static const char *cloud_error(cz_error_t error) {
     switch (error) {
         case CZ_AUTH: return "请在设置中绑定 CloudZao";
         case CZ_REFRESH_REUSED: return "授权已失效，请重新绑定";
+        case CZ_REFRESH_INTERRUPTED: return "授权刷新未完成";
         case CZ_INTEGRATION: return "请核对固件接入 ID";
         case CZ_CLOCK: return "请先校准设备时间";
         case CZ_SLOW_DOWN: return "请求过于频繁，请稍候";
@@ -1065,7 +1066,8 @@ static const char *cloud_bind_title(void) {
     if (status->authorized) return "授权可用";
     if (status->error == CZ_CANCELLED) return "绑定已暂停";
     if (status->error == CZ_AUTH || status->error == CZ_REFRESH_REUSED) return "需要重新授权";
-    if (status->error == CZ_ACTIVATION_UNAVAILABLE) return cloud_error(status->error);
+    if (status->error == CZ_ACTIVATION_UNAVAILABLE || status->error == CZ_REFRESH_INTERRUPTED)
+        return cloud_error(status->error);
     if (status->error) return "暂时无法绑定";
     return "绑定 CloudZao";
 }
@@ -1080,6 +1082,10 @@ static const char *cloud_bind_detail(void) {
     if (status->error == CZ_PAIR_EXPIRED) return "绑定会话已失效，请检查 App 绑定";
     if (status->error) return cloud_error(status->error);
     return "在CloudZao App或小程序中添加这台设备";
+}
+
+static bool cloud_bind_needs_rebind(const cz_status_t *status) {
+    return status->error == CZ_REFRESH_INTERRUPTED || status->rebind_retry;
 }
 
 static bool cloud_bind_action_enabled(void) {
@@ -1146,8 +1152,9 @@ static void draw_cloud_settings(uint8_t *fb) {
     const cz_status_t *bind = &s_cloud_bind_status;
     const bool receiving = s_cloud_status.busy;
     const bool show_code = bind->code[0] && !s_cloud_cancelling;
-    const bool show_unbind_hint = !s_cloud_cancelling && !bind->busy && !show_code && !bind->authorized &&
-                                  bind->error == CZ_ACTIVATION_UNAVAILABLE;
+    const bool show_hint = !s_cloud_cancelling && !bind->busy && !show_code && !bind->authorized;
+    const bool refresh_interrupted = bind->error == CZ_REFRESH_INTERRUPTED;
+    const bool show_unbind_hint = show_hint && (refresh_interrupted || bind->error == CZ_ACTIVATION_UNAVAILABLE);
     const EpdRect card = {36, 282, 612, 290};
     ui_text_box(fb, (EpdRect){36, 220, 612, 52}, 32, "设备绑定", EPD_DRAW_ALIGN_LEFT, false);
     ui_draw_round_rect(fb, card, 22, 0x90);
@@ -1156,9 +1163,11 @@ static void draw_cloud_settings(uint8_t *fb) {
     if (show_code) ui_text_box(fb, (EpdRect){56, 344, 572, 78}, 58, bind->code, EPD_DRAW_ALIGN_CENTER, false);
     if (show_unbind_hint) {
         ui_text_box(fb, (EpdRect){56, 378, 572, 40}, 21,
-                    "若此设备已绑定，请先在", EPD_DRAW_ALIGN_CENTER, false);
+                    refresh_interrupted ? "云端可能仍保留绑定" : "若此设备已绑定，请先在",
+                    EPD_DRAW_ALIGN_CENTER, false);
         ui_text_box(fb, (EpdRect){56, 418, 572, 40}, 21,
-                    "CloudZao App 或小程序解绑后重试", EPD_DRAW_ALIGN_CENTER, false);
+                    refresh_interrupted ? "如需恢复，请先在 App 解绑" : "CloudZao App 或小程序解绑后重试",
+                    EPD_DRAW_ALIGN_CENTER, false);
     } else {
         ui_text_box(fb, (EpdRect){56, show_code ? 422 : 383, 572, 44}, 21,
                     cloud_bind_detail(), EPD_DRAW_ALIGN_CENTER, false);
@@ -1168,7 +1177,7 @@ static void draw_cloud_settings(uint8_t *fb) {
     const bool enabled = cloud_bind_action_enabled(), primary = enabled && !bind->busy && !show_code;
     const char *label = receiving ? "接收结束后可操作" : s_cloud_cancelling ? "正在暂停…" :
         bind->busy || show_code ? "暂停绑定" : bind->authorized ? "检查授权" :
-        bind->error == CZ_CANCELLED ? "继续绑定" : "绑定 / 查看授权";
+        cloud_bind_needs_rebind(bind) ? "重新绑定" : bind->error == CZ_CANCELLED ? "继续绑定" : "绑定 / 查看授权";
     ui_fill_round_rect(fb, action, 18, primary ? UI_GRAY_BLACK : UI_GRAY_WHITE);
     if (!primary) ui_draw_round_rect(fb, action, 18, 0x50);
     ui_text_box(fb, (EpdRect){action.x + 18, action.y + 8, action.width - 36, action.height - 16}, 25,
@@ -1379,8 +1388,9 @@ static app_redraw_t cloud_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) 
                 s_cloud_poll_at = 0;
                 s_cloud_bind_status = (cz_status_t){.error = CZ_CANCELLED};
             } else {
-                const cz_error_t result = cloudzao_start(CZ_JOB_BIND, NULL);
-                s_cloud_bind_status = (cz_status_t){.busy = result == CZ_OK, .error = result};
+                const bool rebind = cloud_bind_needs_rebind(&s_cloud_bind_status);
+                const cz_error_t result = cloudzao_start(rebind ? CZ_JOB_REBIND : CZ_JOB_BIND, NULL);
+                s_cloud_bind_status = (cz_status_t){.busy = result == CZ_OK, .error = result, .rebind_retry = rebind};
                 s_cloud_cancelling = false;
             }
             return APP_REDRAW_PAGE;
@@ -2125,7 +2135,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (s_cloud_bind_status.busy || s_cloud_poll_running) {
             cz_status_t status = cloudzao_status();
             if (status.busy) return APP_REDRAW_NONE;
-            if (s_cloud_cancelling) status = (cz_status_t){.error = CZ_CANCELLED};
+            if (s_cloud_cancelling) status = (cz_status_t){.error = CZ_CANCELLED,
+                .rebind_retry = s_cloud_bind_status.rebind_retry && !status.code[0]};
             const bool same_waiting_card = s_cloud_poll_running && status.code[0] &&
                 !strcmp(status.code, s_cloud_bind_status.code) &&
                 (status.error == CZ_TIMEOUT) == (s_cloud_bind_status.error == CZ_TIMEOUT);
@@ -2149,7 +2160,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             if (status.busy) return APP_REDRAW_NONE;
             s_cloud_status = status;
             if (status.error == CZ_OK) s_cloud_bind_status = (cz_status_t){.authorized = true};
-            else if (status.error == CZ_AUTH || status.error == CZ_REFRESH_REUSED)
+            else if (status.error == CZ_AUTH || status.error == CZ_REFRESH_REUSED ||
+                     status.error == CZ_REFRESH_INTERRUPTED)
                 s_cloud_bind_status = (cz_status_t){.error = status.error};
             s_cloud_cancelling = false;
             const unsigned count = cloud_offer_count();
@@ -2164,7 +2176,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             s_cloud_status = status;
             s_cloud_transfer = transfer;
             if (!status.busy) {
-                if (status.error == CZ_AUTH || status.error == CZ_REFRESH_REUSED)
+                if (status.error == CZ_AUTH || status.error == CZ_REFRESH_REUSED ||
+                    status.error == CZ_REFRESH_INTERRUPTED)
                     s_cloud_bind_status = (cz_status_t){.error = status.error};
                 s_cloud_cancelling = false;
             }

@@ -67,7 +67,7 @@ static bool cloudzao_history_item(unsigned i, cz_history_item_t *item) {
     code += source[source.index("enum { CLOUD_BIND, CLOUD_RECEIVE }"):source.index("static EpdRect cloud_button")]
     code += source[source.index("#define CLOUD_BATCH_PAGE_ROWS"):source.index("static EpdRect cloud_pager(")]
     for name in ("cloud_notice_button", "draw_cloud_notice", "cloud_error", "cloud_button",
-                 "cloud_bind_title", "cloud_bind_detail", "cloud_bind_action_enabled", "cloud_notice_entry",
+                 "cloud_bind_title", "cloud_bind_detail", "cloud_bind_needs_rebind", "cloud_bind_action_enabled", "cloud_notice_entry",
                  "draw_cloud_app_download", "draw_cloud_settings", "draw_cloud_header", "cloud_tab", "cloud_tabs",
                  "cloud_pager", "cloud_bytes", "cloud_row_label", "cloud_history_format", "draw_cloud_history_row",
                  "draw_cloud_history_pager", "cloud_history_clear_button", "cloud_history_confirm_button",
@@ -113,6 +113,8 @@ int main(int argc,char **argv){
             snprintf(path,sizeof(path),"%s/cloudzao-settings-download-%u.raw",argv[1],font_percent);save(path,fb);
             s_cloud_bind_status=(cz_status_t){.code="012345"};cloud_settings_preview(fb);
             snprintf(path,sizeof(path),"%s/cloudzao-settings-binding-%u.raw",argv[1],font_percent);save(path,fb);
+            s_cloud_bind_status=(cz_status_t){.error=CZ_REFRESH_INTERRUPTED};cloud_settings_preview(fb);
+            snprintf(path,sizeof(path),"%s/cloudzao-settings-refresh-interrupted-%u.raw",argv[1],font_percent);save(path,fb);
             ui_clear_page(fb);s_cloud_notice=CLOUD_NOTICE_FIRST_READ;s_cloud_notice_save_failed=false;
             draw_cloud_notice(fb);
             snprintf(path,sizeof(path),"%s/cloudzao-first-read-%u.raw",argv[1],font_percent);save(path,fb);

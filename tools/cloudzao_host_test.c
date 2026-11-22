@@ -336,9 +336,11 @@ typedef struct {
     cz_request_t expected;
     const char *body, *token;
     unsigned calls[6], deny_list, deny_ack;
-    int http;
-    cz_error_t transport;
-    bool fail_write, reject_tokens, unsent;
+    int http, list_http;
+    cz_error_t transport, refresh_cause;
+    unsigned refresh_failures;
+    bool refresh_sent, refresh_needs_rebind;
+    bool fail_write, reject_tokens, unsent, pair_after_refresh;
 } partner_fixture_t;
 
 static int64_t partner_clock(void *context) { return ((partner_fixture_t *)context)->now; }
@@ -349,6 +351,14 @@ static bool partner_persist(void *context, const cz_session_record_t *record) {
     if (f->fail_write || (f->reject_tokens && record->state == CZ_SESSION_AUTHORIZED)) return false;
     f->durable = *record;
     return true;
+}
+
+static void partner_refresh_failed(void *context, cz_error_t cause, bool maybe_sent, bool rebind_required) {
+    partner_fixture_t *f = context;
+    ++f->refresh_failures;
+    f->refresh_cause = cause;
+    f->refresh_sent = maybe_sent;
+    f->refresh_needs_rebind = rebind_required;
 }
 
 static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_request_t *req,
@@ -370,7 +380,7 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
             body = "{\"error\":\"invalid_device_credential\"}";
         } else {
             assert(!f->token || !strcmp(req->token, f->token));
-            http = op == CZ_LIST ? 200 : 204;
+            http = op == CZ_LIST ? (f->list_http ? f->list_http : 200) : 204;
             body = op == CZ_LIST ? LIST("") : "";
         }
     } else {
@@ -386,7 +396,13 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
             assert(strstr(wire, "POST " BASE "/device-tokens/refresh HTTP/1.1"));
             assert(strstr(req->body, "\"refreshToken\":\"prf_fixture"));
             assert(f->durable.state == CZ_SESSION_ROTATING && !f->durable.refresh[0]);
+            if (f->pair_after_refresh) {
+                f->expected = CZ_BIND;
+                f->http = 200;
+                f->body = PAIR_RESPONSE;
+            }
         }
+        if (op == CZ_BIND && f->pair_after_refresh) assert(f->durable.state == CZ_SESSION_EMPTY);
         if (req->maybe_sent) *req->maybe_sent = !f->unsent;
         if (f->transport) return f->transport;
     }
@@ -402,7 +418,7 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
 }
 
 static cz_status_t pair(cz_partner_t *p, bool poll) {
-    return cloudzao_partner_pair(p, poll, "integration_fixture", MAC, "1.1.6");
+    return cloudzao_partner_pair(p, poll ? CZ_JOB_POLL : CZ_JOB_BIND, "integration_fixture", MAC, "1.1.6");
 }
 
 static cz_error_t inbox(cz_partner_t *p, cz_request_t operation) {
@@ -419,7 +435,7 @@ static void partner_regression(void) {
     cz_partner_t p = {.raw = &ops, .persist = partner_persist, .response = reply};
     assert(inbox(&p, CZ_LIST) == CZ_AUTH && f.calls[CZ_LIST] == 0);
     assert(pair(&p, false).error == CZ_ACTIVATION_UNAVAILABLE && !f.calls[CZ_LIST]);
-    assert(cloudzao_partner_pair(&p, false, "", MAC, "1.1.6").error == CZ_INTEGRATION && f.calls[CZ_BIND] == 1);
+    assert(cloudzao_partner_pair(&p, CZ_JOB_BIND, "", MAC, "1.1.6").error == CZ_INTEGRATION && f.calls[CZ_BIND] == 1);
     f.http = 200; f.body = "{\"activationCode\":12345}";
     assert(pair(&p, false).error == CZ_INVALID && !f.durable.state);
     f.body = PAIR_RESPONSE;
@@ -467,20 +483,109 @@ static void partner_regression(void) {
     f.fail_write = false; f.transport = CZ_TIMEOUT; f.unsent = true;
     assert(inbox(&p, CZ_LIST) == CZ_TIMEOUT && f.durable.state == CZ_SESSION_AUTHORIZED);
     f.unsent = false;
-    assert(inbox(&p, CZ_LIST) == CZ_TIMEOUT && f.durable.state == CZ_SESSION_ROTATING);
+    assert(inbox(&p, CZ_LIST) == CZ_REFRESH_INTERRUPTED && f.durable.state == CZ_SESSION_ROTATING);
     p.record = f.durable; f.transport = CZ_OK;
-    assert(inbox(&p, CZ_LIST) == CZ_AUTH && f.calls[CZ_REFRESH] == 7);
+    assert(inbox(&p, CZ_LIST) == CZ_REFRESH_INTERRUPTED && f.calls[CZ_REFRESH] == 7);
     p.record = f.durable = first; f.reject_tokens = true; f.body = TOKEN_REPLY("pat_fixture.lost", "prf_fixture.lost");
-    assert(inbox(&p, CZ_ACK) == CZ_CREDENTIAL_STORAGE && f.durable.state == CZ_SESSION_ROTATING);
+    assert(inbox(&p, CZ_ACK) == CZ_REFRESH_INTERRUPTED && f.durable.state == CZ_SESSION_ROTATING);
     f.reject_tokens = false; p.record = f.durable = first;
     f.body = TOKEN_REPLY("pat_fixture.lost", "prf_fixture.first");
-    assert(inbox(&p, CZ_ACK) == CZ_INVALID && f.durable.state == CZ_SESSION_ROTATING);
+    assert(inbox(&p, CZ_ACK) == CZ_REFRESH_INTERRUPTED && f.durable.state == CZ_SESSION_ROTATING);
     f.expected = CZ_BIND; f.body = PAIR_RESPONSE;
-    assert(pair(&p, false).poll_after_s == 5);
+    assert(cloudzao_partner_pair(&p, CZ_JOB_REBIND, "integration_fixture", MAC, "1.1.6").poll_after_s == 5);
     f.expected = CZ_EXCHANGE; f.now += 5; f.http = 410; f.body = "{\"error\":\"pairing_expired\"}";
     assert(pair(&p, true).error == CZ_PAIR_EXPIRED && f.durable.state == CZ_SESSION_EMPTY);
     assert(pair(&p, true).error == CZ_PAIR_EXPIRED);
     puts("CloudZao Partner pairing, reboot, backoff, rotation, 401 and ambiguous refresh: PASS");
+}
+
+static void partner_check_authorization_regression(void) {
+    const int64_t now = 1794787500;
+    const cz_session_record_t first = {.state = CZ_SESSION_AUTHORIZED, .issued_at = now - 30,
+        .expires_at = now + 870, .refresh_expires_at = now + 2591970,
+        .credential = "pat_fixture.first", .refresh = "prf_fixture.first"};
+    partner_fixture_t f = {.now = now, .durable = first, .token = "pat_fixture.first"};
+    const cz_ops_t ops = {.context = &f, .request = partner_raw, .now = partner_clock, .stop = partner_stop};
+    char reply[CLOUDZAO_PARTNER_RESPONSE_CAP];
+    cz_partner_t p = {.raw = &ops, .persist = partner_persist, .response = reply, .record = first};
+
+    cz_status_t status = pair(&p, false);
+    assert(status.authorized && status.error == CZ_OK && f.calls[CZ_LIST] == 1);
+    assert(!f.calls[CZ_REFRESH] && !f.calls[CZ_BIND] && !f.calls[CZ_ACK] && !f.calls[CZ_DOWNLOAD]);
+
+    f.list_http = 503;
+    status = pair(&p, false);
+    assert(!status.authorized && status.error == CZ_SERVER && !status.code[0]);
+    assert(!f.calls[CZ_REFRESH] && !f.calls[CZ_BIND] && !strcmp(f.durable.refresh, first.refresh));
+    f.list_http = 0;
+
+    f.deny_list = 1; f.expected = CZ_REFRESH; f.http = 200;
+    f.body = TOKEN_REPLY("pat_fixture.second", "prf_fixture.second"); f.token = "pat_fixture.second";
+    status = pair(&p, false);
+    assert(status.authorized && f.calls[CZ_LIST] == 4 && f.calls[CZ_REFRESH] == 1 && !f.calls[CZ_BIND]);
+
+    // 模拟 App 解绑：访问令牌仍在本机有效期内，但云端拒绝访问和刷新。
+    // Simulate app unlinking: the token is locally unexpired, but the server rejects access and refresh.
+    f.deny_list = 1; f.http = 401; f.body = "{\"error\":\"invalid_device_credential\"}";
+    f.pair_after_refresh = true;
+    status = pair(&p, false);
+    assert(!status.authorized && status.error == CZ_OK && !strcmp(status.code, "012345") && status.poll_after_s == 5);
+    assert(f.calls[CZ_LIST] == 5 && f.calls[CZ_REFRESH] == 2 && f.calls[CZ_BIND] == 1);
+    assert(f.durable.state == CZ_SESSION_PAIRING && !f.durable.refresh[0]);
+    status = pair(&p, false);
+    assert(status.error == CZ_PAIR_PENDING && !strcmp(status.code, "012345") && f.calls[CZ_BIND] == 1);
+
+    // 即使刷新成功，云端再次拒绝也不保留旧授权。/ A second denial invalidates the grant even if refresh succeeded.
+    p.record = f.durable = first;
+    f.deny_list = 2; f.expected = CZ_REFRESH; f.http = 200;
+    f.body = TOKEN_REPLY("pat_fixture.third", "prf_fixture.third");
+    status = pair(&p, false);
+    assert(!status.authorized && status.error == CZ_OK && !strcmp(status.code, "012345"));
+    assert(f.calls[CZ_LIST] == 7 && f.calls[CZ_REFRESH] == 3 && f.calls[CZ_BIND] == 2);
+    assert(f.durable.state == CZ_SESSION_PAIRING && !f.durable.refresh[0]);
+    puts("CloudZao Settings checks live authorization and re-pairs after unlink: PASS");
+}
+
+static void partner_interrupted_refresh_regression(void) {
+    const int64_t now = 1794787500;
+    const cz_session_record_t first = {.state = CZ_SESSION_AUTHORIZED, .issued_at = now - 900,
+        .expires_at = now, .refresh_expires_at = now + 86400,
+        .credential = "pat_fixture.first", .refresh = "prf_fixture.first"};
+    partner_fixture_t f = {.now = now, .durable = first, .expected = CZ_REFRESH, .http = 200,
+        .body = TOKEN_REPLY("pat_fixture.next", "prf_fixture.next"), .transport = CZ_TIMEOUT, .unsent = true};
+    const cz_ops_t ops = {.context = &f, .request = partner_raw, .now = partner_clock, .stop = partner_stop};
+    char reply[CLOUDZAO_PARTNER_RESPONSE_CAP];
+    cz_partner_t p = {.raw = &ops, .persist = partner_persist, .refresh_failed = partner_refresh_failed,
+        .response = reply, .record = first};
+
+    assert(pair(&p, false).error == CZ_TIMEOUT && f.durable.state == CZ_SESSION_AUTHORIZED);
+    assert(f.refresh_failures == 1 && f.refresh_cause == CZ_TIMEOUT && !f.refresh_sent && !f.refresh_needs_rebind);
+    assert(!strcmp(f.durable.refresh, first.refresh) && !f.calls[CZ_BIND]);
+
+    f.unsent = false;
+    cz_status_t status = pair(&p, false);
+    assert(status.error == CZ_REFRESH_INTERRUPTED && !status.authorized && !status.poll_after_s);
+    assert(f.refresh_failures == 2 && f.refresh_cause == CZ_TIMEOUT && f.refresh_sent && f.refresh_needs_rebind);
+    assert(f.durable.state == CZ_SESSION_ROTATING && !f.durable.refresh[0] && f.calls[CZ_REFRESH] == 2);
+
+    p.record = f.durable;
+    assert(pair(&p, false).error == CZ_REFRESH_INTERRUPTED); // 重启后也不自动领码。/ No automatic code after reboot either.
+    assert(inbox(&p, CZ_LIST) == CZ_REFRESH_INTERRUPTED && inbox(&p, CZ_ACK) == CZ_REFRESH_INTERRUPTED);
+    assert(!f.calls[CZ_BIND] && !f.calls[CZ_LIST] && !f.calls[CZ_ACK] && f.calls[CZ_REFRESH] == 2);
+
+    f.expected = CZ_BIND; f.transport = CZ_OK; f.http = 409;
+    f.body = "{\"error\":\"activation_unavailable\"}";
+    status = cloudzao_partner_pair(&p, CZ_JOB_REBIND, "integration_fixture", MAC, "1.1.6");
+    assert(status.error == CZ_ACTIVATION_UNAVAILABLE && status.rebind_retry && !status.poll_after_s);
+    assert(f.durable.state == CZ_SESSION_ROTATING && f.calls[CZ_BIND] == 1);
+    f.http = 200; f.body = PAIR_RESPONSE;
+    status = cloudzao_partner_pair(&p, CZ_JOB_REBIND, "integration_fixture", MAC, "1.1.6");
+    assert(status.error == CZ_OK && !status.rebind_retry && !strcmp(status.code, "012345") && status.poll_after_s == 5);
+    assert(f.durable.state == CZ_SESSION_PAIRING && f.calls[CZ_BIND] == 2 && f.calls[CZ_REFRESH] == 2);
+    f.now += 5; f.expected = CZ_EXCHANGE; f.body = TOKEN_REPLY("pat_fixture.recovered", "prf_fixture.recovered");
+    assert(pair(&p, true).authorized && f.durable.state == CZ_SESSION_AUTHORIZED && f.calls[CZ_EXCHANGE] == 1);
+    assert(!strcmp(f.durable.refresh, "prf_fixture.recovered") && f.calls[CZ_REFRESH] == 2);
+    puts("CloudZao interrupted refresh diagnosis, no replay, explicit re-pair: PASS");
 }
 
 static void partner_pair_timeout_regression(void) {
@@ -600,6 +705,8 @@ int main(int argc, char **argv) {
     empty_preview_regression();
     test_t test = {.root = argv[1], .space = 1ULL << 30};
     partner_regression();
+    partner_check_authorization_regression();
+    partner_interrupted_refresh_regression();
     partner_pair_timeout_regression();
     char selection_root[512];
     assert(snprintf(selection_root, sizeof(selection_root), "%s/selection", argv[1]) < (int)sizeof(selection_root));

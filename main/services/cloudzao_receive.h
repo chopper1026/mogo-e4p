@@ -17,12 +17,13 @@
 #define CLOUDZAO_HISTORY_ROWS 32u
 
 typedef enum { CZ_BIND, CZ_EXCHANGE, CZ_REFRESH, CZ_LIST, CZ_DOWNLOAD, CZ_ACK } cz_request_t;
-typedef enum { CZ_JOB_BIND, CZ_JOB_POLL, CZ_JOB_PREVIEW, CZ_JOB_DOWNLOAD } cz_job_t;
+typedef enum { CZ_JOB_BIND, CZ_JOB_POLL, CZ_JOB_PREVIEW, CZ_JOB_DOWNLOAD, CZ_JOB_REBIND } cz_job_t;
 typedef enum {
     CZ_OK, CZ_INVALID, CZ_AUTH, CZ_SERVER, CZ_TIMEOUT, CZ_WIFI,
     CZ_MEDIA, CZ_CANCELLED, CZ_RESOURCES, CZ_STORAGE, CZ_CONFLICT, CZ_DIGEST,
     CZ_PAIR_PENDING, CZ_SLOW_DOWN, CZ_PAIR_EXPIRED, CZ_ACTIVATION_UNAVAILABLE,
-    CZ_REFRESH_REUSED, CZ_INTEGRATION, CZ_DELIVERY_MISSING, CZ_CLOCK, CZ_CREDENTIAL_STORAGE, CZ_LINK_EXPIRED
+    CZ_REFRESH_REUSED, CZ_INTEGRATION, CZ_DELIVERY_MISSING, CZ_CLOCK, CZ_CREDENTIAL_STORAGE, CZ_LINK_EXPIRED,
+    CZ_REFRESH_INTERRUPTED
 } cz_error_t;
 
 typedef enum {
@@ -68,6 +69,7 @@ typedef struct {
     unsigned total, processed, saved, pending, skipped, failed, unavailable;
     char code[7];
     bool authorized;
+    bool rebind_retry; ///< 恢复操作暂时失败，保留手动重绑入口。/ Keep manual re-pair available after a failed recovery attempt.
     uint32_t poll_after_s;
 } cz_status_t;
 

@@ -24,10 +24,13 @@ typedef struct {
     /// 成功时完整提交整条记录；轮换标记成功提交前不得联网刷新。
     /// Commit the entire record; do not refresh until the rotation marker is durable.
     bool (*persist)(void *context, const cz_session_record_t *record);
+    /// 可选：只报告错误和刷新阶段标记，不传递凭据或回包。/ Optional: report errors and rotation flags, never credentials or reply data.
+    void (*refresh_failed)(void *context, cz_error_t cause, bool maybe_sent, bool rebind_required);
 } cz_partner_t;
 
-/// 已有待配对记录则恢复，不另申请验证码。/ Resume a pending pairing instead of issuing another code.
-cz_status_t cloudzao_partner_pair(cz_partner_t *partner, bool poll, const char *integration, const char *mac, const char *version);
+/// 恢复待配对或联网验证授权；刷新中断时，仅显式 REBIND 可再申请绑定码。
+/// Resume pending pairing or verify the grant online; only explicit REBIND may request a code after interrupted rotation.
+cz_status_t cloudzao_partner_pair(cz_partner_t *partner, cz_job_t job, const char *integration, const char *mac, const char *version);
 /// 下载不附加凭据；清单与确认在 401 后至多刷新并重试一次。/ Downloads omit credentials; list and ACK refresh and retry at most once on 401.
 cz_error_t cloudzao_partner_request(cz_partner_t *partner, cz_request_t operation, const cz_http_request_t *request,
                                    cz_sink_t sink, void *sink_context);
