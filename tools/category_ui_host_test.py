@@ -15,10 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 KIT = ROOT / "main/ui/ui_kit.c"
 BOOK = ROOT / "main/apps/app_book.c"
 NAV = ROOT / "main/ui/ui_nav.c"
+SETTINGS = ROOT / "main/apps/app_device_settings.c"
 
 
 def adapter():
-    code = r'''
+    notepad = (ROOT / "main/ui/ui_shelf_notepad.c").read_text().replace(
+        '#include "ui_shelf_notepad.h"',
+        'enum { UI_NOTEPAD_ROWS = 10, UI_NOTEPAD_INK_STEPS = 3 };\n'
+        'void ui_notepad_line(uint8_t *,int,bool,bool,bool,bool,const char *,const char *,unsigned);')
+    code = notepad + r'''
 typedef enum { SHELF, MANAGE, BULK, CATEGORIES, EDIT, SEARCH, IMPORT } book_view_t;
 typedef book_shelf_entry_t shelf_entry_t;
 static book_category_ui_t s_category_ui;
@@ -28,7 +33,7 @@ static uint32_t s_collection_bound_generation;
 static bool binding_fail;
 static book_view_t s_view,s_category_parent;
 static bool s_category_bulk,s_scan_pending;
-static int s_pressed_control,s_count,s_visible_count;
+static int s_pressed_control,s_count,s_visible_count,s_presented_view=-1;
 static shelf_entry_t s_shelf[20],s_managed;
 static char s_batch_message[128],s_cache_library[40]="card-a";
 static bool pending,usb_active,sd_present=true,sd_mounted=true;
@@ -43,7 +48,8 @@ static unsigned shelf_titles;
 static int app_settings_shelf_style(void){return shelf_style;}
 static bool app_settings_shelf_show_titles(uint8_t style){return style==1?shelf_titles&1:style==2?shelf_titles&2:false;}
 static uint8_t app_settings_system_contrast(void){return 100;}
-static int shelf_rows(void){return shelf_style==5?4:9;}
+#define APP_SHELF_STYLE_NOTEPAD 6
+static int shelf_rows(void){return shelf_style==APP_SHELF_STYLE_NOTEPAD?UI_NOTEPAD_ROWS:shelf_style==5?4:9;}
 #include "book_shelf_covers.h"
 #include "book_cover_auto.h"
 #include "ui_image_dither.h"
@@ -105,16 +111,21 @@ static app_redraw_t dictionary_gesture(app_ctx_t *ctx,const ui_gesture_event_t *
 }
 static bool s_shelf_key_mode;
 static int s_shelf_key_pressed;
-static unsigned input_refreshes;
+static unsigned input_refreshes,ink_errors,opened_after_refreshes;
+enum EpdDrawError {EPD_DRAW_SUCCESS,TEST_DRAW_ERROR};
+static bool fail_ink,in_ink_group;
+static bool display_present_begin(void){assert(!in_ink_group);in_ink_group=true;return true;}
+static void display_present_end(bool held){assert(held&&in_ink_group);in_ink_group=false;}
 static int input_intent;
 static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
-static int display_refresh_area(display_state_t *hl,int intent,EpdRect area,unsigned flags){
+static enum EpdDrawError display_refresh_area(display_state_t *hl,int intent,EpdRect area,unsigned flags){
     (void)hl;assert(flags==DISPLAY_REFRESH_DEFAULT);assert(area.width&&area.height);
-    ++input_refreshes;input_intent=intent;return ESP_OK;
+    if(hl)assert(in_ink_group&&intent==DISPLAY_REFRESH_FEEDBACK);
+    ++input_refreshes;input_intent=intent;return fail_ink?TEST_DRAW_ERROR:EPD_DRAW_SUCCESS;
 }
-static void guard_draw_result(display_state_t *hl,int error){(void)hl;assert(error==ESP_OK);}
+static void guard_draw_result(display_state_t *hl,int error){(void)hl;if(error){assert(fail_ink);++ink_errors;}}
 '''
-    for name in ("sort_shelf", "legacy_category_recover", "category_cover_draw", "shelf_category_remember", "shelf_category_restore", "category_reset", "category_begin",
+    for name in ("sort_shelf", "legacy_category_recover", "category_cover_draw", "shelf_layout", "shelf_category_remember", "shelf_category_restore", "category_reset", "category_begin",
                  "category_start_books", "category_select", "category_close", "category_back",
                  "category_input_paint", "category_gesture", "category_storage_ready", "category_error", "category_tick"):
         code += host.function(name, ROOT / "main/apps/app_book.c") + "\n"
@@ -262,7 +273,8 @@ def shelf_fixture():
 #define UI_NAV_TAB_ICON_PX 44
 enum {APP_MAIN_REFRESH_NORMAL};
 static int app_settings_main_refresh_mode(void){return APP_MAIN_REFRESH_NORMAL;}
-static bool app_settings_main_fast_refresh(void){return false;}
+static bool shelf_fast;
+static bool app_settings_main_fast_refresh(void){return shelf_fast;}
 static void display_main_transition_gray_bands(const EpdRect *r,int n){assert(n==1&&r->y==(s_shelf_selecting?272:192));}
 static void unlock_draw(void){}
 static void render(app_ctx_t *,uint8_t *);
@@ -274,12 +286,17 @@ static int shelf_category_at(int n){return book_shelf_categories_at(&s_shelf_cat
 static int shelf_category_available(void){return book_shelf_categories_available(&s_shelf_categories);}
 static unsigned opened_books,requested_nav;
 void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;requested_nav=(unsigned)tab+1;}
-static char s_message[128],s_shelf_warning[128],s_manage_message[128];
+static char s_message[128],s_shelf_warning[128],s_manage_message[128],s_open_error[128];
+static void draw_open_error(uint8_t *fb){(void)fb;assert(false);}
+static app_redraw_t open_error_gesture(const ui_gesture_event_t *ev){(void)ev;assert(false);return APP_REDRAW_NONE;}
 static bool s_save_failed,s_batch_confirm,s_file_removed,s_delete_confirm,s_clear_confirm;
 static void retry_progress(void){}
-static bool open_book(app_ctx_t *ctx,const char *path){(void)ctx;assert(path[0]);++opened_books;return true;}
+static bool open_book(app_ctx_t *ctx,const char *path){(void)ctx;assert(path[0]&&!in_ink_group);opened_after_refreshes=input_refreshes;++opened_books;return true;}
+static bool s_shelf_page_pending;
 static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
-    int next=ctx->leaf+delta;if(next<0)next=0;if(next>=leaves())next=leaves()-1;ctx->leaf=next;return APP_REDRAW_PAGE;
+    const int next=ctx->leaf+delta;
+    if (!delta || next<0 || next>=leaves()) return APP_REDRAW_NONE;
+    ctx->leaf=next;return APP_REDRAW_AREA;
 }
 '''
     for name in ("ui_content_width", "ui_text_box", "ui_pager_area", "ui_pager_rect", "ui_pager_hit", "ui_pager_target", "ui_pager_draw"):
@@ -291,9 +308,12 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
                  "draw_shelf_furniture", "draw_shelf_titles", "shelf_header_action_rect", "shelf_category_title_rect", "shelf_manage_rect", "shelf_import_rect", "draw_shelf_header_button", "draw_shelf_pager", "shelf_page_arrow_rect",
                  "shelf_category_box", "draw_category_menu", "shelf_category_gesture", "toggle_selection", "main_page_visible"):
         code += host.function(name, BOOK) + "\n"
+    for name in ("settings_card", "shelf_style_card", "shelf_style_id", "shelf_style_name", "draw_compact_shelf_style"):
+        code += host.function(name, SETTINGS) + "\n"
     tail = host.function("render", BOOK)
     tail = tail[tail.index("    ui_clear_page(fb);\n    // 留白保持纯白"):]
     code += "static void render(app_ctx_t *ctx,uint8_t *fb){\n" + tail + "\n"
+    code += host.function("play_notepad_title_ink", BOOK) + "\n"
     action = host.function("action_at", BOOK)
     action = action[action.index("    if (s_view == SHELF) {\n        if(s_shelf_selecting"):]
     code += "static app_redraw_t action_at(app_ctx_t *ctx,uint16_t x,uint16_t y){\n" + action + "\n"
@@ -301,19 +321,37 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
     guards = control[control.index("\n") + 1:control.index("    if (s_view == BULK)")]
     control = control[control.index("    if (s_view == SHELF && ui_rect_hit(shelf_manage_rect()"):]
     code += "static int control_at(app_ctx_t *ctx,uint16_t x,uint16_t y,EpdRect *rect){\n" + guards + control + "\n"
-    gesture = host.function("gesture_event", BOOK).split("    bool indent_handled=false;", 1)[0]
-    code += gesture + "return APP_REDRAW_NONE;}\n"
+    code += r'''
+static app_redraw_t paint_control(app_ctx_t *ctx,EpdRect rect){(void)ctx;(void)rect;assert(false);return APP_REDRAW_NONE;}
+static bool present(app_ctx_t *ctx,app_redraw_t redraw){assert(false);return input_present(ctx,redraw);}
+#define READING 20
+#define READER_PANEL_TOOLS 1
+#define READER_BAR_TOP 1000
+#define READER_WIDTH 684
+static bool s_toolbar;
+static int s_reader_panel;
+static EpdRect body_rect(void){assert(false);return (EpdRect){0};}
+static int book_reader_tap_x(EpdRect r,int w,int x,int y){(void)r;(void)w;(void)x;(void)y;assert(false);return -1;}
+static bool app_settings_reader_vertical_turn(void){assert(false);return false;}
+static int reader_swipe_direction(ui_gesture_type_t type,bool vertical){(void)type;(void)vertical;assert(false);return 0;}
+static app_redraw_t turn_page(app_ctx_t *ctx,int d){(void)ctx;(void)d;assert(false);return APP_REDRAW_NONE;}
+static app_redraw_t bulk_turn_page(app_ctx_t *ctx,int d){(void)ctx;(void)d;assert(false);return APP_REDRAW_NONE;}
+'''
+    code += host.function("press_control", BOOK) + "\n"
+    gesture = host.function("gesture_event", BOOK)
+    code += gesture.split("    bool indent_handled=false;", 1)[0]
+    code += gesture[gesture.index("    EpdRect start_rect = {0}, end_rect = {0};"):] + "\n"
     return code + r'''
 static void shelf_snapshot(app_ctx_t *ctx,const char *dir,const char *name){
     book_shelf_covers_cancel(&s_shelf_covers);book_shelf_covers_release(&s_shelf_covers);
-    for(int row=0;row<shelf_rows()&&ctx->leaf*shelf_rows()+row<s_visible_count;++row){
+    for(int row=0;shelf_style!=APP_SHELF_STYLE_NOTEPAD&&row<shelf_rows()&&ctx->leaf*shelf_rows()+row<s_visible_count;++row){
         int i=ctx->leaf*shelf_rows()+row;book_cover_job_t request={0};copy(request.path,288,s_shelf[i].path);copy(request.title,256,s_shelf[i].name);copy(request.author,128,s_shelf[i].author);
         book_shelf_covers_prepare(&s_shelf_covers,row,i,true,false,0,0,ctx->now_ms);
         assert(book_shelf_covers_collect(&s_shelf_covers,row,&request));
     }
     int page=ctx->leaf,selected=book_shelf_categories_selected(&s_shelf_categories);unsigned n=selected_count();render(ctx,ctx->fb);
     assert(ctx->leaf==page&&book_shelf_categories_selected(&s_shelf_categories)==selected&&selected_count()==n);
-    if(!s_shelf_selecting){
+    if(!s_shelf_selecting&&shelf_style!=APP_SHELF_STYLE_NOTEPAD){
         for(int y=160;y<184;++y)for(int x=36;x<648;++x)assert(ui_read_pixel(ctx->fb,x,y)==15);
         for(int y=1056;y<1096;++y)for(int x=36;x<648;++x)assert(ui_read_pixel(ctx->fb,x,y)==15);
         EpdRect hit;
@@ -321,6 +359,138 @@ static void shelf_snapshot(app_ctx_t *ctx,const char *dir,const char *name){
     }
     char path[1024];snprintf(path,sizeof(path),"%s/%s-%u.raw",dir,name,font_scale);save(path,ctx->fb);
 }
+static app_redraw_t shelf_press_pager(app_ctx_t *ctx,int control){
+    const EpdRect r=ui_pager_rect(control);
+    return action_at(ctx,r.x+r.width/2,r.y+r.height/2);
+}
+static void notepad_paper_checks(const uint8_t *fb,bool fast){
+    // 卷边接缝与各行留白保持纯白，纸边和虚线仍有对比。/ Keep the join and row gaps white, with contrast on edges and dashes.
+    for(int x=46;x<637;++x)for(int y=260;y<=262;++y)
+        assert(ui_read_pixel(fb,x,y)==15);
+    for(int slot=0;slot<UI_NOTEPAD_ROWS;++slot){
+        const EpdRect row=ui_notepad_row(slot,false);
+        const int rule=row.y+row.height-1;
+        for(int y=row.y;y<rule;++y)for(int x=380;x<390;++x)
+            assert(ui_read_pixel(fb,x,y)==15);
+        assert(ui_read_pixel(fb,row.x,row.y+row.height/2)==(fast?5:6));
+        if(slot<UI_NOTEPAD_ROWS-1){
+            assert(ui_read_pixel(fb,row.x+11,rule)==0);
+            assert(ui_read_pixel(fb,row.x+20,rule)==15);
+        }
+    }
+}
+static void notepad_paging_checks(app_ctx_t *ctx){
+    const size_t bytes=684*1216/2;
+    uint8_t *first=malloc(bytes);assert(first);
+    const int count=s_count,visible=s_visible_count;
+    s_count=s_visible_count=20;ctx->leaf=0;
+    for(int i=0;i<10;++i){
+        s_shelf[i+10]=s_shelf[i];
+        s_shelf[i+10].pct=(s_shelf[i].pct+50)%101;
+    }
+    assert(leaves()==2);
+    render(ctx,ctx->fb);memcpy(first,ctx->fb,bytes);
+    assert(shelf_press_pager(ctx,UI_PAGER_PREVIOUS)==APP_REDRAW_NONE&&ctx->leaf==0);
+    assert(shelf_press_pager(ctx,UI_PAGER_NEXT)==APP_REDRAW_AREA&&ctx->leaf==1);
+    render(ctx,ctx->fb);
+    const EpdRect row=ui_notepad_row(0,false);
+    unsigned changed=0;
+    for(int x=568;x<628;++x)for(int y=row.y;y<row.y+row.height;++y)
+        changed+=ui_read_pixel(first,x,y)!=ui_read_pixel(ctx->fb,x,y);
+    assert(changed>0);
+    assert(shelf_press_pager(ctx,UI_PAGER_NEXT)==APP_REDRAW_NONE&&ctx->leaf==1);
+    assert(shelf_press_pager(ctx,UI_PAGER_PREVIOUS)==APP_REDRAW_AREA&&ctx->leaf==0);
+    render(ctx,ctx->fb);assert(!memcmp(first,ctx->fb,bytes));
+    assert(shelf_press_pager(ctx,UI_PAGER_LAST)==APP_REDRAW_AREA&&ctx->leaf==1);
+    assert(shelf_press_pager(ctx,UI_PAGER_FIRST)==APP_REDRAW_AREA&&ctx->leaf==0);
+    notepad_paper_checks(first,false);
+    free(first);s_count=count;s_visible_count=visible;
+}
+static void notepad_ink_pixels(app_ctx_t *ctx,const char *output){
+    const size_t bytes=684*1216/2;
+    uint8_t *expected=malloc(bytes);assert(expected);
+    char original[sizeof(s_shelf[9].name)];copy(original,sizeof(original),s_shelf[9].name);
+    copy(s_shelf[9].name,sizeof(s_shelf[9].name),
+         "从这里开始一段特别长的旅途这本书的名字一定会在书架这里截断");
+    for(unsigned scale=100;scale<=200;scale+=25){
+        font_scale=scale;
+        render(ctx,ctx->fb);
+        memcpy(expected,ctx->fb,bytes);
+        int short_width=0;
+        for(int row=0;row<10;row+=9){
+            const EpdRect paper=ui_notepad_row(row,false),ink=ui_notepad_title_ink(ctx->fb,row);
+            assert(ink.x>=48&&ink.x+ink.width<=376&&ink.y>paper.y&&ink.y+ink.height<paper.y+paper.height);
+            if(!row)short_width=ink.width;
+            else assert(ink.width>short_width+80&&ui_text_fixed_width_px(28,s_shelf[9].name)>320);
+            const int cx=ink.x+ink.width/2,cy=ink.y+ink.height/2;
+            bool passes_over_title=false;
+            EpdRect whole={0};
+            for(unsigned step=0;step<UI_NOTEPAD_INK_STEPS;++step){
+                const EpdRect dirty=ui_notepad_ink_step(ctx->fb,row,ink,step);
+                assert(dirty.x>=paper.x+3&&dirty.x+dirty.width<=386&&dirty.x+dirty.width>=dirty.x+1);
+                assert(dirty.y>=paper.y+3&&dirty.height>0&&dirty.y+dirty.height<=paper.y+paper.height-3);
+                assert(dirty.x>=cx-56&&dirty.x+dirty.width<=cx+57);
+                assert(dirty.y>=cy-30&&dirty.y+dirty.height<=cy+31);
+                whole=step?ui_rect_union(whole,dirty):dirty;
+                unsigned added=0;
+                for(int y=dirty.y;y<dirty.y+dirty.height;++y)for(int x=dirty.x;x<dirty.x+dirty.width;++x){
+                    if(ui_read_pixel(expected,x,y)==ui_read_pixel(ctx->fb,x,y))continue;
+                    passes_over_title|=x>=ink.x&&x<ink.x+ink.width&&y>=ink.y&&y<ink.y+ink.height;
+                    assert(ui_read_pixel(expected,x,y)==15&&!ui_read_pixel(ctx->fb,x,y));
+                    epd_draw_pixel(x,y,0,expected);++added;
+                }
+                assert(added>30&&!memcmp(expected,ctx->fb,bytes));
+            }
+            assert(passes_over_title&&whole.height>=39&&whole.height<=58);
+            assert(abs(whole.width-2*whole.height)<=5);
+            if(scale==100&&row==0)assert(whole.height==43);
+            assert(abs(whole.x+whole.width/2-cx)<=3&&abs(whole.y+whole.height/2-cy)<=3);
+        }
+        char path[1024];snprintf(path,sizeof(path),"%s/shelf-notepad-oval-%u.raw",output,scale);save(path,ctx->fb);
+    }
+    copy(s_shelf[9].name,sizeof(s_shelf[9].name),original);
+    free(expected);
+}
+
+static void notepad_ink_gestures(app_ctx_t *ctx){
+    font_scale=100;s_presented_view=SHELF;ctx->hl=(display_state_t *)ctx;
+    s_pressed_control=-1;s_shelf_selecting=false;s_view=SHELF;
+    const unsigned first=input_refreshes,books=opened_books;
+    const int visible=s_visible_count;
+    const EpdRect row=ui_notepad_row(0,false);
+    ui_gesture_event_t ev={.type=UI_GESTURE_PRESS,.x0=75,.x=75,.y0=row.y+28,.y=row.y+28};
+    render(ctx,ctx->fb);
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_NONE&&s_pressed_control==-1);
+    ev.type=UI_GESTURE_CANCEL;assert(gesture_event(ctx,&ev)==APP_REDRAW_NONE);
+    ev.type=UI_GESTURE_SWIPE_R;assert(gesture_event(ctx,&ev)==APP_REDRAW_NONE&&ctx->leaf==0);
+    ev.type=UI_GESTURE_TAP;ev.x=22;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_NONE);ev.x=ev.x0;
+    ev.type=UI_GESTURE_LONG_PRESS;assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&s_view==MANAGE);
+    assert(input_refreshes==first&&opened_books==books);
+    s_view=SHELF;
+    s_shelf_selecting=true;ev.type=UI_GESTURE_TAP;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&s_shelf[0].selected);
+    clear_selection();s_shelf_selecting=false;
+    s_shelf[0].removed=true;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&s_view==MANAGE);
+    s_view=SHELF;s_shelf[0].removed=s_clear_confirm=s_file_removed=s_delete_confirm=false;
+    s_visible_count=0;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_NONE);
+    s_visible_count=visible;
+    assert(input_refreshes==first&&opened_books==books);
+    render(ctx,ctx->fb);
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&opened_books==books+1);
+    assert(input_refreshes==first+UI_NOTEPAD_INK_STEPS&&opened_after_refreshes==input_refreshes);
+    assert(input_intent==DISPLAY_REFRESH_FEEDBACK);
+    render(ctx,ctx->fb);fail_ink=true;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&opened_books==books+2);
+    assert(input_refreshes==first+UI_NOTEPAD_INK_STEPS+1&&opened_after_refreshes==input_refreshes&&ink_errors==1);
+    fail_ink=false;
+    ctx->request_menu=true;
+    assert(gesture_event(ctx,&ev)==APP_REDRAW_PAGE&&input_refreshes==first+UI_NOTEPAD_INK_STEPS+1);
+    ctx->request_menu=false;opened_books=books;ctx->hl=NULL;s_presented_view=-1;
+}
+
 static void shelf_title_checks(app_ctx_t *ctx){
     const size_t bytes=684*1216/2;
     uint8_t *before=malloc(bytes);assert(before);
@@ -372,6 +542,66 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
     assert(shelf_collection_sync(false));shelf_categories_recount();clear_selection();
     shelf_style=2;s_view=SHELF;category_select(&ctx,target);ctx.leaf=0;
     shelf_title_checks(&ctx);
+    shelf_style=APP_SHELF_STYLE_NOTEPAD;
+    const char *notepad_titles[]={"到站请送命","长安的荔枝","我与地坛","冬牧场","且听风吟",
+        "一句顶一万句","百年孤独","献给阿尔吉侬的花束","看不见的城市","月亮与六便士"};
+    const char *notepad_authors[]={"翻云袖","马伯庸","史铁生","李娟","村上春树",
+        "刘震云","加西亚·马尔克斯","丹尼尔·凯斯","伊塔洛·卡尔维诺","毛姆"};
+    const unsigned notepad_progress[]={28,68,42,100,15,83,36,54,19,46};
+    for(int i=0;i<10;++i){
+        copy(s_shelf[i].name,256,notepad_titles[i]);copy(s_shelf[i].author,128,notepad_authors[i]);
+        s_shelf[i].has_progress=true;s_shelf[i].pct=notepad_progress[i];
+    }
+    for(unsigned scale=100;scale<=200;scale+=100){
+        font_scale=scale;
+        ui_clear_page(fb);
+        for(int i=0;i<4;++i){
+            EpdRect card=shelf_style_card(i);uint8_t id=shelf_style_id(i);
+            assert(card.y>=190&&card.y+card.height<UI_NAV_TOP);
+            for(int j=0;j<4;++j)if(j!=i)assert(!ui_rect_hit(shelf_style_card(j),card.x+card.width/2,card.y+card.height/2));
+            assert(ui_font_has_text(shelf_style_name(id)));
+            settings_card(fb,card,24,id==APP_SHELF_STYLE_NOTEPAD?0xd0:UI_GRAY_WHITE,0x70);
+            if(i>=2)draw_compact_shelf_style(fb,card,id,id==APP_SHELF_STYLE_NOTEPAD);
+        }
+        assert(shelf_style_id(3)==APP_SHELF_STYLE_NOTEPAD);
+        assert(!strcmp(shelf_style_name(APP_SHELF_STYLE_NOTEPAD),"便签本")&&ui_font_has_text("无封面 · 每页 10 本"));
+        for(int select=0;select<=1;++select){
+            s_shelf_selecting=select;
+            shelf_snapshot(&ctx,output,select?"shelf-notepad-select":"shelf-notepad");
+            const EpdRect first=ui_notepad_row(0,select);
+            for(int slot=-1;slot<10;++slot){
+                const int top=slot<0?first.y-38:ui_notepad_row(slot,select).y;
+                const int bottom=slot<0?first.y-2:top+first.height-1;
+                int left=543,right=543;
+                for(int y=top;y<bottom;++y){
+                    for(int x=368;x<543;++x)if(ui_read_pixel(fb,x,y)<12&&x<left)left=x;
+                    for(int x=543;x<647;++x)if(ui_read_pixel(fb,x,y)<12&&x>right)right=x;
+                }
+                assert(left>=390&&left<=395&&right>=623&&right<=630);
+                if(slot>=0){
+                    EpdRect hit;int control=control_at(&ctx,300,top+30,&hit);
+                    assert(select?control==-1:control==slot&&hit.y==top);
+                }
+            }
+            EpdRect tenth=ui_notepad_row(9,select);
+            unsigned before=selected_count();
+            assert(action_at(&ctx,300,tenth.y+32)==APP_REDRAW_PAGE);
+            assert(select?selected_count()==before+1:opened_books==1);
+            clear_selection();opened_books=0;
+        }
+    }
+    s_shelf_selecting=false;
+    font_scale=100;
+    notepad_paging_checks(&ctx);
+    notepad_ink_pixels(&ctx,output);
+    notepad_ink_gestures(&ctx);
+    shelf_fast=true;font_scale=100;shelf_snapshot(&ctx,output,"shelf-notepad-fast");
+    notepad_paper_checks(fb,true);
+    unsigned black=0;
+    for(int y=174;y<260;++y)for(int x=24;x<660;++x){
+        int value=ui_read_pixel(fb,x,y);assert(value==0||value==15);black+=value==0;
+    }
+    assert(black>1000);shelf_fast=false;
     for(unsigned scale=100;scale<=200;scale+=25){
         font_scale=scale;shelf_style=2;s_view=SHELF;s_shelf_selecting=false;category_select(&ctx,target);ctx.leaf=0;clear_selection();
         shelf_snapshot(&ctx,output,"shelf-grid");
@@ -413,7 +643,7 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
         ui_gesture_event_t remove={.type=UI_GESTURE_TAP,.x0=200,.y0=376};
         assert(category_gesture(&ctx,&remove)==APP_REDRAW_PAGE&&s_category_ui.command==CATEGORY_UNCLASSIFY&&selected_count()==1);
         s_category_ui.command=CATEGORY_IDLE;category_back(&ctx);assert(s_view==SHELF&&s_shelf_selecting&&selected_count()==1);
-        assert(gesture_event(&ctx,&(ui_gesture_event_t){.type=UI_GESTURE_SWIPE_L})==APP_REDRAW_PAGE&&ctx.leaf==1&&selected_count()==1);
+        assert(gesture_event(&ctx,&(ui_gesture_event_t){.type=UI_GESTURE_SWIPE_L})==APP_REDRAW_AREA&&ctx.leaf==1&&selected_count()==1);
         assert(action_at(&ctx,140,1148)==APP_REDRAW_PAGE&&s_view==CATEGORIES&&s_category_ui.review&&selected_count()==1&&!requested_nav);
         category_back(&ctx);assert(s_view==SHELF&&s_shelf_selecting&&selected_count()==1);
         assert(action_at(&ctx,600,120)==APP_REDRAW_PAGE&&!s_shelf_selecting&&!selected_count());
@@ -440,7 +670,7 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
     }
     book_shelf_covers_cancel(&s_shelf_covers);book_shelf_covers_release(&s_shelf_covers);
     book_shelf_categories_dispose(&s_shelf_categories);clean_library(&s_collection);
-    puts("category shelf: PASS (actual grid/list render and tap routing, covers, selection/review/filter/page retention, per-category sort, legacy recovery guards)");
+    puts("category shelf: PASS (real grid/list/notepad pixels and taps, ten rows, shared author/progress anchors, three-phase oval over the title center and tap/hold/cancel/error routing, fast curl dots, compact thumbnail, selection and per-category state)");
 }
 #undef row_rect
 '''

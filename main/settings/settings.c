@@ -851,7 +851,7 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN_B, &margin_b) == ESP_OK && margin_b <= 96)
         s_book_margin_b = margin_b;
     uint8_t shelf_style = 2;
-    if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 5)
+    if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= APP_SHELF_STYLE_NOTEPAD)
         s_shelf_style = shelf_style == 3 || shelf_style == 4 ? 2 : shelf_style;
     uint8_t shelf_titles = 0;
     if (nvs_get_u8(h, NVS_KEY_SHELF_TITLES, &shelf_titles) == ESP_OK && shelf_titles <= 3)
@@ -1832,7 +1832,7 @@ void app_settings_set_book_paragraph_spacing(uint8_t percent) {
 }
 uint8_t app_settings_shelf_style(void) { return s_shelf_style; }
 void app_settings_set_shelf_style(uint8_t style) {
-    if (style < 1 || style > 5) return;
+    if (style < 1 || style > APP_SHELF_STYLE_NOTEPAD) return;
     if (style == 3 || style == 4) style = 2;
     if (s_shelf_style == style) return;
     s_shelf_style = style;
@@ -2409,9 +2409,11 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
-    const bool cover_format = s_lock_style == APP_LOCK_STYLE_BOOK_COVER || s_off_art.style == APP_OFF_BOOK_COVER ||
-                              s_lock_cover_crop || s_off_art.cover_crop;
-    memcpy(backup.magic, portable_format ? (cover_format ? "PICOSETn" : "PICOSETm") : "PICOSETl", sizeof(backup.magic));
+    // v49 保留新增书架或封面样式编号，字段布局不变。/ V49 preserves the extended shelf or cover IDs without changing the field layout.
+    const bool extended_format = s_shelf_style == APP_SHELF_STYLE_NOTEPAD ||
+                                 s_lock_style == APP_LOCK_STYLE_BOOK_COVER || s_off_art.style == APP_OFF_BOOK_COVER ||
+                                 s_lock_cover_crop || s_off_art.cover_crop;
+    memcpy(backup.magic, portable_format ? (extended_format ? "PICOSETn" : "PICOSETm") : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2437,7 +2439,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // values live in the v29 tail block.
     f[BK_MARGIN] = s_book_margin_l > 48 ? 48 : s_book_margin_l;
     f[BK_PARAGRAPH] = s_book_para;
-    f[BK_SHELF] = s_shelf_style;
+    f[BK_SHELF] = !portable_format && s_shelf_style == APP_SHELF_STYLE_NOTEPAD ? 5 : s_shelf_style;
     strlcpy(backup.font, !strcmp(s_font, "builtin") ? "" : s_font, sizeof(backup.font));
     strlcpy(backup.system_font, s_system_font, sizeof(backup.system_font));
     strlcpy(backup.wallpaper, s_wallpaper, sizeof(backup.wallpaper));
@@ -2699,7 +2701,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
         (version>=20 ?
          app_settings_book_paragraph_value(app_settings_book_paragraph_level(f[BK_PARAGRAPH])) != f[BK_PARAGRAPH] :
          f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25) ||
-        f[BK_SHELF] < 1 || f[BK_SHELF] > 5) return false;
+        f[BK_SHELF] < 1 || f[BK_SHELF] > (version >= 49 ? APP_SHELF_STYLE_NOTEPAD : 5)) return false;
     if (strnlen(backup->books_dir, sizeof(backup->books_dir)) == sizeof(backup->books_dir) ||
         strnlen(backup->fonts_dir, sizeof(backup->fonts_dir)) == sizeof(backup->fonts_dir)) return false;
     return backup_path_valid(backup->font, sizeof(backup->font)) &&

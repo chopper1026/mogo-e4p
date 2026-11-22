@@ -52,12 +52,15 @@ int book_shelf_categories_selected(const book_shelf_categories_t *state);
 int book_shelf_categories_at(const book_shelf_categories_t *state, int ordinal);
 /// 返回可用分类总数。/ Return the number of available categories.
 int book_shelf_categories_available(const book_shelf_categories_t *state);
-/// 保存当前分类和布局的页码；list_layout 区分两种既有布局。/ Remember the selected category page for either existing layout.
-void book_shelf_categories_remember(book_shelf_categories_t *state, bool list_layout, int page);
+typedef enum {
+    BOOK_SHELF_LAYOUT_GRID, BOOK_SHELF_LAYOUT_LIST, BOOK_SHELF_LAYOUT_NOTEPAD, BOOK_SHELF_LAYOUT_COUNT,
+} book_shelf_layout_t;
+/// 分布局保存当前分类页码。/ Remember the selected category page independently for each layout.
+void book_shelf_categories_remember(book_shelf_categories_t *state, book_shelf_layout_t layout, int page);
 /// 读取原页码，不按当前书籍数裁剪，用于页面进入时的准备。/ Read the saved page without count clamping, for page-entry preparation.
-int book_shelf_categories_saved_page(const book_shelf_categories_t *state, bool list_layout);
+int book_shelf_categories_saved_page(const book_shelf_categories_t *state, book_shelf_layout_t layout);
 /// 按现有条目数裁剪并写回当前分类页码。/ Clamp and store the selected category's page for the current entry count.
-int book_shelf_categories_restore(book_shelf_categories_t *state, bool list_layout, int count, int rows);
+int book_shelf_categories_restore(book_shelf_categories_t *state, book_shelf_layout_t layout, int count, int rows);
 /// 返回菜单是否打开。/ Return whether the menu is open.
 bool book_shelf_categories_menu_is_open(const book_shelf_categories_t *state);
 /// 有目录表时打开菜单并定位已选项，无目录表返回 false。/ Open and locate the selection when a table exists; otherwise return false.

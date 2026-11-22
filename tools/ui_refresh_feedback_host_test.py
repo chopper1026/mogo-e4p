@@ -27,7 +27,7 @@ static bool reader_orientation_sync(void){return false;}
 #include <string.h>
 #include <stddef.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;bool user_activity;} app_ctx_t;
+typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;bool user_activity,request_menu;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SHELF,MANAGE,READING,READER_PANEL_NONE,TOC,EDIT,SEARCH,CATEGORIES};
 enum EpdDrawMode {MODE_GL16,MODE_DU,MODE_GC16};
@@ -65,7 +65,8 @@ static int s_water_turn_dir;
 static void *s_prep_done;
 static int s_prep_page=-1;
 static struct {bool started;unsigned generation;} s_prep_cursor;
-static void display_main_transition_shelf_page(void){}
+static unsigned shelf_paging_marks;
+static void display_main_transition_shelf_page(void){++shelf_paging_marks;}
 static unsigned pushes;
 static int route;
 static enum EpdDrawMode pushed_mode;
@@ -77,7 +78,17 @@ enum {DIFF=1,AREA,FULL,WHOLE,FAST,WATER,READER,LOCAL_FULL,READER_IMAGE_GRAY};
 static int test_style;static bool test_fast;
 static int app_settings_shelf_style(void){return test_style;}
 static bool app_settings_main_fast_refresh(void){return test_fast;}
-static int shelf_rows(void){return test_style==5?4:9;}
+#define APP_SHELF_STYLE_NOTEPAD 6
+#define UI_NOTEPAD_ROWS 10
+static int shelf_rows(void){return test_style==APP_SHELF_STYLE_NOTEPAD?UI_NOTEPAD_ROWS:test_style==5?4:9;}
+typedef struct {char name[20],author[20];bool selected,has_progress;unsigned pct;} shelf_entry_t;
+static shelf_entry_t s_shelf[10];
+static int s_visible_count;
+static unsigned test_notepad_draws;
+static void ui_notepad_line(uint8_t *fb,int r,bool selecting,bool selected,bool pressed,bool fast,const char *title,const char *author,unsigned pct){
+    (void)fb;(void)selecting;(void)selected;(void)pressed;(void)fast;(void)title;
+    assert(r==9&&!strcmp(author,"Test")&&pct==100);++test_notepad_draws;
+}
 static bool s_cover_batch_present_pending,s_reader_tools_toggle,s_reader_footer_strong,s_reader_stable_frame;
 static bool s_shelf_selecting;
 static EpdRect shelf_manage_rect(void){return (EpdRect){442,94,97,54};}
@@ -196,6 +207,7 @@ shelf += f'\n#include "{root / "main/book/reader_turn.c"}"\n'
 shelf += function("main/apps/app_book.c", "reader_turn_save") + "\n"
 shelf += function("main/apps/app_book.c", "reader_turn_load") + "\n"
 shelf += function("main/apps/app_book.c", "paint_control") + "\n"
+shelf += function("main/apps/app_book.c", "press_control") + "\n"
 # 页面状态机使用真实呈现和策略，只替换物理显示边界。/ Keep real presenter/policy and replace physical display only.
 shelf+='typedef int EpdWaveform;\n'
 for rel in ('main/display/display_refresh.h','main/display/display_waveform_catalog.h','main/display/display_refresh_policy.h','main/book/reader_present.h'):
@@ -236,6 +248,19 @@ for name in ("reader_status_prepare", "present", "paint_reading", "reader_turn_c
 shelf += r'''
 int main(void){
  uint8_t fb=0;app_ctx_t ctx={.fb=&fb};s_view=s_presented_view=SHELF;
+ test_style=APP_SHELF_STYLE_NOTEPAD;
+ s_area=(EpdRect){0,176,684,912};s_mode=MODE_GL16;
+ for (int fast=0;fast<2;++fast){
+   test_fast=fast;s_shelf_page_pending=true;
+   assert(present(&ctx,APP_REDRAW_AREA)&&!s_shelf_page_pending);
+   assert(pushes==1&&trace_count==1&&shelf_paging_marks==(unsigned)fast+1);
+   assert(route==AREA&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_WAVEFORM);
+   assert(pushed_area.x==0&&pushed_area.y==176&&pushed_area.width==684&&pushed_area.height==912);
+   pushes=trace_count=0;
+ }
+ test_style=0;test_fast=false;
+ puts("PASS: notepad pagination uses the ordinary shelf presenter with one target output");
+
  // 缓存封面在合成前就绪；进入书架只有一次输出，不再等待框架先显示。
  // Cached covers are ready before composition; shelf entry uses one output without waiting for a furniture-first frame.
  test_check_cached=true;s_presented_view=-1;
@@ -269,7 +294,22 @@ int main(void){
    if(trace_count>240)trace_count=0;
  }
  assert(test_body_draws==body_before&&test_prepares==prepares_before&&test_list_draws==160);
- test_style=0;test_fast=false;
+ test_style=APP_SHELF_STYLE_NOTEPAD;s_visible_count=10;
+ s_shelf[9]=(shelf_entry_t){.author="Test",.has_progress=true,.pct=100};
+ EpdRect note=row_rect(9);
+ for(int fast=0;fast<2;++fast){
+   test_fast=fast;s_shelf_selecting=false;
+   unsigned before=pushes;
+   assert(press_control(&ctx,9,note)==APP_REDRAW_NONE&&s_pressed_control==-1);
+   assert(paint_control(&ctx,note)==APP_REDRAW_NONE&&!s_shelf_feedback_pending&&pushes==before);
+   s_shelf_selecting=true;
+   assert(press_control(&ctx,9,note)==APP_REDRAW_AREA&&s_shelf_feedback_pending);
+   assert(present(&ctx,APP_REDRAW_AREA)&&route==DIFF&&pushed_mode==(fast?MODE_DU:MODE_GL16));
+   assert(pushed_area.x==note.x&&pushed_area.height==note.height&&test_body_draws==body_before);
+ }
+ assert(test_notepad_draws==2);s_shelf_selecting=false;
+ puts("PASS: normal notepad press has no pre-tap repaint; selection feedback keeps the tenth row local");
+ test_style=0;test_fast=false;s_visible_count=9;
  puts("PASS: 160 list bounces/settles use cover-only differentials and reuse caches; gray/fast modes retain their waveforms and navigation");
  assert(paint_control(&ctx,(EpdRect){500,90,90,54})==APP_REDRAW_AREA&&!s_shelf_feedback_pending);
  assert(present(&ctx,APP_REDRAW_AREA)&&route==AREA&&pushed_mode==MODE_DU);

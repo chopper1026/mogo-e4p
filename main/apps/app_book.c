@@ -56,7 +56,7 @@
  * 单本管理仍为书架弹窗；原文件批量管理保留其筛选、搜索及重扫清除勾选的语义。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
- * 用户最新修订：书架只保留深色书轨与亚克力，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
+ * 用户2026-11-22修订：在封面和列表样式之外增加便签本，白底每页十本，不加载封面，作者列统一左对齐；不改变收录与移出规则。
  * 底栏保留首页/书架/文件/设置，设置直接进入设置页；用户2026-11-05确认多选时以宽松批量操作栏替换导航，取消后恢复，解决误触与拥挤。
  * 用户修订：长按图书可用本机拼音输入编辑书名；阅读时长与翻页真实记录，供票根锁屏使用。
  * 用户最新修订：书名编辑可点选插入位置并用左右键微调，支持在文字中间插入和删除。
@@ -125,7 +125,11 @@
  * Single-book actions remain a shelf dialog; existing file-batch filters, applied searches and rescans still clear selections.
  * Invalidate failed progress only for changed paths; retain deletion cleanup retries across page exits for this boot.
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
- * Latest user revision: the two retained shelf styles hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
+ * User revision 2026-11-22: add a cover-free ten-book notepad with a shared left author anchor beside existing layouts; retain inclusion and removal rules.
+ * 用户续定：便签纸面保持白底，只加深卷边、纸边和行间虚线。
+ * User follow-up: keep the paper face white and deepen only the curl, paper edges and dashed row rules.
+ * 用户续定：便签普通开书短按抬起时用短 DU 在书名中间描横向椭圆，画完即开书；不画整行按压态，不改变分页。
+ * User follow-up: a confirmed notepad tap draws a horizontal oval over the title center with short DU before opening, with no row press decoration or pagination change.
  * The fourth tab opens Settings directly; user approval2026-11-05 replaces navigation with roomy batch actions while selecting and restores it on cancel to prevent cramped targets.
  * User revision: book details lead to an on-device Pinyin title editor; measured reading time and turns feed the ticket lock face.
  * Latest user revision: the title editor can place and move an insertion caret for edits in the middle of text.
@@ -254,6 +258,7 @@
 #include "book/book_reader_input.h"
 #include "ttf_font.h"
 #include "ui_kit.h"
+#include "ui_shelf_notepad.h"
 #include "ui_reader_heading.h"
 #include "ui_reader_settings.h"
 #include "ui_reader_tap_grid.h"
@@ -746,7 +751,16 @@ static EpdRect progress_rect(void) {
     const int height = reader_footer_height();
     return (EpdRect){36, READER_BAR_TOP + UI_BAR_H - height, READER_WIDTH - 72, height};
 }
-static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
+static book_shelf_layout_t shelf_layout(void) {
+    const uint8_t style = app_settings_shelf_style();
+    return style == APP_SHELF_STYLE_NOTEPAD ? BOOK_SHELF_LAYOUT_NOTEPAD :
+           style == 5 ? BOOK_SHELF_LAYOUT_LIST : BOOK_SHELF_LAYOUT_GRID;
+}
+static int shelf_rows(void) {
+    if (s_view != SHELF) return BOOK_GRID_ROWS;
+    if (app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD) return UI_NOTEPAD_ROWS;
+    return app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS;
+}
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_FURNITURE_BOTTOM 226
 #define SHELF_LIST_BOUNCE_PX 8
@@ -795,6 +809,8 @@ static void draw_shelf_guard(uint8_t *fb,EpdRect rect,int slot) {
     } else for(int y=0;y<p.height;++y)memcpy(fb+(size_t)(p.y+y)*stride+p.x/2,output+(size_t)y*span,span);
 }
 static EpdRect row_rect(int row) {
+    if (s_view == SHELF && app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD)
+        return ui_notepad_row(row, s_shelf_selecting);
     if (s_view == SHELF && app_settings_shelf_style() == 5)
         return s_shelf_selecting?(EpdRect){36,280+row*180,612,180}:(EpdRect){36,184+row*197,612,197};
     if (s_view != BULK) {
@@ -940,6 +956,11 @@ static unsigned shelf_cover_reveal_mask(void) {
 
 static void prepare_covers(app_ctx_t* ctx) {
     if (s_view != SHELF && s_view != MANAGE) return;
+    // 详情返回便签时取消详情遗留的封面任务。/ Cancel detail artwork jobs when returning to the notepad.
+    if (s_view == SHELF && app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD) {
+        if (book_shelf_covers_slot(&s_shelf_covers, 0)->index >= 0) invalidate_covers();
+        return;
+    }
     int rows = shelf_rows();
     book_shelf_covers_page(&s_shelf_covers, ctx->leaf * rows);
     for (int row = 0; row < rows; ++row) {
@@ -3743,8 +3764,11 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
         book_selection_button(fb,book_selection_rect(BOOK_SELECTION_PAGE_ALL),22,"全选本页",s_visible_count>0,false);
     }
     const uint8_t style = app_settings_shelf_style();
+    const bool notepad = style == APP_SHELF_STYLE_NOTEPAD;
     const bool show_titles = app_settings_shelf_show_titles(style);
     const int rows = shelf_rows(), first = ctx->leaf * rows;
+    const bool notepad_fast = notepad && app_settings_main_fast_refresh();
+    if (notepad) ui_notepad_paper(fb, s_shelf_selecting, notepad_fast);
     if (style == 5) {
         EpdRect list=s_shelf_selecting?(EpdRect){36,280,612,720}:(EpdRect){36,184,612,788};
         ui_fill_round_rect(fb,list,20,UI_GRAY_WHITE);
@@ -3753,6 +3777,13 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     for (int row = 0; row < rows; ++row) {
         int i = first + row;
         if (i >= s_visible_count) break;
+        if (notepad) {
+            const shelf_entry_t *item = &s_shelf[i];
+            ui_notepad_line(fb, row, s_shelf_selecting, item->selected, s_shelf_selecting && s_pressed_control == row,
+                            notepad_fast, item->name, item->author[0] ? item->author : "作者未知",
+                            item->has_progress ? item->pct : 0);
+            continue;
+        }
         EpdRect r = row_rect(row);
         // 紧凑多选布局不抬起封面，以免盖住上一行书名。
         // Skip lifting in the compact selection grid so covers cannot obscure captions above.
@@ -3761,14 +3792,16 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
         draw_shelf_cover(fb, r, row, s_shelf[i].name, s_shelf[i].favorite);
         if (style == 5) draw_list_row(fb, row, &s_shelf[i]);
     }
-    draw_shelf_furniture(fb);
+    if (!notepad) draw_shelf_furniture(fb);
     if (show_titles) draw_shelf_titles(fb, first, rows);
     if (s_message[0] || s_shelf_warning[0]) {
-        const int notice_y = show_titles ? (s_shelf_selecting ? 260 : 170) : (s_shelf_selecting ? 998 : 984);
+        const int notice_y = notepad ? (s_shelf_selecting ? 995 : 1063) :
+                             show_titles ? (s_shelf_selecting ? 260 : 170) :
+                                           (s_shelf_selecting ? 998 : 984);
         shelf_label(fb,(EpdRect){UI_MARGIN,notice_y,612,show_titles ? 20 : 22},17,
                     s_message[0]?s_message:s_shelf_warning,false);
     }
-    if(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
+    if(!notepad && app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
         // 32列对齐后的封面/书架区；顶部状态栏、题头和下方分页不做黑色强整理。
         // Aligned cover/furniture area; status, title and lower pagination never enter the dark settling pass.
         const EpdRect artwork=s_shelf_selecting?(EpdRect){0,272,UI_LOCK_WIDTH,736}:(EpdRect){0,192,UI_LOCK_WIDTH,800};
@@ -3776,7 +3809,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     }
     draw_shelf_pager(fb, s_visible_count, ctx->leaf, leaves());
     if(s_shelf_selecting) {
-        for(int row=0;row<shelf_rows() && ctx->leaf*shelf_rows()+row<s_visible_count;++row){
+        for(int row=0;!notepad && row<shelf_rows() && ctx->leaf*shelf_rows()+row<s_visible_count;++row){
             EpdRect card=row_rect(row),check={card.x+12,card.y+10,38,38};
             ui_fill_round_rect(fb,check,5,UI_GRAY_WHITE);ui_draw_control_frame(fb,check,5,0);
             if(s_shelf[ctx->leaf*shelf_rows()+row].selected)ui_draw_icon(fb,check.x+19,check.y+19,32,UI_ICON_CHECK,0);
@@ -4642,10 +4675,10 @@ static book_shelf_query_t shelf_query(void) {
 }
 static void shelf_category_remember(app_ctx_t *ctx) {
     if (s_view == SHELF && !s_scan_pending)
-        book_shelf_categories_remember(&s_shelf_categories, app_settings_shelf_style() == 5, ctx->leaf);
+        book_shelf_categories_remember(&s_shelf_categories, shelf_layout(), ctx->leaf);
 }
 static void shelf_category_restore(app_ctx_t *ctx) {
-    ctx->leaf = book_shelf_categories_restore(&s_shelf_categories, app_settings_shelf_style() == 5,
+    ctx->leaf = book_shelf_categories_restore(&s_shelf_categories, shelf_layout(),
                                              s_visible_count, shelf_rows());
 }
 static void shelf_category_selection_save(void) {
@@ -4766,7 +4799,7 @@ static book_shelf_scan_t shelf_scan_context(app_ctx_t *ctx) {
         .catalog = {&s_shelf, &s_count, &s_shelf_capacity}, .query = s_query,
         .cancel = shelf_scan_cancel, .cancel_ctx = ctx, .category_add = shelf_category_add,
         .favorite_read = favorite_read_handle, .hidden_read = shelf_hidden_read_handle,
-        .metadata = app_settings_shelf_style() == 5,
+        .metadata = shelf_layout() != BOOK_SHELF_LAYOUT_GRID,
     };
 }
 // 缓存返回也补入书根以外读过的书，保留原调用时机。
@@ -6620,6 +6653,26 @@ static int bulk_control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect
     }
     return -1;
 }
+static void play_notepad_title_ink(app_ctx_t *ctx, int row) {
+    if (app_settings_shelf_style() != APP_SHELF_STYLE_NOTEPAD ||
+        s_presented_view != (int)SHELF || s_shelf_page_pending || !ctx->hl ||
+        ctx->request_app || ctx->request_menu || ctx->request_return) return;
+    const EpdRect title = ui_notepad_title_ink(ctx->fb, row);
+    if (!title.width) return;
+    const bool held = display_present_begin();
+    for (unsigned step = 0; step < UI_NOTEPAD_INK_STEPS; ++step) {
+        const EpdRect dirty = ui_notepad_ink_step(ctx->fb, row, title, step);
+        if (!dirty.width) continue;
+        const enum EpdDrawError err = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK,
+                                                          dirty, DISPLAY_REFRESH_DEFAULT);
+        if (err != EPD_DRAW_SUCCESS) {
+            guard_draw_result(ctx->hl, err);
+            break;
+        }
+    }
+    display_present_end(held);
+}
+
 static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (s_view == BULK) return bulk_action(ctx, x, y);
     if (s_view == IMPORT) {
@@ -6796,7 +6849,10 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             if (s_shelf[i].removed) {
                 s_managed = s_shelf[i]; s_view = MANAGE; s_file_removed = s_delete_confirm = true; s_clear_confirm = false;
                 copy_text(s_manage_message, sizeof(s_manage_message), "文件已删除，进度清理失败，请重试");
-            } else open_book(ctx, s_shelf[i].path);
+            } else {
+                play_notepad_title_ink(ctx, row);
+                open_book(ctx, s_shelf[i].path);
+            }
         }
         return APP_REDRAW_PAGE;
     }
@@ -6858,7 +6914,7 @@ static void on_enter(app_ctx_t* ctx) {
     s_reader_return_home = false;
     s_requested_manage = false;
     s_presented_view = -1;
-    ctx->leaf = s_view == SHELF ? book_shelf_categories_saved_page(&s_shelf_categories, app_settings_shelf_style() == 5) : 0;
+    ctx->leaf = s_view == SHELF ? book_shelf_categories_saved_page(&s_shelf_categories, shelf_layout()) : 0;
     s_px = app_settings_book_px();
     s_chrome_height[0] = app_settings_reader_chrome_height(0);
     s_chrome_height[1] = app_settings_reader_chrome_height(1);
@@ -7081,6 +7137,23 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
             return APP_REDRAW_AREA;
         }
     }
+    if (s_view == SHELF && app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD) {
+        for (int row = 0; row < UI_NOTEPAD_ROWS; ++row) {
+            const EpdRect target = row_rect(row);
+            const int i = ctx->leaf * UI_NOTEPAD_ROWS + row;
+            if (i >= s_visible_count || memcmp(&rect, &target, sizeof(rect))) continue;
+            if (!s_shelf_selecting) return APP_REDRAW_NONE;
+            const shelf_entry_t *item = &s_shelf[i];
+            const bool fast = app_settings_main_fast_refresh();
+            ui_notepad_line(ctx->fb, row, s_shelf_selecting, item->selected, s_pressed_control == row,
+                            fast, item->name, item->author[0] ? item->author : "作者未知",
+                            item->has_progress ? item->pct : 0);
+            s_area = target;
+            s_mode = fast ? MODE_DU : MODE_GL16;
+            s_shelf_feedback_pending = true;
+            return APP_REDRAW_AREA;
+        }
+    }
     // 小按钮反馈只重画按钮，不重新绘制全部封面；其余装饰沿用原绘制路径。
     // Repaint small header buttons alone rather than every cover; other decorations retain their path.
     bool header_painted=false;
@@ -7109,6 +7182,15 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
     s_area = rect;
     return APP_REDRAW_AREA;
 }
+static app_redraw_t press_control(app_ctx_t *ctx, int control, EpdRect rect) {
+    // 普通便签行在抬起确认后才画笔迹，按下、滑出或取消时无需补刷。
+    // Normal notepad entries only draw ink on a confirmed tap; press, drag-out and cancel need no repaint.
+    if (s_view == SHELF && !s_shelf_selecting && app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD &&
+        control >= 0 && control < UI_NOTEPAD_ROWS) control = -1;
+    s_pressed_control = control;
+    return control >= 0 ? paint_control(ctx, rect) : APP_REDRAW_NONE;
+}
+
 // 左右滑动始终可用；上下点按模式另外保留上下滑动。
 // Horizontal swipes work in both tap modes; vertical mode also keeps vertical swipes.
 // 从屏幕底部120px上滑呼出工具栏；其他面板保留自己的滑动，正文滑动仍按翻页模式解释。
@@ -7532,10 +7614,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     EpdRect start_rect = {0}, end_rect = {0};
     int start = control_at(ctx, ev->x0, ev->y0, &start_rect);
     int end = control_at(ctx, ev->x, ev->y, &end_rect);
-    if (ev->type == UI_GESTURE_PRESS) {
-        s_pressed_control = start;
-        return start >= 0 ? paint_control(ctx, start_rect) : APP_REDRAW_NONE;
-    }
+    if (ev->type == UI_GESTURE_PRESS) return press_control(ctx, start, start_rect);
     bool decorated = s_pressed_control >= 0;
     s_pressed_control = -1;
     if (ev->type == UI_GESTURE_LONG_PRESS && start == end) {

@@ -96,6 +96,8 @@ static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=
 typedef book_shelf_entry_t shelf_entry_t;
 #define BOOK_ROWS 13
 #define BOOK_GRID_ROWS 9
+#define APP_SHELF_STYLE_NOTEPAD 6
+#define UI_NOTEPAD_ROWS 10
 #define BOOK_BULK_ROWS 6
 #define BOOKMARK_MAX 24
 typedef struct {uint16_t chapter,reserved;uint32_t byte_off,saved_s;} reader_bookmark_entry_t;
@@ -530,7 +532,11 @@ unit += "static const reader_reflow_t *reader_reflow_context(void);\n"
 from book_shelf_test_code import shelf_hooks, service_hooks, service_unhooks, shelf_checks
 unit += shelf_hooks
 unit += "\nbool book_shelf_hidden_read(nvs_handle_t, const char *);\n"
-for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+notepad = source.parents[1] / "ui/ui_shelf_notepad.c"
+unit += f'#include "{source.parents[1] / "assets/shelf_notepad_roll.h"}"\n'
+unit += "enum { PAPER_X" + notepad.read_text().split("enum { PAPER_X", 1)[1].split(";", 1)[0] + ";\n"
+unit += function("ui_notepad_row", notepad)
+for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_layout", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "open_error_button", "dismiss_open_error", "open_error_gesture", "open_error_input_owned", "draw_open_error", "show_open_error", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -612,6 +618,9 @@ int main(void) {
     assert(left.y==right.y&&left.y+left.height<=UI_BAR_TOP);
     test_shelf_style=5;s_view=SHELF;s_visible_count=15;assert(shelf_rows()==4&&leaves()==4);
     for(int i=0;i<4;++i){EpdRect r=row_rect(i);assert(r.y==184+i*197&&r.y+r.height<=972);}
+    test_shelf_style=APP_SHELF_STYLE_NOTEPAD;s_visible_count=21;
+    assert(shelf_rows()==10&&leaves()==3);
+    for(int i=0;i<10;++i){EpdRect r=row_rect(i);assert(r.y==306+i*68&&r.y+r.height<=986);}
     s_view=MANAGE;assert(shelf_rows()==9);s_view=SHELF;
     s_visible_count=0;s_view=SHELF;test_shelf_style=0;
     for (int gray=0; gray<=255; ++gray)

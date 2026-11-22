@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 新增「便签本」书架：每页 10 本，不显示封面，每行只显示书名、作者和阅读百分比。作者表头与正文统一左对齐。纸面保持纯白，卷边、纸边与行间虚线加深，沿用普通书架分页；短按图书在书名中间画个椭圆，画完直接开书。/ Add a curled notepad shelf for ten books per page, with only titles, authors (aligned with the heading), and reading percentages. The paper face stays white, with darker curls, edges and dashed rules. Paging stays standard; a confirmed tap draws a horizontal oval over the title center before opening the book.
+
 - 修复部分长篇 TXT 目录只显示 Part 的问题：使用原文章号和标题，保留旧有续读与书签位置。/ Restore original chapter numbers and titles in affected long TXT books without changing existing resume or bookmark positions.
 - 阅读页眉和页脚的「章节名」在原书只有章号时直接显示原章号，不再显示「未命名章节」。/ Header and footer chapter slots show the original chapter number when there is no separate title.
 - 修复部分 EPUB 因空目录大小记录错误而无法打开、封面不显示的问题；开书失败改用带「确定」的居中弹框。/ Tolerate a specific empty-directory size error in EPUBs so affected books and covers open. Book-open failures now use a centered dialog with an OK button.

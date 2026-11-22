@@ -13,7 +13,7 @@ The device has 16 MiB of flash but each OTA slot holds 5 MiB. Internal FAT and t
 
 | 数据及所有者 / Data And Owner | 实际存储 / Storage | 现有备份与恢复 / Export And Restore | 兼容与源码依据 / Contract And Source |
 | --- | --- | --- | --- |
-| 系统/阅读偏好、首页布局、快捷栏 / Settings, Home, quick controls | NVS `read_pico`；布局 `home_regions`、`quick_layout` 等 / NVS keys | 设置 → 升级和恢复 → 保存与恢复；TF 根目录 `Pico-settings.backup`；含已定义字段和书籍记录，不是整份 NVS / Defined fields only | [settings.c](../../../main/settings/settings.c) 的保存/恢复字段，当前 v48，任一页签选用书籍封面或为封面记忆裁剪填满时用 v49；旧备份兼容，缺少新增字段时保留目标机现值 / Field-defined v48/v49 with compatible older restores |
+| 系统/阅读偏好、首页布局、快捷栏 / Settings, Home, quick controls | NVS `read_pico`；布局 `home_regions`、`quick_layout` 等 / NVS keys | 设置 → 升级和恢复 → 保存与恢复；TF 根目录 `Pico-settings.backup`；含已定义字段和书籍记录，不是整份 NVS / Defined fields only | [settings.c](../../../main/settings/settings.c) 的保存/恢复字段，当前 v48，使用便签本、任一页签选用书籍封面或为封面记忆裁剪填满时用 v49；旧备份兼容，缺少新增字段时保留目标机现值 / Field-defined v48/v49 with compatible older restores; notepad selection uses v49 |
 | 网格书架书名 / Grid shelf captions | NVS `read_pico/shelf_titles`，深色书轨、亚克力各一位 / One bit each for rail and acrylic | v48 起随配置备份迁移 / Included from v48 | 缺失或非法值默认两项均关 / Missing or invalid values default to both off |
 | 书封显示方式、自动联网开关和前光 / Cover framing, automatic network switches and frontlight | `read_pico/lock_png_mode`、`auto_time`、`auto_ota`、`fl_*` | v48 恢复透明书封取景、自动对时和 OTA 开关、前光开关/亮度/色温；无前光的机型不应用硬件 / Restored from v48; apply light only on supported hardware | 图像仍需原路径，服务检查点不迁移 / Images need original paths; service checkpoints are not copied |
 | 书籍封面壁纸 / Book cover wallpaper | NVS `read_pico/lock_face`、`off_art` / One selection per purpose | v49 保存两页各自的书籍封面样式与取景；未记录取景时默认为完整显示 / v49 preserves both Book Cover selections and fit modes; records without fit flags default to contain | 不把封面像素写入设置备份；显示时按阅读记录读取书源 / Cover pixels are not in the settings backup; read the source when displaying the wallpaper |
@@ -35,6 +35,8 @@ The device has 16 MiB of flash but each OTA slot holds 5 MiB. Internal FAT and t
 | 屏幕偏移修正 / Screen offset correction | NVS `read_pico/screen_offset`，单个 u32 保存两轴，水平/竖直各 ±32px / Both axes in one u32 | 设备本地校正，不随配置备份迁移；恢复备份保留本机值 / Device-local; restores retain it | [settings.c](../../../main/settings/settings.c)、[显示契约](../designs/DISPLAY_REFRESH.md)；缺失/非法值为零，全擦除丢失 / Missing/invalid values default to zero; chip erase loses it |
 | 面板 VCOM 标定 / Panel VCOM calibration | S31 的 ESP NVS `panel/vcom`；启动加载，仅出厂标定流程可保存，产品页不可修改 / Loaded at boot; factory-only writes | 不在设置备份内；擦除 NVS 会丢失标定，须重新出厂标定 / Excluded from settings backup; NVS erase requires factory calibration again | [电源后端](../../../components/device_power/device_power_metalio.c)、[出厂流程](../../../main/factory/vcom_setup.c)、[组件契约](../../../components/device_power/README.md)、[硬约束](../../../AGENTS.md) |
 | 触控固件 / Touch firmware | 独立触控芯片 / Separate touch controller | 不在 ESP 设置备份；ESP 固件回退不回退触控固件 / Independent of ESP backup/rollback | [驱动契约](../../../components/cst836u/README.md) |
+
+便签本使用书架样式编号 6；包含该样式的 v49 备份需要支持便签本的固件，若需要降级后恢复，先切换到旧样式再备份。/ Notepad uses shelf style ID 6; a v49 backup containing it requires notepad-capable firmware. To restore on older firmware, switch to a supported style before saving.
 
 v48/v49 恢复先校验全部数据和 WiFi 容量，再按存储所有者写入。后续 TF/NVS/FAT I/O 仍可能中途失败，**不是跨卷回滚事务**；恢复前可另存目标机的现有备份。不同 TF 卡上的分类不会相互覆盖，其他字段仍可恢复。手账与分类恢复是快照替换，不是合并。请妥善保管含明文 WiFi 密码及阅读数据的备份文件。
 

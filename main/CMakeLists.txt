@@ -153,6 +153,7 @@ idf_component_register(
         "ui/ui_reading_journal.c"
         "ui/ui_reading_streak.c"
         "ui/ui_mini_library.c"
+        "ui/ui_shelf_notepad.c"
         "ui/ui_reader_heading.c"
         "ui/ui_reader_settings.c"
         "ui/ui_reader_tap_grid.c"

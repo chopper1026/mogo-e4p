@@ -78,6 +78,7 @@
 #include "app_font_context.h"
 #include "ui_gesture.h"
 #include "ui_kit.h"
+#include "ui_shelf_notepad.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
 #include "ui_nav.h"
@@ -833,28 +834,48 @@ static void setting_toggle(uint8_t *fb, int y, const char *title, const char *de
     setting_toggle_track(fb, (EpdRect){555, y + 43, 69, 39}, active);
 }
 
+enum { SHELF_STYLE_CARD_COUNT = 4 };
 static EpdRect shelf_style_card(int index) {
-    return (EpdRect){36, 263 + index * 300, 612, index == 2 ? 230 : 277};
+    return index < 2 ? (EpdRect){36, 263 + index * 300, 612, 277} :
+                       (EpdRect){36 + (index - 2) * 314, 863, 298, 230};
 }
 static EpdRect shelf_style_titles_row(EpdRect card) {
     return (EpdRect){card.x, card.y + 228, card.width, card.height - 228};
 }
-static uint8_t shelf_style_id(int index) { return index == 2 ? 5 : (uint8_t)(index + 1); }
+static uint8_t shelf_style_id(int index) {
+    static const uint8_t ids[] = {1, 2, 5, APP_SHELF_STYLE_NOTEPAD};
+    return ids[index];
+}
+static const char *shelf_style_name(uint8_t style) {
+    if (style == APP_SHELF_STYLE_NOTEPAD) return "便签本";
+    return style == 5 ? "列表书架" : style == 1 ? "深色书轨" : "亚克力书架";
+}
+static void draw_compact_shelf_style(uint8_t *fb, EpdRect card, uint8_t style, bool active) {
+    const EpdRect art = {card.x + 22, card.y + 13, card.width - 44, 145};
+    if (style == APP_SHELF_STYLE_NOTEPAD) {
+        ui_notepad_thumbnail(fb, art);
+    } else {
+        ui_fill_round_rect(fb, art, 9, UI_GRAY_WHITE);
+        for (int i = 0; i < 3; ++i) {
+            const int y = art.y + 10 + 43 * i;
+            ui_fill_rect_fast((EpdRect){art.x + 10, y, 25, 34}, i == 1 ? UI_GRAY_LIGHT : UI_GRAY_BLACK, fb);
+            ui_hairline(fb, y + 5, art.x + 47, 110, UI_GRAY_BLACK);
+            ui_hairline(fb, y + 15, art.x + 47, 57, 0x50);
+            ui_fill_rect_fast((EpdRect){art.x + 47, y + 25, art.width - 60, 3}, 0xc0, fb);
+            ui_fill_rect_fast((EpdRect){art.x + 47, y + 25, 40 + 25 * i, 3}, 0x40, fb);
+        }
+    }
+    const int title_px = ui_text_effective_px(23), detail_px = ui_text_effective_px(17);
+    int x = card.x + 22, cy = card.y + 179, rx = card.x + card.width - 35;
+    ui_text_fixed_vc(fb, x, cy, title_px > 30 ? 30 : title_px, shelf_style_name(style), EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_fixed_vc(fb, x, card.y + 207, detail_px > 22 ? 22 : detail_px,
+                     style == APP_SHELF_STYLE_NOTEPAD ? "无封面 · 每页 10 本" : "含封面 · 每页 4 本", EPD_DRAW_ALIGN_LEFT, false);
+    epd_draw_circle(rx, cy, 13, UI_GRAY_BLACK, fb);
+    if (active) epd_fill_circle(rx, cy, 6, UI_GRAY_BLACK, fb);
+}
 
 static void draw_style_thumbnail(uint8_t *fb, int style, int top, bool titles) {
     if (top < 242 || top + 170 >= UI_NAV_TOP) return;
-    if (style == 5) {
-        ui_fill_round_rect(fb, (EpdRect){68,top,548,170}, 12, UI_GRAY_WHITE);
-        for (int i=0;i<3;++i) {
-            int y=top+9+i*52;
-            ui_fill_rect_fast((EpdRect){86,y,31,43},i==1?UI_GRAY_LIGHT:UI_GRAY_BLACK,fb);
-            ui_fill_rect_fast((EpdRect){137,y+6,218,3},0,fb);
-            ui_fill_rect_fast((EpdRect){137,y+19,84,2},UI_GRAY_BLACK,fb);
-            ui_fill_rect_fast((EpdRect){137,y+34,435,4},UI_GRAY_LIGHT,fb);
-            ui_fill_rect_fast((EpdRect){137,y+34,120+i*75,4},UI_GRAY_BLACK,fb);
-        }
-        return;
-    }
     const int left = 99;
     for (int i = 0; i < 3; ++i) {
         int x = left + 20 + i * 155;
@@ -1403,22 +1424,21 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_back(fb, 36, 79);
         ui_text_vc(fb, 342, 107, 34, "书架样式", EPD_DRAW_ALIGN_CENTER, false);
         ui_text(fb, 36, 207, 23, "选择书架外观与排列方式", EPD_DRAW_ALIGN_LEFT, false);
-        static const char *const styles[] = {"深色书轨", "亚克力书架", "列表书架"};
-        static const char *const descriptions[] = {"每页 9 本", "每页 9 本", "作者与进度 · 每页 4 本"};
         if (s_notice[0]) ui_text_vc(fb, 36, 169, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < SHELF_STYLE_CARD_COUNT; ++i) {
             EpdRect card = shelf_style_card(i);
             const uint8_t style = shelf_style_id(i);
             const bool active = app_settings_shelf_style() == style;
             const bool titles = app_settings_shelf_show_titles(style);
             const int y = card.y;
             settings_card(fb, card, 24, active ? 0xd0 : UI_GRAY_WHITE, active ? 0x58 : 0x70);
+            if (i >= 2) { draw_compact_shelf_style(fb, card, style, active); continue; }
             draw_style_thumbnail(fb, style, y + 11, titles);
             int title_px = ui_text_effective_px(23), detail_px = ui_text_effective_px(17);
             if (title_px > 30) title_px = 30;
             if (detail_px > 22) detail_px = 22;
-            ui_text_fixed_vc(fb, 68, y + 207, title_px, styles[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text_fixed_vc(fb, 310, y + 207, detail_px, descriptions[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_fixed_vc(fb, 68, y + 207, title_px, shelf_style_name(style), EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_fixed_vc(fb, 310, y + 207, detail_px, "每页 9 本", EPD_DRAW_ALIGN_LEFT, false);
             epd_draw_circle(609, y + 207, 13, UI_GRAY_BLACK, fb);
             if (active) epd_fill_circle(609, y + 207, 6, UI_GRAY_BLACK, fb);
             if (style != 5) {
@@ -1891,7 +1911,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *background_base=background_path[0]?strrchr(background_path,'/'):NULL;
     snprintf(background_value,sizeof(background_value),"%s",
         background_path[0]?(background_base?background_base+1:background_path):"无");
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+    const char *personal_values[]={shelf_style_name(app_settings_shelf_style()),
         app_settings_lock_style()==APP_LOCK_STYLE_BOOK_COVER?"书籍封面":
         app_settings_lock_style()==APP_LOCK_STYLE_CLOCK?"简约时钟":app_settings_lock_style()==4?"日历":app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value,"","显示与排序"};
@@ -2558,11 +2578,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
         if (y < 190) { s_page = SETTINGS_MAIN; s_notice[0] = 0; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < SHELF_STYLE_CARD_COUNT; ++i) {
             EpdRect card = shelf_style_card(i);
             if (!ui_rect_hit(card, ev->x0, y)) continue;
             const uint8_t style = shelf_style_id(i);
-            if (style != 5 && ui_rect_hit(shelf_style_titles_row(card), ev->x0, y)) {
+            if (i < 2 && ui_rect_hit(shelf_style_titles_row(card), ev->x0, y)) {
                 const bool saved = app_settings_set_shelf_show_titles(style, !app_settings_shelf_show_titles(style));
                 snprintf(s_notice, sizeof(s_notice), "%s", saved ? "" : "保存失败，请重试");
                 return APP_REDRAW_PAGE;

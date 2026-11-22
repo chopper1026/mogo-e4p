@@ -15,7 +15,7 @@
 struct book_shelf_category_entry {
     char path[BOOK_STORE_PATH_MAX];
     uint32_t id;
-    int pages[2], count;
+    int pages[BOOK_SHELF_LAYOUT_COUNT], count;
     bool available;
     bool sort_known, recent_sort;
 };
@@ -214,17 +214,19 @@ int book_shelf_categories_available(const book_shelf_categories_t *state) {
     return count;
 }
 
-void book_shelf_categories_remember(book_shelf_categories_t *state, bool list_layout, int page) {
-    if (has_selection(state)) state->entries[state->selected].pages[list_layout] = page;
+void book_shelf_categories_remember(book_shelf_categories_t *state, book_shelf_layout_t layout, int page) {
+    if ((unsigned)layout < BOOK_SHELF_LAYOUT_COUNT && has_selection(state))
+        state->entries[state->selected].pages[layout] = page;
 }
 
-int book_shelf_categories_saved_page(const book_shelf_categories_t *state, bool list_layout) {
-    return has_selection(state) ? state->entries[state->selected].pages[list_layout] : 0;
+int book_shelf_categories_saved_page(const book_shelf_categories_t *state, book_shelf_layout_t layout) {
+    return (unsigned)layout < BOOK_SHELF_LAYOUT_COUNT && has_selection(state)
+        ? state->entries[state->selected].pages[layout] : 0;
 }
 
-int book_shelf_categories_restore(book_shelf_categories_t *state, bool list_layout, int count, int rows) {
-    int page = book_shelf_saved_page(book_shelf_categories_saved_page(state, list_layout), count, rows);
-    book_shelf_categories_remember(state, list_layout, page);
+int book_shelf_categories_restore(book_shelf_categories_t *state, book_shelf_layout_t layout, int count, int rows) {
+    int page = book_shelf_saved_page(book_shelf_categories_saved_page(state, layout), count, rows);
+    book_shelf_categories_remember(state, layout, page);
     return page;
 }
 

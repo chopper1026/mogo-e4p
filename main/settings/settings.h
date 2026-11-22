@@ -477,7 +477,9 @@ void app_settings_set_book_paragraph_spacing(uint8_t percent);
 bool app_settings_book_styles(void);
 /// 保存失败返回 false，内存不变。/ Failed persistence returns false without changing memory.
 bool app_settings_set_book_styles(bool enabled);
-/// 书架样式：1 深色书轨、2 亚克力、5 列表；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5); retired IDs 3/4 fall back to 2.
+/// 书架样式：1 深色书轨、2 亚克力、5 列表、6 便签本；旧 3/4 回退 2。
+/// Shelf styles: rail (1), acrylic (2), list (5), notepad (6); retired IDs 3/4 fall back to 2.
+enum { APP_SHELF_STYLE_NOTEPAD = 6 };
 uint8_t app_settings_shelf_style(void);
 void app_settings_set_shelf_style(uint8_t style);
 /// 深色书轨与亚克力独立记忆封面下书名，默认关闭；列表始终按原样绘制。

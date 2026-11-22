@@ -93,6 +93,8 @@ typedef struct {char name[256],author[128];bool has_progress,favorite;unsigned p
 static shelf_entry_t *s_shelf;
 static int s_visible_count=4;
 static int shelf_rows(void){return 4;}
+#define APP_SHELF_STYLE_NOTEPAD 6
+static EpdRect ui_notepad_row(int row,bool selecting){(void)row;(void)selecting;assert(false);return (EpdRect){0};}
 static int app_settings_shelf_style(void){return style;}
 static bool app_settings_main_fast_refresh(void){return false;}
 static bool fast_cover_matches(int row,EpdRect r){(void)row;(void)r;return false;}

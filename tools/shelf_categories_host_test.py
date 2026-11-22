@@ -54,7 +54,8 @@ static const char *books_root="/sdcard/books";
 static const char *app_settings_books_dir(void){return books_root;}
 static int style;
 static int app_settings_shelf_style(void){return style;}
-static int shelf_rows(void){return style==5?4:9;}
+#define APP_SHELF_STYLE_NOTEPAD 6
+static int shelf_rows(void){return style==6?10:style==5?4:9;}
 static unsigned invalidations;
 static void invalidate_covers(void){++invalidations;}
 typedef struct{int x,y,width,height;}EpdRect;
@@ -100,7 +101,7 @@ static book_shelf_entry_t s_shelf[40];
 '''
 unit += 'static void clear_selection(void){++clear_count;book_shelf_clear_selection(s_shelf,s_count); }\n'
 for name in ('shelf_category_add', 'shelf_category_init', 'shelf_category_name', 'shelf_query',
-             'shelf_category_remember', 'shelf_category_restore', 'shelf_categories_recount', 'sort_shelf',
+             'shelf_layout', 'shelf_category_remember', 'shelf_category_restore', 'shelf_categories_recount', 'sort_shelf',
              'shelf_category_selection_save', 'shelf_collection_sync', 'rescan_shelf',
              'shelf_category_at', 'shelf_category_available', 'shelf_category_box', 'shelf_category_gesture'):
     unit += function(name) + '\n'
@@ -135,6 +136,10 @@ int main(int argc,char **argv){
  ctx.leaf=1;shelf_category_remember(&ctx);book_shelf_categories_select(&s_shelf_categories,0);sort_shelf(&ctx);shelf_category_restore(&ctx);assert(ctx.leaf==2);
  book_shelf_categories_select(&s_shelf_categories,literature);sort_shelf(&ctx);shelf_category_restore(&ctx);assert(ctx.leaf==1);
  style=5;shelf_category_restore(&ctx);assert(!ctx.leaf);ctx.leaf=3;shelf_category_remember(&ctx);style=0;shelf_category_restore(&ctx);assert(ctx.leaf==1);
+ style=APP_SHELF_STYLE_NOTEPAD;shelf_category_restore(&ctx);assert(!ctx.leaf);
+ ctx.leaf=1;shelf_category_remember(&ctx);style=5;shelf_category_restore(&ctx);assert(ctx.leaf==3);
+ style=APP_SHELF_STYLE_NOTEPAD;shelf_category_restore(&ctx);assert(ctx.leaf==1);
+ style=0;shelf_category_restore(&ctx);assert(ctx.leaf==1);
  // 扫描或离开书架时不覆盖之前的页码。/ Pending scans and non-shelf views must not overwrite remembered pages.
  s_scan_pending=true;ctx.leaf=0;shelf_category_remember(&ctx);s_scan_pending=false;shelf_category_restore(&ctx);assert(ctx.leaf==1);
  s_view=1;ctx.leaf=0;shelf_category_remember(&ctx);s_view=SHELF;shelf_category_restore(&ctx);assert(ctx.leaf==1);
