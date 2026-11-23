@@ -87,6 +87,8 @@ static uint8_t app_settings_reader_full_pages(void){return full_pages;}
 static int effect=1;
 static int app_settings_reader_turn_effect(void){return effect;}
 static int test_images;
+static bool s_reader_image_refresh_pending;
+static struct { bool comic; } test_image, *s_page_images;
 static int book_layout_page_image_count(size_t page){(void)page;return test_images;}
 static app_redraw_t paint_reading(app_ctx_t *ctx,int mode){(void)ctx;assert(mode==MODE_GL16);++paints;return APP_REDRAW_AREA;}
 '''
@@ -120,6 +122,7 @@ static void reset(bool full,bool tools,size_t page,size_t chapter){
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=excerpt_repositions=0;
  failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=s_reader_stable_frame=true;
  s_reader_turn_pending=s_water_turn_pending=s_reader_cleanup=false;s_jump_offset=0;
+ s_reader_image_refresh_pending=false;s_page_images=NULL;
 }
 int main(void){
  app_ctx_t ctx={.now_ms=1000};
@@ -158,6 +161,11 @@ int main(void){
   assert(turn_page(&ctx,1)!=APP_REDRAW_NONE&&!s_water_turn_pending&&s_reader_cleanup);
  }
  reset(true,false,2,0);test_images=1;s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA);
+ for(int comic=0;comic<=1;++comic){
+  reset(true,false,2,0);s_reader_slider=-1;s_reader_image_refresh_pending=true;
+  test_image.comic=comic;s_page_images=&test_image;
+  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&s_reader_turn_pending==test_image.comic&&!s_water_turn_pending);
+ }
  test_images=0;effect=1;
  // Mixed/image targets and leaving an image never run the text ripple waveform.
  reset(true,false,2,0);test_images=2;s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
