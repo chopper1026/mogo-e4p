@@ -13,9 +13,7 @@ cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
 build/book-tests/settings-backup
 cc -std=c11 -Wall -Wextra -Werror -Imain -Imain/boot -Imain/display -Imain/lock -Imain/ota -Imain/services -Imain/settings tools/auto_lock_host_test.c -o build/book-tests/auto-lock
 build/book-tests/auto-lock
-cc -std=gnu11 -Wall -Wextra -Werror -Itools/settings_backup_stubs \
-    tools/book_history_backup_host_test.c -o build/book-tests/book-history-backup
-build/book-tests/book-history-backup
+python3 tools/reader_bookmark_storage_host_test.py
 python3 tools/book_ui_host_test.py
 python3 tools/reader_fullscreen_host_test.py
 python3 tools/reader_controls_host_test.py

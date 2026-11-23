@@ -2774,6 +2774,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (y >= 561 && y < 644) {
             s_config_confirm = false;
             esp_err_t err = app_settings_backup_save();
+            const char *bad = app_settings_backup_bad_bookmark();
+            if (err != ESP_OK && *bad) {
+                snprintf(s_notice, sizeof(s_notice), "书签损坏：%s", bad);
+                return APP_REDRAW_PAGE;
+            }
             snprintf(s_notice, sizeof(s_notice), "%s",
                      err == ESP_OK ? "已保存到 TF 卡根目录" :
                      err == ESP_ERR_INVALID_STATE ? "未识别到 TF 卡，请插卡后重试" :

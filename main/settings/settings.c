@@ -2384,7 +2384,10 @@ static esp_err_t backup_portable_capture(settings_backup_portable_t *value, cons
     return backup_portable_valid(value) ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
+static char s_backup_bad_bookmark[25];
+const char *app_settings_backup_bad_bookmark(void) { return s_backup_bad_bookmark; }
 static esp_err_t settings_backup_save_file(bool portable_format) {
+    s_backup_bad_bookmark[0] = 0;
     board_sd_info_t card;
     if (!backup_card_ready(&card)) return ESP_ERR_INVALID_STATE;
     app_weather_init();
@@ -2641,7 +2644,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     if (ok && portable_format) ok = book_store_prepare_data() == ESP_OK &&
         app_reading_journal_backup_write(file) == ESP_OK &&
         book_collection_backup_write(file, card.identity) == ESP_OK;
-    if (ok) ok = book_history_backup_write(file) == ESP_OK;
+    if (ok) ok = book_history_backup_write(file, s_backup_bad_bookmark, sizeof(s_backup_bad_bookmark)) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     if (ok) ok = fsync(fileno(file)) == 0;
     if (fclose(file) != 0) ok = false;

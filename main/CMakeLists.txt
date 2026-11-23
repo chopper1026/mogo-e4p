@@ -204,6 +204,7 @@ idf_component_register(
         "book/reader_chrome.c"
         "book/book_progress.c"
         "book/book_path_state.c"
+        "book/book_bookmark_store.c"
         "book/book_category_ops.c"
         "apps/book_category_ui.c"
         "book/book_history_backup.c"

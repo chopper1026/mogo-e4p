@@ -213,6 +213,7 @@
 #include "memory_peak.h"
 #include "book_progress.h"
 #include "book_bookmark_format.h"
+#include "book_bookmark_store.h"
 #include "book_category_ops.h"
 #include "book_category_ui.h"
 #include "book_selection_ui.h"
@@ -572,7 +573,8 @@ static char s_reader_notice[128];
 static int64_t s_reader_notice_until;
 static int s_bookmark_page;
 static bool s_bookmark_edit, s_bookmark_delete_confirm, s_bookmark_delete_error;
-static uint32_t s_bookmark_selected;
+static uint8_t *s_bookmark_selection_bits;
+static size_t s_bookmark_selection_bytes;
 static EpdRect s_area;
 static enum EpdDrawMode s_mode = MODE_GL16;
 static bool s_input_settle;
@@ -1899,51 +1901,159 @@ static bool shelf_hidden_save(const char *path, bool hidden) {
     if(err==ESP_OK){book_lock_collage_invalidate();book_store_notify_changed();}
     return err == ESP_OK;
 }
-static bool bookmark_read_handle(nvs_handle_t h, reader_bookmarks_t* marks) {
-    if (!marks || !s_reader_session.book.path[0]) return false;
-    memset(marks, 0, sizeof(*marks));
-    char key[11]; bookmark_key(s_reader_session.book.path, key);
-    size_t size = 0;
-    if (nvs_get_blob(h, key, NULL, &size) != ESP_OK) return false;
-    if (size == sizeof(legacy_reader_bookmark_t)) {
-        legacy_reader_bookmark_t old;
-        size = sizeof(old);
-        if (nvs_get_blob(h, key, &old, &size) != ESP_OK ||
-            old.magic != UINT32_C(0x52504d31) || old.file_size != s_reader_session.book.file_size ||
-            strcmp(old.path, s_reader_session.book.path)) return false;
-        marks->magic = UINT32_C(0x52504d32);
-        marks->file_size = old.file_size;
-        marks->count = 1;
-        copy_text(marks->path, sizeof(marks->path), old.path);
-        marks->entries[0] = (reader_bookmark_entry_t){
-            .chapter = old.chapter, .byte_off = old.byte_off,
-        };
-        return true;
-    }
-    if (size != sizeof(*marks) || nvs_get_blob(h, key, marks, &size) != ESP_OK) return false;
-    return marks->magic == UINT32_C(0x52504d32) && marks->file_size == s_reader_session.book.file_size &&
-        marks->count <= BOOKMARK_MAX && !strcmp(marks->path, s_reader_session.book.path);
+static reader_bookmarks_unbounded_t *bookmark_alloc(uint32_t count) {
+    size_t bytes = 0;
+    if (!reader_bookmarks_unbounded_size(count, &bytes)) return NULL;
+    reader_bookmarks_unbounded_t *marks = calloc(1, bytes);
+    if (!marks) return NULL;
+    marks->magic = UINT32_C(0x52504d33);
+    marks->count = count;
+    return marks;
 }
-
-static bool bookmark_load(reader_bookmarks_t* marks) {
-    if (!marks || !s_reader_session.book.path[0]) return false;
+static reader_bookmarks_unbounded_t *bookmark_from_legacy(const legacy_reader_bookmark_t *old) {
+    if (!old) return NULL;
+    reader_bookmarks_unbounded_t *marks = bookmark_alloc(1);
+    if (!marks) return NULL;
+    marks->file_size = old->file_size;
+    copy_text(marks->path, sizeof(marks->path), old->path);
+    marks->entries[0] = (reader_bookmark_entry_t){.chapter = old->chapter, .byte_off = old->byte_off};
+    return marks;
+}
+static reader_bookmarks_unbounded_t *bookmark_from_v2(const reader_bookmarks_t *old) {
+    if (!old || old->count > BOOKMARK_LEGACY_MAX) return NULL;
+    reader_bookmarks_unbounded_t *marks = bookmark_alloc(old->count);
+    if (!marks) return NULL;
+    marks->file_size = old->file_size;
+    copy_text(marks->path, sizeof(marks->path), old->path);
+    memcpy(marks->entries, old->entries, (size_t)old->count * sizeof(old->entries[0]));
+    return marks;
+}
+static esp_err_t bookmark_read_handle(nvs_handle_t h, reader_bookmarks_unbounded_t **out) {
+    const char *path = s_reader_session.book.path;
+    char key[11]; bookmark_key(path, key);
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(h, key, NULL, &size);
+    if (err != ESP_OK) return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
+    if (size < sizeof(uint32_t)) return ESP_ERR_INVALID_STATE;
+    void *raw = malloc(size);
+    if (!raw) return ESP_ERR_NO_MEM;
+    err = nvs_get_blob(h, key, raw, &size);
+    if (err == ESP_OK) {
+        reader_bookmarks_unbounded_t *v3 = raw;
+        reader_bookmarks_t *v2 = raw;
+        legacy_reader_bookmark_t *v1 = raw;
+        const char *owner = reader_bookmarks_owner(raw, size);
+        if (!owner || strcmp(owner, path)) err = ESP_ERR_INVALID_STATE;
+        else if (v3->file_size != s_reader_session.book.file_size) err = ESP_ERR_INVALID_SIZE;
+        else if (out) {
+            if (v3->magic == UINT32_C(0x52504d33)) { *out = v3; raw = NULL; }
+            else *out = v2->magic == UINT32_C(0x52504d32) ? bookmark_from_v2(v2) : bookmark_from_legacy(v1);
+            if (!*out) err = ESP_ERR_NO_MEM;
+        }
+    }
+    free(raw);
+    return err;
+}
+static bool bookmark_card_book(void) {
+    return !strncmp(s_reader_session.book.path, "/sdcard/", 8);
+}
+static esp_err_t bookmark_legacy_erase(void) {
     nvs_handle_t h;
-    if (nvs_open("rp_marks", NVS_READONLY, &h) != ESP_OK) return false;
-    bool ok = bookmark_read_handle(h, marks);
+    esp_err_t err = nvs_open("rp_marks", NVS_READONLY, &h);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    if (err != ESP_OK) return err;
+    err = bookmark_read_handle(h, NULL);
     nvs_close(h);
-    return ok;
+    if (err == ESP_ERR_NOT_FOUND) return ESP_OK;
+    if (err != ESP_OK && err != ESP_ERR_INVALID_SIZE) return err;
+    err = nvs_open("rp_marks", NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    char key[11]; bookmark_key(s_reader_session.book.path, key);
+    err = nvs_erase_key(h, key);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+static esp_err_t bookmark_load(reader_bookmarks_unbounded_t **out) {
+    *out = NULL;
+    if (!s_reader_session.book.path[0]) return ESP_ERR_INVALID_ARG;
+    if (bookmark_card_book()) {
+        esp_err_t err = book_bookmark_store_load(s_reader_session.book.path, s_reader_session.book.file_size, out);
+        if (err == ESP_ERR_INVALID_SIZE) return ESP_ERR_NOT_FOUND;
+        if (err != ESP_ERR_NOT_FOUND) return err;
+    }
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("rp_marks", NVS_READONLY, &h);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_ERR_NOT_FOUND;
+    if (err != ESP_OK) return err;
+    err = bookmark_read_handle(h, out);
+    nvs_close(h);
+    return err == ESP_ERR_INVALID_SIZE ? ESP_ERR_NOT_FOUND : err;
+}
+static esp_err_t bookmark_save_current(const reader_bookmarks_unbounded_t *marks) {
+    if (bookmark_card_book()) {
+        esp_err_t err = book_bookmark_store_save(marks);
+        // 已提交的卡记录优先；旧键清理失败可在后续编辑重试。/ The committed file wins; later edits can retry legacy cleanup.
+        if (err == ESP_OK) (void)bookmark_legacy_erase();
+        return err;
+    }
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("rp_marks", NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    char key[11]; bookmark_key(s_reader_session.book.path, key);
+    size_t bytes;
+    err = reader_bookmarks_unbounded_size(marks->count, &bytes) ? nvs_set_blob(h, key, marks, bytes) : ESP_ERR_INVALID_SIZE;
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+static esp_err_t bookmark_remove_current(void) {
+    // 先清旧键，避免最后一个卡书签删除后复活。/ Clear legacy first so removing the last card bookmark cannot resurrect it.
+    esp_err_t err = bookmark_legacy_erase();
+    return err == ESP_OK && bookmark_card_book() ? book_bookmark_store_remove(s_reader_session.book.path) : err;
+}
+static void bookmark_selection_clear(void) {
+    free(s_bookmark_selection_bits);
+    s_bookmark_selection_bits = NULL;
+    s_bookmark_selection_bytes = 0;
+}
+static bool bookmark_selection_prepare(size_t count) {
+    size_t bytes = count / 8 + (count % 8 != 0);
+    if (bytes == s_bookmark_selection_bytes) return true;
+    uint8_t *next = bytes ? calloc(1, bytes) : NULL;
+    if (bytes && !next) return false;
+    free(s_bookmark_selection_bits);
+    s_bookmark_selection_bits = next;
+    s_bookmark_selection_bytes = bytes;
+    return true;
+}
+static bool bookmark_selected_at(size_t index) {
+    return s_bookmark_selection_bits && index / 8u < s_bookmark_selection_bytes &&
+        (s_bookmark_selection_bits[index / 8u] & (uint8_t)(1u << (index % 8u)));
+}
+static void bookmark_selected_set(size_t index, bool selected) {
+    if (!s_bookmark_selection_bits || index / 8u >= s_bookmark_selection_bytes) return;
+    uint8_t mask = (uint8_t)(1u << (index % 8u));
+    if (selected) {
+        s_bookmark_selection_bits[index / 8u] |= mask;
+    } else s_bookmark_selection_bits[index / 8u] &= (uint8_t)~mask;
 }
 static bool bookmark_is_current(void) {
-    reader_bookmarks_t marks;
-    if (!bookmark_load(&marks)) return false;
+    reader_bookmarks_unbounded_t *marks = NULL;
+    if (bookmark_load(&marks) != ESP_OK) return false;
     size_t offset = book_layout_page_start_offset(s_reader_session.position.page);
-    for (size_t i = 0; i < marks.count; ++i)
-        if (marks.entries[i].chapter == s_reader_session.position.chapter && marks.entries[i].byte_off == offset) return true;
-    return false;
+    bool found = false;
+    for (size_t i = 0; i < marks->count; ++i)
+        if (marks->entries[i].chapter == s_reader_session.position.chapter && marks->entries[i].byte_off == offset) { found = true; break; }
+    free(marks);
+    return found;
 }
 static size_t bookmark_count(void) {
-    reader_bookmarks_t marks;
-    return bookmark_load(&marks) ? marks.count : 0;
+    reader_bookmarks_unbounded_t *marks = NULL;
+    if (bookmark_load(&marks) != ESP_OK) return 0;
+    size_t count = marks->count;
+    free(marks);
+    return count;
 }
 static int bookmark_row_step(void) {
     int scale=app_settings_system_font_size();
@@ -1959,83 +2069,79 @@ static EpdRect bookmark_row_rect(int row) {
 static int bookmark_pages(size_t count) {
     return count ? ((int)count + bookmark_rows() - 1) / bookmark_rows() : 1;
 }
-static unsigned bookmark_selected_count(void) {
-    unsigned count = 0;
-    for (unsigned i = 0; i < BOOKMARK_MAX; ++i) if (s_bookmark_selected & (UINT32_C(1) << i)) ++count;
+static size_t bookmark_selected_count(void) {
+    size_t count = 0;
+    for (size_t i = 0; i < s_bookmark_selection_bytes; ++i) {
+        uint8_t bits = s_bookmark_selection_bits[i];
+        while (bits) { count += bits & 1u; bits >>= 1; }
+    }
     return count;
 }
-static void bookmark_compact(reader_bookmarks_t* marks, uint32_t selected) {
+static void bookmark_compact(reader_bookmarks_unbounded_t* marks) {
     size_t write = 0;
     for (size_t i = 0; i < marks->count; ++i)
-        if (!(selected & (UINT32_C(1) << i))) marks->entries[write++] = marks->entries[i];
-    marks->count = (uint16_t)write;
+        if (!bookmark_selected_at(i)) marks->entries[write++] = marks->entries[i];
+    marks->count = (uint32_t)write;
 }
 static bool bookmark_delete_selected(void) {
-    if (!s_bookmark_selected || !s_reader_session.book.path[0]) return false;
-    nvs_handle_t h;
-    if (nvs_open("rp_marks", NVS_READWRITE, &h) != ESP_OK) return false;
-    reader_bookmarks_t marks;
-    bool valid = bookmark_read_handle(h, &marks);
-    esp_err_t err = valid ? ESP_OK : ESP_ERR_NOT_FOUND;
-    if (valid) {
-        bookmark_compact(&marks, s_bookmark_selected);
-        char key[11]; bookmark_key(s_reader_session.book.path, key);
-        err = marks.count ? nvs_set_blob(h, key, &marks, sizeof(marks)) : nvs_erase_key(h, key);
-        if (err == ESP_OK) err = nvs_commit(h);
-    }
-    nvs_close(h);
+    if (!bookmark_selected_count() || !s_reader_session.book.path[0]) return false;
+    reader_bookmarks_unbounded_t *marks = NULL;
+    if (bookmark_load(&marks) != ESP_OK) return false;
+    bookmark_compact(marks);
+    esp_err_t err = marks->count ? bookmark_save_current(marks) : bookmark_remove_current();
+    free(marks);
     if (err != ESP_OK) return false;
-    s_bookmark_selected = 0;
+    bookmark_selection_clear();
     s_bookmark_page = 0;
-    s_bookmark_edit = marks.count != 0;
+    s_bookmark_edit = bookmark_count() != 0;
     return true;
+}
+static bool bookmark_save_failed(void) {
+    copy_text(s_reader_notice, sizeof(s_reader_notice), "书签保存失败");
+    s_reader_notice_until = esp_timer_get_time() / 1000 + 2200;
+    return false;
 }
 static bool bookmark_toggle(void) {
     if (!s_reader_session.book.path[0]) return false;
-    nvs_handle_t h;
-    if (nvs_open("rp_marks", NVS_READWRITE, &h) != ESP_OK) return false;
-    char key[11]; bookmark_key(s_reader_session.book.path, key);
-    reader_bookmarks_t marks;
-    bool valid = bookmark_read_handle(h, &marks);
-    if (!valid) {
-        memset(&marks, 0, sizeof(marks));
-        marks.magic = UINT32_C(0x52504d32);
-        marks.file_size = s_reader_session.book.file_size;
-        copy_text(marks.path, sizeof(marks.path), s_reader_session.book.path);
-    }
-    uint32_t offset = (uint32_t)book_layout_page_start_offset(s_reader_session.position.page);
-    size_t found = marks.count;
-    for (size_t i = 0; i < marks.count; ++i)
-        if (marks.entries[i].chapter == s_reader_session.position.chapter && marks.entries[i].byte_off == offset) { found = i; break; }
-    bool remove = found < marks.count;
-    if (remove) {
-        memmove(&marks.entries[found], &marks.entries[found + 1],
-                (marks.count - found - 1) * sizeof(marks.entries[0]));
-        --marks.count;
-    } else {
-        if (marks.count == BOOKMARK_MAX) {
-            memmove(&marks.entries[0], &marks.entries[1],
-                    (BOOKMARK_MAX - 1) * sizeof(marks.entries[0]));
-            --marks.count;
+    reader_bookmarks_unbounded_t *marks = NULL;
+    esp_err_t loaded = bookmark_load(&marks);
+    if (loaded == ESP_ERR_NOT_FOUND) {
+        marks = bookmark_alloc(0);
+        if (marks) {
+            marks->file_size = s_reader_session.book.file_size;
+            copy_text(marks->path, sizeof(marks->path), s_reader_session.book.path);
         }
+    }
+    if (!marks) return bookmark_save_failed();
+    uint32_t offset = (uint32_t)book_layout_page_start_offset(s_reader_session.position.page);
+    size_t found = marks->count;
+    for (size_t i = 0; i < marks->count; ++i)
+        if (marks->entries[i].chapter == s_reader_session.position.chapter && marks->entries[i].byte_off == offset) { found = i; break; }
+    bool remove = found < marks->count;
+    if (remove) {
+        memmove(&marks->entries[found], &marks->entries[found + 1],
+                (marks->count - found - 1u) * sizeof(marks->entries[0]));
+        --marks->count;
+    } else {
+        uint32_t next_count = marks->count + 1u;
+        size_t bytes = 0;
+        if (next_count == 0 || !reader_bookmarks_unbounded_size(next_count, &bytes)) { free(marks); return bookmark_save_failed(); }
+        reader_bookmarks_unbounded_t *grown = realloc(marks, bytes);
+        if (!grown) { free(marks); return bookmark_save_failed(); }
+        marks = grown;
         time_t now = time(NULL);
-        marks.entries[marks.count++] = (reader_bookmark_entry_t){
+        marks->entries[marks->count++] = (reader_bookmark_entry_t){
             .chapter = (uint16_t)s_reader_session.position.chapter, .byte_off = offset,
             .saved_s = now >= 1704067200 ? (uint32_t)now : 0,
         };
     }
-    esp_err_t err = marks.count ? nvs_set_blob(h, key, &marks, sizeof(marks)) : nvs_erase_key(h, key);
-    if (err == ESP_ERR_NVS_NOT_FOUND && !marks.count) err = ESP_OK;
-    if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
+    esp_err_t err = marks->count ? bookmark_save_current(marks) : bookmark_remove_current();
+    free(marks);
     if (err == ESP_OK) {
         copy_text(s_reader_notice, sizeof(s_reader_notice), remove ? "书签已移除" : "书签已添加");
         s_reader_notice_until = esp_timer_get_time() / 1000 + 1600;
-    } else {
-        copy_text(s_reader_notice, sizeof(s_reader_notice), "书签保存失败");
-        s_reader_notice_until = esp_timer_get_time() / 1000 + 2200;
-    }
-    return err == ESP_OK;
+    } else return bookmark_save_failed();
+    return true;
 }
 
 static void draw_reader_tool_icon(uint8_t* fb, int cx, int cy, int kind, bool selected) {
@@ -2977,28 +3083,34 @@ static void draw_reader_bookmarks(uint8_t* fb) {
     draw_sheet(fb, top, "书签");
     epd_draw_line(55, top + 49, 64, top + 58, UI_GRAY_BLACK, fb);
     epd_draw_line(64, top + 58, 73, top + 49, UI_GRAY_BLACK, fb);
-    reader_bookmarks_t marks = {0};
-    bool valid = bookmark_load(&marks);
-    int pages = bookmark_pages(valid ? marks.count : 0);
+    reader_bookmarks_unbounded_t *marks = NULL;
+    esp_err_t loaded = bookmark_load(&marks);
+    bool valid = loaded == ESP_OK;
+    int pages = bookmark_pages(valid ? marks->count : 0);
     if (s_bookmark_page >= pages) s_bookmark_page = pages - 1;
-    if (valid && marks.count) {
+    if (valid && marks->count) {
         EpdRect manage = {544, top + 30, 104, 54};
         ui_fill_round_rect(fb, manage, 20, s_bookmark_edit ? 0xd8 : 0xe8);
         ui_draw_control_frame(fb, manage, 20, 0x78);
         reader_panel_text_vc(fb, 596, top + 57, 20, s_bookmark_edit ? "完成" : "管理", EPD_DRAW_ALIGN_CENTER, false);
     }
-    if (!valid || !marks.count) {
+    if (!valid && loaded != ESP_ERR_NOT_FOUND) {
+        reader_panel_text_vc(fb, 342, top + 260, 26, "书签读取失败", EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
+    if (!valid || !marks->count) {
         reader_panel_text_vc(fb, 342, top + 260, 26, "还没有保存书签", EPD_DRAW_ALIGN_CENTER, false);
         reader_panel_text_vc(fb, 342, top + 309, 18, "阅读时点按“书签”即可保存当前位置", EPD_DRAW_ALIGN_CENTER, false);
+        free(marks);
         return;
     }
     int first = s_bookmark_page * bookmark_rows();
-    for (int row = 0; row < bookmark_rows() && first + row < marks.count; ++row) {
-        int newest = (int)marks.count - 1 - (first + row);
-        const reader_bookmark_entry_t* mark = &marks.entries[newest];
+    for (int row = 0; row < bookmark_rows() && first + row < (int)marks->count; ++row) {
+        int newest = (int)marks->count - 1 - (first + row);
+        const reader_bookmark_entry_t* mark = &marks->entries[newest];
         EpdRect item = bookmark_row_rect(row);
         bool current = mark->chapter == s_reader_session.position.chapter && mark->byte_off == book_layout_page_start_offset(s_reader_session.position.page);
-        bool selected = s_bookmark_edit && (s_bookmark_selected & (UINT32_C(1) << newest));
+        bool selected = s_bookmark_edit && bookmark_selected_at((size_t)newest);
         ui_fill_round_rect(fb, item, 14, selected ? 0xc0 : current ? 0xc8 : 0xe8);
         ui_draw_control_frame(fb, item, 14, current ? 0x50 : 0x98);
         char chapter[96];
@@ -3025,10 +3137,11 @@ static void draw_reader_bookmarks(uint8_t* fb) {
     if (s_bookmark_edit) {
         EpdRect all = {36, top + 520, 258, 64}, remove = {312, top + 520, 336, 64};
         ui_draw_button(fb, all, "全选本页", false);
-        char label[40]; snprintf(label, sizeof(label), "删除已选 · %u", bookmark_selected_count());
+        char label[40]; snprintf(label, sizeof(label), "删除已选 · %u", (unsigned)bookmark_selected_count());
         ui_draw_button(fb, remove, label, bookmark_selected_count() > 0);
     }
-    char page[32]; snprintf(page, sizeof(page), "‹   %d / %d   ›", s_bookmark_page + 1, pages);
+    free(marks);
+    char page[64]; snprintf(page, sizeof(page), "‹   %d / %d   ›", s_bookmark_page + 1, pages);
     reader_panel_text_vc(fb, 342, top + 606, 22, page, EPD_DRAW_ALIGN_CENTER, false);
     if (s_bookmark_delete_confirm) {
         EpdRect panel = {54, top + 196, 576, 240};
@@ -4954,7 +5067,10 @@ static void shelf_label(uint8_t *fb,EpdRect rect,int px,const char *value,bool c
     ui_text_fixed_vc(fb,center?rect.x+rect.width/2:rect.x,rect.y+rect.height/2,px,line,center?EPD_DRAW_ALIGN_CENTER:EPD_DRAW_ALIGN_LEFT,false);
 }
 static esp_err_t category_extra_state(const char *old_path, const char *new_path, uint32_t size) {
-    return app_reading_journal_relocate(old_path,new_path,size) ? ESP_OK : ESP_FAIL;
+    if (!app_reading_journal_relocate(old_path,new_path,size)) return ESP_FAIL;
+    if (!strncmp(old_path, "/sdcard/", 8) && !strncmp(new_path, "/sdcard/", 8))
+        return book_bookmark_store_relocate(old_path, new_path, size);
+    return ESP_OK;
 }
 static bool shelf_collection_load(bool retry) {
     board_sd_info_t sd = {0}; board_sd_get_info(&sd);
@@ -6058,7 +6174,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (ui_rect_hit(reader_more_rect(1), x, y)) {
             s_bookmark_page = 0;
             s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
-            s_bookmark_selected = 0;
+            bookmark_selection_clear();
             s_reader_panel = READER_PANEL_BOOKMARKS;
         }
         else return APP_REDRAW_NONE;
@@ -6071,7 +6187,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         if (ui_rect_hit(details, x, y)) {
             s_bookmark_page = 0;
             s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
-            s_bookmark_selected = 0;
+            bookmark_selection_clear();
             s_reader_panel = READER_PANEL_BOOKMARKS;
         }
         else if (ui_rect_hit(recent, x, y)) {
@@ -6094,30 +6210,36 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (y < top + 86) {
             if (x >= 544 && bookmark_count()) {
                 s_bookmark_edit = !s_bookmark_edit;
-                s_bookmark_selected = 0;
+                bookmark_selection_clear();
                 s_bookmark_page = 0;
             } else s_reader_panel = READER_PANEL_MORE;
         } else {
-            reader_bookmarks_t marks = {0};
-            bool valid = bookmark_load(&marks);
-            int pages = bookmark_pages(valid ? marks.count : 0);
+            reader_bookmarks_unbounded_t *marks = NULL;
+            bool valid = bookmark_load(&marks) == ESP_OK;
+            if (s_bookmark_edit && (!valid || !bookmark_selection_prepare(marks->count))) {
+                free(marks);
+                copy_text(s_reader_notice, sizeof(s_reader_notice), valid ? "内存不足，无法选择书签" : "书签读取失败");
+                s_reader_notice_until = ctx->now_ms + 2200;
+                return APP_REDRAW_PAGE;
+            }
+            int pages = bookmark_pages(valid ? marks->count : 0);
             if (s_bookmark_edit && y >= top + 520 && y < top + 584) {
                 if (x < 303) {
                     int first = s_bookmark_page * bookmark_rows();
-                    for (int row = 0; row < bookmark_rows() && first + row < marks.count; ++row)
-                        s_bookmark_selected |= UINT32_C(1) << (marks.count - 1 - (first + row));
-                } else if (s_bookmark_selected) s_bookmark_delete_confirm = true;
+                    for (int row = 0; row < bookmark_rows() && marks && first + row < (int)marks->count; ++row)
+                        bookmark_selected_set(marks->count - 1u - (size_t)(first + row), true);
+                } else if (bookmark_selected_count()) s_bookmark_delete_confirm = true;
             } else if (y >= top + (s_bookmark_edit ? 590 : 570)) {
                 if (x < UI_LOCK_WIDTH / 2 && s_bookmark_page > 0) --s_bookmark_page;
                 else if (x >= UI_LOCK_WIDTH / 2 && s_bookmark_page + 1 < pages) ++s_bookmark_page;
             } else if (valid && y >= top + 96) {
                 int row = ((int)y - (top + 96)) / bookmark_row_step();
                 int position = s_bookmark_page * bookmark_rows() + row;
-                if (row >= 0 && row < bookmark_rows() && position < marks.count &&
+                if (row >= 0 && row < bookmark_rows() && marks && position < (int)marks->count &&
                     ui_rect_hit(bookmark_row_rect(row),x,y)) {
-                    int newest = (int)marks.count - 1 - position;
-                    reader_bookmark_entry_t mark = marks.entries[newest];
-                    if (s_bookmark_edit) s_bookmark_selected ^= UINT32_C(1) << newest;
+                    int newest = (int)marks->count - 1 - position;
+                    reader_bookmark_entry_t mark = marks->entries[newest];
+                    if (s_bookmark_edit) bookmark_selected_set((size_t)newest, !bookmark_selected_at((size_t)newest));
                     else if (mark.chapter < book_chapter_count() && load_chapter(ctx, mark.chapter, mark.byte_off, false)) {
                         reader_excerpt_reposition();
                         s_reader_panel = READER_PANEL_NONE;
@@ -6125,6 +6247,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                     }
                 }
             }
+            free(marks);
         }
         invalidate_prep();
         return APP_REDRAW_PAGE;
@@ -6929,7 +7052,7 @@ static void on_enter(app_ctx_t* ctx) {
             (void)load_chapter(ctx, s_reader_session.position.chapter, book_layout_page_start_offset(s_reader_session.position.page), false);
     }
     s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
-    s_bookmark_selected = 0;
+    bookmark_selection_clear();
     clear_selection();
     s_view = s_requested_manage ? BULK : SHELF;
     s_reader_return_home = false;

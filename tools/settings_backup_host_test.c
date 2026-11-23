@@ -138,7 +138,8 @@ esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool appl
 }
 
 static unsigned history_saves, history_restores;
-esp_err_t book_history_backup_write(FILE *file) {
+esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
+    (void)bad_slot; (void)cap;
     ++history_saves;
     return fwrite("RPHIST1", 1, 8, file) == 8 ? ESP_OK : ESP_FAIL;
 }

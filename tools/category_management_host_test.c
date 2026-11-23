@@ -87,7 +87,7 @@ static void failure_matrix(void) {
     unsigned injected=0;
     for(int failure=1;failure<=28;++failure) {
         char root[]="/tmp/mogo-category-XXXXXX";assert(mkdtemp(root));char source[288],dest[288],old[288],next[288];
-        path(source,root,"source");path(dest,root,"target");assert(!mkdir(source,0700));assert(!mkdir(dest,0700));
+        path(source,root,"source");path(dest,root,"longer-target-directory");assert(!mkdir(source,0700));assert(!mkdir(dest,0700));
         path(old,source,"sample.epub");path(next,dest,"sample.epub");file(old);memset(disk,0,sizeof(disk));fail_at=0;seed(old);
         book_progress_watch_t *watch=book_progress_watch_create(old);assert(watch);
         writes=0;fail_at=failure;esp_err_t result=book_category_move(root,old,dest,extra);fail_at=0;

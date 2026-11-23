@@ -37,7 +37,8 @@ static reader_panel_t s_reader_panel;
 static int s_reader_settings_group,s_line_spacing,s_reader_slider,s_bookmark_page;
 static bool s_reader_tools_toggle,s_toc_jump_open,s_toc_jump_drag;
 static bool s_bookmark_edit,s_bookmark_delete_confirm,s_bookmark_delete_error;
-static uint32_t s_bookmark_selected;
+static bool selection_present;
+static void bookmark_selection_clear(void){selection_present=false;}
 static char s_message[64];
 static size_t toc_position;
 static unsigned saved,bookmarked,invalidated;
@@ -68,7 +69,7 @@ static void reset(void){
  s_line_spacing=99;s_reader_slider=5;s_reader_tools_toggle=false;
  s_toc_jump_open=s_toc_jump_drag=true;strcpy(s_message,"old message");
  s_bookmark_edit=s_bookmark_delete_confirm=s_bookmark_delete_error=true;
- s_bookmark_page=3;s_bookmark_selected=UINT32_MAX;
+ s_bookmark_page=3;selection_present=true;
  saved=bookmarked=invalidated=0;view=READING;toc_position=19;
 }
 static void check_tool(app_ctx_t *ctx,int index){
@@ -110,7 +111,7 @@ int main(void){
    app_redraw_t redraw=tap(&ctx,r.x+((corner&1)?r.width-1:0),r.y+((corner&2)?r.height-1:0));
    assert(!saved&&!bookmarked);
    if(i==0)assert(redraw==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_STATS);
-   if(i==1)assert(redraw==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_BOOKMARKS&&!s_bookmark_page&&!s_bookmark_edit&&!s_bookmark_delete_confirm&&!s_bookmark_delete_error&&!s_bookmark_selected);
+   if(i==1)assert(redraw==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_BOOKMARKS&&!s_bookmark_page&&!s_bookmark_edit&&!s_bookmark_delete_confirm&&!s_bookmark_delete_error&&!selection_present);
   }
   const int gaps[][2]={{35,r.y},{648,r.y},{36,r.y-1},{36,r.y+r.height}};
   for(unsigned point=0;point<sizeof(gaps)/sizeof(gaps[0]);++point){

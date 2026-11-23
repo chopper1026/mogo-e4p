@@ -7,6 +7,7 @@
  * English: Stream progress, reading time, bookmarks, favorites, titles and shelf removals to TF.
  */
 #include "book_history_backup.h"
+#include "book_bookmark_store.h"
 #include <stdlib.h>
 #include <string.h>
 #include "nvs.h"
@@ -34,7 +35,7 @@ static bool book_key(const char *key, char prefix) {
 
 static bool valid_record(unsigned ns, uint8_t type, const char *key, const uint8_t *data, size_t len) {
     if (ns >= sizeof(namespaces) / sizeof(namespaces[0]) || !key[0] ||
-        strnlen(key, 16) == 16 || !len || len > HISTORY_MAX_VALUE) return false;
+        strnlen(key, 16) == 16 || !len || (ns != 2 && len > HISTORY_MAX_VALUE)) return false;
     if (ns == 0) {
         if (!strcmp(key, "seq")) return type == NVS_TYPE_U32 && len == 4;
         if (!strcmp(key, "last")) return type == NVS_TYPE_STR && len >= 1 &&
@@ -52,7 +53,14 @@ static bool valid_record(unsigned ns, uint8_t type, const char *key, const uint8
         if (!strcmp(key, "heatmap")) return type == NVS_TYPE_BLOB && len == 244 && magic == UINT32_C(0x52504831);
         return false;
     }
-    if (ns == 2) return book_key(key, 'm') && type == NVS_TYPE_BLOB && len >= 300;
+    if (ns == 2) {
+        if (!book_key(key, 'm') || type != NVS_TYPE_BLOB) return false;
+        const char *path = reader_bookmarks_owner(data, len);
+        if (!path) return false;
+        char expected[11];
+        snprintf(expected, sizeof(expected), "m_%08lx", (unsigned long)hash_bytes(UINT32_C(2166136261), path, strlen(path)));
+        return !strcmp(key, expected);
+    }
     if (ns == 3) return book_key(key, 'f') && type == NVS_TYPE_U8 && len == 1 && data[0] <= 1;
     if (ns == 4) return book_key(key, 't') && type == NVS_TYPE_BLOB && len >= 4;
     // 新命名空间追加在末尾，旧备份的索引保持不变；完整路径与键必须属于同一本书。
@@ -66,7 +74,7 @@ static bool valid_record(unsigned ns, uint8_t type, const char *key, const uint8
     return !strcmp(key, expected);
 }
 
-static esp_err_t read_value(nvs_handle_t h, const nvs_entry_info_t *info, uint8_t **value, size_t *len) {
+static esp_err_t read_value(nvs_handle_t h, unsigned ns, const nvs_entry_info_t *info, uint8_t **value, size_t *len) {
     *value = NULL;
     *len = 0;
     esp_err_t err;
@@ -76,7 +84,7 @@ static esp_err_t read_value(nvs_handle_t h, const nvs_entry_info_t *info, uint8_
     else if (info->type == NVS_TYPE_BLOB) err = nvs_get_blob(h, info->key, NULL, len);
     else return ESP_ERR_INVALID_ARG;
     if ((info->type == NVS_TYPE_STR || info->type == NVS_TYPE_BLOB) && err != ESP_OK) return err;
-    if (!*len || *len > HISTORY_MAX_VALUE) return ESP_ERR_INVALID_SIZE;
+    if (!*len || (ns != 2 && *len > HISTORY_MAX_VALUE)) return ESP_ERR_INVALID_SIZE;
     *value = malloc(*len);
     if (!*value) return ESP_ERR_NO_MEM;
     if (info->type == NVS_TYPE_U8) err = nvs_get_u8(h, info->key, *value);
@@ -87,13 +95,35 @@ static esp_err_t read_value(nvs_handle_t h, const nvs_entry_info_t *info, uint8_
     return err;
 }
 
-esp_err_t book_history_backup_write(FILE *file) {
+#define CARD_NS 6
+#define V2_HEADER 22
+
+typedef struct { FILE *file; uint32_t hash, count; } history_writer_t;
+static void put32(uint8_t *p, uint32_t v) {
+    for (unsigned i = 0; i < 4; ++i) p[i] = (uint8_t)(v >> (8 * i));
+}
+static uint32_t get32(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static esp_err_t write_record(history_writer_t *w, unsigned ns, uint8_t type, const char *key,
+                              const void *value, size_t len) {
+    uint8_t head[V2_HEADER] = {(uint8_t)ns, type};
+    if (len > UINT32_MAX || w->count == UINT32_MAX) return ESP_ERR_INVALID_SIZE;
+    memcpy(head + 2, key, strlen(key)); put32(head + 18, (uint32_t)len);
+    if (fwrite(head, 1, sizeof(head), w->file) != sizeof(head) || fwrite(value, 1, len, w->file) != len) return ESP_FAIL;
+    w->hash = hash_bytes(hash_bytes(w->hash, head, sizeof(head)), value, len);
+    ++w->count;
+    return ESP_OK;
+}
+static esp_err_t write_card(const reader_bookmarks_unbounded_t *marks, size_t len, void *ctx) {
+    return write_record(ctx, CARD_NS, NVS_TYPE_BLOB, "", marks, len);
+}
+
+esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
     if (!file) return ESP_ERR_INVALID_ARG;
-    static const char magic[8] = {'R','P','H','I','S','T','1',0};
-    if (fwrite(magic, 1, 8, file) != 8) return ESP_FAIL;
-    uint32_t hash = UINT32_C(2166136261);
-    uint16_t count = 0;
-    for (unsigned ns = 0; ns < sizeof(namespaces) / sizeof(namespaces[0]); ++ns) {
+    if (fwrite("RPHIST2", 1, 8, file) != 8) return ESP_FAIL;
+    history_writer_t w = {file, UINT32_C(2166136261), 0};
+    for (unsigned ns = 0; ns < CARD_NS; ++ns) {
         nvs_handle_t h;
         esp_err_t err = nvs_open(namespaces[ns], NVS_READONLY, &h);
         if (err == ESP_ERR_NVS_NOT_FOUND) continue;
@@ -103,72 +133,82 @@ esp_err_t book_history_backup_write(FILE *file) {
         while (err == ESP_OK) {
             nvs_entry_info_t info;
             err = nvs_entry_info(it, &info);
-            if (err != ESP_OK) break;
-            uint8_t *value = NULL;
-            size_t len = 0;
-            err = read_value(h, &info, &value, &len);
-            if (err == ESP_OK && (!valid_record(ns, info.type, info.key, value, len) || count == HISTORY_MAX_RECORDS))
-                err = ESP_ERR_INVALID_STATE;
-            if (err == ESP_OK) {
-                uint8_t head[HISTORY_RECORD_HEADER] = {(uint8_t)ns, (uint8_t)info.type};
-                memcpy(head + 2, info.key, strlen(info.key));
-                head[18] = (uint8_t)len; head[19] = (uint8_t)(len >> 8);
-                if (fwrite(head, 1, sizeof(head), file) != sizeof(head) ||
-                    fwrite(value, 1, len, file) != len) err = ESP_FAIL;
-                else {
-                    hash = hash_bytes(hash, head, sizeof(head));
-                    hash = hash_bytes(hash, value, len);
-                    ++count;
-                }
-            }
+            uint8_t *value = NULL; size_t len = 0;
+            if (err == ESP_OK) err = read_value(h, ns, &info, &value, &len);
+            if (err == ESP_OK && !valid_record(ns, info.type, info.key, value, len)) err = ESP_ERR_INVALID_STATE;
+            if (err == ESP_OK) err = write_record(&w, ns, info.type, info.key, value, len);
             free(value);
             if (err != ESP_OK) break;
             err = nvs_entry_next(&it);
         }
-        nvs_release_iterator(it);
-        nvs_close(h);
+        nvs_release_iterator(it); nvs_close(h);
         if (err != ESP_ERR_NVS_NOT_FOUND) return err;
     }
-    uint8_t end[HISTORY_RECORD_HEADER] = {0xff};
-    uint8_t seal[6] = {(uint8_t)count, (uint8_t)(count >> 8),
-        (uint8_t)hash, (uint8_t)(hash >> 8), (uint8_t)(hash >> 16), (uint8_t)(hash >> 24)};
-    return fwrite(end, 1, sizeof(end), file) == sizeof(end) &&
-           fwrite(seal, 1, sizeof(seal), file) == sizeof(seal) ? ESP_OK : ESP_FAIL;
+    esp_err_t err = book_bookmark_store_visit(write_card, &w, bad_slot, cap);
+    if (err != ESP_OK) return err;
+    uint8_t end[V2_HEADER] = {0xff}, seal[8];
+    put32(seal, w.count); put32(seal + 4, w.hash);
+    return fwrite(end, 1, sizeof(end), file) == sizeof(end) && fwrite(seal, 1, sizeof(seal), file) == sizeof(seal) ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t read_stream(FILE *file, bool restore) {
+typedef enum { VALIDATE, STAGE_CARD, RESTORE_NVS } read_mode_t;
+static esp_err_t read_stream(FILE *file, read_mode_t mode) {
     char magic[8];
-    if (fread(magic, 1, sizeof(magic), file) != sizeof(magic) || memcmp(magic, "RPHIST1", 8))
-        return ESP_ERR_INVALID_RESPONSE;
-    uint32_t hash = UINT32_C(2166136261);
-    uint16_t count = 0;
-    nvs_handle_t h = 0;
-    int open_ns = -1;
+    if (!file || fread(magic, 1, 8, file) != 8) return ESP_ERR_INVALID_RESPONSE;
+    bool v1 = !memcmp(magic, "RPHIST1", 8);
+    if (!v1 && memcmp(magic, "RPHIST2", 8)) return ESP_ERR_INVALID_RESPONSE;
+    uint32_t hash = UINT32_C(2166136261), count = 0;
+    nvs_handle_t h = 0; int open_ns = -1;
     esp_err_t result = ESP_OK;
+    size_t head_len = v1 ? HISTORY_RECORD_HEADER : V2_HEADER;
     for (;;) {
-        uint8_t head[HISTORY_RECORD_HEADER];
-        if (fread(head, 1, sizeof(head), file) != sizeof(head)) { result = ESP_ERR_INVALID_RESPONSE; break; }
-        if (head[0] == 0xff) {
-            for (unsigned i = 1; i < sizeof(head); ++i)
-                if (head[i]) { result = ESP_ERR_INVALID_RESPONSE; break; }
+        uint8_t head[V2_HEADER] = {0};
+        if (fread(head, 1, head_len, file) != head_len) { result = ESP_ERR_INVALID_RESPONSE; break; }
+        unsigned ns = head[0];
+        if (ns == 0xff) {
+            for (unsigned i = 1; i < head_len; ++i) if (head[i]) result = ESP_ERR_INVALID_RESPONSE;
             break;
         }
-        unsigned ns = head[0];
         uint8_t type = head[1];
-        char key[16]; memcpy(key, head + 2, sizeof(key));
-        size_t len = (size_t)head[18] | ((size_t)head[19] << 8);
-        if (result != ESP_OK || ns >= sizeof(namespaces) / sizeof(namespaces[0]) ||
-            strnlen(key, sizeof(key)) == sizeof(key) || !len || len > HISTORY_MAX_VALUE ||
-            count == HISTORY_MAX_RECORDS) { result = ESP_ERR_INVALID_RESPONSE; break; }
+        const char *key = (const char *)head + 2;
+        size_t len = get32(head + 18);
+        if (!memchr(key, 0, 16) || !len || ns > CARD_NS || count == UINT32_MAX ||
+            (v1 && (ns == CARD_NS || len > HISTORY_MAX_VALUE || count == HISTORY_MAX_RECORDS)) ||
+            (ns != 2 && ns != CARD_NS && len > HISTORY_MAX_VALUE) ||
+            (ns == CARD_NS && (*key || type != NVS_TYPE_BLOB))) { result = ESP_ERR_INVALID_RESPONSE; break; }
+        // 大记录先验证定长头，再分配整本书所需空间。/ Check a large record's header before allocating its entries.
+        reader_bookmarks_unbounded_t header;
+        size_t prefix = 0;
+        if (ns == CARD_NS || len > HISTORY_MAX_VALUE) {
+            prefix = sizeof(header);
+            if (len < prefix || fread(&header, 1, prefix, file) != prefix || !reader_bookmarks_v3_valid(&header, len)) {
+                result = ESP_ERR_INVALID_RESPONSE; break;
+            }
+        }
+        if (ns == CARD_NS && mode == RESTORE_NVS) {
+            // 卡记录已经校验并发布；重放 NVS 只分块复核校验和，不再分配整本书的缓冲区。
+            // Card records are already published. Recheck the seal in chunks without allocating a whole book during NVS replay.
+            if (strncmp(header.path, "/sdcard/", 8)) { result = ESP_ERR_INVALID_RESPONSE; break; }
+            hash = hash_bytes(hash_bytes(hash, head, head_len), &header, prefix);
+            uint8_t chunk[512];
+            for (size_t left = len - prefix; left;) {
+                size_t n = left < sizeof(chunk) ? left : sizeof(chunk);
+                if (fread(chunk, 1, n, file) != n) { result = ESP_ERR_INVALID_RESPONSE; break; }
+                hash = hash_bytes(hash, chunk, n); left -= n;
+            }
+            if (result != ESP_OK) break;
+            ++count; continue;
+        }
         uint8_t *value = malloc(len);
         if (!value) { result = ESP_ERR_NO_MEM; break; }
-        if (fread(value, 1, len, file) != len || !valid_record(ns, type, key, value, len)) {
+        if (prefix) memcpy(value, &header, prefix);
+        if (fread(value + prefix, 1, len - prefix, file) != len - prefix ||
+            (ns == CARD_NS ? strncmp(header.path, "/sdcard/", 8) != 0 : !valid_record(ns, type, key, value, len))) {
             free(value); result = ESP_ERR_INVALID_RESPONSE; break;
         }
-        hash = hash_bytes(hash, head, sizeof(head));
-        hash = hash_bytes(hash, value, len);
-        ++count;
-        if (restore) {
+        hash = hash_bytes(hash_bytes(hash, head, head_len), value, len); ++count;
+        if (ns == CARD_NS && mode == STAGE_CARD) result = book_bookmark_restore_put((void *)value);
+        if (ns < CARD_NS && mode == RESTORE_NVS) {
             if (open_ns != (int)ns) {
                 if (open_ns >= 0) { result = nvs_commit(h); nvs_close(h); }
                 open_ns = -1;
@@ -186,27 +226,30 @@ static esp_err_t read_stream(FILE *file, bool restore) {
         if (result != ESP_OK) break;
     }
     if (open_ns >= 0) {
-        esp_err_t commit = result == ESP_OK ? nvs_commit(h) : result;
-        nvs_close(h);
-        if (result == ESP_OK) result = commit;
-        if (restore) book_progress_notify_changed();
+        if (result == ESP_OK) result = nvs_commit(h);
+        nvs_close(h); book_progress_notify_changed();
     }
     if (result != ESP_OK) return result;
-    uint8_t seal[6];
-    if (fread(seal, 1, sizeof(seal), file) != sizeof(seal)) return ESP_ERR_INVALID_RESPONSE;
-    uint16_t stored_count = (uint16_t)seal[0] | (uint16_t)seal[1] << 8;
-    uint32_t stored_hash = (uint32_t)seal[2] | (uint32_t)seal[3] << 8 |
-                           (uint32_t)seal[4] << 16 | (uint32_t)seal[5] << 24;
-    return stored_count == count && stored_hash == hash && fgetc(file) == EOF && !ferror(file)
-        ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+    uint8_t seal[8]; size_t count_bytes = v1 ? 2 : 4;
+    if (fread(seal, 1, count_bytes + 4, file) != count_bytes + 4) return ESP_ERR_INVALID_RESPONSE;
+    uint32_t stored_count = v1 ? ((uint32_t)seal[0] | (uint32_t)seal[1] << 8) : get32(seal);
+    return count == stored_count && hash == get32(seal + count_bytes) && fgetc(file) == EOF && !ferror(file) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
-bool book_history_backup_validate(FILE *file) { return read_stream(file, false) == ESP_OK; }
+bool book_history_backup_validate(FILE *file) { return read_stream(file, VALIDATE) == ESP_OK; }
 esp_err_t book_history_backup_restore(FILE *file) {
     if (!file) return ESP_ERR_INVALID_ARG;
     long start = ftell(file);
     if (start < 0 || !book_history_backup_validate(file) || fseek(file, start, SEEK_SET))
         return ESP_ERR_INVALID_RESPONSE;
+    esp_err_t card = book_bookmark_restore_begin();
+    if (card == ESP_OK) card = read_stream(file, STAGE_CARD);
+    if (card != ESP_OK) return card;
+    if (fseek(file, start, SEEK_SET)) return ESP_FAIL;
+    // 先发布卡目录：任一文件写入/换名失败，旧 NVS 阅读数据均保持原样。
+    // Publish before erasing NVS so any card staging or promotion failure leaves the old NVS library intact.
+    card = book_bookmark_restore_finish();
+    if (card != ESP_OK) return card;
     // Recovery replaces the old reading library. Merging leaves stale "last"
     // and per-book records behind, so the restored shelf can appear unchanged.
     // 恢复应替换旧阅读资料；合并会留下备份外的旧书进度与最近阅读排序。
@@ -220,5 +263,5 @@ esp_err_t book_history_backup_restore(FILE *file) {
         book_progress_notify_changed();
         if (err != ESP_OK) return err;
     }
-    return read_stream(file, true);
+    return read_stream(file, RESTORE_NVS);
 }

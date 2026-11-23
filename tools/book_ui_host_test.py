@@ -99,10 +99,7 @@ typedef book_shelf_entry_t shelf_entry_t;
 #define APP_SHELF_STYLE_NOTEPAD 6
 #define UI_NOTEPAD_ROWS 10
 #define BOOK_BULK_ROWS 6
-#define BOOKMARK_MAX 24
-typedef struct {uint16_t chapter,reserved;uint32_t byte_off,saved_s;} reader_bookmark_entry_t;
-typedef struct {uint32_t magic,file_size;uint16_t count,reserved;char path[288];reader_bookmark_entry_t entries[BOOKMARK_MAX];} reader_bookmarks_t;
-#define BOOK_STORE_PATH_MAX 288
+#include "book_bookmark_format.h"
 #define UI_BTN_H 84
 #define UI_GAP 12
 static EpdRect ui_row_rect(int i,int count,int y,int height){EpdRect r=ui_bar_rect(i,count);r.y=y;r.height=height;return r;}
@@ -340,7 +337,10 @@ static void app_settings_set_reader_hide_images(bool on){test_hide_images=on;}
 static bool s_reader_footer_pending,s_reader_footer_strong,s_reader_image_refresh_pending,s_water_turn_pending;
 static int s_turns;
 static bool s_bookmark_edit,s_bookmark_delete_confirm,s_bookmark_delete_error;
-static uint32_t s_bookmark_selected;
+static bool fail_selection_alloc;
+static void *selection_alloc(size_t n,size_t size){return fail_selection_alloc?NULL:calloc(n,size);}
+static uint8_t *s_bookmark_selection_bits;
+static size_t s_bookmark_selection_bytes;
 static int64_t s_stats_activity_ms;
 static int s_du_count;
 static int64_t s_size_settle_ms,s_poll_ms;
@@ -537,8 +537,9 @@ unit += f'#include "{source.parents[1] / "assets/shelf_notepad_roll.h"}"\n'
 unit += "enum { PAPER_X" + notepad.read_text().split("enum { PAPER_X", 1)[1].split(";", 1)[0] + ";\n"
 unit += function("ui_notepad_row", notepad)
 for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "slider_index", "reader_margin_input", "reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "clean_filename", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_layout", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_query", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "sort_shelf", "delete_retry_find", "shelf_scan_cancel", "shelf_scan_context", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "open_error_button", "dismiss_open_error", "open_error_gesture", "open_error_input_owned", "draw_open_error", "show_open_error", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
-    unit += function(name) + "\n"
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_selection_clear", "bookmark_selection_prepare", "bookmark_selected_set", "bookmark_selected_at", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "open_error_button", "dismiss_open_error", "open_error_gesture", "open_error_input_owned", "draw_open_error", "show_open_error", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+    fragment = function(name)
+    unit += (fragment.replace("calloc(", "selection_alloc(") if name == "bookmark_selection_prepare" else fragment) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
 unit += "static unsigned app_settings_system_font_size(void){return 100;}\n"
@@ -677,13 +678,15 @@ int main(void) {
     s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=36;
     memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
     s_page=0;test_reflows=0;
-    reader_bookmarks_t marks={.count=6};
-    for(unsigned i=0;i<marks.count;++i)marks.entries[i].byte_off=(i+1)*100;
-    bookmark_compact(&marks,(1u<<0)|(1u<<2)|(1u<<5));
-    assert(marks.count==3&&marks.entries[0].byte_off==200&&
-           marks.entries[1].byte_off==400&&marks.entries[2].byte_off==500);
-    bookmark_compact(&marks,(1u<<0)|(1u<<1)|(1u<<2));
-    assert(marks.count==0);
+    size_t mark_bytes=0; assert(reader_bookmarks_unbounded_size(73,&mark_bytes));
+    reader_bookmarks_unbounded_t *marks=calloc(1,mark_bytes); assert(marks); marks->count=73;
+    for(unsigned i=0;i<marks->count;++i) marks->entries[i].byte_off=i;
+    assert(bookmark_selection_prepare(marks->count));
+    bookmark_selected_set(0,true);bookmark_selected_set(32,true);bookmark_selected_set(72,true);
+    fail_selection_alloc=true;assert(!bookmark_selection_prepare(900) && bookmark_selected_at(72));fail_selection_alloc=false;
+    bookmark_compact(marks); assert(marks->count==70 && marks->entries[0].byte_off==1 &&
+        marks->entries[31].byte_off==33 && marks->entries[69].byte_off==71);
+    bookmark_selection_clear();free(marks);
     EpdRect reading_body=reader_area(), text_body=body_rect(), reading_footer=progress_rect();
     assert(reading_body.y>=160&&reading_body.y%32==0);
     assert(text_body.y==169&&text_body.y>=reading_body.y);
