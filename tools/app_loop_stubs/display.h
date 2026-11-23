@@ -4,6 +4,7 @@
 #include "../../main/display/display_geometry.h"
 
 void display_request_full_refresh(void);
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState*, const void*, EpdRect);
 
 enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect area);
 

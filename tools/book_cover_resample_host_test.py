@@ -35,6 +35,7 @@ unit+=fn('luminance').replace('return', '++luma_calls; return')+'\n'
 for name in ('scale_gap','scale_axis'):unit+=fn(name)+'\n'
 unit+='typedef struct {uint16_t at;uint8_t frac;} scale_step_t;\n'
 for name in ('scale_map','scale_next','bilinear4','book_cover_crop'):unit+=fn(name)+'\n'
+unit+=fn('image_enhance_comic')+'\n'
 unit+='enum {JPEG_IMAGE_SCALE_0=0, JPEG_IMAGE_SCALE_1_8=3};\n'+fn('jpeg_target_scale')+'\n'
 unit+='typedef bool (*image_cancel_fn)(void *);\ntypedef struct {const uint8_t *data;size_t size,pos;FILE *file;image_cancel_fn cancelled;void *context;} png_input_t;\n'
 for name in ('png_read_mem','png_gray_input_cancel','png_gray_input'):unit+=fn(name)+'\n'
@@ -42,6 +43,24 @@ unit+=r'''
 #undef free
 int main(int argc,char **argv){
  assert(argc==4);
+ uint8_t comic[256],native_tone[256];
+ memset(comic,255,sizeof(comic));memset(comic,60,64);comic[100]=168;
+ memcpy(native_tone,comic,sizeof(comic));
+ image_enhance_comic(native_tone,16,16,false);
+ assert(native_tone[0]==15 && native_tone[100]>100 && native_tone[100]<168 && native_tone[255]==255);
+ image_enhance_comic(comic,16,16,true);
+ assert(comic[0]==15 && comic[100]==native_tone[100]-17 && comic[99]==255 && !live);
+ memset(comic,255,sizeof(comic));memset(comic,60,64);comic[100]=168;
+ fail_after=0;image_enhance_comic(comic,16,16,true);fail_after=-1;
+ assert(!memcmp(comic,native_tone,sizeof(comic)) && !live);
+ for(unsigned i=0;i<256;++i)comic[i]=(uint8_t)i;
+ image_enhance_comic(comic,1,256,true);
+ for(unsigned i=1;i<256;++i)assert(comic[i]>=comic[i-1]);
+ memset(comic,0,sizeof(comic));comic[255]=255;image_enhance_comic(comic,16,16,true);
+ assert(comic[0]==0 && comic[255]==255 && !live);
+ memset(comic,210,sizeof(comic));image_enhance_comic(comic,16,16,true);
+ for(unsigned i=0;i<256;++i)assert(comic[i]==210);
+
  assert(jpeg_target_scale(684,1216,684,1216)==0);
  assert(jpeg_target_scale(700,600,176,240)==0);
  assert(jpeg_target_scale(5000,960,176,240)==1);

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "display.h"
+#include "display_reader_waveform.h"
 #include "display_static_black.h"
 #include "epd_output_offset.h"
 #include "app_config.h"
@@ -31,7 +32,8 @@ bool app_settings_main_fast_refresh(void) {return false;}
 bool frontlight_on(void) {return false;}
 int epd_width(void) {return 1216;}
 int epd_height(void) {return 684;}
-enum EpdRotation epd_get_rotation(void) {return EPD_ROT_INVERTED_PORTRAIT;}
+static enum EpdRotation rotation = EPD_ROT_INVERTED_PORTRAIT;
+enum EpdRotation epd_get_rotation(void) {return rotation;}
 void* heap_caps_aligned_alloc(size_t a,size_t b,unsigned c) {(void)a;(void)b;(void)c;assert(false);return NULL;}
 void heap_caps_free(void* p) {assert(p);free(p);}
 const EpdWaveform* display_main_gray_waveform(void) {return &E0470_WAVEFORM;}
@@ -61,8 +63,8 @@ const EpdWaveform* display_main_normal_waveform(void) { return display_main_wate
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_waveform(void) {return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_acrylic_clean_waveform(void) {return &E0470_WAVEFORM;}
-int epd_rotated_display_width(void) { return 684; }
-int epd_rotated_display_height(void) { return 1216; }
+int epd_rotated_display_width(void) { return rotation & 1 ? 684 : 1216; }
+int epd_rotated_display_height(void) { return rotation & 1 ? 1216 : 684; }
 
 #define FB_BYTES 128
 const EpdWaveform E0470_WAVEFORM = {.num_modes=0}, E0470_FOLLOW_WAVEFORM = {.num_modes=1}, E0470_GRAY8_WAVEFORM = {.num_modes=2}, E0470_FULL_WAVEFORM = {.num_modes=3},
@@ -87,6 +89,10 @@ static int water_calls;
 static EpdRect last_area;
 static uint8_t physical_offset_frame[1216 * 684];
 static int offset_scans, offset_discards;
+static const EpdWaveform comic_wave = {.num_modes=1};
+static const uint8_t *comic_front, *comic_back;
+static EpdRect comic_body;
+static unsigned comic_scans;
 static bool check_static_black, check_reader_black, check_reader_background, check_joined, full_size_fb;
 static unsigned static_black_scans, forgotten_waveforms;
 static uint8_t test_gl16_lut[8][16][4];
@@ -110,6 +116,28 @@ enum EpdDrawError epd_draw_base(EpdRect area, const uint8_t *data, EpdRect crop,
     enum EpdDrawMode mode, int temperature, const bool *lines,
     const uint8_t *columns, const EpdWaveform *waveform) {
     assert(ota_display_depth && !lines && !columns && temperature == 25);
+    if (waveform == &comic_wave) {
+        assert(mode == (MODE_PACKING_1PPB_DIFFERENCE | MODE_GC16) && last_scan == BOARD_EPD_SCAN_FULL);
+        assert(area.width == 1216 && area.height == 684 && !memcmp(&area, &crop, sizeof(area)));
+        physical_scan_power();
+        ++comic_scans;
+        for (int y = 0; y < area.height; ++y) for (int x = 0; x < area.width; ++x) {
+            int logical_y = rotation == EPD_ROT_PORTRAIT ? area.width - 1 - x :
+                rotation == EPD_ROT_INVERTED_PORTRAIT ? x :
+                rotation == EPD_ROT_INVERTED_LANDSCAPE ? area.height - 1 - y : y;
+            size_t i = (size_t)y * area.width + x;
+            unsigned old = (comic_back[i / 2] >> (4 * (x & 1))) & 15;
+            unsigned target_gray = (comic_front[i / 2] >> (4 * (x & 1))) & 15;
+            unsigned pair = (target_gray << 4) | old;
+            bool outside = logical_y < comic_body.y || logical_y >= comic_body.y + comic_body.height;
+            unsigned expected = outside && old == target_gray ? DISPLAY_COMIC_HOLD :
+                pair == DISPLAY_COMIC_HOLD ? DISPLAY_COMIC_EQUIVALENT : pair;
+            assert(data[i] == expected);
+        }
+        enum EpdDrawError err = next_draw_error;
+        next_draw_error = EPD_DRAW_SUCCESS;
+        return err;
+    }
     assert(mode == (MODE_PACKING_1PPB_DIFFERENCE | MODE_GL16));
     if (check_static_black || check_reader_black || check_reader_background || check_joined) {
         physical_scan_power();
@@ -521,6 +549,43 @@ static void test_static_black(void) {
     free(diff); free(back); free(front);
 }
 
+static void test_comic_regions(void) {
+    size_t bytes = (size_t)epd_width() * epd_height() / 2;
+    uint8_t *front = malloc(bytes), *back = malloc(bytes), *original = malloc(bytes), *diff = malloc(2 * bytes);
+    assert(front && back && original && diff);
+    for (size_t i = 0; i < 2 * bytes; i += 2) {
+        unsigned a = i & 255, b = (i + 1) & 255;
+        original[i / 2] = (a & 15) | (b << 4);
+        front[i / 2] = (a >> 4) | (b & 0xf0);
+    }
+    EpdiyHighlevelState hl = {.front_fb=front, .back_fb=back, .difference_fb=diff};
+    comic_front = front; comic_back = original; full_size_fb = true;
+    for (int rot = 0; rot < 4; ++rot) for (int bars = 0; bars < 4; ++bars) {
+        rotation = (enum EpdRotation)rot;
+        int width = epd_rotated_display_width(), height = epd_rotated_display_height();
+        int top = bars & 1 ? 83 : 0, footer = bars & 2 ? 71 : 0;
+        comic_body = (EpdRect){0, top, width, height - top - footer};
+        for (int fail = 0; fail < 2; ++fail) {
+            memcpy(back, original, bytes);
+            enum EpdDrawError expected = fail ? EPD_DRAW_OTHER_ERROR : EPD_DRAW_SUCCESS;
+            next_draw_error = expected;
+            unsigned scans = comic_scans;
+            int full = full_draws;
+            assert(update_display_reader_comic(&hl, &comic_wave, comic_body) == expected);
+            assert(comic_scans == scans + (bars != 0) && full_draws == full + (bars == 0));
+            if (!bars) assert(waveform_at_draw == &E0470_FULL_WAVEFORM && last_mode == MODE_GC16);
+            assert(!memcmp(back, fail ? original : front, bytes));
+        }
+    }
+    memcpy(back, original, bytes);
+    int full = full_draws;
+    assert(update_display_reader_comic(&hl, &E0470_FULL_WAVEFORM, comic_body) == EPD_DRAW_SUCCESS);
+    assert(full_draws == full + 1 && !memcmp(back, front, bytes));
+    full_size_fb = false;
+    free(diff); free(original); free(back); free(front);
+    puts("comic: one GC16 scan, all rotation and bar combinations, exact odd edges, error baseline and original-table fallback");
+}
+
 int main(void) {
     uint8_t front[FB_BYTES], back[FB_BYTES];
     for (size_t i = 0; i < FB_BYTES; ++i) target[i] = (uint8_t)(i * 37U + 3U);
@@ -798,6 +863,7 @@ int main(void) {
     assert(update_display_mode_diff(&hl, MODE_GL16) == EPD_DRAW_SUCCESS && clears == before + 1);
     puts("boot: one clear for centered and shifted starts; power rejection defers the baseline rebuild");
     test_static_black();
+    test_comic_regions();
 }
 
 // Continuous state is exercised separately with native-size buffers.

@@ -25,6 +25,8 @@ void book_epub_close(book_epub_t *book);
 /// packaged TTF); on by default. Turning it off puts body text back on the system face; faces
 /// already in a slot are handed back when the book closes.
 void book_epub_set_fonts_enabled(book_epub_t *book, bool on);
+/// 是否在 OPF 中标明漫画类型。/ Whether the OPF declares a comic.
+bool book_epub_is_comic(const book_epub_t *book);
 /// 返回 spine 章节数，上限 8192。/ Return the spine chapter count, at most 8192.
 size_t book_epub_chapter_count(const book_epub_t *book);
 /// 优先列可识别的正文编号章节；识别不完整时使用书内导航，并略过书前资料；不改变 spine 进度。

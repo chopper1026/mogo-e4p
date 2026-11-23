@@ -51,6 +51,12 @@ book_crop_t book_cover_crop(unsigned src_width, unsigned src_height,
 /// Decode JPEG/PNG/static WebP to byte grayscale, bounded to one panel; WebP is signature-detected.
 bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
                           unsigned out_width, unsigned out_height, uint8_t *out);
+/// 漫画基线 JPEG 的软件回退直接解目标所需的亮度平面。/ Decode a target-sized luma plane on the comic baseline JPEG software path.
+bool image_comic_grayscale(const uint8_t *data, size_t size, bool png,
+                           unsigned out_width, unsigned out_height, uint8_t *out);
+/// 在解码后的整页漫画上校正抬高的黑位，缩图时增强暗边。原地处理，每张位图仅调用一次。
+/// Correct lifted ink and strengthen reduced dark edges in place, once per decoded comic bitmap.
+void image_enhance_comic(uint8_t *gray, unsigned width, unsigned height, bool downscaled);
 /// 读取图像头尺寸；不分配像素。/ Read header dimensions without pixel allocations.
 bool book_image_dimensions(const uint8_t *data, size_t size, bool png,
                            unsigned *width, unsigned *height);

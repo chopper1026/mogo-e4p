@@ -56,6 +56,7 @@
 #include "e0470_waveform_trim.h"
 #include "settings.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -366,6 +367,31 @@ const EpdWaveform* display_reader_image_waveform(void) {
     s_image_ready = true;
     ESP_LOGI("reader_wf", "image table frames=%d", frames);
     return &s_image_waveform;
+}
+
+const EpdWaveform* display_reader_comic_waveform(void) {
+    static EpdWaveformPhases phases;
+    static const EpdWaveformPhases* ranges[] = {&phases};
+    static const EpdWaveformMode mode = {MODE_GC16, 1, ranges};
+    static const EpdWaveformMode* modes[] = {&mode};
+    static EpdWaveform wave = {.num_modes = 1, .num_temp_ranges = 1, .mode_data = modes};
+    if (phases.luts) return &wave;
+
+    const EpdWaveform* full = &E0470_FULL_WAVEFORM;
+    const EpdWaveformPhases* base = e0470_waveform_phases(full, MODE_GC16);
+    if (!base || !base->luts || base->phases != E0470_FULL_GC16_FRAMES) return full;
+    for (int f = 0; f < base->phases; ++f) {
+        if (e0470_phase_action(base, f, DISPLAY_COMIC_HOLD >> 4, DISPLAY_COMIC_HOLD & 15) !=
+            e0470_phase_action(base, f, DISPLAY_COMIC_EQUIVALENT >> 4, DISPLAY_COMIC_EQUIVALENT & 15)) return full;
+    }
+    uint8_t (*data)[16][4] = heap_caps_malloc(base->phases * sizeof(*data), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!data) return full;
+    memcpy(data, base->luts, base->phases * sizeof(*data));
+    for (int frame = 0; frame < base->phases; ++frame)
+        bg_set(data, frame, DISPLAY_COMIC_HOLD >> 4, DISPLAY_COMIC_HOLD & 15, 0);
+    wave.temp_intervals = full->temp_intervals;
+    phases = (EpdWaveformPhases){base->phases, (const uint8_t*)data, base->phase_times};
+    return &wave;
 }
 
 const EpdWaveform* display_reader_water_waveform(void) {

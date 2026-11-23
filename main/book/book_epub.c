@@ -38,7 +38,7 @@
 // 索引载荷格式随标题/锚点池化而变：旧缓存里的定长字段读不出指针，必须整体失效。
 // The index payload changed with the title/anchor pooling: fixed fields in an old cache cannot be
 // turned back into pointers, so every older cache has to lapse.
-#define EPUB_CACHE_VERSION 13u
+#define EPUB_CACHE_VERSION 14u
 #define EPUB_META_CACHE_VERSION 1u
 #define EPUB_CSS_MAX (256u * 1024u)
 #define EPUB_CSS_FILE_MAX (128u * 1024u)
@@ -97,6 +97,7 @@ struct book_epub {
     size_t chapter_capacity;
     uint32_t total; ///< 原始 HTML 字节总量 / Total source HTML bytes
     char source_path[EPUB_PATH_CAP]; ///< 延迟目录缓存来源 / Source for lazy navigation cache
+    bool comic; ///< OPF 明确标记为漫画 / Explicit comic classification in OPF
     bool headings_dirty; ///< 标题需要写回 / Titles need caching
     bool navigation_ready; ///< 本次打开已筛选目录 / Navigation prepared for this open
     size_t navigation_count; ///< 可见目录条数 / Visible navigation entries
@@ -117,6 +118,7 @@ typedef struct {
     uint32_t total;
     uint32_t authored_count;
     uint8_t body_scanned;
+    uint8_t comic;
 } epub_cache_payload_t;
 typedef struct {
     char title[256];
@@ -232,7 +234,7 @@ static bool epub_cache_load(const char* source, book_epub_t* book) {
     epub_cache_payload_t payload;
     bool ok = fread(&payload, 1, sizeof(payload), cache) == sizeof(payload) &&
         payload.count > 0 && payload.count <= EPUB_CHAPTER_MAX &&
-        payload.authored_count <= EPUB_NAV_MAX && payload.body_scanned <= 1;
+        payload.authored_count <= EPUB_NAV_MAX && payload.body_scanned <= 1 && payload.comic <= 1;
     // 结构体里的标题现在是指针，不能整块落盘：先读元数据，再按同样的顺序把字符串接回池里。
     // The entry's title is a pointer now and cannot be dumped as a block: read the metadata, then
     // rebind each string into the pool in the same order.
@@ -291,6 +293,7 @@ static bool epub_cache_load(const char* source, book_epub_t* book) {
     book->count = payload.count; book->total = payload.total; book->authored_count = payload.authored_count;
     book->navigation_capacity = payload.authored_count;
     book->body_scanned = payload.body_scanned != 0;
+    book->comic = payload.comic != 0;
     return true;
 }
 
@@ -301,7 +304,7 @@ static void epub_cache_save(const char* source, const book_epub_t* book) {
     if (!cache) return;
     epub_cache_payload_t payload = {.count = (uint32_t)book->count, .total = book->total,
                                     .authored_count = (uint32_t)book->authored_count,
-                                    .body_scanned = book->body_scanned ? 1 : 0};
+                                    .body_scanned = book->body_scanned ? 1 : 0, .comic = book->comic};
     bool ok = fwrite(&payload, 1, sizeof(payload), cache) == sizeof(payload);
     for (size_t i = 0; ok && i < book->count; ++i) {
         chapter_t entry = book->chapters[i];
@@ -655,6 +658,20 @@ static esp_err_t package_parse(book_epub_t *book, const char *opf, char ncx[EPUB
     xml_t xml; xml_reader(&xml, text, len); token_t t;
     while (xml_next(&xml, &t)) {
         if (t.kind == XML_OPEN && t.depth == 1 && local_name(t.name, "package")) root = true;
+        if (t.depth == 3 && local_name(xml.stack[1], "metadata") && !book->comic) {
+            char value[32];
+            if (t.kind == XML_OPEN && local_name(t.name, "meta") &&
+                attribute(t, "name", value, sizeof(value)) && !strcasecmp(value, "book-type") &&
+                attribute(t, "content", value, sizeof(value))) {
+                book->comic = !strcasecmp(value, "comic") || !strcasecmp(value, "manga");
+            } else if (t.kind == XML_TEXT && local_name(xml.stack[2], "type")) {
+                span_t type = t.text;
+                while (type.n && space(*type.p)) { ++type.p; --type.n; }
+                while (type.n && space(type.p[type.n - 1])) --type.n;
+                book->comic = (type.n == 5 && (!strncasecmp(type.p, "comic", 5) ||
+                                              !strncasecmp(type.p, "manga", 5)));
+            }
+        }
         if (t.kind == XML_OPEN && local_name(t.name, "manifest")) manifest_depth = t.depth;
         if (t.kind == XML_CLOSE && t.depth == manifest_depth) manifest_depth = 0;
         if (t.kind != XML_OPEN || !manifest_depth || t.depth != manifest_depth + 1 || !local_name(t.name, "item")) continue;
@@ -1042,6 +1059,7 @@ void book_epub_close(book_epub_t *book) {
 void book_epub_set_fonts_enabled(book_epub_t *book, bool on) {
     if (book) book->fonts_enabled = on;
 }
+bool book_epub_is_comic(const book_epub_t *book) { return book && book->comic; }
 size_t book_epub_chapter_count(const book_epub_t *book) { return book ? book->count : 0; }
 // 目录缺项时只解析当前可见章节的标题，不在开书时解压所有章节。
 // Resolve missing navigation labels lazily so opening a large book remains fast.
@@ -2280,8 +2298,11 @@ esp_err_t book_epub_image_dimensions(book_epub_t *book, size_t chapter, const ch
     int entry = zip_find(book->zip, path);
     if (entry < 0) return ESP_ERR_NOT_FOUND;
     size_t size = zip_entry_size(book->zip, entry);
-    if (!size) return ESP_ERR_INVALID_SIZE;
-    if (size > 65536) size = 65536;
+    if (!size || (book->comic && size > ZIP_OUTPUT_MAX)) return ESP_ERR_INVALID_SIZE;
+    // 漫画通常在首个扇区就有尺寸，少数较晚的帧头仍走完整读取。
+    // Comic dimensions usually fit in the first sector; late frame headers retain the full-read fallback.
+    const size_t cap = book->comic ? 1024u : 65536u;
+    if (size > cap) size = cap;
     uint8_t *header = psram(size);
     if (!header) return ESP_ERR_NO_MEM;
     esp_err_t err = zip_extract_prefix(book->zip, entry, header, size);

@@ -147,6 +147,7 @@ uint32_t book_chapter_byte_offset(size_t i) {
     if (s_mobi) return book_mobi_chapter_byte_offset(s_mobi, i);
     return s_epub ? book_epub_chapter_byte_offset(s_epub, i) : i < s_book.count ? s_book.entries[i].offset : 0;
 }
+bool book_is_epub_comic(void) { return book_epub_is_comic(s_epub); }
 book_kind_t book_kind(void) { return s_mobi ? BOOK_KIND_MOBI : s_epub ? BOOK_KIND_EPUB : BOOK_KIND_TXT; }
 esp_err_t book_chapter_image(size_t chapter, const char *src, uint8_t **data, size_t *size, bool *png) {
     if (s_mobi) return book_mobi_image(s_mobi, chapter, src, data, size, png);

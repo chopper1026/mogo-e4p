@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- EPUB 中标记为漫画的整页单图会按本页黑位加深偏灰的墨线，并在缩图后增强细线与网点的暗边。漫画翻页时加快图片读取与绘制，画面和可见页眉页脚同步刷新。普通翻页对漫画正文使用完整 GC16，页眉页脚只更新变化像素，留白保持。/ Full-page images in EPUBs marked as comics adapt to lifted ink levels and strengthen fine dark edges after reduction. Comic turns reduce image loading and drawing work and refresh artwork and visible bars together. Ordinary turns use full GC16 across the comic body and drive only changed pixels in the bars, keeping their whitespace steady.
+
 - 新增「便签本」书架：每页 10 本，不显示封面，每行只显示书名、作者和阅读百分比。作者表头与正文统一左对齐。纸面保持纯白，卷边、纸边与行间虚线加深，沿用普通书架分页；短按图书在书名中间画个椭圆，画完直接开书。/ Add a curled notepad shelf for ten books per page, with only titles, authors (aligned with the heading), and reading percentages. The paper face stays white, with darker curls, edges and dashed rules. Paging stays standard; a confirmed tap draws a horizontal oval over the title center before opening the book.
 
 - 修复部分长篇 TXT 目录只显示 Part 的问题：使用原文章号和标题，保留旧有续读与书签位置。/ Restore original chapter numbers and titles in affected long TXT books without changing existing resume or bookmark positions.

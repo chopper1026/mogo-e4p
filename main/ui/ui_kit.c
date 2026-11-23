@@ -1556,6 +1556,49 @@ void ui_clear_page(uint8_t* framebuffer) {
     memset(framebuffer, 0xFF, (size_t)epd_width() * epd_height() / 2);
 }
 
+void ui_blit_gray_bitmap(uint8_t *fb, EpdRect rect, const uint8_t *gray) {
+    if (!fb || !gray || rect.width <= 0 || rect.height <= 0 ||
+        (uint64_t)rect.width * rect.height > PTRDIFF_MAX) return;
+    const int w = epd_rotated_display_width(), h = epd_rotated_display_height();
+    const int x0 = rect.x < 0 ? 0 : rect.x, y0 = rect.y < 0 ? 0 : rect.y;
+    const int64_t right = (int64_t)rect.x + rect.width, bottom = (int64_t)rect.y + rect.height;
+    const int x1 = right > w ? w : (int)right, y1 = bottom > h ? h : (int)bottom;
+    if (x0 >= x1 || y0 >= y1) return;
+
+    // 成对写入物理像素；小块转置让竖屏源图的相邻行保留在缓存里。
+    // Pack adjacent panel pixels together and transpose in small tiles to keep portrait source rows in cache.
+    EpdRect area = ui_rotate_rect_to_fb((EpdRect){x0, y0, x1 - x0, y1 - y0});
+    int x = x0, y = y0, dx = 1, dy = 0;
+    switch (epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT: y = y1 - 1; dx = 0; dy = -1; break;
+        case EPD_ROT_INVERTED_LANDSCAPE: x = x1 - 1; y = y1 - 1; dx = -1; break;
+        case EPD_ROT_INVERTED_PORTRAIT: x = x1 - 1; dx = 0; dy = 1; break;
+        default: break;
+    }
+    const int pw = epd_width();
+    const ptrdiff_t step = dx + (ptrdiff_t)dy * rect.width;
+    for (int tile = 0; tile < area.width; tile += 16) {
+        const int end = tile + 16 < area.width ? tile + 16 : area.width;
+        for (int row = 0; row < area.height; ++row) {
+            int lx = x + tile * dx - row * dy, ly = y + tile * dy + row * dx;
+            size_t at = (size_t)(ly - rect.y) * rect.width + (lx - rect.x);
+            uint8_t *dst = fb + (size_t)(row + area.y) * (pw / 2) + (area.x + tile) / 2;
+            int col = tile;
+            if ((area.x + col) & 1) {
+                *dst = (*dst & 0x0f) | (ui_image_dither_gray(gray[at], lx, ly) & 0xf0);
+                ++dst; ++col; at += step; lx += dx; ly += dy;
+            }
+            for (; col + 1 < end; col += 2) {
+                const uint8_t lo = ui_image_dither_gray(gray[at], lx, ly) >> 4;
+                const uint8_t hi = ui_image_dither_gray(gray[at + step], lx + dx, ly + dy) & 0xf0;
+                *dst++ = lo | hi;
+                at += (size_t)step * 2; lx += dx * 2; ly += dy * 2;
+            }
+            if (col < end) *dst = (*dst & 0xf0) | (ui_image_dither_gray(gray[at], lx, ly) >> 4);
+        }
+    }
+}
+
 void ui_blit_mono_bitmap(uint8_t *fb,EpdRect rect,const uint8_t *bits,size_t stride) {
     if(!fb||!bits||rect.width<=0||rect.height<=0||stride<((size_t)rect.width+7)/8)return;
     int64_t right=(int64_t)rect.x+rect.width,bottom=(int64_t)rect.y+rect.height;

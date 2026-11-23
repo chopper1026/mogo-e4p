@@ -36,6 +36,7 @@ static const display_waveform_descriptor_t s_catalog[DISPLAY_WAVE_COUNT] = {
     ENTRY(DISPLAY_WAVE_READER_WATER,"reader-water",READER,DISPLAY_WAVE_DEFAULT,DISPLAY_WAVE_ACTIVE,"保留前导擦除和原白列，补黑 / Preserve leading erase and original white row, boost black"),
     ENTRY(DISPLAY_WAVE_READER_BACKGROUND,"reader-background",READER,DISPLAY_WAVE_READER_WATER,DISPLAY_WAVE_ACTIVE,"二次裁剪、剥深色擦除、补白 / Retrim, strip dark-pair erase, boost white"),
     ENTRY(DISPLAY_WAVE_READER_IMAGE,"reader-image",READER,DISPLAY_WAVE_READER_WATER,DISPLAY_WAVE_ACTIVE,"保留较长擦除、等灰保持 / Retain longer erase and hold equal grays"),
+    ENTRY(DISPLAY_WAVE_READER_COMIC,"reader-comic",READER,DISPLAY_WAVE_FULL,DISPLAY_WAVE_ACTIVE,"正文完整 GC16，栏位静止像素使用保持编码 / Full GC16 body with a hold code for stationary chrome"),
     ENTRY(DISPLAY_WAVE_NORMALIZE,"normalize",NORMALIZE,DISPLAY_WAVE_READER_INK,DISPLAY_WAVE_ACTIVE,"字芯统一 18 擦白和 18 推黑 / Normalize glyph cores with 18 white and 18 black pushes"),
     ENTRY(DISPLAY_WAVE_NORMALIZE_GRAY,"normalize-gray",NORMALIZE,DISPLAY_WAVE_READER_INK,DISPLAY_WAVE_ACTIVE,"归一字芯，非黑相等对保持 / Normalize black cores, hold nonblack equal pairs"),
 };
@@ -68,6 +69,7 @@ const EpdWaveform *display_waveform_get(display_waveform_id_t id) {
         case DISPLAY_WAVE_READER_WATER: return display_reader_water_base_waveform();
         case DISPLAY_WAVE_READER_BACKGROUND: return display_reader_bg_waveform();
         case DISPLAY_WAVE_READER_IMAGE: return display_reader_image_waveform();
+        case DISPLAY_WAVE_READER_COMIC: return display_reader_comic_waveform();
         case DISPLAY_WAVE_NORMALIZE: return display_normalize_waveform(false);
         case DISPLAY_WAVE_NORMALIZE_GRAY: return display_normalize_waveform(true);
         case DISPLAY_WAVE_COUNT: return NULL;

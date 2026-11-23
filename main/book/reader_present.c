@@ -43,6 +43,21 @@ reader_present_result_t reader_present_output(EpdiyHighlevelState *hl,
         err = display_refresh_area(hl, DISPLAY_REFRESH_RESTORE, request->screen_area,
             request->hold_gray || request->image_page ? DISPLAY_REFRESH_HOLD_GRAY : DISPLAY_REFRESH_DEFAULT);
     }
+    else if (request->comic_page && request->image_gray_refresh && request->prior_reader &&
+             request->refresh != READER_PRESENT_FULL) {
+        err = request->turn_pending && !request->cleanup
+            ? display_refresh_area(hl, DISPLAY_REFRESH_READER_COMIC, request->body_area, DISPLAY_REFRESH_DEFAULT)
+            : display_refresh_area(hl, DISPLAY_REFRESH_READER_CLEANUP, request->screen_area, DISPLAY_REFRESH_DEFAULT);
+        joined = true;
+        if (err == EPD_DRAW_SUCCESS) {
+            result.status_updated = request->status_pending;
+            result.footer_updated = request->footer_pending;
+        } else {
+            // 扫描失败后物理画面可能停在中间灰阶，下次输出须重建完整基准。
+            // An interrupted scan can leave intermediate grays. Require a full refresh on the next output.
+            display_request_full_refresh();
+        }
+    }
     else if (request->image_gray_refresh && request->refresh == READER_PRESENT_AREA && !request->cleanup && request->prior_reader) {
         // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
         // Drive the grayscale body from the current frame instead of clearing the whole screen to white.

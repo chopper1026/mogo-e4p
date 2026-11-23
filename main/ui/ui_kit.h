@@ -358,6 +358,9 @@ int ui_datamatrix_side(const char* text);
 void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text);
 
 void ui_clear_page(uint8_t* framebuffer);
+/// 按逻辑坐标抖动 8 位灰度图并裁剪写入旋转后的帧缓冲。/ Dither a gray8 bitmap at logical coordinates and clip it into the rotated framebuffer.
+void ui_blit_gray_bitmap(uint8_t *fb, EpdRect rect, const uint8_t *gray);
+
 /// Exact logical fill using contiguous packed rows; preserves boundary nibbles.
 void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *framebuffer);
 /// 直接写入已裁剪的一位位图，源数据按行、低位在先；不缩放、不申请内存。/ Blit a clipped row-major, least-bit-first mono bitmap directly, without rescaling or allocation.

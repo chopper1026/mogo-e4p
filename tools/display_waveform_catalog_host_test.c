@@ -11,13 +11,37 @@
 #include "e0470_epaper_waveform.h"
 static const char *background="";
 const char *app_settings_book_background_path(void) {return background;}
+static void check_comic_waveform(void) {
+    const EpdWaveform *wave = display_waveform_get(DISPLAY_WAVE_READER_COMIC);
+    const EpdWaveformPhases *comic = e0470_waveform_phases(wave, MODE_GC16);
+    const EpdWaveformPhases *full = e0470_waveform_phases(&E0470_FULL_WAVEFORM, MODE_GC16);
+    assert(wave != &E0470_FULL_WAVEFORM && wave->temp_intervals == E0470_FULL_WAVEFORM.temp_intervals);
+    assert(full && comic && comic->phases == full->phases && comic->phases == 48);
+    assert(comic->phase_times == full->phase_times);
+    assert(!e0470_waveform_phases(wave, MODE_GL16));
+    for (int frame = 0; frame < full->phases; ++frame) {
+        for (int from = 0; from < 16; ++from) {
+            for (int to = 0; to < 16; ++to) {
+                const int pair = (to << 4) | from;
+                const int body = pair == DISPLAY_COMIC_HOLD ? DISPLAY_COMIC_EQUIVALENT : pair;
+                const int chrome = from == to ? DISPLAY_COMIC_HOLD : body;
+                const int original = e0470_phase_action(full, frame, to, from);
+                assert(e0470_phase_action(comic, frame, body >> 4, body & 15) == original);
+                assert(e0470_phase_action(comic, frame, chrome >> 4, chrome & 15) == (from == to ? 0 : original));
+            }
+        }
+    }
+    display_waveform_info_t original;
+    assert(display_waveform_inspect(DISPLAY_WAVE_FULL, MODE_GC16, &original) && original.equal_pairs_driven == 16);
+}
+
 int main(void) {
     e0470_waveform_init();
     const EpdWaveform *legacy[DISPLAY_WAVE_COUNT]={
         &E0470_WAVEFORM,&E0470_FULL_WAVEFORM,&E0470_GRAY8_WAVEFORM,&E0470_FOLLOW_WAVEFORM,
         &E0470_TEXTTURN_WAVEFORM,&E0470_CAPSULE_DRAG_WAVEFORM,&E0470_CAPSULE_WHITE_WAVEFORM,&E0470_CAPSULE_GRAY_WAVEFORM,&E0470_APPLY_WAVEFORM,
         display_main_gray_waveform(),display_main_shelf_exit_waveform(),display_main_water_waveform(),display_main_bw_waveform(),display_main_normal_waveform(),display_main_shelf_waveform(MODE_GL16),display_main_shelf_waveform(MODE_GC16),
-        display_reader_text_waveform(),display_reader_ink_waveform(),display_reader_water_waveform(),display_reader_bg_waveform(),display_reader_image_waveform(),display_normalize_waveform(false),display_normalize_waveform(true)};
+        display_reader_text_waveform(),display_reader_ink_waveform(),display_reader_water_waveform(),display_reader_bg_waveform(),display_reader_image_waveform(),display_normalize_waveform(false),display_normalize_waveform(true),display_reader_comic_waveform()};
     int reserved=0,executor=0;
     for(int i=0;i<DISPLAY_WAVE_COUNT;++i) {
         const display_waveform_descriptor_t *d=display_waveform_descriptor(i);
@@ -40,7 +64,8 @@ int main(void) {
             assert(info.equal_pairs_driven==equal&&info.black_pushes_from_white==black&&info.white_pushes_from_black==white);
         }
     }
-    assert(DISPLAY_WAVE_COUNT==23&&reserved==3&&executor==1);
+    check_comic_waveform();
+    assert(DISPLAY_WAVE_COUNT==24&&reserved==3&&executor==1);
     background="/background.png";
     assert(display_waveform_get(DISPLAY_WAVE_READER_WATER)==legacy[DISPLAY_WAVE_READER_WATER]);
     display_waveform_info_t info;
@@ -55,5 +80,5 @@ int main(void) {
     assert(display_waveform_inspect(DISPLAY_WAVE_FOLLOW,MODE_DU,&follow));
     assert(complete.black_pushes_from_white>follow.black_pushes_from_white);
     assert(complete.white_pushes_from_black>follow.white_pushes_from_black);
-    puts("catalog: PASS (23 original table identities, unique acyclic descriptors, reserved/executor roles, all-mode pulse statistics and invalid inputs)");
+    puts("catalog: PASS (24 table identities, all 48 phases of every comic transition, unique acyclic descriptors, reserved/executor roles, all-mode pulse statistics and invalid inputs)");
 }

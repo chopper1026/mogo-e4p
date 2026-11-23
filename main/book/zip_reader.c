@@ -107,15 +107,6 @@ static bool empty_directory_size_quirk(zip_reader_t *z, const zip_entry_t *entry
         read_at(z, next, h, 4) && u32(h) == UINT32_C(0x04034b50));
 }
 
-static uint32_t zip_crc32(const uint8_t* data, size_t len) {
-    uint32_t crc = UINT32_MAX;
-    while (len--) {
-        crc ^= *data++;
-        for (int i = 0; i < 8; ++i) crc = (crc >> 1) ^ (UINT32_C(0xedb88320) & (0U - (crc & 1U)));
-    }
-    return ~crc;
-}
-
 static bool trailing_whitespace(const uint8_t* data, size_t len) {
     if (len > TRAILING_WHITESPACE_MAX) return false;
     for (size_t i = 0; i < len; ++i)
@@ -333,7 +324,7 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
         if (!ok) return ESP_ERR_INVALID_SIZE;
     }
     if (prefix && target < entry->unpacked) return ESP_OK;
-    return zip_crc32(output, entry->unpacked) == entry->crc ? ESP_OK : ESP_ERR_INVALID_CRC;
+    return mz_crc32(MZ_CRC32_INIT, output, entry->unpacked) == entry->crc ? ESP_OK : ESP_ERR_INVALID_CRC;
 }
 
 esp_err_t zip_extract(zip_reader_t *z, int index, void *dst, size_t cap) { return extract_impl(z, index, dst, cap, false); }

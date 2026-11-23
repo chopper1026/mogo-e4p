@@ -11,7 +11,7 @@ Pages and controls submit intent, bounds and frame attributes. Display selects w
 | `display_refresh_policy.c` | 纯解析：意图和属性 → 波形编号、模式、覆盖、脏区膨胀。/ Pure intent/attribute → waveform ID, mode, coverage and dilation. |
 | `display_refresh_context.c` | 每次同步读取现有主页与背景设置，不缓存状态。/ Read existing main/background settings for each call without caching. |
 | `display_refresh.c` | 解析后只调用一次既有物理出口，原样返回错误。/ Resolve and invoke exactly one existing physical exit, returning its error. |
-| `display_waveform_catalog.c` | 23 个稳定编号、来源、主要基底、派生说明和用途；惰性调用原构造器。/ 23 stable IDs with sources, primary bases, recipes and roles; resolve original builders lazily. |
+| `display_waveform_catalog.c` | 24 个稳定编号、来源、主要基底、派生说明和用途；惰性调用原构造器。/ 24 stable IDs with sources, primary bases, recipes and roles; resolve original builders lazily. |
 | `display.c` | 物理执行、导航多段输出、清屏计数、扫描档、OTA 互斥、供电准入与失败恢复。/ Physical execution, staged navigation, counters, scan profiles, OTA exclusion, power admission and recovery. |
 | `display_static_black.c` | 复用差分缓冲同帧合成局刷和区外纯黑补偿，不改源波形。/ Merge the requested update and outside-black reinforcement in the existing difference buffer without modifying source waveforms. |
 | `display_main_waveform.c` / `display_reader_waveform.c` / `display_normalize.c` | 原有派生构造与分配失败回退，不属于页面接口。/ Existing derivation builders and allocation-failure fallbacks, outside the page API. |
@@ -41,6 +41,7 @@ AUTO retains the old exit behavior: area GL16 drives all pixels, DU uses the ori
 | READER_BODY | IMAGE 优先 reader-image；否则背景 reader-background / 无背景 reader-ink / IMAGE wins, otherwise background reader-background or reader-ink | QUICK DU，否则 GL16 / QUICK DU, otherwise GL16 | DIFF |
 | READER_LAYOUT | 背景 reader-background，否则 reader-ink / background reader-background, otherwise reader-ink | QUICK DU，否则 GL16 / QUICK DU, otherwise GL16 | AUTO |
 | READER_IMAGE | full | GC16 | AUTO |
+| READER_COMIC | reader-comic | GC16 | 正文 FULL、栏位 DIFF，同帧 / FULL body and DIFF chrome in one scan |
 | READER_CLEANUP | full | GC16 | FULL |
 | RESTORE | HOLD_GRAY 为 normalize-gray，否则 normalize / HOLD_GRAY normalize-gray, otherwise normalize | GL16 | FULL |
 | CAPSULE | default | DU | DIFF，1 行 + 1 列字节膨胀 / 1 row + 1 column byte padding |
@@ -84,6 +85,9 @@ Ordinary GL16 and ripple turns of stable text publish changed chrome in the body
 
 Ordinary turns use the current body table for chrome differences; with a background the body retains original transitions, including white-to-white. Ripple retains the eight-band/37-phase body reveal, and chrome uses an independent, unstaggered LUT within the first 37 ticks. Changed pixels and static black are encoded separately, and unstarted body bands hold; the full turn still takes 44 ticks at the 11090 µs target. Commit exact regions only on success. Host tests establish phase counts and bounds, not physical latency or optical behavior; verify chapter/minute erasure, ink density, background whiteness and consecutive-turn stability on panel.
 
+已解码的整页 EPUB 漫画普通翻页时，正文使用完整 GC16，页眉、状态栏和页脚只驱动变化像素，同一次扫描更新。正文取当前布局的全宽阅读区域，四个方向均按实际边界处理。GC16 原表中 2→0 与 3→0 的驱动逐相相同。`reader-comic` 将这两种真实转换合用一个编码，用空出的编码保持栏位中的静止像素。正文所有 256 种转换均保留原驱动与时序。首次构造校验两种转换并分配 3 KiB PSRAM。原表变化导致校验失败、分配失败或三栏全隐藏时，使用原表完整扫描。周期清理和手动全刷保留整屏 GC16。扫描失败时保留旧帧基准并请求完整刷新。
+On ordinary full-page EPUB comic turns, the current body receives full GC16 and only changed pixels in the status, header and footer bars are driven in the same scan. The body follows the current full-width layout in all four orientations. Full GC16 has identical pulses for 2→0 and 3→0 in every phase. The `reader-comic` table shares one code between these real transitions and uses the spare code to hold stationary chrome. All 256 body transitions retain their original drive and timing. First use checks the equivalence and allocates 3 KiB of PSRAM. A failed equivalence check or allocation, or a body occupying the whole screen, uses the original full table. Periodic and manual cleanup retain whole-screen GC16. Scan failure preserves the previous frame baseline and requests a full refresh.
+
 ## 界面三色 / UI palette
 
 界面底色和控件目标统一为白、黑及固定灰（`UI_GRAY_LIGHT=0x90`，4 位灰阶第 9 档），不随系统对比度漂移。卡片和导航以白底为主，文字使用黑色或明确的反白；固定灰用于进度底槽、未启用控件及活动状态。边框使用黑色，底栏分隔线使用固定灰0x90。共享底栏只有四枚图标与选中横条，高104像素，图标垂直居中；内容扫描止于1088，2像素0x90灰分隔线位于1112，保留24行白色保护带。
@@ -101,7 +105,7 @@ The quick layer uses opaque white; frontlight capsules use black tracks, white f
 | --- | --- |
 | 基础 / Base (9) | default, full, gray8, follow, text-base, capsule-drag, capsule-white, capsule-gray, apply |
 | 主页 / Main (7) | main-gray, shelf-exit, main-water, main-bw, main-normal, shelf-gl16, shelf-gc16 |
-| 阅读 / Reader (5) | reader-text, reader-ink, reader-water, reader-background, reader-image |
+| 阅读 / Reader (6) | reader-text, reader-ink, reader-water, reader-background, reader-image, reader-comic |
 | 归一 / Normalize (2) | normalize, normalize-gray |
 
 gray8、capsule-white、capsule-gray 是保留的备用表；apply 是错相逐带执行壳。目录不因为无当前产品调用而删除表，也不合并光学目的不同的派生表。
@@ -141,8 +145,8 @@ python3 tools/run_reader_baseline.py
 idf.py --preview build
 ```
 
-refresh 专项覆盖 23 表身份与实际驱动统计、1,152 组策略输入、唯一出口、面积/膨胀、错误透传、无效请求和页面呈现边界。结构检查包含拒绝反例。测试中的目录/硬件替身与真实策略分开，阅读/快捷栏原有输出断言继续有效。
-The refresh suite covers 23 table identities/statistics, 1,152 policy inputs, one-exit dispatch, bounds/padding, errors, rejection and page presentation boundaries. Structural checks include rejecting fixtures. Catalog/hardware doubles remain separate from real policy, retaining existing reader/quick-layer output assertions.
+refresh 专项覆盖 24 表身份与实际驱动统计、1,280 组策略输入、唯一出口、面积/膨胀、错误透传、无效请求和页面呈现边界。结构检查包含拒绝反例。测试中的目录/硬件替身与真实策略分开，阅读/快捷栏原有输出断言继续有效。
+The refresh suite covers 24 table identities/statistics, 1,280 policy inputs, one-exit dispatch, bounds/padding, errors, rejection and page presentation boundaries. Structural checks include rejecting fixtures. Catalog/hardware doubles remain separate from real policy, retaining existing reader/quick-layer output assertions.
 
 波形合并或改参数前，用同一设备、温度、VCOM、电源和固定图案，对比黑白文字互换、16 灰阶、背景正文、插图、时钟、输入候选、快捷栏开合。记录残影、白底回灰、字芯黑度、闪烁及实测延迟，包含多次累积和睡眠/失败恢复。宿主与编译结果不能代替这一步。
 Before merging or retuning waveforms, use the same device, temperature, VCOM, power and fixed patterns to compare black/white text reversals, 16 grays, background text, illustrations, clocks, input candidates and overlay open/close. Record ghosting, white drift, glyph darkness, flashing and measured latency, including repeated accumulation and sleep/failure recovery. Host tests and compilation do not replace this step.

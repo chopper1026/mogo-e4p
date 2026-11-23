@@ -86,6 +86,9 @@ def main():
             return lambda files: files.__setitem__('OPS/pkg/book.opf', files['OPS/pkg/book.opf'].replace(old, new))
 
         case('good_paths')
+        case('good_comic_meta', replace_opf('<manifest>', '<metadata><meta content="comic" name="book-type"/></metadata><manifest>'))
+        case('good_comic_dc', replace_opf('<manifest>', '<metadata><dc:type> Manga </dc:type></metadata><manifest>'))
+        case('good_fixed_layout', replace_opf('<manifest>', '<metadata><meta property="rendition:layout">pre-paginated</meta></metadata><manifest>'))
         def colon_paths(files):
             renamed = {}
             for name, content in files.items():

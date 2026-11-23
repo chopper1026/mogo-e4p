@@ -19,7 +19,7 @@ bool display_present_begin(void) { ++present_depth; return true; }
 void display_present_end(bool held) { assert(held && present_depth == 1); --present_depth; ++completed_presentations; }
 
 static const EpdWaveform text = {.num_modes=4}, page = {.num_modes=5}, image = {.num_modes=6},
-    normalize = {.num_modes=7}, normalize_gray = {.num_modes=8}, background = {.num_modes=9};
+    normalize = {.num_modes=7}, normalize_gray = {.num_modes=8}, background = {.num_modes=9}, comic = {.num_modes=10};
 static bool use_background;
 const EpdWaveform* display_reader_text_waveform(void) { return &text; }
 const EpdWaveform* display_reader_page_waveform(void) { return &page; }
@@ -35,6 +35,7 @@ const EpdWaveform *display_waveform_get(display_waveform_id_t id) {
         case DISPLAY_WAVE_READER_TEXT: return &text;
         case DISPLAY_WAVE_READER_INK: return &page;
         case DISPLAY_WAVE_READER_BACKGROUND: return &background;
+        case DISPLAY_WAVE_READER_COMIC: return &comic;
         case DISPLAY_WAVE_READER_IMAGE: return &image;
         case DISPLAY_WAVE_NORMALIZE: return &normalize;
         case DISPLAY_WAVE_NORMALIZE_GRAY: return &normalize_gray;
@@ -48,7 +49,7 @@ enum EpdDrawError update_display_area_diff_padded(EpdiyHighlevelState *s, const 
                                                  enum EpdDrawMode m, EpdRect a, int x, int y) {
     (void)s;(void)w;(void)m;(void)a;(void)x;(void)y;assert(!"unexpected padded output");return EPD_DRAW_INVALID_CROP;
 }
-enum call_kind { AREA, DIFF, FULL_AREA, WHOLE, WHOLE_DIFF, FULL, IMAGE_GRAY, FAST, WATER, TICK, JOINED };
+enum call_kind { AREA, DIFF, FULL_AREA, WHOLE, WHOLE_DIFF, FULL, IMAGE_GRAY, FAST, WATER, TICK, JOINED, COMIC };
 typedef struct {
     enum call_kind kind;
     const EpdWaveform *wave;
@@ -88,6 +89,9 @@ enum EpdDrawError update_display_area_reader_turn(EpdiyHighlevelState *s, const 
     return record(s, full_body ? AREA : DIFF, w, m, a);
 }
 AREA_OUTPUT(update_display_area_full_with, FULL_AREA)
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState *s, const EpdWaveform *w, EpdRect body) {
+    return record(s, COMIC, w, MODE_GC16, body);
+}
 enum EpdDrawError update_display_with(EpdiyHighlevelState *s, const EpdWaveform *w, enum EpdDrawMode m) {
     return record(s, WHOLE, w, m, none);
 }
@@ -256,6 +260,29 @@ int main(void) {
         assert(out.error == EPD_DRAW_SUCCESS && count == 1 && tick == 13579);
         expect(0, WHOLE, &E0470_FULL_WAVEFORM, MODE_GC16, none);
     }
+    // 漫画正反向翻页都用同一整屏定稿；失败不确认栏位，也不追加补刷。
+    // Comic turns settle the whole frame once; a failed scan acknowledges no bars and never replays them.
+    for (int water = 0; water < 2; ++water) for (int cleanup = 0; cleanup < 2; ++cleanup)
+    for (int footer = 0; footer < 2; ++footer) for (int failure = 0; failure < 2; ++failure) {
+        r = reset(); r.comic_page = r.image_gray_refresh = r.image_page = r.status_pending = true;
+        r.footer_pending = footer; r.water_effect = water; r.cleanup = cleanup;
+        complete_refresh_pending = false;
+        if (failure) errors[0] = EPD_DRAW_OTHER_ERROR;
+        out = reader_present_output(&hl, &r);
+        assert(count == 1 && out.error == errors[0]);
+        assert(out.status_updated == !failure && out.footer_updated == (footer && !failure));
+        if (cleanup) expect(0, FULL_AREA, &E0470_FULL_WAVEFORM, MODE_GC16, r.screen_area);
+        else expect(0, COMIC, &comic, MODE_GC16, r.body_area);
+        assert(complete_refresh_pending == !!failure);
+    }
+    complete_refresh_pending = false;
+    r = reset(); r.comic_page = r.image_gray_refresh = r.image_page = true;
+    r.turn_pending = false;
+    reader_present_output(&hl, &r); assert(count == 1);
+    expect(0, FULL_AREA, &E0470_FULL_WAVEFORM, MODE_GC16, r.screen_area);
+    r.refresh = READER_PRESENT_FULL; r.turn_pending = true; count = outputs = 0;
+    reader_present_output(&hl, &r); assert(count == 1);
+    expect(0, IMAGE_GRAY, &E0470_FULL_WAVEFORM, MODE_GC16, none);
     // 插图正文也优先输出，保留原完整灰阶或插图差分出口。
     // Illustration bodies also present first while retaining full-gray or image-differential output.
     for (int bg = 0; bg < 2; ++bg) for (int water = 0; water < 2; ++water)

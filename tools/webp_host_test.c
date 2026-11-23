@@ -192,6 +192,21 @@ int main(int argc, char **argv) {
         for (unsigned i = 0; i < 4; ++i) assert(!pthread_join(threads[i], NULL));
         assert(!live);
         puts("PASS: concurrent lossy/lossless/alpha initialization and decoding");
+    } else if (!strcmp(argv[1], "comic")) {
+        size_t size = 0;
+        uint8_t *data = read_file(argv[2], &size);
+        for (unsigned scale = 1; scale <= 8; scale *= 2) {
+            const unsigned w = 849 / scale, h = 619 / scale;
+            uint8_t *out = malloc((size_t)w * h);
+            assert(out && image_comic_grayscale(data, size, false, w, h, out));
+            for (unsigned y = 0; y < h; ++y) {
+                assert(out[y*w] < 32);
+                assert(out[y*w+w-1] > 210 && out[y*w+w-1] < 230);
+            }
+            free(out);
+            assert(!live);
+        }
+        free(data);
     } else if (!strcmp(argv[1], "epub")) {
         for (int i = 2; i < argc; ++i) check_epub(argv[i]);
     } else if (!strcmp(argv[1], "reject")) {

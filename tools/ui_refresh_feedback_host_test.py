@@ -35,7 +35,7 @@ enum EpdDrawError {EPD_DRAW_SUCCESS,EPD_DRAW_ERROR,EPD_DRAW_INVALID_CROP,EPD_DRA
 #define APP_PAGE_REFRESH_MODE MODE_GL16
 #define SHELF_BOOK_LIFT_PX 16
 #define portMAX_DELAY 0
-static const int normalize_wave=5,normalize_gray_wave=6;
+static const int normalize_wave=5,normalize_gray_wave=6,comic_wave=7;
 static const int E0470_WAVEFORM=0,E0470_FULL_WAVEFORM=1,E0470_FOLLOW_WAVEFORM=2,E0470_TEXTTURN_WAVEFORM=3,E0470_SOFT_TEXTTURN_WAVEFORM=4;
 static const int* display_reader_text_waveform(void){return &E0470_SOFT_TEXTTURN_WAVEFORM;}
 static const char *TAG="test";
@@ -160,7 +160,7 @@ static size_t s_jump_offset;
 static int64_t s_last_turn_ms,s_stats_activity_ms;
 static const uint8_t *reader_prefetch_frame(size_t page){(void)page;return NULL;}
 
-static struct {uint8_t *gray;} test_image={.gray=(uint8_t*)"gray"},*s_page_images=&test_image;
+static struct {uint8_t *gray;bool comic;} test_image={.gray=(uint8_t*)"gray"},*s_page_images=&test_image;
 #define BOOK_TOC_ROWS 12
 #define E0470_TURN_RTL 1
 #define E0470_TURN_LTR -1
@@ -194,6 +194,7 @@ static enum EpdDrawError update_display_area_stable_diff(void *hl,const int *wav
 static enum EpdDrawError update_display_area_reader_turn(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area,bool full_body){(void)hl;trace_wave[trace_count]=*wave;return record(full_body?AREA:DIFF,mode,area);}
 static enum EpdDrawError update_display_area_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(AREA,mode,area);}
 static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(LOCAL_FULL,mode,area);}
+static enum EpdDrawError update_display_reader_comic(void *hl,const int *wave,EpdRect body){return update_display_area_full_with(hl,wave,MODE_GC16,body);}
 static enum EpdDrawError update_display_with(void *hl,const int *wave,enum EpdDrawMode mode){(void)hl;(void)wave;return record(WHOLE,mode,(EpdRect){0});}
 static void display_request_full_refresh(void){}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;return record(FULL,MODE_GC16,(EpdRect){0});}
@@ -228,6 +229,7 @@ const EpdWaveform *display_waveform_get(display_waveform_id_t id){
  case DISPLAY_WAVE_FOLLOW: return &E0470_FOLLOW_WAVEFORM;
  case DISPLAY_WAVE_READER_TEXT: return display_reader_text_waveform();
  case DISPLAY_WAVE_READER_INK: return &E0470_WAVEFORM;
+ case DISPLAY_WAVE_READER_COMIC: return &comic_wave;
  case DISPLAY_WAVE_READER_IMAGE: return &E0470_WAVEFORM;
  case DISPLAY_WAVE_READER_BACKGROUND: return &E0470_WAVEFORM;
  case DISPLAY_WAVE_FULL: return &E0470_FULL_WAVEFORM;
@@ -411,6 +413,19 @@ int main(void){
    }
  }
  test_hide_images=false;
+ for(int cleanup=0;cleanup<2;++cleanup)for(int dir=-1;dir<=1;dir+=2)for(int effect=0;effect<2;++effect)for(int footer=0;footer<2;++footer){
+   test_full_pages=cleanup;s_turns=0;test_image.comic=true;test_effect=effect;s_chrome_visible[1]=footer;
+   s_view=s_presented_view=READING;s_reader_panel=READER_PANEL_NONE;s_reader_slider=-1;
+   test_types[0][1]=test_types[1][0]=1;s_chapter=dir>0?0:1;s_page=dir>0?1:0;
+   app_redraw_t redraw=turn_page(&ctx,dir);trace_count=0;present(&ctx,redraw);
+   assert(trace_count==1&&route==LOCAL_FULL&&pushed_mode==MODE_GC16);
+   assert(trace_wave[0]==(cleanup?E0470_FULL_WAVEFORM:comic_wave));
+   EpdRect expected=cleanup?(EpdRect){0,0,READER_WIDTH,READER_HEIGHT}:reader_area();
+   assert(memcmp(&pushed_area,&expected,sizeof(expected))==0);
+ }
+ trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
+ assert(trace_count==1&&route==LOCAL_FULL&&trace_wave[0]==E0470_FULL_WAVEFORM);
+ test_image.comic=false;test_effect=test_full_pages=0;
  for(int footer=0;footer<2;++footer)for(int from=0;from<3;++from)
  for(int to=0;to<3;++to)for(int dir=-1;dir<=1;dir+=2){
    s_chrome_visible[1]=footer;

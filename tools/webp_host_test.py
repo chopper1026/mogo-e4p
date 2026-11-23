@@ -73,6 +73,13 @@ def main():
         gc = "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections"
         exe = work / "test"
         subprocess.run(["c++", *flags, gc, *objects, "-lz", "-lm", "-o", str(exe)], check=True)
+        # 同一内存解码入口的漫画 JPEG 回退：奇数尺寸、明暗方向和缩放边界。
+        # The same memory decoder's comic JPEG fallback covers odd edges, tone direction and scale bounds.
+        stripes = Image.new("RGB", (849, 619), (220, 220, 220))
+        stripes.paste((24, 24, 24), (0, 0, 420, 619))
+        strips_path = work / "comic.jpg"
+        stripes.save(strips_path, quality=92, subsampling=2)
+        subprocess.run([str(exe), "comic", str(strips_path)], check=True)
         good = []
         for name, mode, color, lossless, metadata in (
                 ("lossy", "RGB", (128, 128, 128), False, {}),

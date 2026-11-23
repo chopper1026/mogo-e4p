@@ -19,6 +19,9 @@ const EpdWaveform *display_waveform_get(display_waveform_id_t id) {
 display_refresh_context_t display_refresh_context(void) {
     return (display_refresh_context_t){0};
 }
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState *h, const void *w, EpdRect a) {
+    (void)h;(void)w;(void)a;assert(!"unexpected comic output");return EPD_DRAW_INVALID_CROP;
+}
 __attribute__((weak)) enum EpdDrawError update_display_area_with(EpdiyHighlevelState *h, const void *w, int m, EpdRect a) {
     (void)h;(void)w;(void)m;(void)a;assert(!"unexpected area output");return EPD_DRAW_INVALID_CROP;
 }

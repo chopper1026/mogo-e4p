@@ -159,6 +159,9 @@ enum EpdDrawError update_display_area_diff_padded(
 /// Present body and requested bars together. False means no scan and allows legacy fallback; never replay a failed scan.
 bool update_display_reader_joined(EpdiyHighlevelState* hl, EpdRect body, EpdRect top, EpdRect footer,
                                   bool ripple, e0470_turn_dir_t dir, enum EpdDrawError* result);
+/// 漫画正文与四周栏位同时输出，正文使用完整 GC16，栏位保持静止像素。
+/// Present full GC16 in the comic body and hold stationary chrome pixels in the same scan.
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState* hl, const EpdWaveform* waveform, EpdRect body);
 /// 阅读页可选的真实错相 GL16 翻页，使用面板原厂灰阶表；缺相位时回退现有 GL16，扫描失败重建真实基准。
 /// Optional staggered GL16 reader turn using the vendor table; fall back on missing phases and rebuild the baseline after failure.
 enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect area,

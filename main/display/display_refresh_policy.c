@@ -48,6 +48,11 @@ bool display_refresh_resolve(display_refresh_intent_t intent, unsigned flags,
             plan->mode=quick ? MODE_DU : MODE_GL16; plan->coverage=DISPLAY_COVERAGE_AUTO; break;
         case DISPLAY_REFRESH_READER_IMAGE:
             plan->waveform=DISPLAY_WAVE_FULL; plan->mode=MODE_GC16; plan->coverage=DISPLAY_COVERAGE_AUTO; break;
+        case DISPLAY_REFRESH_READER_COMIC:
+            plan->waveform = DISPLAY_WAVE_READER_COMIC;
+            plan->mode = MODE_GC16;
+            plan->coverage = DISPLAY_COVERAGE_FULL;
+            break;
         case DISPLAY_REFRESH_READER_CLEANUP:
         case DISPLAY_REFRESH_CLEANUP:
             plan->waveform=DISPLAY_WAVE_FULL; plan->mode=MODE_GC16; plan->coverage=DISPLAY_COVERAGE_FULL; break;

@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <zlib.h>
+#define MZ_CRC32_INIT 0
+#define mz_crc32 crc32
 typedef unsigned char mz_uint8;
 typedef unsigned int mz_uint32;
 typedef struct { z_stream stream; int initialized; } tinfl_decompressor;

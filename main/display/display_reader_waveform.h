@@ -46,3 +46,11 @@ const EpdWaveform* display_reader_bg_waveform(void);
 /// hold, so the unchanged pixels that dilation drags along no longer take a white-black trip
 /// that draws a thin outline.
 const EpdWaveform* display_reader_image_waveform(void);
+
+// 原表中 2→0 与 3→0 逐相相同，可腾出一个差分编码表示栏位保持。
+// Full GC16 drives 2→0 and 3→0 identically in every phase, freeing a difference code for stationary chrome.
+enum { DISPLAY_COMIC_HOLD = 0x02, DISPLAY_COMIC_EQUIVALENT = 0x03 };
+
+/// 仅将保留编码置为保持；构造失败时返回完整 GC16 原表。
+/// Hold only the reserved code. Return the original full GC16 table if construction fails.
+const EpdWaveform* display_reader_comic_waveform(void);

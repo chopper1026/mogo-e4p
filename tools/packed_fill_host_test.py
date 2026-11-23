@@ -14,7 +14,8 @@ def function(text,name):
     return text[start:i]
 ui=(root/'main/ui/ui_kit.c').read_text()
 original=(root/'components/epdiy/src/epdiy.c').read_text()
-prefix='''#include <stdint.h>
+prefix='''#include <stddef.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -32,7 +33,8 @@ static int epd_rotated_display_height(void){return display_rotation&1?64:48;}
 #define _swap_int(a,b) do {int t=(a);(a)=(b);(b)=t;} while(0)
 '''
 code=prefix+'\n'.join(function(original,n) for n in ('_rotate','epd_draw_pixel','epd_draw_hline','epd_fill_rect'))
-code+='\n'+'\n'.join(function(ui,n) for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap'))
+code+='\n#include "ui_image_dither.h"\n'
+code+='\n'+'\n'.join(function(ui,n) for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','ui_blit_gray_bitmap'))
 code+='''
 static uint32_t seed=192;static unsigned rng(void){seed=seed*1664525u+1013904223u;return seed;}
 int main(void){unsigned cases=0;uint8_t a[64*48/2+64],b[sizeof(a)];
@@ -50,13 +52,21 @@ int main(void){unsigned cases=0;uint8_t a[64*48/2+64],b[sizeof(a)];
   for(int y=0;y<r.height;++y)for(int x=0;x<r.width;++x)epd_draw_pixel(r.x+x,r.y+y,bits[y*13+x/8]&(1u<<(x&7))?255:0,a+32);
   ui_blit_mono_bitmap(b+32,r,bits,13);assert(!memcmp(a,b,sizeof(a)));
  }
+ uint8_t gray8[100*100];for(unsigned j=0;j<sizeof(gray8);++j)gray8[j]=(uint8_t)(rng()>>24);
+ for(display_rotation=0;display_rotation<4;++display_rotation)for(int trial=0;trial<512;++trial){
+  for(unsigned j=0;j<sizeof(a);++j)a[j]=b[j]=(uint8_t)rng();
+  EpdRect r={(int)(rng()%100)-20,(int)(rng()%100)-20,(int)(rng()%98)+1,(int)(rng()%98)+1};
+  for(int y=0;y<r.height;++y)for(int x=0;x<r.width;++x)
+   epd_draw_pixel(r.x+x,r.y+y,ui_image_dither_gray(gray8[y*r.width+x],r.x+x,r.y+y),a+32);
+  ui_blit_gray_bitmap(b+32,r,gray8);assert(!memcmp(a,b,sizeof(a)));
+ }
  display_rotation=0;memset(a,37,sizeof(a));memcpy(b,a,sizeof(a));ui_fill_rect_fast((EpdRect){0,0,2147483647,2147483647},0x80,b+32);
  for(unsigned i=32;i<32+64*48/2;++i)assert(b[i]==0x88);
  assert(!memcmp(a,b,32)&&!memcmp(a+sizeof(a)-32,b+sizeof(b)-32,32));
- printf("PASS: %u rectangles, 256 grays, all rotations, clipping and exact boundary nibbles; 2048 exact mono blits; no framebuffer overrun\\n",cases);
+ printf("PASS: %u rectangles, 256 grays, all rotations, clipping and exact boundary nibbles; 2048 each exact mono and gray blits; no framebuffer overrun\\n",cases);
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
     src=Path(tmp)/'fill.c';binary=Path(tmp)/'fill';src.write_text(code)
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-O2',str(src),'-o',str(binary)],check=True)
+    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-O2','-Imain/ui',str(root/'main/ui/ui_image_dither.c'),str(src),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)

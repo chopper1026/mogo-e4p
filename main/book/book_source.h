@@ -27,6 +27,8 @@ void book_close(void);
 /// Toggle embedded faces when the open book is an EPUB; a no-op for TXT/MOBI. The change takes
 /// effect when the next chapter is parsed.
 void book_set_embedded_fonts(bool on);
+/// 当前打开的 EPUB 是否声明为漫画。/ Whether the current EPUB identifies itself as a comic.
+bool book_is_epub_comic(void);
 /// 返回章节数。/ Return the chapter count.
 size_t book_chapter_count(void);
 /// 目录映射到原书源章节：EPUB 为 spine，MOBI 为固定分段，TXT 为原有章节或 Part。

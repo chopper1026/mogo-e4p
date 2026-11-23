@@ -160,6 +160,7 @@ book_kind_t book_kind(void){return BOOK_KIND_EPUB;}
 size_t book_chapter_count(void){return chapters;}
 size_t book_layout_page_count(void){return 9;}
 int book_layout_page_image_count(size_t page){(void)page;return 1;}
+#define reader_image_slots book_layout_page_image_count
 void book_layout_set_image_dims(book_layout_image_dims_fn fn,void *ctx){(void)fn;(void)ctx;}
 void book_layout_free(void){}
 void book_layout_set_runs(const html_run_t *r,size_t n){(void)r;(void)n;}

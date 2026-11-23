@@ -1276,6 +1276,49 @@ enum EpdDrawError update_display_area_full_with(
     return result;
 }
 
+static inline uint8_t comic_drive_code(uint8_t pair, bool in_body) {
+    if (!in_body && (pair >> 4) == (pair & 15)) return DISPLAY_COMIC_HOLD;
+    return pair == DISPLAY_COMIC_HOLD ? DISPLAY_COMIC_EQUIVALENT : pair;
+}
+
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState* hl, const EpdWaveform* waveform, EpdRect body) {
+    const EpdRect screen = {0, 0, epd_rotated_display_width(), epd_rotated_display_height()};
+    EpdRect native;
+    if (!hl || !hl->front_fb || !hl->back_fb || !hl->difference_fb || !waveform ||
+        !display_static_black_native(body, &native)) return EPD_DRAW_INVALID_CROP;
+    bool held = display_present_begin();
+    enum EpdDrawError result;
+    if (display_needs_full()) result = update_display_full_unlocked(hl);
+    else if (s_main_fault || s_main_armed || waveform == &E0470_FULL_WAVEFORM ||
+             (body.height == screen.height && body.width == screen.width))
+        result = update_display_area_full_with_unlocked(hl, &E0470_FULL_WAVEFORM, MODE_GC16, screen);
+    else if (!display_power_ready()) result = DISPLAY_DRAW_POWER_NOT_READY;
+    else {
+        const EpdRect full = epd_full_screen();
+        const int stride = full.width / 2;
+        // 同一字节里的两个像素可能跨越正文边界，按原生坐标分别编码。
+        // Two pixels in one byte can straddle the body edge. Encode each at its native coordinate.
+        for (int y = 0; y < full.height; ++y) {
+            const uint8_t *front = hl->front_fb + y * stride, *back = hl->back_fb + y * stride;
+            uint8_t *diff = hl->difference_fb + y * full.width;
+            const bool body_row = y >= native.y && y < native.y + native.height;
+            const int x0 = native.x, x1 = body_row ? native.x + native.width : x0;
+            for (int x = 0; x < full.width; x += 2) {
+                const uint8_t target = front[x / 2], old = back[x / 2];
+                diff[x] = comic_drive_code(((target & 15) << 4) | (old & 15), x >= x0 && x < x1);
+                diff[x + 1] = comic_drive_code((target & 0xf0) | (old >> 4), x + 1 >= x0 && x + 1 < x1);
+            }
+        }
+        use_scan_for(waveform, MODE_GC16);
+        epd_leading_skip_discard();
+        result = epd_draw_base(full, hl->difference_fb, full, MODE_PACKING_1PPB_DIFFERENCE | MODE_GC16,
+                               25, NULL, NULL, waveform);
+        if (result == EPD_DRAW_SUCCESS) memcpy(hl->back_fb, hl->front_fb, (size_t)stride * full.height);
+    }
+    display_present_end(held);
+    return result;
+}
+
 bool update_display_reader_joined(EpdiyHighlevelState* hl, EpdRect body, EpdRect top, EpdRect footer,
                                   bool ripple, e0470_turn_dir_t dir, enum EpdDrawError* result) {
     EpdRect native, chrome[2] = {0};

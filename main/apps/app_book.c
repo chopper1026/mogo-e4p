@@ -29,6 +29,8 @@
  * User revision 2026-10-30: update time/power with page turns, without idle top-band output;
  * shorten chrome output with default GL16 status and short-DU ordinary footers, retain default GL16
  * cleanup for chapter/illustration footers, and keep body-first presentation.
+ * 用户2026-11-23实屏反馈同灰保持会削弱漫画墨色：普通漫画翻页在正文恢复完整 GC16，栏位只驱动变化像素，同帧完成。
+ * Panel feedback on 2026-11-23 found held grays weakened comic ink. Ordinary turns restore full GC16 in the body and drive only changed chrome pixels in the same scan.
  * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部提示移除。
  * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body regions; the translucent editor activates only successfully saved drafts and removes the footer hint.
  * 用户2026-11-11修复：阅读点按与滑动接纳左右留白，九宫格留白归相邻边缘格；正文分区与上下热区不变，修复边缘有震动却无动作。
@@ -536,7 +538,7 @@ static char** s_images;
 static size_t s_image_count;
 // PR #7 的当前页图片集合：只保留显示页的灰阶，不限制为八张。
 // PR #7's current-page image set retains visible grayscale only, without an eight-image limit.
-typedef struct { uint8_t *gray; int width, height; } reader_image_t;
+typedef struct { uint8_t *gray; int width, height; bool comic; } reader_image_t;
 static reader_image_t *s_page_images;
 static int s_page_image_count;
 static size_t s_page_images_for = SIZE_MAX;
@@ -3553,6 +3555,10 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
                 if (y == 0 && !app_settings_book_background_path()[0])
                     top = reader_area().y + s_margin[MARGIN_TOP];
 
+                if (image->comic) {
+                    ui_blit_gray_bitmap(fb, (EpdRect){left, top, image->width, image->height}, image->gray);
+                    continue;
+                }
                 for (int iy = 0; iy < image->height; ++iy)
                     for (int ix = 0; ix < image->width; ++ix)
                         epd_draw_pixel(left + ix, top + iy,
@@ -3986,6 +3992,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         .prior_reader = s_presented_view == (int)READING,
         .image_page = reader_image_slots(s_reader_session.position.page) > 0,
         .image_gray_refresh = image_gray_refresh,
+        .comic_page = image_gray_refresh && s_page_images && s_page_images[0].comic,
         .water_effect = app_settings_reader_turn_effect() == 1,
         .cleanup = s_reader_cleanup, .tools_toggle = tools_toggle,
         .closing_tools_to_text = s_presented_panel == READER_PANEL_TOOLS &&
@@ -4087,7 +4094,7 @@ static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
     (void)ui_reader_background_prepare(app_settings_book_background_path());
     prepare_inline_image();
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
-        book_layout_page_image_count(s_reader_session.position.page) > 0 && s_page_images;
+        reader_image_slots(s_reader_session.position.page) > 0 && s_page_images;
     lock_draw();
     const uint8_t *prepared = NULL;
     if (!s_toolbar && !s_clear_confirm) {
@@ -4123,10 +4130,17 @@ typedef struct {
 } reader_dims_ctx_t;
 static reader_dims_ctx_t s_reader_dims_ctx;
 
-// 按 PR9 通过完整资源解包测量，兼容 SVG 包装及较晚的 JPEG 尺寸头。/ Use PR9's full resource measurement for SVG wrappers and late JPEG headers.
+// 漫画先探测文件头；书源负责晚帧头与 SVG 包装的回退。/ Probe comic headers first; the source handles late frames and SVG wrappers.
 static bool reader_image_dims(void* ctx, int image, int* width, int* height) {
     const reader_dims_ctx_t* c = (const reader_dims_ctx_t*)ctx;
     if (!c || image < 0 || (size_t)image >= c->count) return false;
+    if (book_is_epub_comic()) {
+        unsigned w = 0, h = 0;
+        if (book_chapter_image_dimensions(c->chapter, c->images[image], &w, &h) != ESP_OK) return false;
+        if (width) *width = (int)w;
+        if (height) *height = (int)h;
+        return true;
+    }
     uint8_t* encoded = NULL;
     size_t size = 0;
     bool png = false;
@@ -4313,8 +4327,13 @@ static void prepare_inline_image(void) {
                 free(encoded);
                 continue;
             }
-            if (book_image_grayscale(encoded, size, png, width, height, gray)) {
-                s_page_images[i] = (reader_image_t){gray, width, height};
+            const bool comic = book_is_epub_comic() && book_layout_page_image(s_reader_session.position.page) == index;
+            bool ok = comic ? image_comic_grayscale(encoded, size, png, width, height, gray)
+                            : book_image_grayscale(encoded, size, png, width, height, gray);
+            if (ok) {
+                if (comic)
+                    image_enhance_comic(gray, width, height, source_w > (unsigned)width || source_h > (unsigned)height);
+                s_page_images[i] = (reader_image_t){gray, width, height, comic};
                 pixels_left -= pixels;
                 ++decoded;
             } else {
@@ -4540,7 +4559,7 @@ static bool open_book_impl(app_ctx_t *ctx, const char *path, uint32_t size) {
     s_view = READING;
     s_reader_entry_full = true;
     s_reader_image_refresh_pending = !app_settings_reader_hide_images() &&
-        book_layout_page_image_count(s_reader_session.position.page) > 0 && s_page_images;
+        reader_image_slots(s_reader_session.position.page) > 0 && s_page_images;
     s_stats_last_ms = s_stats_activity_ms = ctx->now_ms;
     app_reading_journal_record(s_reader_session.book.path,s_reader_session.book.title,
         s_reader_session.book.file_size,(unsigned)s_reader_session.position.chapter,0,0);
@@ -5348,7 +5367,9 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
         .chapter_changed = s_reader_session.position.chapter != prior_chapter,
     };
     reader_turn_effects_t effects = reader_turn_effects(&frame);
-    s_reader_turn_pending = effects.text;
+    const bool comic_turn = !chrome_changed && s_reader_image_refresh_pending &&
+        s_page_images && s_page_images[0].comic;
+    s_reader_turn_pending = effects.text || comic_turn;
     // 水波纹走原厂 GL16 表，灰阶转换逐对校准，阅读背景页同样适用；插图页仍排除。
     // The ripple rides the vendor GL16 table with per-pair calibrated transitions, so
     // reading backgrounds qualify; image pages stay excluded.

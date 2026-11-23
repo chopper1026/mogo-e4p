@@ -110,6 +110,7 @@ static bool ui_reader_background_prepare(const char *p){(void)p;return true;}
 static void prepare_inline_image(void){}
 static bool app_settings_reader_hide_images(void){return false;}
 static int book_layout_page_image_count(int p){(void)p;return 0;}
+#define reader_image_slots book_layout_page_image_count
 static size_t fb_bytes(void){return sizeof(fb);}
 static void draw_reader(uint8_t *f,int p){(void)f;(void)p;assert(false);}
 static EpdRect reader_area(void){return (EpdRect){0,expected_band(),684,1216-expected_band()};}

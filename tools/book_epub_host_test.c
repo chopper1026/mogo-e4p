@@ -26,6 +26,7 @@ int main(int argc, char **argv) {
             printf("epub rejection passed: %s\n", argv[a]); continue;
         }
         assert(book_epub_open(argv[a], &book) == ESP_OK && book);
+        assert(book_epub_is_comic(book) == (strstr(argv[a], "/good_comic_") != NULL));
         if (strstr(argv[a], "good_footnote")) {
             html_text_t text = {0};
             assert(book_epub_load(book, 0, &text) == ESP_OK);

@@ -62,7 +62,7 @@ static void test_log(const char *tag,const char *format,...){(void)tag;(void)for
 #define ESP_LOGI(...) test_log(__VA_ARGS__)
 #define ESP_FAIL -1
 enum {READING,SHELF};
-typedef struct {uint8_t *gray;int width,height;} reader_image_t;
+typedef struct {uint8_t *gray;int width,height;bool comic;} reader_image_t;
 static reader_image_t *s_page_images;
 static int s_page_image_count;
 static size_t s_page_images_for=SIZE_MAX;
@@ -71,7 +71,12 @@ static size_t s_image_count;
 static char **s_images;
 static bool hidden,locked;
 static int alloc_fail_after=-1,read_failure=-1,decode_failure=-1;
-static unsigned reads,decodes,pixels,notices,invalidations;
+static unsigned reads,decodes,pixels,notices,invalidations,enhancements;
+static bool marked_comic;
+bool book_is_epub_comic(void){return marked_comic;}
+static void image_enhance_comic(uint8_t *gray,unsigned w,unsigned h,bool reduced){
+ assert(gray && w==20 && h==6 && reduced);++enhancements;
+}
 static int reading_image;
 static EpdRect body={40,20,100,200};
 // 插图可用区域：默认等于正文栏，通栏用例把它换成更宽的一条带。
@@ -144,6 +149,13 @@ static bool book_image_grayscale(const uint8_t *data,size_t len,bool png,unsigne
  if(reading_image==decode_failure)return false;
  memset(gray,128,(size_t)w*h);return true;
 }
+static unsigned comic_decodes,header_reads;
+static bool image_comic_grayscale(const uint8_t *data,size_t len,bool png,unsigned w,unsigned h,uint8_t *gray){
+ ++comic_decodes;return book_image_grayscale(data,len,png,w,h,gray);
+}
+esp_err_t book_chapter_image_dimensions(size_t chapter,const char *src,unsigned *w,unsigned *h){
+ assert(src);++header_reads;measured_chapter=chapter;*w=60;*h=20;return ESP_OK;
+}
 static uint8_t ui_image_dither_gray(uint8_t g,int x,int y){(void)x;(void)y;assert(g==128);return g;}
 static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  (void)fb;
@@ -153,6 +165,10 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  if(x>pixel_max_x)pixel_max_x=x;
  if(y<pixel_min_y)pixel_min_y=y;
  if(y>pixel_max_y)pixel_max_y=y;
+}
+static unsigned comic_blits;
+static void ui_blit_gray_bitmap(uint8_t *fb,EpdRect rect,const uint8_t *gray){
+ assert(fb && gray && rect.width==20 && rect.height==6);++comic_blits;
 }
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
@@ -230,6 +246,16 @@ int main(void){
  setup_images(0);prepare_inline_image();unsigned prior_invalidations=invalidations;
  ++s_page;prepare_inline_image();assert(invalidations==prior_invalidations);
  ++generation;prepare_inline_image();assert(invalidations==prior_invalidations+1);
+ // 只增强已标记漫画的独图页，缓存命中不能重复加深。
+ // Enhance only a marked single-image page and never repeat on a cache hit.
+ setup_images(1);whole_image=0;prepare_inline_image();assert(!enhancements);
+ marked_comic=true;setup_images(1);prepare_inline_image();assert(!enhancements);
+ whole_image=0;++generation;prepare_inline_image();prepare_inline_image();assert(enhancements==1 && comic_decodes==1 && s_page_images[0].comic);
+ reader_dims_ctx_t comic_dims={s_chapter,s_images,s_image_count};
+ draw_reader_images(&fb,s_page,body);assert(comic_blits==1);
+ unsigned before=reads;int cw=0,ch=0;
+ assert(reader_image_dims(&comic_dims,0,&cw,&ch)&&cw==60&&ch==20&&header_reads==1&&reads==before);
+ marked_comic=false;
  setup_images(12);prepare_inline_image();assert(reads==12&&decodes==12&&s_page_image_count==12);
  draw_reader_images(&fb,s_page,body);assert(pixels==12*20*6&&!notices);
  prepare_inline_image();assert(reads==12);

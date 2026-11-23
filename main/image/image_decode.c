@@ -230,7 +230,7 @@ static bool resample_gray8(const uint8_t *pixels, unsigned stride, unsigned widt
     return ok;
 }
 
-/* ---- 渐进式 JPEG / Progressive JPEG ---- */
+/* ---- 亮度平面 / JPEG luminance plane ---- */
 
 // EIGHT_BIT_GRAYSCALE 下 pPixels 每像素一个字节。JPEGDEC 按 MCU 块回调：块内 stride 是
 // iWidth，只有 iWidthUsed 列有效，坐标落在 JPEGDEC 缩放后的空间里。
@@ -246,47 +246,38 @@ static int jpegdec_collect(JPEGDRAW *draw) {
     jpegdec_plane_t *plane = draw->pUser;
     if (!plane || !plane->plane || draw->iBpp != 8 || !draw->pPixels || draw->iWidth < 1) return 0;
     const uint8_t *src = (const uint8_t *)draw->pPixels;
-    const int columns = draw->iWidthUsed < draw->iWidth ? draw->iWidthUsed : draw->iWidth;
+    if (draw->x < 0 || (unsigned)draw->x >= plane->stride || draw->y < 0 ||
+        draw->iWidthUsed <= 0 || draw->iWidthUsed > draw->iWidth) return 0;
+    unsigned columns = (unsigned)draw->iWidthUsed;
+    if (columns > plane->stride - draw->x) columns = plane->stride - draw->x;
     for (int row = 0; row < draw->iHeight; ++row) {
         size_t y = (size_t)draw->y + row;
-        if (draw->y + row < 0 || y >= plane->height) break;
-        for (int column = 0; column < columns; ++column) {
-            if (draw->x + column < 0) continue;
-            size_t x = (size_t)draw->x + column;
-            if (x >= plane->stride) continue;
-            plane->plane[y * plane->stride + x] = src[(size_t)row * draw->iWidth + column];
-        }
+        if (y >= plane->height) break;
+        memcpy(plane->plane + y * plane->stride + draw->x, src + (size_t)row * draw->iWidth, columns);
     }
     return 1;
 }
 
 // ESP-IDF 下 JPEGDEC 只提供 C++ 类，组件里有一层 extern "C" 包装。
 // Under ESP-IDF JPEGDEC only offers the C++ class; the component wraps it with C linkage.
-extern int jpegdec_gray_progressive(const uint8_t *data, int size, JPEG_DRAW_CALLBACK *draw,
-                                    void *user, int *drawn_width, int *drawn_height);
+extern int jpegdec_gray_memory(const uint8_t *data, int size, unsigned divisor, JPEG_DRAW_CALLBACK *draw, void *user);
 
-// 渐进式只取 DC 扫描，JPEGDEC 因此固定输出 1/8 分辨率；平面尺寸由帧头算出，
-// 将小平面缩放到目标尺寸，不分配全幅系数数组，放大不会恢复高频细节。
-// Progressive decoding reads only the DC scan, then rescales its 1/8 plane. Avoid a full-size
-// coefficient array; enlarging the plane cannot restore high-frequency detail.
 static bool jpegdec_gray(const uint8_t *data, size_t size, unsigned frame_width,
                          unsigned frame_height, unsigned out_width, unsigned out_height,
-                         uint8_t *out) {
+                         unsigned divisor, size_t budget, uint8_t *out) {
     if (!data || size < 4 || size > INT32_MAX || !frame_width || !frame_height) return false;
     jpegdec_plane_t plane = {
-        .stride = (frame_width + 7) / 8,
-        .height = (frame_height + 7) / 8,
+        .stride = (frame_width + divisor - 1) / divisor,
+        .height = (frame_height + divisor - 1) / divisor,
     };
-    if (plane.stride > 4096 || plane.height > 4096) return false;
+    if (plane.stride > 4096 || plane.height > 4096 ||
+        (size_t)plane.stride * plane.height > budget) return false;
     plane.plane = cover_alloc((size_t)plane.stride * plane.height);
     if (!plane.plane) return false;
     memset(plane.plane, 0xFF, (size_t)plane.stride * plane.height);
-    const bool decoded = jpegdec_gray_progressive(data, (int)size, jpegdec_collect, &plane,
-                                                 NULL, NULL) != 0;
+    const bool decoded = jpegdec_gray_memory(data, (int)size, divisor, jpegdec_collect, &plane) != 0;
     bool ok = false;
     if (decoded) {
-        // 1/8 小平面按长边铺满 + 居中裁剪映射到目标。
-        // The 1/8 plane maps to the target the same way: fill the longer side, centre-crop.
         ok = resample_gray8(plane.plane, plane.stride, plane.stride, plane.height,
                             out_width, out_height, out);
     }
@@ -305,13 +296,13 @@ static int jpeg_target_scale(unsigned width, unsigned height, unsigned out_width
 }
 
 static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
-                      unsigned out_height, uint8_t *out) {
+                      unsigned out_height, uint8_t *out, bool comic) {
     if (size > UINT32_MAX) return false;
     uint8_t sof = 0;
     unsigned frame_width = 0, frame_height = 0;
     const bool framed = book_jpeg_frame(data, size, &sof, &frame_width, &frame_height);
     if (framed && sof == 0xC2)
-        return jpegdec_gray(data, size, frame_width, frame_height, out_width, out_height, out);
+        return jpegdec_gray(data, size, frame_width, frame_height, out_width, out_height, 8, SIZE_MAX, out);
 #if BOOK_JPEG_HW
     // 基线 JPEG 先试 S31 硬件整幅解码；失败或超预算时继续走下面的软件 1/1…1/8 路径。
     // Try the S31 hardware full-frame decode for baseline JPEGs; any failure or budget
@@ -329,6 +320,14 @@ static bool jpeg_gray(const uint8_t *data, size_t size, unsigned out_width,
         }
     }
 #endif
+    if (comic && framed && sof == 0xC0) {
+        // 大漫画超出硬件整幅预算时直接解亮度；缩小后两轴仍覆盖目标，不放大 DC 缩略图。
+        // Decode luma when a comic misses the full-frame hardware path. Keep both axes at target resolution.
+        unsigned divisor = 1;
+        while (divisor < 8 && frame_width / (divisor * 2) >= out_width &&
+               frame_height / (divisor * 2) >= out_height) divisor *= 2;
+        if (jpegdec_gray(data, size, frame_width, frame_height, out_width, out_height, divisor, 3u * 1024u * 1024u, out)) return true;
+    }
     esp_jpeg_image_cfg_t cfg = { .indata = (uint8_t *)data, .indata_size = (uint32_t)size,
                                  .out_format = JPEG_IMAGE_FORMAT_RGB565 };
     esp_jpeg_image_output_t info = {0};
@@ -495,18 +494,79 @@ static bool png_gray_input(const uint8_t *data, size_t size, FILE *file, unsigne
     return png_gray_input_cancel(data,size,file,out_width,out_height,out,alpha,NULL,NULL);
 }
 
-bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
-                          unsigned out_width, unsigned out_height, uint8_t *out) {
+static bool image_grayscale(const uint8_t *data, size_t size, bool png,
+                            unsigned out_width, unsigned out_height, uint8_t *out, bool comic) {
     if (!data || !size || !out || !out_width || !out_height ||
         out_width > 1216 || out_height > 1216 || (size_t)out_width * out_height > 684u * 1216u)
         return false;
     if (size >= 12 && !memcmp(data, "RIFF", 4) && !memcmp(data + 8, "WEBP", 4))
         return book_webp_grayscale(data, size, out_width, out_height, out);
     return png ? png_gray_input(data, size, NULL, out_width, out_height, out, NULL)
-               : jpeg_gray(data, size, out_width, out_height, out);
+               : jpeg_gray(data, size, out_width, out_height, out, comic);
 }
 
+bool book_image_grayscale(const uint8_t *data, size_t size, bool png,
+                          unsigned out_width, unsigned out_height, uint8_t *out) {
+    return image_grayscale(data, size, png, out_width, out_height, out, false);
+}
 
+bool image_comic_grayscale(const uint8_t *data, size_t size, bool png,
+                           unsigned out_width, unsigned out_height, uint8_t *out) {
+    return image_grayscale(data, size, png, out_width, out_height, out, true);
+}
+
+void image_enhance_comic(uint8_t *gray, unsigned width, unsigned height, bool downscaled) {
+    if (!gray || !width || !height || width > 1216 || height > 1216 ||
+        (size_t)width * height > 684u * 1216u) return;
+
+    // 用最暗 1% 定位油墨，纸白充足时才校正；高调页和已经有实黑的页面保留原调。
+    // Anchor ink to the darkest percentile on paper-backed pages. Keep high-key and true-black tones.
+    const size_t count = (size_t)width * height;
+    unsigned histogram[256] = {0};
+    for (size_t i = 0; i < count; ++i) ++histogram[gray[i]];
+    unsigned ink = 0, below = histogram[0], paper = 0;
+    while (below < (count + 99) / 100) below += histogram[++ink];
+    for (unsigned g = 224; g < 256; ++g) paper += histogram[g];
+
+    // 暗部保留梯度；到 224 平滑接回原灰度，白纸和最浅网点不受黑位校正影响。
+    // Retain shadow gradation and rejoin the original tones at 224 to preserve paper and pale screens.
+    unsigned lift = ink - (ink + 2) / 4;
+    if (ink > 64) lift = ink >= 96 ? 0 : (lift * (96 - ink) + 16) / 32;
+    const unsigned anchor = lift && paper >= (count + 9) / 10 ? ink : 0;
+    uint8_t tone[256];
+    const unsigned target = anchor ? anchor - lift : 0;
+    for (unsigned g = 0; g < 256; ++g) {
+        if (anchor && g <= anchor) tone[g] = (g * target + anchor / 2) / anchor;
+        else if (anchor && g < 224) tone[g] = target +
+            ((g - anchor) * (224 - target) + (224 - anchor) / 2) / (224 - anchor);
+        else tone[g] = g;
+    }
+
+    // 只补缩图后仍可辨的暗边，最多一档灰阶；保存上一行原样本，避免改写后的邻点沿行扩散。
+    // Deepen surviving reduced edges by at most one panel level. Keep the previous source row intact.
+    uint8_t *previous = downscaled && width > 1 && height > 1 ? cover_alloc(width) : NULL;
+    if (previous) memcpy(previous, gray, width);
+    for (unsigned y = 0; y < height; ++y) {
+        uint8_t *row = gray + (size_t)y * width;
+        const uint8_t *next = y + 1 < height ? row + width : row;
+        unsigned left = row[0];
+        for (unsigned x = 0; x < width; ++x) {
+            const unsigned g = row[x];
+            unsigned detail = 0;
+            if (previous) {
+                unsigned right = x + 1 < width ? row[x + 1] : g;
+                unsigned neighbours = left + right + previous[x] + next[x];
+                if (neighbours > 4 * g) detail = (neighbours - 4 * g + 4) / 8;
+                if (detail > 17) detail = 17;
+                previous[x] = g;
+                left = g;
+            }
+            row[x] = tone[g] > detail ? tone[g] - detail : 0;
+        }
+        decode_yield(y);
+    }
+    free(previous);
+}
 
 static bool file_frame(FILE *file, bool png, uint8_t *sof, unsigned *width, unsigned *height, image_cancel_fn cancelled, void *context) {
     if (fseek(file, 0, SEEK_SET)) return false;

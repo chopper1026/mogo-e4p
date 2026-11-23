@@ -11,6 +11,8 @@ enum EpdDrawError display_refresh_area(EpdiyHighlevelState *hl, display_refresh_
     if (!display_refresh_resolve(intent, flags, display_refresh_context(), &plan)) return EPD_DRAW_INVALID_CROP;
     const EpdWaveform *wave = display_waveform_get(plan.waveform);
     if (!wave) return EPD_DRAW_NO_PHASES_AVAILABLE;
+    if (intent == DISPLAY_REFRESH_READER_COMIC)
+        return update_display_reader_comic(hl, wave, area);
     if (intent == DISPLAY_REFRESH_READER_TEXT)
         return update_display_area_reader_turn(hl,wave,plan.mode,area,plan.coverage == DISPLAY_COVERAGE_AUTO);
     if (plan.coverage == DISPLAY_COVERAGE_FULL)

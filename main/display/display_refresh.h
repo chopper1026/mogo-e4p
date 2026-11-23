@@ -31,6 +31,7 @@ typedef enum {
     DISPLAY_REFRESH_RESTORE,
     DISPLAY_REFRESH_CAPSULE,
     DISPLAY_REFRESH_CLEANUP, ///< 区域内全像素清残影。/ Full-pixel cleanup within the requested area.
+    DISPLAY_REFRESH_READER_COMIC, ///< 正文全像素，栏位同帧差分 / Full-pixel body with differential chrome in the same frame
     DISPLAY_REFRESH_COUNT
 } display_refresh_intent_t;
 

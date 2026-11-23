@@ -28,6 +28,7 @@ typedef struct {
     bool reader_body; ///< 当前有阅读正文 / Current view has reader content
     bool prior_reader; ///< 前帧是阅读视图 / Previous frame was the reader
     bool image_page; ///< 目标页含插图槽 / Target has illustration slots
+    bool comic_page; ///< 当前整页图已按 EPUB 漫画解码 / Decoded full-page EPUB comic artwork
     bool image_gray_refresh; ///< 请求保护插图灰阶 / Preserve illustration grays
     bool water_effect; ///< 用户选择水波纹效果 / Selected water-turn effect
     bool cleanup; ///< 正文周期清理 / Periodic reader cleanup
@@ -36,7 +37,7 @@ typedef struct {
     bool closing_panel_to_text; ///< 面板收起回到纯文字 / Closing a panel onto text
     bool closing_notice; ///< 提示收起后整屏归一 / Normalize the whole screen after dismissing a notice
     bool feedback; ///< 书架按压局部反馈 / Shelf press feedback
-    bool turn_pending; ///< 普通文字翻页 / Ordinary text turn
+    bool turn_pending; ///< 普通文字或整页漫画翻页 / Ordinary text or full-page comic turn
     bool water_turn_pending; ///< 已允许水波纹翻页 / Approved water turn
     bool status_pending; ///< 本次翻页顶部状态有变化 / Top status changed for this turn
     bool footer_pending; ///< 还需更新页脚 / Footer still needs output

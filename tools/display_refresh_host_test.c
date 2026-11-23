@@ -29,6 +29,9 @@ static enum EpdDrawError record(EpdiyHighlevelState *h, const EpdWaveform *w, in
 }
 #define AREA(name,k) enum EpdDrawError name(EpdiyHighlevelState *h, const EpdWaveform *w, enum EpdDrawMode m, EpdRect a) {return record(h,w,m,a,k);}
 AREA(update_display_area_with, DISPLAY_COVERAGE_AUTO)
+enum EpdDrawError update_display_reader_comic(EpdiyHighlevelState *h, const EpdWaveform *w, EpdRect a) {
+    return record(h,w,MODE_GC16,a,8);
+}
 AREA(update_display_area_diff_with, DISPLAY_COVERAGE_DIFF)
 AREA(update_display_area_stable_diff, 6)
 enum EpdDrawError update_display_area_reader_turn(EpdiyHighlevelState *h, const EpdWaveform *w,
@@ -64,6 +67,7 @@ static const display_refresh_plan_t expected[DISPLAY_REFRESH_COUNT] = {
     {DISPLAY_WAVE_NORMALIZE,MODE_GL16,DISPLAY_COVERAGE_FULL,0,0},
     {DISPLAY_WAVE_DEFAULT,MODE_DU,DISPLAY_COVERAGE_DIFF,1,1},
     {DISPLAY_WAVE_FULL,MODE_GC16,DISPLAY_COVERAGE_FULL,0,0},
+    {DISPLAY_WAVE_READER_COMIC,MODE_GC16,DISPLAY_COVERAGE_FULL,0,0},
 };
 static void reset(void) {lookups=outputs=pad_rows=pad_cols=0;}
 int main(void) {
@@ -96,7 +100,7 @@ int main(void) {
             assert(got.pad_lines==want.pad_lines&&got.pad_col_bytes==want.pad_col_bytes);
             bool stable=want.mode==MODE_GL16 && (i==DISPLAY_REFRESH_DETAIL ||
                 i==DISPLAY_REFRESH_MAIN_CLOCK || i==DISPLAY_REFRESH_MAIN_DETAIL);
-            assert(selected==want.waveform&&mode==want.mode&&kind==(i==DISPLAY_REFRESH_READER_TEXT?7:stable?6:want.pad_lines?3:(int)want.coverage));
+            assert(selected==want.waveform&&mode==want.mode&&kind==(i==DISPLAY_REFRESH_READER_COMIC?8:i==DISPLAY_REFRESH_READER_TEXT?7:stable?6:want.pad_lines?3:(int)want.coverage));
             assert(!memcmp(&bounds,&area,sizeof(area))&&pad_rows==want.pad_lines&&pad_cols==want.pad_col_bytes);
         }
         reset();bool screen=valid&&want.coverage!=DISPLAY_COVERAGE_FULL&&!want.pad_lines;
