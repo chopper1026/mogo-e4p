@@ -706,6 +706,45 @@ static void add_filtered_sample(bool replay, int x, int y, int count) {
     if (replay) touch_sampler_test_push((uint32_t)(sample_count * 100), x, y, count);
     add(x, y, count, ESP_OK);
 }
+static bool share_test_edge(const app_ctx_t *ctx) { (void)ctx; return true; }
+static ui_gesture_event_t edge_tap;
+static app_redraw_t edge_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    if (ev->type == UI_GESTURE_TAP) edge_tap = *ev;
+    return gesture(ctx, ev);
+}
+static void test_reader_top_edge(void) {
+    const int xs[] = {1, 342, 683}, ys[] = {0, 16, 32, 33};
+    for (int replay=0; replay<2; ++replay) {
+        for (unsigned col=0; col<3; ++col) for (unsigned row=0; row<4; ++row) {
+            reset(); first.share_top_edge_tap=share_test_edge; first.on_gesture=edge_gesture;
+            touch_sampler_test_enable(replay);
+            add_filtered_sample(replay,xs[col],ys[row],1);
+            add_filtered_sample(replay,xs[col],ys[row]+2,1);
+            add_filtered_sample(replay,0,0,0);
+            run(); touch_sampler_test_enable(false);
+            assert(events[UI_GESTURE_PRESS]==1 && events[UI_GESTURE_TAP]==1 && !quick_draws);
+            assert(edge_tap.x0==xs[col] && edge_tap.y0==ys[row]);
+        }
+        for (int kind=0; kind<5; ++kind) {
+            reset(); first.share_top_edge_tap=share_test_edge; first.on_gesture=edge_gesture;
+            touch_sampler_test_enable(replay);
+            add_filtered_sample(replay,300,0,1);
+            if (kind==0) add_filtered_sample(replay,300,72,1);
+            if (kind==1) add_filtered_sample(replay,300,71,1);
+            if (kind==2) add_filtered_sample(replay,320,20,1);
+            if (kind==3) add_filtered_sample(replay,300,0,2);
+            if (kind==4) {
+                time_step=100000;
+                for(int t=0;t<5;++t)add_filtered_sample(replay,300,0,1);
+            }
+            add_filtered_sample(replay,0,0,0);
+            run(); touch_sampler_test_enable(false);
+            assert(quick_draws==(kind==0) && events[UI_GESTURE_CANCEL]==1);
+            assert(!events[UI_GESTURE_TAP] && !events[UI_GESTURE_LONG_PRESS] && !events[UI_GESTURE_SWIPE_D]);
+        }
+    }
+    puts("PASS: live/replayed top-edge taps reach the page once at their origin; a pull opens only quick settings; drags, holds and multitouch do not tap");
+}
 static void test_screen_touch_lock(void) {
     for (unsigned replay = 0; replay < 2; ++replay) {
         reset();first.owns_keys=true;first.on_gesture=gesture;first.screen_touch_disabled=screen_policy;
@@ -823,6 +862,7 @@ int main(void) {
 
     test_auto_lock_network_sessions();
     test_panel_key_replay();
+    test_reader_top_edge();
     test_screen_touch_lock();
     // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。
     // Automatic offers retain the body resume point through real navigation; touch and existing requests win.

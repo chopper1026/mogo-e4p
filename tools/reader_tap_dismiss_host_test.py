@@ -27,6 +27,7 @@ static int panel_calls,turn_calls,last_turn;
 static bool image_slots,vertical_turn,rtl_book;
 static app_redraw_t reader_panel_action(app_ctx_t *ctx,uint16_t x,uint16_t y){(void)ctx;(void)x;(void)y;++panel_calls;return APP_REDRAW_PAGE;}
 static app_redraw_t turn_page(app_ctx_t *ctx,int dir){(void)ctx;++turn_calls;last_turn=dir;return APP_REDRAW_PAGE;}
+static EpdRect reader_grid_tap_area(void){return (EpdRect){0,140,684,944};}
 static EpdRect body_rect(void){return (EpdRect){36,160,612,900};}
 static int reader_image_slots(int page){(void)page;return image_slots;}
 static int book_layout_link_at(size_t page,int x,int y){(void)page;(void)x;(void)y;return -1;}

@@ -23,7 +23,7 @@ static ui_quick_event_t feed(int x,int y,int count,bool pressed,bool released,bo
  app_touch_t touch={.x=x,.y=y,.count=count,.touched=count!=0};
  app_ctx_t ctx={.touch=&touch,.now_ms=time_ms,.pressed=pressed,.released=released};
  ui_quick_event_t event;
- assert(ui_quick_menu_feed(&menu,&ctx,allowed,&event)==owned);return event;
+ assert(ui_quick_menu_feed(&menu,&ctx,allowed,false,&event)==owned);return event;
 }
 static void open(void){ui_quick_menu_reset(&menu);time_ms=0;
  assert(feed(300,32,1,true,false,true,true).action==UI_QUICK_NONE);

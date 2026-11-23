@@ -36,6 +36,16 @@ static inline int book_reader_grid_hit(EpdRect body, int x, int y) {
     return -1;
 }
 
+/// 将正文所在阅读区域的上下留白投到首尾九宫格行，栏位区域仍被排除。
+/// Project the reading area's vertical margins into the first/last grid rows while excluding chrome.
+static inline int book_reader_grid_tap_y_in_area(EpdRect body, EpdRect area, int y) {
+    if (body.width <= 0 || body.height <= 0 || area.width <= 0 || area.height <= 0 ||
+        y < area.y || y >= area.y + area.height) return -1;
+    if (y < body.y) return body.y;
+    if (y >= body.y + body.height) return body.y + body.height - 1;
+    return y;
+}
+
 /// rtl 表示竖排从右到左：横向分区的「上一页」在右半边，左右翻转。
 /// rtl marks right-to-left vertical text: the previous-page half is the right one.
 static inline int book_reader_tap_direction(EpdRect body, int x, int y, bool vertical, bool rtl) {

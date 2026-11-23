@@ -304,7 +304,8 @@ bool app_quick_layer_feed_frame(app_ctx_t *ctx, const app_desc_t *current, bool 
     bool owned = ui_quick_menu_feed(&s_quick, ctx,
         current->render && !current->holds_pmu && !usb_storage_active() && !pico_online_busy() &&
         (!current->modal_input_owned || !current->modal_input_owned(ctx)),
-        &event);
+        (ctx->pressed || s_quick.sharing_tap) && current->on_gesture && current->share_top_edge_tap &&
+            current->share_top_edge_tap(ctx), &event);
     if (owned) ctx->consumed = true;
     if (event.action == UI_QUICK_OPEN || event.action == UI_QUICK_CLOSE) {
         if (event.action == UI_QUICK_OPEN) {

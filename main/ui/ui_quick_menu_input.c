@@ -106,7 +106,7 @@ void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on
 }
 
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu) {
-    menu->tracking = false;
+    menu->tracking = menu->sharing_tap = false;
     menu->swallow = true;
     menu->fl_pull = false;
     menu->drag = UI_QUICK_CTL_NONE;
@@ -127,7 +127,7 @@ static void dismiss(ui_quick_menu_t *menu, ui_quick_event_t *event) {
 }
 
 bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowed,
-                        ui_quick_event_t *event) {
+                        bool share_tap, ui_quick_event_t *event) {
     *event = (ui_quick_event_t){0};
     if (!allowed) {
         bool owned = menu->tracking || menu->swallow || menu->open;
@@ -186,6 +186,7 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
             return true;
         }
         menu->tracking = true;
+        menu->sharing_tap = !menu->open && share_tap;
         menu->moved = false;
         menu->x0 = x; menu->y0 = y;
         menu->started_ms = ctx->now_ms;
@@ -199,6 +200,12 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         return true;
     }
     if (abs(dx) > UI_TOUCH_SLOP_PX || abs(dy) > UI_TOUCH_SLOP_PX) menu->moved = true;
+    // 只共享轻点：拖出容差或长按就取消页面识别，但快捷栏继续追踪下拉。
+    // Share only a tap: exceeding slop or holding cancels page recognition, but pull tracking continues.
+    if (menu->sharing_tap && (!share_tap || menu->moved ||
+        dx * dx + dy * dy > UI_TOUCH_SLOP_PX * UI_TOUCH_SLOP_PX ||
+        ctx->now_ms - menu->started_ms >= UI_LONG_PRESS_MS)) menu->sharing_tap = false;
+    const bool owned = !menu->sharing_tap;
     // WiFi / 蓝牙 / 震动 / 内存圆键按住 0.5 秒：关层并请求对应设置页，抬手不再触发点按。手指允许
     // 在圆键命中半径内轻微漂移；层状态先收起，由主循环在同轮末尾切页，swallow
     // 保证这条接触序列不落到新页面。
@@ -276,7 +283,7 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
                dy <= -UI_QUICK_SWIPE_PX && -dy >= abs(dx) * 2) {
         dismiss(menu, event);
     } else if (ctx->released) {
-        menu->tracking = false;
+        menu->tracking = menu->sharing_tap = false;
         if (menu->open && !menu->moved) {
             if (item == APP_QUICK_FRONTLIGHT && circle_hit(menu, x, y) == menu->hit) {
                 // 前光圆钮点按翻转，并作为一次立即提交；翻转也
@@ -322,5 +329,5 @@ bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowe
         }
         menu->drag = UI_QUICK_CTL_NONE;
     }
-    return true;
+    return owned;
 }

@@ -164,6 +164,9 @@ struct app_desc_s {
     /// 可选：单指手势中检查每个接触采样（含容差内和回放），返回 false 即取消。
     /// Optional per-sample check during a single-finger gesture (including slop/replay); false cancels it.
     bool (*gesture_contact_allowed)(const app_ctx_t* ctx);
+    /// 可选纯查询：顶部快捷栏尚未展开时，允许页内手势识别短点按；下拉仍由快捷栏接管。
+    /// Optional pure query: share a short top-edge tap with the page gesture recognizer, never a pull-down.
+    bool (*share_top_edge_tap)(const app_ctx_t* ctx);
     /// 可选：屏蔽屏幕触摸，底部三键继续分发；主循环在摄取每帧前查询。
     /// Optional: suppress screen touch while retaining panel keys; queried before ingesting each frame.
     bool (*screen_touch_disabled)(app_ctx_t* ctx);

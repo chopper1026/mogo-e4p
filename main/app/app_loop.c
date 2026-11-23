@@ -974,13 +974,18 @@ void app_loop_run(const app_loop_config_t* config) {
             if (err != ESP_OK || touch_blocked) {
                 quick_input_owned = app_quick_layer_cancel_input();
             }
-            else {
+            else if (!replayed) {
+                // 与回放共用采样时钟；已回放的末帧不再喂第二次。
+                // Use the replay clock for live samples too, and never feed the last replay frame twice.
+                const int64_t now_ms = ctx.now_ms;
+                ctx.now_ms = sample_ms;
                 quick_input_owned = app_quick_layer_feed_frame(&ctx, current, &quick_lock_requested, false);
-                if (quick_input_owned) {
-                    panel_key_cancel(&key_hold);
-                    up_key_cancel(&up_key);
-                    app_input_cancel_gesture(&ctx, current, &gesture);
-                }
+                ctx.now_ms = now_ms;
+            }
+            if (quick_input_owned) {
+                panel_key_cancel(&key_hold);
+                up_key_cancel(&up_key);
+                app_input_cancel_gesture(&ctx, current, &gesture);
             }
             app_quick_layer_present_buttons(&ctx,current);
         }

@@ -33,8 +33,8 @@
  * Panel feedback on 2026-11-23 found held grays weakened comic ink. Ordinary turns restore full GC16 in the body and drive only changed chrome pixels in the same scan.
  * 用户2026-11-10修订：正文点按保留左右/上下模式，新增九宫格自定义动作；半透明正文编辑器草稿在保存成功后启用，取消不改变配置，底部提示移除。
  * User revision 2026-11-10: retain horizontal/vertical taps and add nine independently assigned body regions; the translucent editor activates only successfully saved drafts and removes the footer hint.
- * 用户2026-11-11修复：阅读点按与滑动接纳左右留白，九宫格留白归相邻边缘格；正文分区与上下热区不变，修复边缘有震动却无动作。
- * User fix 2026-11-11: accept side margins for reader taps/swipes and map grid margins to adjacent edge cells, retaining body divisions and vertical bounds to fix vibrating edge taps with no action.
+ * 用户2026-11-23实屏反馈：九宫格隐藏页眉后，首行轻点延伸到屏顶，即使状态栏仍显示；下拉仍归快捷栏。隐藏页脚后，末行延伸到屏底。
+ * Device feedback, 2026-11-23: with the header hidden, top-row taps reach the screen edge even over a visible status bar; a pull still opens quick settings. Hiding the footer extends the last row to the bottom.
  * 用户同日修订：阅读线新增实线和跟随正文开关，缩短到实际文字范围；默认保留铺满正文区域。
  * Same-day user revision: add solid guides and a text-follow switch for actual text spans; retain full-body spans by default.
  * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
@@ -712,6 +712,16 @@ static EpdRect reader_area(void) {
         (s_chrome_visible[0] ? s_chrome_height[0] : 0);
     const int bottom = READER_HEIGHT - (s_chrome_visible[1] ? UI_BAR_MARGIN + reader_footer_height() : 0);
     return (EpdRect){0, top, READER_WIDTH, bottom - top};
+}
+// 状态栏只影响排版；无页眉时九格轻点可穿过它，滑动与编辑器仍用原阅读区域。
+// With no header, grid taps extend through the status bar; layout, swipes and the editor keep their original bounds.
+static EpdRect reader_grid_tap_area(void) {
+    EpdRect area = reader_area();
+    if (!s_chrome_visible[0]) {
+        area.height += area.y;
+        area.y = 0;
+    }
+    return area;
 }
 // 工具栏覆盖底部 120px；默认高度的页脚进度条（1143–1149）和章节行都在这条带内。
 // The tools bar covers the bottom 120 px; the default footer bar (1143–1149) and title row sit inside it.
@@ -6090,9 +6100,10 @@ static app_redraw_t reader_tap_grid_action(app_ctx_t *ctx, uint16_t x, uint16_t 
         if (s_tap_picker) return APP_REDRAW_NONE;
     } else if (y >= 106) {
         EpdRect body = body_rect();
-        int tap_x = book_reader_tap_x(body, READER_WIDTH, x, y);
-        if (tap_x < 0) return APP_REDRAW_NONE;
-        int cell = book_reader_grid_hit(body, tap_x, y);
+        int tap_y = book_reader_grid_tap_y_in_area(body, reader_area(), y);
+        int tap_x = book_reader_tap_x(body, READER_WIDTH, x, tap_y);
+        if (tap_x < 0 || tap_y < 0) return APP_REDRAW_NONE;
+        int cell = book_reader_grid_hit(body, tap_x, tap_y);
         if (cell < 0) return APP_REDRAW_NONE;
         s_tap_selected = cell;
         s_tap_picker = true;
@@ -6913,19 +6924,18 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // link test runs before the page-turn test.
         int link = book_layout_link_at(s_reader_session.position.page, x, y);
         if (link >= 0 && note_open_link(link)) return APP_REDRAW_PAGE;
-        // 页眉页脚槽位只显示内容，无控件；点信息条不翻页，落入下方正文热区判定。
-        // The chrome slots show content only, no controls; bar taps do not turn pages and fall
-        // through to the body hit test below.
-        // 左右留白投到最近的正文边缘，保留不对称边距下的原分区；插图沿用整图热区，九格保留正文上下界。
-        // Project side margins onto the nearest body edge, preserving asymmetric region splits;
-        // illustrations retain their image area, while the grid keeps the body's vertical bounds.
+        // 可见页眉和页脚不翻页；隐藏页眉时，九格首行也接收状态栏上的轻点。
+        // Visible headers and footers stay inert; without a header, first-row grid taps include the status bar.
+        // 左右留白投到最近的正文边缘，九格上下留白投到首尾行；插图沿用整图热区。
+        // Project side margins onto the nearest body edge and vertical margins into the first/last grid rows; illustrations retain their image area.
         EpdRect tap_area = body_rect();
         bool grid_tap = app_settings_reader_tap_mode() == APP_READER_TAP_GRID;
         if (!grid_tap && reader_image_slots(s_reader_session.position.page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
-        int tap_x = book_reader_tap_x(tap_area, READER_WIDTH, x, y);
-        if (tap_x < 0) return APP_REDRAW_NONE;
+        int tap_y = grid_tap ? book_reader_grid_tap_y_in_area(tap_area, reader_grid_tap_area(), y) : y;
+        int tap_x = book_reader_tap_x(tap_area, READER_WIDTH, x, tap_y);
+        if (tap_x < 0 || tap_y < 0) return APP_REDRAW_NONE;
         if (grid_tap) {
-            int cell = book_reader_grid_hit(tap_area, tap_x, y);
+            int cell = book_reader_grid_hit(tap_area, tap_x, tap_y);
             return cell < 0 ? APP_REDRAW_NONE : reader_key_action(ctx, app_settings_reader_tap_action((unsigned)cell));
         }
         int target = book_reader_tap_direction(tap_area, tap_x, y,
@@ -7787,7 +7797,9 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     if (!s_clear_confirm && !s_scan_pending) {
         if (s_view == READING && (!s_toolbar || (s_reader_panel == READER_PANEL_TOOLS && ev->y0 < READER_BAR_TOP)) &&
-            book_reader_tap_x(body_rect(), READER_WIDTH, ev->x0, ev->y0) >= 0) {
+            book_reader_tap_x(body_rect(), READER_WIDTH, ev->x0,
+                app_settings_reader_tap_mode() == APP_READER_TAP_GRID ?
+                    book_reader_grid_tap_y_in_area(body_rect(), reader_area(), ev->y0) : ev->y0) >= 0) {
             int direction = reader_swipe_direction(ev->type, app_settings_reader_vertical_turn());
             if (direction) { ctx->user_activity = true; return turn_page(ctx, direction); }
         } else if (s_view == SHELF && (ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R)) {
@@ -7970,6 +7982,11 @@ static bool menu_handle_enabled(app_ctx_t* ctx) {
     // 图书所有视图只使用产品导航，旧菜单不能抢占右侧分页按钮。
     // All book views use product navigation; the legacy menu must never steal the right pager.
     return false;
+}
+static bool share_top_edge_tap(const app_ctx_t *ctx) {
+    (void)ctx;
+    return app_book_reader_body_visible() && !s_chrome_visible[0] &&
+        app_settings_reader_tap_mode() == APP_READER_TAP_GRID;
 }
 static bool screen_touch_disabled(app_ctx_t *ctx) {
     (void)ctx;
@@ -8341,6 +8358,7 @@ const app_desc_t app_book = {
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
     .gesture_long_drag = dictionary_long_drag,
+    .share_top_edge_tap = share_top_edge_tap,
     .screen_touch_disabled = screen_touch_disabled,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,
     .on_power_short = on_power_short,

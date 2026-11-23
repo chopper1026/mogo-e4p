@@ -96,6 +96,7 @@ typedef enum {
 
 typedef struct {
     bool open, tracking, swallow, moved;
+    bool sharing_tap; ///< 本次闭层接触仍是页面轻点候选。/ This closed-layer contact is still a candidate page tap.
     app_quick_layout_t layout; ///< 装配层提供的显示与顺序。/ Visibility/order supplied by the layer owner.
     const char *network_notice; ///< 静态网络错误提示。/ Static network error notice.
     bool rotation_notice; ///< 当前页面不能旋转的提示。/ Rotation-unavailable notice for the current page.
@@ -263,10 +264,10 @@ bool ui_quick_menu_draw_notice(uint8_t *fb, const ui_quick_menu_t *menu, EpdRect
 /// Set frontlight capability and sync the preview values; the layer height follows the on state.
 void ui_quick_menu_set_frontlight(ui_quick_menu_t *menu, bool available, bool on,
                                   uint8_t brightness, uint8_t cct);
-/// 返回true表示整条触摸序列被接管；多指/读错不执行按钮与滑杆，收起之后仍吞到抬手。
-/// True owns the whole contact stream; multitouch/read errors never activate controls, and dismissal still swallows until release.
+/// true 接管本帧；页面可在闭层时共享轻点候选，拖动或长按后不再放回。已展开或正在关闭的层独占输入。
+/// True owns this frame. A closed layer may share a tap candidate until movement or a hold; an open or dismissing layer is exclusive.
 bool ui_quick_menu_feed(ui_quick_menu_t *menu, const app_ctx_t *ctx, bool allowed,
-                        ui_quick_event_t *event);
+                        bool share_tap, ui_quick_event_t *event);
 /// 取消接触但保留已打开的层；正在拖动的滑杆保留当前值，由主循环决定是否落盘。
 /// Cancel a contact while retaining an already open layer; a dragged slider keeps its value and the loop decides persistence.
 void ui_quick_menu_cancel_input(ui_quick_menu_t *menu);
