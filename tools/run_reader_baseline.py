@@ -118,6 +118,7 @@ SUITES = {
     "categories": ["bash", "tools/run_category_management_tests.sh"],
     "categories_ui": [sys.executable, "tools/category_ui_host_test.py"],
     "bookmark_storage": [sys.executable, "tools/reader_bookmark_storage_host_test.py"],
+    "reading_bg_gallery": [sys.executable, "tools/reading_bg_gallery_host_test.py"],
     "management": [sys.executable, "tools/book_ui_host_test.py"],
     "files": [sys.executable, "tools/file_listing_host_test.py"],
     "files_ui": [sys.executable, "tools/file_ui_host_test.py"],

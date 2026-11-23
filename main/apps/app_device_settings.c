@@ -35,11 +35,8 @@
  * User revision of 2026-11-02: hide the TF upgrade entry; automatic OTA defaults on, checking only the manifest every twelve hours before offering confirmation.
  * 用户新增：个性化功能新增「触摸震动」入口，页内包含开关与强度档位，打开或改档即时震一记作预览。
  * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
- * 用户 2026-10-25 新增：个性化功能在触摸震动下方新增「阅读背景」入口；列表加预览对齐壁纸选择，
- * 解码延迟到 tick，入口自阅读器迁出后旧面板删除。
- * User addition of 2026-10-25: personalization gains a Reading background entry under Touch
- * vibration; list-plus-preview mirrors the wallpaper picker, decoding defers to the tick, and the
- * reader's retired panel is deleted now that the entry lives here.
+ * 用户 2026-10-25 新增、2026-11-23 重设计：个性化功能在触摸震动下方新增「阅读背景」入口；入口使用两列缩略图卡片，解码延迟到 tick。
+ * User addition of 2026-10-25 and redesign of 2026-11-23: personalization gains a Reading background entry under Touch vibration; the entry uses a two-column thumbnail-card grid and defers decoding to the tick.
  * 用户 2026-10-26 新增：设置列表最底部一行居中的版本号与固件构建日期，随列表滚动露出。
  * User addition of 2026-10-26: the settings list ends with a centred version and firmware build
  * date line, revealed by scrolling to the bottom.
@@ -50,6 +47,7 @@
 #include <stdlib.h>
 #include "esp_heap_caps.h"
 #include <dirent.h>
+#include <errno.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -87,6 +85,8 @@
 #include "ui_reader_background.h"
 #include "ui_avatar.h"
 #include "ui_builtin_image.h"
+#include "ui_image_dither.h"
+#include "image_decode.h"
 #include "book_search.h"
 #include "book_store.h"
 #include "book_cover.h"
@@ -510,37 +510,143 @@ static void draw_system_font_sync(uint8_t *fb) {
     }
 }
 static int s_year, s_month, s_day, s_hour, s_minute;
-#define WALLPAPER_MAX 64
 typedef struct { char path[288]; char name[96]; } wallpaper_item_t;
-// 壁纸列表放 PSRAM，理由同上。
-// The wallpaper list lives in PSRAM for the same reason.
+// 壁纸列表放 PSRAM，按需扩容，不以固定数量截断 TF 卡目录。
+// The wallpaper list lives in PSRAM and grows on demand instead of truncating the SD directory.
 static wallpaper_item_t *s_wallpapers;
+static size_t s_wallpaper_capacity;
 
-static bool wallpapers_alloc(void) {
-    if (!s_wallpapers)
-        s_wallpapers = heap_caps_calloc(WALLPAPER_MAX, sizeof(wallpaper_item_t),
-                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    return s_wallpapers != NULL;
+static bool wallpapers_reserve(size_t needed) {
+    if (needed <= s_wallpaper_capacity) return true;
+    size_t capacity = s_wallpaper_capacity ? s_wallpaper_capacity : 64;
+    while (capacity < needed) {
+        if (capacity > SIZE_MAX / 2u) { capacity = needed; break; }
+        capacity *= 2u;
+    }
+    if (capacity > SIZE_MAX / sizeof(wallpaper_item_t)) return false;
+    wallpaper_item_t *next = heap_caps_realloc(s_wallpapers, capacity * sizeof(*next),
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!next) return false;
+    s_wallpapers = next;
+    s_wallpaper_capacity = capacity;
+    return true;
 }
+static bool wallpapers_alloc(void) { return wallpapers_reserve(1); }
 static int s_wallpaper_count;
 static int s_wallpaper_selected;
+
+#define READING_BG_THUMB_SLOTS 6
+#define READING_BG_THUMB_WIDTH 128
+#define READING_BG_THUMB_HEIGHT 136
+#define READING_BG_THUMB_DECODE_WIDTH 64
+#define READING_BG_THUMB_DECODE_HEIGHT 68
+#define READING_BG_CARD_TOP 320
+#define READING_BG_CARD_WIDTH 300
+#define READING_BG_CARD_HEIGHT 202
+#define READING_BG_CARD_GAP_X 12
+#define READING_BG_CARD_GAP_Y 12
+static EpdRect reading_bg_card_rect(int slot) {
+    if (slot < 0 || slot >= READING_BG_THUMB_SLOTS) return (EpdRect){0};
+    return (EpdRect){36 + (slot % 2) * (READING_BG_CARD_WIDTH + READING_BG_CARD_GAP_X),
+                     READING_BG_CARD_TOP + (slot / 2) * (READING_BG_CARD_HEIGHT + READING_BG_CARD_GAP_Y),
+                     READING_BG_CARD_WIDTH, READING_BG_CARD_HEIGHT};
+}
+static EpdRect reading_bg_restore_rect(void) { return (EpdRect){36, 966, 252, 60}; }
+static EpdRect reading_bg_thumbnail_rect(int slot) {
+    EpdRect card = reading_bg_card_rect(slot);
+    return (EpdRect){card.x + 14, card.y + 14, READING_BG_THUMB_WIDTH, READING_BG_THUMB_HEIGHT};
+}
+static uint8_t *s_reading_bg_thumbnails[READING_BG_THUMB_SLOTS];
+static uint8_t s_reading_bg_thumbnail_state[READING_BG_THUMB_SLOTS];
+static int s_reading_bg_thumbnail_page = -1;
+
+static void reading_bg_thumbnails_release(void) {
+    for (unsigned i = 0; i < READING_BG_THUMB_SLOTS; ++i) {
+        free(s_reading_bg_thumbnails[i]);
+        s_reading_bg_thumbnails[i] = NULL;
+        s_reading_bg_thumbnail_state[i] = 0;
+    }
+    s_reading_bg_thumbnail_page = -1;
+}
+static void reading_bg_thumbnails_reset(int page) {
+    reading_bg_thumbnails_release();
+    s_reading_bg_thumbnail_page = page;
+}
+static bool wallpaper_png(const char *path) {
+    const char *ext = strrchr(path ? path : "", '.');
+    return ext && !strcasecmp(ext, ".png");
+}
+static bool reading_bg_thumbnail_prepare(int slot) {
+    if (slot < 0 || slot >= READING_BG_THUMB_SLOTS) return false;
+    int index = s_wallpaper_page * READING_BG_THUMB_SLOTS + slot;
+    if (index < 0 || index >= s_wallpaper_count) return false;
+    uint8_t *gray = malloc((size_t)READING_BG_THUMB_DECODE_WIDTH * READING_BG_THUMB_DECODE_HEIGHT);
+    if (!gray) return false;
+    bool ok = book_image_file_grayscale(s_wallpapers[index].path, wallpaper_png(s_wallpapers[index].path),
+                                        READING_BG_THUMB_DECODE_WIDTH, READING_BG_THUMB_DECODE_HEIGHT, gray);
+    if (!ok) { free(gray); return false; }
+    free(s_reading_bg_thumbnails[slot]);
+    s_reading_bg_thumbnails[slot] = gray;
+    return true;
+}
+static const uint8_t *reading_bg_thumbnail_at(int slot) {
+    return s_reading_bg_thumbnail_page == s_wallpaper_page && s_reading_bg_thumbnail_state[slot] == 1 ? s_reading_bg_thumbnails[slot] : NULL;
+}
+static bool reading_bg_thumbnail_tick(bool touched) {
+    if (s_reading_bg_thumbnail_page != s_wallpaper_page)
+        reading_bg_thumbnails_reset(s_wallpaper_page);
+    // 空闲 tick 每次解一张，整页就绪后再刷新。/ Decode one image per idle tick and refresh once the page is ready.
+    if (!touched) {
+        int visible = s_wallpaper_count - s_wallpaper_page * READING_BG_THUMB_SLOTS;
+        if (visible > READING_BG_THUMB_SLOTS) visible = READING_BG_THUMB_SLOTS;
+        for (int slot = 0; slot < visible; ++slot) {
+            if (s_reading_bg_thumbnail_state[slot]) continue;
+            s_reading_bg_thumbnail_state[slot] = reading_bg_thumbnail_prepare(slot) ? 1 : 2;
+            if (slot + 1 == visible) return true;
+            break;
+        }
+    }
+    return false;
+}
+static void reading_bg_thumbnail_draw(uint8_t *fb, EpdRect rect, const uint8_t *gray) {
+    if (!gray) {
+        ui_text_vc(fb, rect.x + rect.width / 2, rect.y + rect.height / 2, 16, "暂无预览", EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
+    for (int y = 0; y < rect.height && y < READING_BG_THUMB_HEIGHT; ++y) {
+        const unsigned sy = (unsigned)y * READING_BG_THUMB_DECODE_HEIGHT / (unsigned)rect.height;
+        for (int x = 0; x < rect.width && x < READING_BG_THUMB_WIDTH; ++x) {
+            const unsigned sx = (unsigned)x * READING_BG_THUMB_DECODE_WIDTH / (unsigned)rect.width;
+            epd_draw_pixel(rect.x + x, rect.y + y,
+                           ui_image_dither_gray(gray[(size_t)sy * READING_BG_THUMB_DECODE_WIDTH + sx],
+                                                rect.x + x, rect.y + y), fb);
+        }
+    }
+}
+
 // 阅读背景选择：预览解码延迟到 tick，ready 只在解码成功后置位，notice 兼作列表页反馈行。
 // Reading-background picker: preview decoding defers to the tick, ready is set only after a
 // successful decode, and notice doubles as the list page's feedback line.
 static bool s_reading_bg_confirm, s_reading_bg_ready, s_reading_bg_pending;
 static char s_reading_bg_notice[96];
 
-static void wallpaper_scan_dir(const char *root) {
-    if (!wallpapers_alloc()) return;
+static bool wallpaper_scan_dir(const char *root) {
+    if (!wallpapers_alloc()) return false;
+    bool complete = true;
     DIR *dir = opendir(root);
-    if (!dir) return;
+    if (!dir) return errno == ENOENT;
     struct dirent *entry;
-    while (s_wallpaper_count < WALLPAPER_MAX && (entry = readdir(dir))) {
+    for (;;) {
+        errno = 0;
+        entry = readdir(dir);
+        if (!entry) { complete = errno == 0; break; }
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
         const char *ext = strrchr(entry->d_name, '.');
         if (!ext || (strcasecmp(ext, ".jpg") && strcasecmp(ext, ".jpeg") && strcasecmp(ext, ".png"))) continue;
+        if (!wallpapers_reserve((size_t)s_wallpaper_count + 1u)) { complete = false; break; }
         wallpaper_item_t *item = &s_wallpapers[s_wallpaper_count];
-        if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
+        int written = snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name);
+        if (written < 0 || (size_t)written >= sizeof(item->path)) continue;
         struct stat st;
         if (stat(item->path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 || (uint64_t)st.st_size > BOOK_IMAGE_FILE_MAX) continue;
         size_t name_len = strnlen(entry->d_name, sizeof(item->name) - 1);
@@ -548,7 +654,7 @@ static void wallpaper_scan_dir(const char *root) {
         item->name[name_len] = 0;
         ++s_wallpaper_count;
     }
-    closedir(dir);
+    return closedir(dir) == 0 && complete;
 }
 static void wallpaper_scan(void) {
     s_wallpaper_count = s_wallpaper_page = 0;
@@ -560,8 +666,11 @@ static void wallpaper_scan(void) {
 // The reading-background setter accepts only the /sdcard/pictures prefix, so the list must not
 // offer other folders; picking one would fail to persist.
 static void reading_bg_scan(void) {
+    reading_bg_thumbnails_release();
     s_wallpaper_count = s_wallpaper_page = 0;
-    wallpaper_scan_dir("/sdcard/pictures");
+    s_reading_bg_notice[0] = 0;
+    if (!wallpaper_scan_dir("/sdcard/pictures"))
+        snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "图片列表未完整读取");
     s_wallpaper_selected = 0;
     for (int i = 0; i < s_wallpaper_count; ++i)
         if (!strcmp(s_wallpapers[i].path, app_settings_book_background_path())) s_wallpaper_selected = i;
@@ -1610,26 +1719,49 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
 
     if (s_page == SETTINGS_READING_BG) {
         back_header(fb, "阅读背景");
-        section(fb, 244, "TF 卡 pictures · JPG / PNG · 不超过 50 MB");
-        if (!s_wallpaper_count)
-            ui_text(fb, 54, 325, 25, "未找到图片，请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
-        // 7 行/页给底部的关闭按钮留位；壁纸列表的 8 行版式不放按钮。
-        // Seven rows per page leave room for the bottom close button; the wallpaper list has
-        // no button and keeps eight.
-        for (int i = 0; i < 7; ++i) {
-            int index = s_wallpaper_page * 7 + i;
+        section(fb, 236, "选择图片作为正文底图");
+        char current[128];
+        const char *current_path = app_settings_book_background_path();
+        const char *current_name = current_path[0] ? strrchr(current_path, '/') : NULL;
+        snprintf(current, sizeof(current), "当前：%s", current_path[0] ? (current_name ? current_name + 1 : current_path) : "白底");
+        fit_value(current, 360);
+        ui_text_vc(fb, 48, 280, 20, current, EPD_DRAW_ALIGN_LEFT, false);
+        char count_text[48];
+        snprintf(count_text, sizeof(count_text), "共 %d 张", s_wallpaper_count);
+        ui_text_vc(fb, 636, 280, 20, count_text, EPD_DRAW_ALIGN_RIGHT, false);
+        // 两列卡片展示缩略图、文件名和当前状态，避免把图片选择压成单调文件名列表。
+        // Two card columns show thumbnails, filenames and state instead of a flat filename list.
+        for (int slot = 0; slot < READING_BG_THUMB_SLOTS; ++slot) {
+            int index = s_wallpaper_page * READING_BG_THUMB_SLOTS + slot;
             if (index >= s_wallpaper_count) break;
-            EpdRect box = {36, 292 + i * 92, 612, 78};
-            bool active = !strcmp(s_wallpapers[index].path, app_settings_book_background_path());
-            settings_card(fb, box, 18, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
+            EpdRect box = reading_bg_card_rect(slot);
+            EpdRect thumb = reading_bg_thumbnail_rect(slot);
+            bool active = !strcmp(s_wallpapers[index].path, current_path);
+            settings_card(fb, box, 20, active ? 0xc8 : 0xf0, active ? 0x30 : 0x88);
+            ui_fill_round_rect(fb, thumb, 10, UI_GRAY_WHITE);
+            reading_bg_thumbnail_draw(fb, thumb, reading_bg_thumbnail_at(slot));
+            ui_draw_control_frame(fb, thumb, 10, active ? UI_GRAY_BLACK : 0x88);
             char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[index].name);
-            fit_value(name, 490);
-            ui_text_vc(fb, 60, box.y + 39, 24, name, EPD_DRAW_ALIGN_LEFT, false);
-            if (active) epd_fill_circle(609, box.y + 39, 6, UI_GRAY_BLACK, fb);
+            fit_value(name, 126);
+            ui_text_box(fb, (EpdRect){box.x + 156, box.y + 22, 128, 60}, 21, name, EPD_DRAW_ALIGN_LEFT, false);
+            char number[32]; snprintf(number, sizeof(number), "第 %d 张", index + 1);
+            ui_text_box(fb, (EpdRect){box.x + 156, box.y + 88, 128, 38}, 18, number, EPD_DRAW_ALIGN_LEFT, false);
+            if (active) {
+                ui_fill_round_rect(fb, (EpdRect){box.x + 156, box.y + 154, 128, 36}, 12, UI_GRAY_BLACK);
+                ui_text_box(fb, (EpdRect){box.x + 156, box.y + 154, 128, 36}, 18, "当前使用", EPD_DRAW_ALIGN_CENTER, true);
+            }
         }
-        ui_draw_button(fb, (EpdRect){36, 956, 612, 76}, "关闭阅读背景 · 恢复白底", false);
+        if (!s_wallpaper_count) {
+            settings_card(fb, (EpdRect){36, READING_BG_CARD_TOP, 612, 210}, 22, 0xf0, 0x88);
+            ui_text_vc(fb, 342, READING_BG_CARD_TOP + 84, 24, "未找到图片", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_vc(fb, 342, READING_BG_CARD_TOP + 134, 20, "请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_CENTER, false);
+        }
+        ui_draw_button(fb, reading_bg_restore_rect(), "恢复白底", false);
+        int pages = s_wallpaper_count > 0 ? (s_wallpaper_count + READING_BG_THUMB_SLOTS - 1) / READING_BG_THUMB_SLOTS : 1;
+        char page_text[64]; snprintf(page_text, sizeof(page_text), "%d / %d 页 · 上下滑动翻页", s_wallpaper_page + 1, pages);
+        ui_text_box(fb, (EpdRect){300,966,348,60}, 19, page_text, EPD_DRAW_ALIGN_RIGHT, false);
         if (s_reading_bg_notice[0])
-            ui_text_vc(fb, 342, 1062, 21, s_reading_bg_notice, EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){36,1036,612,54}, 19, s_reading_bg_notice, EPD_DRAW_ALIGN_CENTER, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -2132,6 +2264,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         return APP_REDRAW_FULL;
     }
 
+    if (s_page == SETTINGS_READING_BG && reading_bg_thumbnail_tick(ctx->touch && ctx->touch->touched))
+        return APP_REDRAW_PAGE;
+
     // 阅读背景预览：解码上限 50 MB，只能放 tick 里做，render 只画缓存。
     // Reading-background preview: decoding reads up to 50 MB, so it runs here; render paints
     // the cache only.
@@ -2451,7 +2586,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         int next = s_wallpaper_selected + (ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
         if (next < 0 || next >= s_wallpaper_count) return APP_REDRAW_NONE;
         s_wallpaper_selected = next;
-        s_wallpaper_page = next / 7;
+        s_wallpaper_page = next / READING_BG_THUMB_SLOTS;
         // 换图要重新解码：ready 只对上一张有效。
         // A different image needs a fresh decode; ready was only valid for the previous one.
         s_reading_bg_ready = false;
@@ -2463,7 +2598,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int *page = s_page == SETTINGS_SYSTEM_FONT ? &s_font_page : &s_wallpaper_page;
         int count = s_page == SETTINGS_SYSTEM_FONT ? ttf_font_count() + 1 : s_wallpaper_count;
-        int slots = s_page == SETTINGS_SYSTEM_FONT ? system_font_layout().slots : 7;
+        int slots = s_page == SETTINGS_SYSTEM_FONT ? system_font_layout().slots : READING_BG_THUMB_SLOTS;
         int pages = count > 0 ? (count + slots - 1) / slots : 1;
         int old = *page;
         if (ev->type == UI_GESTURE_SWIPE_U && *page + 1 < pages) ++*page;
@@ -2558,19 +2693,22 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_READING_BG) {
         if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
-        if (y >= 956 && y < 1032) {
+        if (ui_rect_hit(reading_bg_restore_rect(), ev->x0, y)) {
             if (!app_settings_set_book_background_path("")) return APP_REDRAW_NONE;
             snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已恢复白底");
             return APP_REDRAW_PAGE;
         }
-        if (y >= 292 && y < 936) {
-            int index = s_wallpaper_page * 7 + (y - 292) / 92;
-            if (index >= s_wallpaper_count) return APP_REDRAW_NONE;
+        for (int slot = 0; slot < READING_BG_THUMB_SLOTS; ++slot) {
+            EpdRect card = reading_bg_card_rect(slot);
+            if (!ui_rect_hit(card, ev->x0, y)) continue;
+            int index = s_wallpaper_page * READING_BG_THUMB_SLOTS + slot;
+            if (index < 0 || index >= s_wallpaper_count) return APP_REDRAW_NONE;
             s_wallpaper_selected = index;
             s_reading_bg_confirm = false;
             s_reading_bg_ready = false;
             s_reading_bg_pending = true;
             s_reading_bg_notice[0] = 0;
+            reading_bg_thumbnails_release();
             s_page = SETTINGS_READING_BG_PREVIEW;
             return APP_REDRAW_PAGE;
         }
@@ -2865,7 +3003,6 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if(row==5){
             reading_bg_scan();
             s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;
-            s_reading_bg_notice[0]=0;
             s_page=SETTINGS_READING_BG;
         }
         else if(row==6){app_components_open(ctx,false);return APP_REDRAW_NONE;}
@@ -2968,6 +3105,8 @@ static void settings_exit(app_ctx_t *ctx) {
     // 释放预览内存；阅读器按当前路径读取TF成品，缓存失效时才重新解码。
     // Release preview RAM; the reader loads prepared SD art and decodes only stale/missing caches.
     ui_reader_background_release();
+    reading_bg_thumbnails_release();
+    free(s_wallpapers); s_wallpapers = NULL; s_wallpaper_capacity = 0;
     s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
@@ -2987,6 +3126,7 @@ static void on_before_lock(app_ctx_t *ctx) {
         s_page = SETTINGS_MAIN;
         s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
         ui_reader_background_release();
+        reading_bg_thumbnails_release();
     }
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
     s_upgrade_job = UPGRADE_JOB_NONE;
@@ -3003,6 +3143,7 @@ static void settings_media_lost(app_ctx_t *ctx) {
         s_page = SETTINGS_MAIN;
         s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;s_reading_bg_notice[0]=0;
         ui_reader_background_release();
+        reading_bg_thumbnails_release();
     }
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }

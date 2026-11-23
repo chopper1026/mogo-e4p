@@ -6,6 +6,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## 未发布 / Unreleased
 
 - 每本书的书签不再限 24 条；TF 卡书签在首次编辑时从旧 NVS 记录迁移，设置备份可恢复卡上与内置书籍的书签。/ Remove the 24-bookmark cap per book; migrate legacy card bookmarks on edit and include both card and internal bookmarks in settings backups.
+- 阅读背景选择页按两列展示缩略图、文件名和当前项，不再只列前 64 张；空闲时逐张解码，当前页完成后统一刷新。/ Browse background thumbnails, filenames and current selection in two columns without a 64-image cutoff. Decode one per idle tick and refresh when the page is ready.
+- 调整阅读背景页的标题与当前状态间距，避免文字挤压错位；移除卡片内多余的「点击预览」提示，直接点按整张卡片即可进入预览。/ Space the reading-background title and current-state row to prevent cramped text, and remove the redundant “Tap to preview” labels so tapping anywhere on a card opens its preview.
 
 ## v1.1.9 · 2026-11-23
 
