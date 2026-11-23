@@ -3,7 +3,7 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 未发布 / Unreleased
+## v1.1.9 · 2026-11-23
 
 - EPUB 中标记为漫画的整页单图会按本页黑位加深偏灰的墨线，并在缩图后增强细线与网点的暗边。漫画翻页时加快图片读取与绘制，画面和可见页眉页脚同步刷新。普通翻页对漫画正文使用完整 GC16，页眉页脚只更新变化像素，留白保持。/ Full-page images in EPUBs marked as comics adapt to lifted ink levels and strengthen fine dark edges after reduction. Comic turns reduce image loading and drawing work and refresh artwork and visible bars together. Ordinary turns use full GC16 across the comic body and drive only changed pixels in the bars, keeping their whitespace steady.
 
