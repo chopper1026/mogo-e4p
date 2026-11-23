@@ -34,7 +34,8 @@ void cloudzao_cancel(void);
 void cloudzao_media_lost(void);
 /// 仅主循环消费一次，合并同批书架失效通知。/ Main loop consumes coalesced bookshelf invalidation once.
 bool cloudzao_take_books_changed(void);
-/// 请求取消并等待句柄及网络归还，不强制终止工作任务。/ Cancel and wait for handles and lease without killing the worker.
+/// 取消后续业务并等待归还；已经尝试发送的刷新可限时收尾，等待超时不终止任务。
+/// Cancel follow-up work and wait for handoff; a started refresh may finish within its deadline, and a wait timeout does not kill it.
 bool cloudzao_quiesce(unsigned timeout_ms);
 #else
 static inline bool cloudzao_quiesce(unsigned timeout_ms) { (void)timeout_ms; return true; }

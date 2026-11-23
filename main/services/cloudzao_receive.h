@@ -75,12 +75,19 @@ typedef struct {
 
 typedef bool (*cz_sink_t)(void *context, const void *bytes, size_t length);
 typedef struct {
+    /// TLS 就绪后、第一次写入前提交轮换标记；失败不得发送。
+    /// Commit rotation after TLS is ready and before the first write; never send on failure.
+    bool (*prepare)(void *context);
+    void *context;
+    bool maybe_sent; ///< 进入 TLS 写入前置位，不以返回字节数推定未发送。/ Set before TLS write; byte counts cannot prove an unsent request.
+} cz_refresh_send_t;
+typedef struct {
     const char *url;          ///< 仅用于文件请求。/ Only supplied to a file request.
     const char *body;         ///< 配对或换令牌的 JSON。/ JSON for pairing or token operations.
     const char *token;        ///< 仅清单和确认请求使用。/ List and acknowledgement only.
     const char *delivery_id; ///< 仅确认请求使用。/ Acknowledgement only.
     size_t limit;            ///< 允许接收的最大字节数。/ Maximum allowed response bytes.
-    bool *maybe_sent;        ///< 刷新仅在确定未发送时保留旧令牌。/ Keep old credentials only when refresh was certainly unsent.
+    cz_refresh_send_t *refresh; ///< 仅令牌刷新使用。/ Only supplied to token refresh.
 } cz_http_request_t;
 typedef struct {
     void *context;

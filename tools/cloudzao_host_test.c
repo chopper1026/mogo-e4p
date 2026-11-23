@@ -367,6 +367,11 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
     char wire[1024], host[254];
     assert(cloudzao_wire_request(op, req, host, sizeof(host), wire, sizeof(wire)));
     assert(!strcmp(host, "claw.cloudzao.cn") && strstr(wire, "\r\nHost: claw.cloudzao.cn\r\n"));
+    if (op == CZ_REFRESH) {
+        assert(req->refresh && req->refresh->prepare && !req->refresh->maybe_sent);
+        if (!f->unsent && !req->refresh->prepare(req->refresh->context)) return CZ_CREDENTIAL_STORAGE;
+        req->refresh->maybe_sent = !f->unsent;
+    }
     ++f->calls[op];
     f->now += f->request_seconds;
     unsigned http = f->http;
@@ -395,7 +400,8 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
         } else if (op == CZ_REFRESH) {
             assert(strstr(wire, "POST " BASE "/device-tokens/refresh HTTP/1.1"));
             assert(strstr(req->body, "\"refreshToken\":\"prf_fixture"));
-            assert(f->durable.state == CZ_SESSION_ROTATING && !f->durable.refresh[0]);
+            assert(f->unsent ? f->durable.state == CZ_SESSION_AUTHORIZED :
+                f->durable.state == CZ_SESSION_ROTATING && !f->durable.refresh[0]);
             if (f->pair_after_refresh) {
                 f->expected = CZ_BIND;
                 f->http = 200;
@@ -403,7 +409,6 @@ static cz_error_t partner_raw(void *context, cz_request_t op, const cz_http_requ
             }
         }
         if (op == CZ_BIND && f->pair_after_refresh) assert(f->durable.state == CZ_SESSION_EMPTY);
-        if (req->maybe_sent) *req->maybe_sent = !f->unsent;
         if (f->transport) return f->transport;
     }
     cz_response_t response;
@@ -699,6 +704,8 @@ static void expired_link_regression(const char *root) {
     assert(!status.error && test_queue.offers[0].kind == CZ_KIND_NONE);
 }
 
+void cloudzao_refresh_transport_regression(void);
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     framing();
@@ -707,6 +714,7 @@ int main(int argc, char **argv) {
     partner_regression();
     partner_check_authorization_regression();
     partner_interrupted_refresh_regression();
+    cloudzao_refresh_transport_regression();
     partner_pair_timeout_regression();
     char selection_root[512];
     assert(snprintf(selection_root, sizeof(selection_root), "%s/selection", argv[1]) < (int)sizeof(selection_root));

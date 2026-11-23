@@ -41,6 +41,8 @@ static bool store(cz_partner_t *p, const cz_session_record_t *r) {
     return true;
 }
 
+static bool prepare_refresh(void *context) { return store(context, &rotating); }
+
 typedef struct { char *body; size_t used; } response_t;
 static bool collect(void *ctx, const void *data, size_t size) {
     response_t *reply = ctx;
@@ -69,9 +71,9 @@ static void delete_reply(cJSON *root) {
     cJSON_Delete(root);
 }
 
-static cz_error_t json_request(cz_partner_t *p, cz_request_t operation, const char *body, cJSON **out, bool *maybe_sent) {
+static cz_error_t json_request(cz_partner_t *p, cz_request_t operation, const char *body, cJSON **out, cz_refresh_send_t *refresh) {
     response_t reply = {.body = p->response};
-    const cz_http_request_t request = {.body = body, .limit = PARTNER_RESPONSE_MAX, .maybe_sent = maybe_sent};
+    const cz_http_request_t request = {.body = body, .limit = PARTNER_RESPONSE_MAX, .refresh = refresh};
     cz_error_t error = p->raw->request(p->raw->context, operation, &request, collect, &reply);
     reply.body[reply.used] = 0;
     *out = error == CZ_OK ? cloudzao_json_parse(reply.body, reply.used) : NULL;
@@ -107,24 +109,23 @@ static cz_error_t ensure_access(cz_partner_t *p, bool force) {
     if (now < r->retry_at) return CZ_SLOW_DOWN;
     cz_session_record_t previous = *r;
     cz_error_t error = p->raw->stop(p->raw->context);
-    if (error == CZ_OK && !store(p, &rotating)) error = CZ_CREDENTIAL_STORAGE;
-    bool maybe_sent = false;
+    cz_refresh_send_t send = {.prepare = prepare_refresh, .context = p};
     if (error == CZ_OK) {
         // 回包丢失时保留已轮换标记，防止重启后重发可能作废的令牌。
         // Keep a rotation marker on an ambiguous result so reboot cannot replay a possibly spent token.
         char body[CLOUDZAO_TOKEN_MAX + 24];
         snprintf(body, sizeof(body), "{\"refreshToken\":\"%s\"}", previous.refresh);
         cJSON *root = NULL;
-        error = json_request(p, CZ_REFRESH, body, &root, &maybe_sent);
+        error = json_request(p, CZ_REFRESH, body, &root, &send);
         cloudzao_partner_wipe(body, sizeof(body));
         if (error == CZ_OK) {
             const char *next_refresh = member(root, "refreshToken");
             error = next_refresh && !strcmp(next_refresh, previous.refresh) ? CZ_INVALID :
                 save_tokens(p, root, now, previous.refresh_expires_at);
         }
-        else if (!maybe_sent || error == CZ_SLOW_DOWN) {
+        else if (!send.maybe_sent || error == CZ_SLOW_DOWN) {
             if (error == CZ_SLOW_DOWN) previous.retry_at = now + SLOW_DOWN_SECONDS;
-            if (!store(p, &previous)) error = CZ_CREDENTIAL_STORAGE;
+            if (p->record.state == CZ_SESSION_ROTATING && !store(p, &previous)) error = CZ_CREDENTIAL_STORAGE;
         } else if (error == CZ_AUTH || error == CZ_REFRESH_REUSED) {
             if (!store(p, &empty)) error = CZ_CREDENTIAL_STORAGE;
         }
@@ -133,7 +134,7 @@ static cz_error_t ensure_access(cz_partner_t *p, bool force) {
     cloudzao_partner_wipe(&previous, sizeof(previous));
     const bool rebind_required = p->record.state == CZ_SESSION_ROTATING;
     if (error != CZ_OK && p->refresh_failed)
-        p->refresh_failed(p->raw->context, error, maybe_sent, rebind_required);
+        p->refresh_failed(p->raw->context, error, send.maybe_sent, rebind_required);
     return rebind_required && error != CZ_CANCELLED && error != CZ_MEDIA ? CZ_REFRESH_INTERRUPTED : error;
 }
 
@@ -261,10 +262,14 @@ cz_error_t cloudzao_partner_request(cz_partner_t *p, cz_request_t operation, con
     cz_error_t error = p->raw->stop(p->raw->context);
     if (error != CZ_OK) return error;
     if ((error = ensure_access(p, false)) != CZ_OK) return error;
+    // 已发出的刷新可先提交新凭据，取消后不再发送清单或确认。
+    // An in-flight refresh can commit first; cancellation must still stop listing or acknowledgement.
+    if ((error = p->raw->stop(p->raw->context)) != CZ_OK) return error;
     cz_http_request_t authenticated = *request;
     authenticated.token = p->record.credential;
     error = p->raw->request(p->raw->context, operation, &authenticated, sink, sink_context);
     if (error != CZ_AUTH) return error;
     if ((error = ensure_access(p, true)) != CZ_OK) return error;
+    if ((error = p->raw->stop(p->raw->context)) != CZ_OK) return error;
     return p->raw->request(p->raw->context, operation, &authenticated, sink, sink_context);
 }

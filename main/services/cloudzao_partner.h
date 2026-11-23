@@ -21,8 +21,8 @@ typedef struct {
     const cz_ops_t *raw;
     char *response; ///< 调用方提供固定容量的凭据响应缓冲。/ Caller-owned fixed-capacity credential reply buffer.
     cz_session_record_t record;
-    /// 成功时完整提交整条记录；轮换标记成功提交前不得联网刷新。
-    /// Commit the entire record; do not refresh until the rotation marker is durable.
+    /// 成功时完整提交整条记录；轮换标记落盘后才可发送刷新请求。
+    /// Commit the entire record; send the refresh only after the rotation marker is durable.
     bool (*persist)(void *context, const cz_session_record_t *record);
     /// 可选：只报告错误和刷新阶段标记，不传递凭据或回包。/ Optional: report errors and rotation flags, never credentials or reply data.
     void (*refresh_failed)(void *context, cz_error_t cause, bool maybe_sent, bool rebind_required);

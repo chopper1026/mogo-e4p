@@ -276,8 +276,12 @@ static uint64_t free_bytes(void *context) {
 
 static void book_added(void *context) { (void)context; atomic_store(&s_books_changed, true); }
 
-static bool active(worker_t *worker, int64_t idle) {
-    return esp_timer_get_time() < idle && stop(worker) == CZ_OK;
+static bool active(worker_t *worker, int64_t idle, int64_t refresh_until) {
+    const int64_t now = esp_timer_get_time();
+    if (now >= idle) return false;
+    // 只允许已开始发送的刷新在当前连接限时收尾，不再受页面或 TF 取消影响。
+    // Only a started refresh may finish on this connection within its deadline despite UI or TF cancellation.
+    return refresh_until ? now < refresh_until && now < worker->deadline : stop(worker) == CZ_OK;
 }
 
 static bool would_block(ssize_t result) {
@@ -287,6 +291,8 @@ static bool would_block(ssize_t result) {
 static cz_error_t request(void *context, cz_request_t operation, const cz_http_request_t *req,
                           cz_sink_t sink, void *sink_context) {
     worker_t *worker = context;
+    if (operation == CZ_REFRESH && (!req->refresh || !req->refresh->prepare)) return CZ_INVALID;
+    int64_t refresh_until = 0;
     char host[254];
     size_t length = cloudzao_wire_request(operation, req, host, sizeof(host), (char *)worker->chunk, CLOUDZAO_CHUNK);
     esp_tls_t *tls = length ? esp_tls_init() : NULL;
@@ -304,7 +310,7 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
         };
         int64_t idle = esp_timer_get_time() + CZ_IDLE_US;
         bool connected = false;
-        while (active(worker, idle)) {
+        while (active(worker, idle, 0)) {
             int result = esp_tls_conn_new_async(host, (int)strlen(host), 443, &cfg, tls);
             if (result == 1) { connected = true; break; }
             if (result < 0) { error = CZ_SERVER; break; }
@@ -313,8 +319,17 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
         if (connected) {
             size_t sent = 0;
             idle = esp_timer_get_time() + CZ_IDLE_US;
-            while (sent < length && active(worker, idle)) {
-                if (req->maybe_sent) *req->maybe_sent = true;
+            while (sent < length && active(worker, idle, refresh_until)) {
+                if (operation == CZ_REFRESH && !refresh_until) {
+                    if (!req->refresh->prepare(req->refresh->context)) { error = CZ_CREDENTIAL_STORAGE; break; }
+                    error = stop(worker);
+                    if (error != CZ_OK) break;
+                    error = CZ_TIMEOUT;
+                    const int64_t now = esp_timer_get_time();
+                    if (now >= idle) break;
+                    refresh_until = now + CZ_TOKEN_REPLY_IDLE_US;
+                    req->refresh->maybe_sent = true;
+                }
                 ssize_t written = esp_tls_conn_write(tls, worker->chunk + sent, length - sent);
                 if (written > 0) {
                     sent += (size_t)written;
@@ -331,7 +346,7 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
                 cz_response_t response;
                 cloudzao_wire_begin(&response, operation, req->limit, sink, sink_context);
                 idle = esp_timer_get_time() + reply_idle_us;
-                while (active(worker, idle)) {
+                while (active(worker, idle, refresh_until)) {
                     ssize_t n = esp_tls_conn_read(tls, worker->chunk, CLOUDZAO_CHUNK);
                     if (would_block(n)) { vTaskDelay(1); continue; }
                     if (n < 0) { error = CZ_SERVER; break; }
@@ -347,8 +362,13 @@ static cz_error_t request(void *context, cz_request_t operation, const cz_http_r
     }
     // 请求缓冲区可能仍含未发送的请求头；每条请求统一擦除。/ Wipe any unsent headers on every request exit.
     mbedtls_platform_zeroize(worker->chunk, CLOUDZAO_CHUNK);
-    cz_error_t interrupted = stop(worker);
-    if (operation == CZ_REFRESH) worker->refresh_http_status = http_status;
+    if (operation == CZ_REFRESH) {
+        worker->refresh_http_status = http_status;
+        // 完整回包交给凭据层提交，不能被末尾的取消或链路状态覆盖。
+        // Let the credential layer commit a complete reply; do not overwrite it with late cancellation or link state.
+        if (refresh_until || error == CZ_CREDENTIAL_STORAGE) return error;
+    }
+    const cz_error_t interrupted = stop(worker);
     if (worker->job == CZ_JOB_PREVIEW)
         worker->preview_http_error = interrupted == CZ_OK && error == CZ_SERVER &&
             http_status >= 300 && http_status < 600 ? (uint16_t)http_status : 0;
