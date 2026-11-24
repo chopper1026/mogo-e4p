@@ -368,6 +368,20 @@ static void shelf_snapshot(app_ctx_t *ctx,const char *dir,const char *name){
     }
     char path[1024];snprintf(path,sizeof(path),"%s/%s-%u.raw",dir,name,font_scale);save(path,ctx->fb);
 }
+static void check_category_outline(app_ctx_t *ctx){
+    unsigned selected_rows=0;
+    EpdRect box=shelf_category_box();
+    for(int row=0;row<SHELF_CATEGORY_ROWS;++row){
+        int index=shelf_category_at(book_shelf_categories_menu_page(&s_shelf_categories)*SHELF_CATEGORY_ROWS+row);
+        if(index<0)break;
+        int x=box.x+box.width/2,y=box.y+8+row*83;
+        int edge=index==book_shelf_categories_selected(&s_shelf_categories)?0:15;
+        selected_rows+=edge==0;
+        assert(ui_read_pixel(ctx->fb,x,y)==edge&&ui_read_pixel(ctx->fb,x,y+1)==edge);
+        assert(ui_read_pixel(ctx->fb,x,y+4)==15);
+    }
+    assert(selected_rows==1);
+}
 static app_redraw_t shelf_press_pager(app_ctx_t *ctx,int control){
     const EpdRect r=ui_pager_rect(control);
     return action_at(ctx,r.x+r.width/2,r.y+r.height/2);
@@ -601,6 +615,17 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
     }
     s_shelf_selecting=false;
     font_scale=100;
+    EpdRect title=shelf_category_title_rect();
+    assert(shelf_category_gesture(&ctx,&(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=title.x+20,.y0=title.y+40})==APP_REDRAW_AREA);
+    shelf_snapshot(&ctx,output,"shelf-notepad-category");check_category_outline(&ctx);
+    book_shelf_categories_menu_close(&s_shelf_categories);
+    for(int action=1;action<=3;++action){
+        EpdRect r=shelf_header_action_rect(action);
+        unsigned before=input_refreshes;
+        assert(action_at(&ctx,r.x+r.width/2,r.y+r.height/2)==APP_REDRAW_PAGE);
+        assert(input_refreshes==before&&s_view==(action==1?SHELF:action==2?BULK:IMPORT));
+        assert(s_shelf_selecting==(action==1));s_shelf_selecting=false;s_view=SHELF;
+    }
     notepad_paging_checks(&ctx);
     notepad_ink_pixels(&ctx,output);
     notepad_ink_gestures(&ctx);
@@ -646,7 +671,9 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
         shelf_snapshot(&ctx,output,"shelf-grid-selected");
         assert(gesture_event(&ctx,&(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=160,.y0=110})==APP_REDRAW_NONE&&selected_count()==1&&!book_shelf_categories_menu_is_open(&s_shelf_categories));
         assert(gesture_event(&ctx,&(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=160,.y0=222})==APP_REDRAW_AREA&&book_shelf_categories_menu_is_open(&s_shelf_categories));
-        shelf_snapshot(&ctx,output,"shelf-category-switch");book_shelf_categories_menu_close(&s_shelf_categories);
+        shelf_snapshot(&ctx,output,"shelf-category-switch");
+        check_category_outline(&ctx);
+        book_shelf_categories_menu_close(&s_shelf_categories);
         assert(action_at(&ctx,356,120)==APP_REDRAW_PAGE&&s_view==CATEGORIES&&s_category_ui.screen==CATEGORY_SELECTED_ACTIONS&&s_category_ui.source==target);
         book_category_ui_draw(&s_category_ui,&s_shelf_categories,fb);
         ui_gesture_event_t remove={.type=UI_GESTURE_TAP,.x0=200,.y0=376};

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复书架「选择」「管理」「导入」等题头按钮按下时误用阅读波形导致黑闪；分类下拉选中项改为白底黑色实线边框。/ Route shelf header presses to short local feedback instead of a reader waveform; outline the selected category in black on white.
+
 - 书架分类改为 TF 卡 `books/` 下的一级文件夹；新建、改名和归类直接整理卡上文件，移出分类会将书移回根目录。旧分类可预览后迁移，同名冲突不覆盖。/ Shelf categories now mirror direct TF `books/` folders. Creating, renaming or assigning updates the card; unclassifying returns books to the root. Preview legacy migration first; conflicts never overwrite books.
 
 - 每本书的书签不再限 24 条；TF 卡书签在首次编辑时从旧 NVS 记录迁移，设置备份可恢复卡上与内置书籍的书签。/ Remove the 24-bookmark cap per book; migrate legacy card bookmarks on edit and include both card and internal bookmarks in settings backups.

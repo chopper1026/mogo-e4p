@@ -4860,7 +4860,7 @@ static void draw_category_menu(uint8_t *fb) {
         if (index<0) break;
         int y=box.y+8+row*83;
         bool selected=index==book_shelf_categories_selected(&s_shelf_categories);
-        if (selected) ui_fill_round_rect(fb,(EpdRect){box.x+8,y,box.width-16,79},16,0xd0);
+        if (selected) ui_draw_control_frame(fb,(EpdRect){box.x+8,y,box.width-16,79},16,UI_GRAY_BLACK);
         ui_draw_icon(fb,box.x+35,y+40,27,index<2 ? UI_ICON_LIBRARY_BIG : UI_ICON_FOLDER_OPEN,UI_GRAY_BLACK);
         char name[BOOK_STORE_PATH_MAX],count[24];
         snprintf(count,sizeof(count),"%d",book_shelf_categories_count(&s_shelf_categories,index));
@@ -7373,13 +7373,16 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
     }
     // 小按钮反馈只重画按钮，不重新绘制全部封面；其余装饰沿用原绘制路径。
     // Repaint small header buttons alone rather than every cover; other decorations retain their path.
-    bool header_painted=false;
     if(s_view==SHELF)for(int action=0;action<(s_shelf_selecting?2:4);++action){
         EpdRect target=action==0?shelf_manage_rect():action==1?shelf_import_rect():shelf_header_action_rect(action);
         if(memcmp(&rect,&target,sizeof(rect)))continue;
-        draw_shelf_header_button(ctx->fb,rect,action);header_painted=true;break;
+        draw_shelf_header_button(ctx->fb,rect,action);
+        s_area=rect;
+        s_mode=MODE_DU;
+        s_shelf_feedback_pending=true;
+        return APP_REDRAW_AREA;
     }
-    if(!header_painted)render(ctx,ctx->fb);
+    render(ctx,ctx->fb);
     s_mode = MODE_DU;
     s_shelf_feedback_pending = false;
     if (s_view == SHELF) {

@@ -91,9 +91,9 @@ static void ui_notepad_line(uint8_t *fb,int r,bool selecting,bool selected,bool 
 }
 static bool s_cover_batch_present_pending,s_reader_tools_toggle,s_reader_footer_strong,s_reader_stable_frame;
 static bool s_shelf_selecting;
-static EpdRect shelf_manage_rect(void){return (EpdRect){442,94,97,54};}
-static EpdRect shelf_import_rect(void){return (EpdRect){551,94,97,54};}
-static EpdRect shelf_header_action_rect(int action){return (EpdRect){40+action*100,80,80,80};}
+static EpdRect shelf_header_action_rect(int);
+static EpdRect shelf_manage_rect(void){return shelf_header_action_rect(0);}
+static EpdRect shelf_import_rect(void){return shelf_header_action_rect(1);}
 static bool display_present_begin(void){return true;}
 static void display_present_end(bool held){assert(held);}
 static app_redraw_t dictionary_dismiss(void);
@@ -131,7 +131,10 @@ static const char *s_text;
 static void prepare_inline_image(void){}
 static bool test_check_cached;
 static unsigned test_button_draws,test_body_draws;
-static void draw_shelf_header_button(uint8_t *fb,EpdRect r,bool importing){(void)fb;assert(r.width==97&&r.height==54);assert(r.x==(importing?551:442));++test_button_draws;}
+static void draw_shelf_header_button(uint8_t *fb,EpdRect r,int action){
+ (void)fb;EpdRect expected=action==0?shelf_manage_rect():action==1?shelf_import_rect():shelf_header_action_rect(action);
+ assert(!memcmp(&r,&expected,sizeof(r)));++test_button_draws;
+}
 static unsigned test_prepare_order,test_render_order,test_step;
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++test_body_draws;if(test_check_cached){assert(test_prepare_order);test_render_order=++test_step;}}
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;++test_prepares;if(test_check_cached)test_prepare_order=++test_step;}
@@ -207,6 +210,7 @@ static enum EpdDrawError update_display_water_turn(void *hl,EpdRect area,int dir
 shelf += f'\n#include "{root / "main/book/reader_turn.c"}"\n'
 shelf += function("main/apps/app_book.c", "reader_turn_save") + "\n"
 shelf += function("main/apps/app_book.c", "reader_turn_load") + "\n"
+shelf += function("main/apps/app_book.c", "shelf_header_action_rect") + "\n"
 shelf += function("main/apps/app_book.c", "paint_control") + "\n"
 shelf += function("main/apps/app_book.c", "press_control") + "\n"
 # 页面状态机使用真实呈现和策略，只替换物理显示边界。/ Keep real presenter/policy and replace physical display only.
@@ -270,9 +274,19 @@ int main(void){
  assert(test_prepare_order==1&&test_render_order==2&&pushes==1&&trace_count==1&&route==FAST);
  test_check_cached=false;pushes=trace_count=0;
  unsigned body_before=test_body_draws;
- assert(paint_control(&ctx,(EpdRect){442,94,97,54})==APP_REDRAW_AREA);
- assert(paint_control(&ctx,(EpdRect){551,94,97,54})==APP_REDRAW_AREA);
+ assert(paint_control(&ctx,shelf_manage_rect())==APP_REDRAW_AREA);
+ assert(paint_control(&ctx,shelf_import_rect())==APP_REDRAW_AREA);
  assert(test_button_draws==2&&test_body_draws==body_before);
+ test_style=APP_SHELF_STYLE_NOTEPAD;
+ for(int action=1;action<=3;++action){
+   EpdRect button=action==1?shelf_import_rect():shelf_header_action_rect(action);
+   unsigned before=pushes;
+   assert(press_control(&ctx,action==1?115:118+action,button)==APP_REDRAW_AREA);
+   assert(present(&ctx,APP_REDRAW_AREA)&&pushes==before+1&&route==DIFF&&pushed_mode==MODE_DU);
+   assert(trace_wave[trace_count-1]==E0470_FOLLOW_WAVEFORM&&!memcmp(&pushed_area,&button,sizeof(button)));
+   assert(!s_shelf_feedback_pending&&!s_du_count&&test_body_draws==body_before);
+ }
+ test_style=0;
  for(int repeat=0;repeat<80;++repeat){
    int row=repeat%9;EpdRect original=row_rect(row);s_pressed_control=repeat%2?row:-1;
    assert(paint_control(&ctx,original)==APP_REDRAW_AREA&&s_shelf_feedback_pending);
