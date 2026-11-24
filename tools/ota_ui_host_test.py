@@ -119,7 +119,7 @@ void pico_online_get_status(pico_update_status_t *out){*out=backend_status;}
 #include "ui/ui_nav_layout.h"
 #include "app.h"
 static enum {SETTINGS_MAIN,SETTINGS_TEXT_EDIT,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SHELF_STYLE,
- SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY,SETTINGS_READING_BG,SETTINGS_MEMORY,SETTINGS_SCREEN_OFFSET} s_page;
+ SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY,SETTINGS_READING_BG,SETTINGS_MEMORY} s_page;
 static bool s_input_settle,s_input_layout,s_scroll_present_pending,s_memory_present_pending;
 static void memory_render_content(uint8_t *fb){(void)fb;assert(false);}
 static EpdRect memory_area_hint(app_ctx_t *ctx){(void)ctx;assert(false);return (EpdRect){0};}
@@ -131,10 +131,6 @@ app_main_refresh_mode_t app_settings_main_refresh_mode(void){return APP_MAIN_REF
 static const EpdWaveform *display_main_normal_waveform(void){return &E0470_WAVEFORM;}
 enum EpdDrawMode {MODE_DU,MODE_GL16};
 enum EpdDrawError {EPD_DRAW_SUCCESS};
-// 屏幕偏移由专项覆盖；升级呈现若误入此分支必须失败。/ Offset tests cover this path; OTA presentation must never enter it.
-enum { SCREEN_OFFSET_RETRIES = 2 };
-static unsigned s_screen_offset_retries;
-static void screen_offset_present(app_ctx_t *ctx){(void)ctx;assert(false);}
 static int diff_pushes,full_pushes,render_calls;
 static enum EpdDrawMode pushed_mode;
 static EpdRect pushed_area;

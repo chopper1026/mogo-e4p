@@ -80,7 +80,6 @@ typedef struct{bool enabled,applied,save_error;uint8_t sampled_bins,trusted_bins
 static device_power_batt_calibration_status_t s_batt_calibration_status;
 static void device_power_get_batt_calibration(device_power_batt_calibration_status_t *out){memset(out,0,sizeof(*out));out->total_bins=21;}
 static bool s_reading_bg_confirm,s_reading_bg_ready,s_reading_bg_pending;
-static char s_reading_bg_notice[96];
 static char s_quick_notice[96];
 static void reading_bg_scan(void){}
 static void ui_lock_style_open(const uint8_t *fb){(void)fb;}
@@ -122,12 +121,12 @@ int main(void){
    for(int i=0;i<l.slots;++i){EpdRect r=system_font_item_rect(i);assert(r.y+r.height<UI_NAV_TOP);if(i)assert(system_font_item_rect(i-1).y+system_font_item_rect(i-1).height<r.y);}
    assert(SETTINGS_WIRELESS_Y>=180+settings_profile_height()+70);
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
-   assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+7*SETTINGS_ROW_H);
+   assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+6*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y,SETTINGS_POWER_Y};
-   const int counts[]={3,7,8,3,3};
-   assert(SETTINGS_DISPLAY_ROWS==7&&SETTINGS_POWER_ROWS==3);
+   const int counts[]={3,6,8,3,3};
+   assert(SETTINGS_DISPLAY_ROWS==6&&SETTINGS_POWER_ROWS==3);
    const int destinations[][8]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
-     {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP,SETTINGS_SCREEN_OFFSET},
+     {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP},
      {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,SETTINGS_HAPTIC,SETTINGS_READING_BG,-5,SETTINGS_QUICK_BAR},
      {SETTINGS_CONFIG,-4,SETTINGS_UPGRADE},{SETTINGS_BATT_CALIBRATION,SETTINGS_POWER_LOG,SETTINGS_CHARGE_CURRENT}};
    for(int group=0;group<5;++group)for(int i=0;i<counts[group];++i){
@@ -177,7 +176,7 @@ int main(void){
    assert(!strcmp(system_path,fonts[index-1].path));s_font_sync_confirm=false;
   }
  }
- puts("PASS: 11 scales, all 24 destinations including screen offset and charge profiles, reachable final row and footer, 513-font pagination/selection, modal isolation, opt-in sync and failed-save retry");
+ puts("PASS: 11 scales, all 23 destinations including charge profiles, reachable final row and footer, 513-font pagination/selection, modal isolation, opt-in sync and failed-save retry");
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

@@ -76,7 +76,7 @@ static int power_pending;
 static struct {int x,y,count,error;} samples[128];static unsigned sample_count;
 static void add(int x,int y,int count,int error){samples[sample_count++]=(typeof(samples[0])){x,y,count,error};}
 static void tap(int x,int y){add(x,y,1,0);add(x,y,0,0);}
-static bool display_orientation_touch(uint16_t *x,uint16_t *y){(void)x;(void)y; return true; }
+static void display_orientation_touch(uint16_t *x,uint16_t *y){(void)x;(void)y; }
 static void correct(void){tap(158,862);tap(526,544);tap(526,862);tap(158,544);}
 void lock_pin_wipe(void *bytes,unsigned n){volatile uint8_t *p=bytes;while(n--)*p++=0;++wiped;}
 static bool lock_pin_available(void){return valid_storage;}

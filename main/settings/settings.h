@@ -29,12 +29,6 @@ typedef enum {
 } app_sleep_mode_t;
 
 void app_settings_init(void);
-#define APP_SCREEN_OFFSET_LIMIT 32
-/// 正常竖屏的显示平移，右/下为正；设备本地保存，不随备份迁移。
-/// Portrait display translation, positive right/down; device-local and excluded from backups.
-void app_settings_screen_offset(int *x, int *y);
-/// 两轴同一事务保存；越界或保存失败保留原值。/ Save both axes atomically; invalid values or save failure retain the prior values.
-bool app_settings_set_screen_offset(int x, int y);
 /// 快捷栏显隐与顺序；保存失败时保留原值。/ Quick-bar visibility/order; a failed save retains the previous value.
 const app_quick_layout_t *app_settings_quick_layout(void);
 bool app_settings_set_quick_layout(const app_quick_layout_t *layout);

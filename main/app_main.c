@@ -167,9 +167,6 @@ void app_main(void) {
 #endif
     ESP_LOGI(TAG, "startup reset=%d stack=%u", (int)reset, (unsigned)uxTaskGetStackHighWaterMark(NULL));
     app_settings_init();
-    int screen_x, screen_y;
-    app_settings_screen_offset(&screen_x, &screen_y);
-    display_apply_screen_offset(screen_x, screen_y);
     mm_init();
     mm_set_clean_callback(app_lifecycle_memory_clean);
     // 在大缓冲和字体之前读取小型锁屏设置；读取失败不阻塞，之后的检查仍可重试。

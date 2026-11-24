@@ -25,7 +25,6 @@
 #include "epdiy.h"
 #include "lcd_driver.h"
 #include "render_lcd.h"
-#include "epd_output_offset.h"
 
 // declare vector optimized line mask application.
 void epd_apply_line_mask_VE(uint8_t* line, const uint8_t* mask, int mask_len);
@@ -284,11 +283,8 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             epd_lcd_start_frame();
         }
 
-        // 调度和 DMA 仍按物理行推进；裁剪、脏行和相位查询使用对应源行。
-        // Scheduling and DMA keep physical rows; crops, dirty rows and phases use the source row.
-        const int source_y = l - ctx->offset_y;
-        if (l >= ctx->display_height || source_y < min_y || source_y >= max_y
-            || (ctx->drawn_lines != NULL && !ctx->drawn_lines[source_y - area.y])) {
+        if (l >= ctx->display_height || l < min_y || l >= max_y
+            || (ctx->drawn_lines != NULL && !ctx->drawn_lines[l - area.y])) {
             uint8_t* buf = NULL;
             while (buf == NULL) {
                 // break in case of errors or if the scan already finished
@@ -305,7 +301,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
         }
 
         uint32_t* lp = (uint32_t*)input_line;
-        const uint8_t* ptr = ptr_start + bytes_per_line * (source_y - min_y);
+        const uint8_t* ptr = ptr_start + bytes_per_line * (l - min_y);
 
 #if defined(CONFIG_IDF_TARGET_ESP32S31)
         Cache_Start_L1_DCache_Preload((uint32_t)ptr, ctx->display_width, 0);
@@ -343,8 +339,8 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
             }
         } else {
             const uint8_t* lut = ctx->conversion_lut;
-            if (ctx->line_phase && ctx->phase_luts && source_y < ctx->display_height) {
-                int8_t phase = ctx->line_phase[source_y];
+            if (ctx->line_phase && ctx->phase_luts && l < ctx->display_height) {
+                int8_t phase = ctx->line_phase[l];
                 if (phase >= 0) lut = ctx->phase_luts[phase];
                 else if (ctx->line_outer_lut) lut = NULL;
             }
@@ -354,9 +350,6 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
 
         // apply the line mask
         epd_apply_line_mask_VE(buf, ctx->line_mask, ctx->display_width / 4);
-        if (ctx->offset_x) {
-            epd_output_shift_line(buf, ctx->display_width / 4, ctx->offset_x, ctx->lut_msb_first);
-        }
 
         lq_commit(lq);
     }

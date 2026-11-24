@@ -25,64 +25,48 @@ int ui_key_hit_test(uint16_t x, uint16_t y) {
 
 static void touch_filter_cases(void) {
     app_input_touch_filter_t f = {0};
-    app_ctx_t ctx = {0};
     app_touch_t t;
     // 全屏任一点、多点都被屏蔽，连底边上滑和屏幕滑入三键也不能变成按键。
     // Block every screen point and multitouch, including bottom swipes and drags into the key strip.
     for (unsigned x = 0; x < 684; x += 13) for (unsigned y = 0; y < UI_KEY_AREA_TOP; y += 17) {
         f = (app_input_touch_filter_t){0};
         t = (app_touch_t){.touched=true,.count=1,.x=x,.y=y};
-        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && !t.touched && !t.count);
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched && !t.count);
         t = (app_touch_t){.touched=true,.count=1,.x=80,.y=UI_KEY_AREA_TOP};
-        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && !t.touched);
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
         t = (app_touch_t){0};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0));
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true));
         t = (app_touch_t){.touched=true,.count=1,.x=80,.y=UI_KEY_AREA_TOP};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && t.touched);
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true) && t.touched);
     }
     for (unsigned key = 0; key < 3; ++key) {
         f = (app_input_touch_filter_t){0};
         t = (app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=UI_KEY_AREA_TOP};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && t.touched);
+        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, true) && t.touched);
         t.y = 900;
-        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && !t.touched);
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
         t = (app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=UI_KEY_AREA_TOP};
-        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0));
+        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true));
     }
     // 开关切换和读错期间的旧接触保持隔离，必须抬手才恢复。
     // Quarantine contacts across policy changes and read failures until they lift.
     f = (app_input_touch_filter_t){0};
     t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
-    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 0) && t.touched);
-    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && !t.touched);
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false) && t.touched);
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
     t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
-    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 0));
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false));
     t = (app_touch_t){0};
-    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 0));
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false));
     t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
-    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 0) && t.touched);
-    assert(app_input_filter_screen_touch(&f, &t, ESP_ERR_INVALID_STATE, false, &ctx, 0) && !t.touched);
+    assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false) && t.touched);
+    assert(app_input_filter_screen_touch(&f, &t, ESP_ERR_INVALID_STATE, false) && !t.touched);
     t = (app_touch_t){.touched=true,.count=1,.x=50,.y=80};
-    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 0));
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false));
     t = (app_touch_t){0};
-    app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0);
+    app_input_filter_screen_touch(&f, &t, ESP_OK, true);
     t = (app_touch_t){.touched=true,.count=2,.x=80,.y=UI_KEY_AREA_TOP};
-    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true, &ctx, 0) && !t.touched);
-
-    for (unsigned down_after_commit = 0; down_after_commit < 2; ++down_after_commit) {
-        f = (app_input_touch_filter_t){0};
-        ctx = (app_ctx_t){0};
-        t = (app_touch_t){.touched=true,.count=1,.x=80,.y=560};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 100));
-        ctx.screen_touch_cutoff_ms = 200;
-        if (!down_after_commit) t = (app_touch_t){0};
-        assert(app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 210));
-        assert(!t.touched && ctx.physical_touch_active == (bool)down_after_commit);
-        t = (app_touch_t){0};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 220));
-        t = (app_touch_t){.touched=true,.count=1,.x=80,.y=560};
-        assert(!app_input_filter_screen_touch(&f, &t, ESP_OK, false, &ctx, 230));
-    }
+    assert(app_input_filter_screen_touch(&f, &t, ESP_OK, true) && !t.touched);
 
 }
 
@@ -295,4 +279,4 @@ int main(void) {
     return 0;
 }
 
-bool display_orientation_touch(uint16_t *x, uint16_t *y) { (void)x; (void)y; return true; }
+void display_orientation_touch(uint16_t *x, uint16_t *y) { (void)x; (void)y; }

@@ -74,10 +74,6 @@ typedef struct {
     /// 去抖后的触摸快照：空槽已清零，抬手后保留最后一次坐标。
     /// / Debounced touch: empty slots cleared; last coords kept after lift.
     const app_touch_t* touch;
-    /// 最近一次成功采样仍有物理接触（含留白和三键）。/ The latest valid sample has contact, including strips and panel keys.
-    bool physical_touch_active;
-    /// 偏移落屏时刻；不回放该毫秒及之前采集的屏内接触。/ Offset commit time; do not replay screen contacts sampled at or before it.
-    int64_t screen_touch_cutoff_ms;
     /// 借用的加速度计句柄，主循环装配填入；为空表示板上无传感器。
     /// / Borrowed accelerometer handle filled by the loop; NULL when the board has none.
     struct sc7a20h_dev_t* acc;
@@ -161,9 +157,6 @@ struct app_desc_s {
     bool (*present)(app_ctx_t* ctx, app_redraw_t redraw);
     /// 可选：启用本次接触的长按拖动释放事件。/ Enable long-drag release events for a new contact.
     bool (*gesture_long_drag)(app_ctx_t* ctx);
-    /// 可选：单指手势中检查每个接触采样（含容差内和回放），返回 false 即取消。
-    /// Optional per-sample check during a single-finger gesture (including slop/replay); false cancels it.
-    bool (*gesture_contact_allowed)(const app_ctx_t* ctx);
     /// 可选纯查询：顶部快捷栏尚未展开时，允许页内手势识别短点按；下拉仍由快捷栏接管。
     /// Optional pure query: share a short top-edge tap with the page gesture recognizer, never a pull-down.
     bool (*share_top_edge_tap)(const app_ctx_t* ctx);

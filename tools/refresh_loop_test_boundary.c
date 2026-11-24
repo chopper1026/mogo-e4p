@@ -34,4 +34,4 @@ enum EpdDrawError update_display_mode_diff_with(EpdiyHighlevelState *h, const vo
 
 __attribute__((weak)) int epd_rotated_display_width(void) { return 684; }
 __attribute__((weak)) int epd_rotated_display_height(void) { return 1216; }
-__attribute__((weak)) bool display_orientation_touch(uint16_t *x, uint16_t *y) { (void)x; (void)y; return true; }
+__attribute__((weak)) void display_orientation_touch(uint16_t *x, uint16_t *y) { (void)x; (void)y; }

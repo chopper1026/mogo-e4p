@@ -28,7 +28,6 @@ void epd_set_rotation(enum EpdRotation value){rotation=value;}
 typedef struct {bool active;uint16_t x,y;} point_t;
 typedef struct {bool touched;uint8_t count;uint16_t x,y;point_t points[2];uint8_t raw[16];} app_touch_t;
 typedef int esp_err_t;
-typedef struct {bool physical_touch_active;int64_t screen_touch_cutoff_ms;} app_ctx_t;
 #define ESP_OK 0
 '''
 policy += re.search(r'typedef struct \{[^{}]*\} app_input_touch_filter_t;',
@@ -48,7 +47,6 @@ static bool stable(reader_orientation_t *s,int x,int y,int z,int64_t t,display_o
  return reader_orientation_feed(s,x,y,z,false,t+500,next);
 }
 int main(void){
- app_ctx_t ctx={0};
  for(int d=0;d<4;++d){
   display_orientation_set(d);assert(display_orientation_get()==(display_orientation_t)d);
   // 每个屏内像素都必须落到原竖屏触点对应的同一物理像素。
@@ -58,21 +56,21 @@ int main(void){
    assert(px==y&&py==683-x);
    app_input_touch_filter_t filter={0};
    app_touch_t blocked={.touched=true,.count=1,.x=x,.y=y};
-   assert(app_input_filter_screen_touch(&filter,&blocked,ESP_OK,true,&ctx,0));
+   assert(app_input_filter_screen_touch(&filter,&blocked,ESP_OK,true));
    assert(!blocked.touched&&!blocked.count);
   }
   app_touch_t touch={.touched=true,.x=15,.y=34,.points={{true,15,34},{true,650,1100}}};
   memset(touch.raw,0xa6,sizeof(touch.raw));uint16_t x=650,y=1100;display_orientation_touch(&x,&y);
-  assert(app_input_rotate_touch(&touch));assert(touch.x==touch.points[0].x&&touch.y==touch.points[0].y);
+  app_input_rotate_touch(&touch);assert(touch.x==touch.points[0].x&&touch.y==touch.points[0].y);
   assert(touch.points[1].x==x&&touch.points[1].y==y);
   for(unsigned i=0;i<sizeof(touch.raw);++i)assert(touch.raw[i]==0xa6);
   touch=(app_touch_t){.touched=true,.x=240,.y=1500,.points={{true,240,1500},{false,12,13}}};
-  assert(app_input_rotate_touch(&touch));assert(touch.x==240&&touch.y==1500&&touch.points[0].y==1500);
+  app_input_rotate_touch(&touch);assert(touch.x==240&&touch.y==1500&&touch.points[0].y==1500);
   assert(touch.points[1].x==12&&touch.points[1].y==13);
   for(int key=0;key<UI_KEY_COUNT;++key){
    app_input_touch_filter_t filter={0};
    touch=(app_touch_t){.touched=true,.count=1,.x=key*UI_KEY_PITCH+80,.y=1500};
-   assert(!app_input_filter_screen_touch(&filter,&touch,ESP_OK,true,&ctx,0));
+   assert(!app_input_filter_screen_touch(&filter,&touch,ESP_OK,true));
    assert(touch.touched&&touch.x==key*UI_KEY_PITCH+80&&touch.y==1500);
   }
  }
@@ -236,7 +234,7 @@ with tempfile.TemporaryDirectory(prefix="reader-orientation-") as directory:
     flags = ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
              "-g", "-fsanitize=address,undefined", "-Imain/book", "-Imain/display"]
     for name, source, extra in (
-        ("policy", policy, ["-I" + str(stub), "main/display/display_orientation.c", "components/epdiy/src/epd_output_offset.c", "-Icomponents/epdiy/src", "main/book/reader_orientation.c"]),
+        ("policy", policy, ["-I" + str(stub), "main/display/display_orientation.c", "-Icomponents/epdiy/src", "main/book/reader_orientation.c"]),
         ("layout", layout, ["-Itools/book_layout_stubs", "-Itools/book_source_host_stubs", "main/book/reader_session.c",
                             "main/book/book_layout.c", "main/book/book_hyphen_en.c", "main/book/html_text.c", "main/book/reader_orientation.c"]),
     ):

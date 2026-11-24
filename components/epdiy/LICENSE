@@ -29,5 +29,5 @@ directory unless a file states otherwise. 上游文件头部的版权声明保�
 - src/epd_power_guard.{c,h}、epdiy.{c,h}、render.c、epd_board.h：独立任务执行扫描后100ms空闲关电，扫描互斥，关断失败重试；增加嵌套显示组结束关电、扫描准入检查及确认关电后排斥扫描的Flash保护接口。
   Independent task for 100 ms idle shutdown after scanning, scan serialization and retries on unconfirmed shutdown; add nested display-group shutdown, scan admission checks and flash protection that confirms power-off and excludes scans.
 
-- src/epd_output_offset.{c,h}、render.c、output_common/render_context.h、output_lcd/render_lcd.c：快照原生偏移、选择对应源行并在遮罩后平移两位驱动；空出位置保持；新增原生坐标的新旧偏移差分生成供实时校正擦除旧边缘，复用差分缓冲，不改波形表、不增加整屏缓存。
+- 历史修改（已撤回） / Historical modification (removed): src/epd_output_offset.{c,h}、render.c、output_common/render_context.h、output_lcd/render_lcd.c：快照原生偏移、选择对应源行并在遮罩后平移两位驱动；空出位置保持；新增原生坐标的新旧偏移差分生成供实时校正擦除旧边缘，复用差分缓冲，不改波形表、不增加整屏缓存。
   Snapshot native offsets, select source rows and translate masked two-bit drives while holding exposed positions; add physical old/new-offset differences for live calibration to erase old edges using the existing difference buffer, without waveform edits or full-screen caches.

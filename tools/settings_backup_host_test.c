@@ -247,23 +247,29 @@ esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size
 }
 /* rc92 引入的时间同步键走 u32；桩按缺省处理即可（恢复时回退 0）。/ rc92's time-sync keys use u32;
    defaulting stubs are enough (restore falls back to zero). */
-static uint32_t durable_screen, pending_screen;
-static bool has_screen, screen_pending, screen_write_fails;
+static uint32_t durable_screen;
+static bool has_screen, screen_pending, screen_erase_fails;
+static unsigned screen_erases;
 esp_err_t nvs_get_u32(nvs_handle_t h, const char *key, uint32_t *value) {
     (void)h;
     if (!strcmp(key, NVS_KEY_SCREEN_OFFSET) && has_screen) { *value = durable_screen; return ESP_OK; }
     return ESP_FAIL;
 }
 esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) {
+    (void)h; (void)value;
+    assert(strcmp(key, NVS_KEY_SCREEN_OFFSET));
+    return ESP_OK;
+}
+esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) {
     (void)h;
     if (!strcmp(key, NVS_KEY_SCREEN_OFFSET)) {
-        assert(flash_depth);
-        if (screen_write_fails) return ESP_FAIL;
-        pending_screen = value; screen_pending = true;
+        assert(flash_depth && has_screen);
+        ++screen_erases;
+        if (screen_erase_fails) return ESP_FAIL;
+        screen_pending = true;
     }
     return ESP_OK;
 }
-esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { assert(flash_depth); (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
 // 新布局桩模拟提交边界，旧设置桩的行为不变。
@@ -449,7 +455,7 @@ esp_err_t backup_nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
-    if (err == ESP_OK && screen_pending) { durable_screen = pending_screen; has_screen = true; }
+    if (err == ESP_OK && screen_pending) has_screen = false;
     if (err == ESP_OK && pending_shelf_slot>=0) {
         memcpy(shelf_preferences[pending_shelf_slot].data,pending_shelf_data,sizeof(pending_shelf_data));
         shelf_preferences[pending_shelf_slot].size=sizeof(pending_shelf_data);
@@ -1670,35 +1676,24 @@ static void test_quick_bar_layout(void) {
     puts("PASS: quick-bar selection/order survives reboot and v45 backups; invalid NVS, failed commits, corrupt/truncated tails and v44 default migration are safe");
 }
 
-// 校正属于本机面板；备份恢复不能带入其他设备的公差。
-// Calibration belongs to this panel; restoring settings must not import another device's tolerances.
-static void test_screen_offset(void) {
-    int x, y;
-    has_screen = false; app_settings_init(); app_settings_screen_offset(&x, &y); assert(!x && !y);
-    const uint32_t invalid[] = {0, UINT32_MAX, UINT32_C(0x534f4120), UINT32_C(0x534f2041)};
-    for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); ++i) {
-        durable_screen = invalid[i]; has_screen = true; app_settings_init();
-        app_settings_screen_offset(&x, &y); assert(!x && !y);
-    }
-    assert(app_settings_set_screen_offset(-32, 32));
-    app_settings_init(); app_settings_screen_offset(&x, &y); assert(x == -32 && y == 32);
-    int before = commit_count; assert(app_settings_set_screen_offset(-32, 32) && commit_count == before);
-    assert(!app_settings_set_screen_offset(33, 0) && !app_settings_set_screen_offset(0, -33));
-    for (int failure = 0; failure < 4; ++failure) {
-        screen_write_fails = failure == 0; commit_fails = failure == 1;
-        face_open_fails = failure == 2; flash_failure = failure == 3;
-        assert(!app_settings_set_screen_offset(1, -1) && !flash_depth);
-        app_settings_screen_offset(&x, &y); assert(x == -32 && y == 32);
-        screen_write_fails = commit_fails = face_open_fails = flash_failure = false;
-        app_settings_init(); app_settings_screen_offset(&x, &y); assert(x == -32 && y == 32);
-    }
+// 旧键只清一次；写入失败可重试，备份恢复不得复活已撤回的偏移。
+// Retire the legacy key once, retry after a failed write, and never resurrect it from a backup.
+static void test_retired_screen_offset(void) {
+    has_screen = true; durable_screen = UINT32_C(0x534f4000);
     assert(app_settings_backup_save() == ESP_OK);
-    assert(app_settings_set_screen_offset(7, -9));
-    assert(app_settings_backup_restore() == ESP_OK);
-    app_settings_init(); app_settings_screen_offset(&x, &y); assert(x == 7 && y == -9);
-    assert(app_settings_set_screen_offset(0, 0)); app_settings_init();
-    app_settings_screen_offset(&x, &y); assert(!x && !y);
-    puts("PASS: local screen calibration persists atomically, rejects invalid values, survives failures and stays outside backups");
+    for (int failure = 0; failure < 4; ++failure) {
+        screen_erase_fails = failure == 0; commit_fails = failure == 1;
+        face_open_fails = failure == 2; flash_failure = failure == 3;
+        app_settings_init(); assert(has_screen && !flash_depth);
+        screen_erase_fails = commit_fails = face_open_fails = flash_failure = false;
+    }
+    app_settings_init(); assert(!has_screen);
+    unsigned erases = screen_erases;
+    assert(app_settings_backup_restore() == ESP_OK && !has_screen);
+    app_settings_init(); assert(screen_erases == erases && !flash_depth);
+    has_screen = true; durable_screen = UINT32_MAX;
+    app_settings_init(); assert(!has_screen && screen_erases == erases + 1);
+    puts("PASS: legacy screen offsets are retired, not restored from backups");
 }
 
 static void test_shutdown_wallpaper(void) {
@@ -3073,7 +3068,7 @@ int main(void) {
     test_quick_bar_layout();
     test_chrome_visibility();
     test_unified_reader_migration();
-    test_screen_offset();
+    test_retired_screen_offset();
     test_shutdown_wallpaper();
     puts("settings backup host test passed (legacy formats, Home regions, 200% sizes, retired shelf migration)");
     test_shelf_titles();

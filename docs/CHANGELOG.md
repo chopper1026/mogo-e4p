@@ -6,6 +6,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## 未发布 / Unreleased
 
 - 修复书架「选择」「管理」「导入」等题头按钮按下时误用阅读波形导致黑闪；分类下拉选中项改为白底黑色实线边框。/ Route shelf header presses to short local feedback instead of a reader waveform; outline the selected category in black on white.
+- 移除屏幕偏移修正。升级后显示与触摸自动恢复居中，不影响其他设置。/ Remove screen offset correction. Display and touch return to centered coordinates on upgrade without resetting other settings.
 
 - 书架分类改为 TF 卡 `books/` 下的一级文件夹；新建、改名和归类直接整理卡上文件，移出分类会将书移回根目录。旧分类可预览后迁移，同名冲突不覆盖。/ Shelf categories now mirror direct TF `books/` folders. Creating, renaming or assigning updates the card; unclassifying returns books to the root. Preview legacy migration first; conflicts never overwrite books.
 

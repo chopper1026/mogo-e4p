@@ -15,8 +15,6 @@
 typedef struct {
     EpdRect area;
     EpdRect crop_to;
-    int offset_x; ///< 原生横向扫描偏移 / Native horizontal scan offset
-    int offset_y; ///< 原生纵向扫描偏移 / Native vertical scan offset
     const bool* drawn_lines;
     const uint8_t* data_ptr;
 

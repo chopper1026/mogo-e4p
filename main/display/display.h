@@ -56,14 +56,6 @@ void display_present_end(bool held);
 /// 解锁或阅读返回时，下一张完成绘制的画面使用完整48相GC16整屏全像素清理；成功才消费请求。
 /// Clean the next completed unlock/reader-return frame with complete 48-phase full-pixel GC16; consume only on success.
 void display_request_full_refresh(void);
-/// 应用正常竖屏的设备偏移；两次扫描之间调用，下一帧清屏重建真实基准。
-/// Apply device offsets in portrait coordinates between scans; rebuild the physical baseline on the next frame.
-void display_apply_screen_offset(int x, int y);
-/// 查询已应用的竖屏偏移；界面任务在扫描之间调用。/ Get applied portrait offsets; call from the UI task between scans.
-void display_get_screen_offset(int* x, int* y);
-/// 正常校正走物理差分；成功才切换坐标，失败保留重建要求。
-/// Calibrate by physical differences; publish coordinates only on success and retain recovery on failure.
-enum EpdDrawError update_display_screen_offset(EpdiyHighlevelState* hl, int x, int y);
 /// 启动：在供电守卫内建立白底并提交已绘好的开机画面。
 /// Boot: establish a white baseline under the power guard and present the prepared splash.
 enum EpdDrawError update_display_boot_frame(EpdiyHighlevelState* hl);

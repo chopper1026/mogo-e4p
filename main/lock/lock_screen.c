@@ -148,10 +148,10 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             if(pad.blocked&&lock_pin_available()&&now>=retry_at){ui_pinpad_reset(&pad,NULL,"请重新输入");ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());}
             app_touch_t sample={0};esp_err_t error=s31_input_read_touch(touch,&sample);
             bool down=error==ESP_OK&&sample.touched;
-            const bool mapped = !down || display_orientation_touch(&sample.x, &sample.y);
+            if (down) display_orientation_touch(&sample.x, &sample.y);
             if(draining){if(!down&&error==ESP_OK)draining=false;was_down=down;vTaskDelay(pdMS_TO_TICKS(5));continue;}
             if(down)latest=sample;else{latest.touched=false;latest.count=0;}
-            app_ctx_t ctx={.now_ms=now,.touch=&latest,.pressed=down&&!was_down,.released=!down&&was_down,.consumed=error!=ESP_OK||!mapped};
+            app_ctx_t ctx={.now_ms=now,.touch=&latest,.pressed=down&&!was_down,.released=!down&&was_down,.consumed=error!=ESP_OK};
             ui_gesture_event_t event;
             if(ui_gesture_feed(&gesture,&ctx,&event)){
                 active_at=now;EpdRect dirty;ui_pin_result_t r=ui_pinpad_handle(&pad,&event,&dirty);

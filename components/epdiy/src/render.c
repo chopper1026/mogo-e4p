@@ -1,5 +1,4 @@
 #include "render.h"
-#include "epd_output_offset.h"
 
 #include "epd_board.h"
 #include "epd_power_guard.h"
@@ -302,7 +301,6 @@ enum EpdDrawError IRAM_ATTR epd_draw_base(
     render_context.error = EPD_DRAW_SUCCESS;
     render_context.drawn_lines = drawn_lines;
     render_context.data_ptr = data;
-    epd_get_output_offset(&render_context.offset_x, &render_context.offset_y);
     render_context.lut_build_func = lut_functions.build_func;
     render_context.lut_lookup_func = lut_functions.lookup_func;
     render_context.lut_msb_first = lut_functions.msb_first;

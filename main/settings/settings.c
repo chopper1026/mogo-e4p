@@ -105,7 +105,6 @@ static bool off_art_decode(const char *encoded, app_shutdown_wallpaper_t *value)
     return true;
 }
 #define NVS_KEY_SCREEN_OFFSET "screen_offset"
-static int s_screen_x, s_screen_y;
 #define NVS_KEY_QUICK_LAYOUT "quick_layout"
 static app_quick_layout_t s_quick_layout = APP_QUICK_LAYOUT_DEFAULT;
 
@@ -146,21 +145,6 @@ bool app_settings_set_shutdown_wallpaper(const app_shutdown_wallpaper_t *value) 
     if (err == ESP_OK) err = nvs_commit(handle);
     settings_write_close(handle);
     if (err == ESP_OK) s_off_art = *value;
-    return err == ESP_OK;
-}
-
-void app_settings_screen_offset(int *x, int *y) { *x = s_screen_x; *y = s_screen_y; }
-bool app_settings_set_screen_offset(int x, int y) {
-    if (x < -APP_SCREEN_OFFSET_LIMIT || x > APP_SCREEN_OFFSET_LIMIT ||
-        y < -APP_SCREEN_OFFSET_LIMIT || y > APP_SCREEN_OFFSET_LIMIT) return false;
-    if (x == s_screen_x && y == s_screen_y) return true;
-    const uint32_t encoded = UINT32_C(0x534f0000) | (uint32_t)(x + 32) | ((uint32_t)(y + 32) << 8);
-    nvs_handle_t h;
-    if (settings_write_open(&h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_u32(h, NVS_KEY_SCREEN_OFFSET, encoded);
-    if (err == ESP_OK) err = nvs_commit(h);
-    settings_write_close(h);
-    if (err == ESP_OK) { s_screen_x = x; s_screen_y = y; }
     return err == ESP_OK;
 }
 
@@ -502,7 +486,6 @@ static void migrate_device_name(char *name, size_t capacity) {
 }
 
 void app_settings_init(void) {
-    s_screen_x = s_screen_y = 0;
     s_shelf_titles = 0;
     s_quick_layout = (app_quick_layout_t)APP_QUICK_LAYOUT_DEFAULT;
     s_network_route = NETWORK_ROUTE_AUTO;
@@ -517,13 +500,9 @@ void app_settings_init(void) {
 
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
-    uint32_t screen_encoded = 0;
-    if (nvs_get_u32(h, NVS_KEY_SCREEN_OFFSET, &screen_encoded) == ESP_OK &&
-        (screen_encoded & UINT32_C(0xffff0000)) == UINT32_C(0x534f0000) &&
-        (screen_encoded & 255) <= 64 && ((screen_encoded >> 8) & 255) <= 64) {
-        s_screen_x = (int)(screen_encoded & 255) - 32;
-        s_screen_y = (int)((screen_encoded >> 8) & 255) - 32;
-    }
+    // 旧校正从不生效；仅有旧键时才申请写事务清理。/ Never apply legacy calibration; request a write only if the retired key exists.
+    uint32_t legacy_offset;
+    const bool retire_offset = nvs_get_u32(h, NVS_KEY_SCREEN_OFFSET, &legacy_offset) == ESP_OK;
     char quick_encoded[APP_QUICK_ITEM_COUNT + 2] = {0};
     size_t quick_size = sizeof(quick_encoded);
     if (nvs_get_str(h, NVS_KEY_QUICK_LAYOUT, quick_encoded, &quick_size) == ESP_OK &&
@@ -862,6 +841,10 @@ void app_settings_init(void) {
     if (migrate_shelf) s_shelf_style = 2;
     // 固定媒体根目录；忽略旧版自定义目录键。/ Fixed media roots ignore retired custom-directory keys.
     nvs_close(h);
+    if (retire_offset && settings_write_open(&h) == ESP_OK) {
+        if (nvs_erase_key(h, NVS_KEY_SCREEN_OFFSET) == ESP_OK) (void)nvs_commit(h);
+        settings_write_close(h);
+    }
     if ((migrate_shelf || retired_shelf) && settings_write_open(&h) == ESP_OK) {
         // 首次刷入此版只切换书架外观；随后尊重用户手动选择。/ Set acrylic once on upgrade, then preserve manual choices.
         esp_err_t saved = nvs_set_u8(h, NVS_KEY_SHELF_STYLE, 2);

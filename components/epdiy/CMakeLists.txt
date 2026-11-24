@@ -4,7 +4,6 @@
 set(app_sources "src/epdiy.c"
                 "src/epd_power_guard.c"
                 "src/render.c"
-                "src/epd_output_offset.c"
                 "src/output_lcd/render_lcd.c"
                 "src/output_lcd/lcd_driver.c"
                 "src/output_common/rmt_compat.c"

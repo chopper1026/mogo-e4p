@@ -774,7 +774,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     s_last_frame = f;
                     app_input_frame_to_touch(&f, &touch);
                     touch_blocked = app_input_filter_screen_touch(&touch_filter, &touch, ESP_OK,
-                        current->screen_touch_disabled && current->screen_touch_disabled(&ctx), &ctx, f.t_ms);
+                        current->screen_touch_disabled && current->screen_touch_disabled(&ctx));
                     if (touch_blocked) {
                         panel_key_cancel(&key_hold);
                         last_input_ms = (int64_t)f.t_ms;
@@ -906,7 +906,7 @@ void app_loop_run(const app_loop_config_t* config) {
 #endif
         if (!replayed) {
             touch_blocked = app_input_filter_screen_touch(&touch_filter, &touch, err,
-                current->screen_touch_disabled && current->screen_touch_disabled(&ctx), &ctx, sample_ms);
+                current->screen_touch_disabled && current->screen_touch_disabled(&ctx));
             if (touch_blocked) {
                 panel_key_cancel(&key_hold);
                 if (err == ESP_OK) last_input_ms = frame_ms;

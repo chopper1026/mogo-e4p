@@ -37,7 +37,6 @@
  */
 
 #include "display.h"
-#include "epd_output_offset.h"
 #include "display_memory.h"
 #include "board_hardware.h"
 #include "ota_online.h"
@@ -107,18 +106,6 @@ typedef enum { STATIC_BLACK_OFF, STATIC_BLACK_PERIODIC, STATIC_BLACK_READER } st
 
 static const void* s_main_armed;
 static bool s_main_fault;
-void display_apply_screen_offset(int x, int y) {
-    if (x < -APP_SCREEN_OFFSET_LIMIT || x > APP_SCREEN_OFFSET_LIMIT ||
-        y < -APP_SCREEN_OFFSET_LIMIT || y > APP_SCREEN_OFFSET_LIMIT) return;
-    int old_x, old_y;
-    epd_get_output_offset(&old_x, &old_y);
-    if (old_x == y && old_y == -x) return;
-    epd_set_output_offset(y, -x);
-    // 平移改变了光学坐标，旧逻辑 back 不能作为新位置的差分基准。
-    // Translation changes optical coordinates; the logical back buffer cannot describe the new positions.
-    s_main_fault = true;
-    display_request_full_refresh();
-}
 static bool s_main_shelf_page;
 static EpdRect s_main_bands[3];
 static unsigned s_main_band_count;
@@ -935,66 +922,12 @@ void display_present_end(bool held) {
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
 static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
 
-void display_get_screen_offset(int* x, int* y) {
-    int native_x, native_y;
-    epd_get_output_offset(&native_x, &native_y);
-    *x = -native_y;
-    *y = native_x;
-}
-
 static void retain_failed_frame(enum EpdDrawError result) {
     s_main_fault = s_full_refresh_requested = true;
     if (result & EPD_DRAW_EMPTY_LINE_QUEUE) {
         s_pclk_mhz = DISPLAY_PCLK_SAFE_MHZ;
         board_epd_set_pclk(DISPLAY_PCLK_SAFE_MHZ);
     }
-}
-
-enum EpdDrawError update_display_screen_offset(EpdiyHighlevelState* hl, int x, int y) {
-    if (!hl || !hl->front_fb || !hl->back_fb || !hl->difference_fb ||
-        x < -APP_SCREEN_OFFSET_LIMIT || x > APP_SCREEN_OFFSET_LIMIT ||
-        y < -APP_SCREEN_OFFSET_LIMIT || y > APP_SCREEN_OFFSET_LIMIT) return EPD_DRAW_INVALID_CROP;
-    bool held = display_present_begin();
-    display_main_transition_cancel();
-    int old_x, old_y;
-    epd_get_output_offset(&old_x, &old_y);
-    enum EpdDrawError result;
-    if (display_needs_full() || s_main_fault) {
-        // 恢复扫描临时使用目标位置；失败则退回原坐标，保留重建义务。
-        // Temporarily scan recovery at the target; on failure restore the old coordinates and retain recovery.
-        display_apply_screen_offset(x, y);
-        result = update_display_full_unlocked(hl);
-    } else if (!display_power_ready()) {
-        result = DISPLAY_DRAW_POWER_NOT_READY;
-    } else {
-        const int width = epd_width(), height = epd_height();
-        bool changed = epd_output_offset_difference(hl->front_fb, hl->back_fb,
-            hl->difference_fb, width, height, old_x, old_y, y, -x);
-        result = EPD_DRAW_SUCCESS;
-        if (changed) {
-            // 差分已在物理坐标中，临时关闭扫描平移，包含新旧覆盖区和空出的白边。
-            // Differences already use physical coordinates; temporarily disable scan translation, including old/new coverage and exposed white strips.
-            const EpdWaveform *waveform = display_main_normal_waveform();
-            use_scan_for(waveform, MODE_GL16);
-            epd_set_output_offset(0, 0);
-            epd_clear_phase_luts();
-            epd_leading_skip_discard();
-            EpdRect full = epd_full_screen();
-            result = epd_draw_base(full, hl->difference_fb, full,
-                MODE_PACKING_1PPB_DIFFERENCE | MODE_GL16, 25, NULL, NULL, waveform);
-        }
-        if (result == EPD_DRAW_SUCCESS) {
-            memcpy(hl->back_fb, hl->front_fb, (size_t)width * height / 2);
-        }
-    }
-    if (result == EPD_DRAW_SUCCESS) {
-        epd_set_output_offset(y, -x);
-    } else {
-        epd_set_output_offset(old_x, old_y);
-        retain_failed_frame(result);
-    }
-    display_present_end(held);
-    return result;
 }
 
 enum EpdDrawError update_display_boot_frame(EpdiyHighlevelState* hl) {

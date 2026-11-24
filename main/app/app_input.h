@@ -19,16 +19,13 @@ typedef void (*app_input_present_t)(app_ctx_t *ctx, const app_desc_t *app,
 typedef struct {
     bool contact; ///< 原始接触尚未抬起 / Raw contact has not lifted
     bool blocked; ///< 本次接触隔离至抬起 / Quarantine this contact until lift
-    int64_t last_contact_ms; ///< 最近一次按下采样的时间 / Latest down sample time
-    bool panel_key; ///< 最近接触帧是物理三键 / Last contact frame was a physical panel key
     bool disabled; ///< 上帧屏幕禁触状态 / Previous screen-touch policy
 } app_input_touch_filter_t;
-/// 先按物理三键筛选，再变换屏内坐标；留白或策略禁触均隔离至物理抬起。
-/// Check raw cover keys before mapping screen coordinates; quarantine exposed strips and disabled contacts until physical lift.
-/// 旧坐标帧也会隔离，但保留物理三键和抬手跟踪。/ Stale coordinates quarantine screen input but preserve raw keys and lift tracking.
+/// 先按物理三键筛选，再变换屏内坐标；策略禁触时隔离至物理抬起。
+/// Check raw cover keys before mapping screen coordinates; quarantine disabled contacts until physical lift.
 /// 返回 true 时取消所有输入跟踪，不合成释放事件。/ On true, cancel input tracking without synthesizing a release.
 bool app_input_filter_screen_touch(app_input_touch_filter_t *filter, app_touch_t *touch,
-                                    esp_err_t err, bool disabled, app_ctx_t *ctx, int64_t sample_ms);
+                                    esp_err_t err, bool disabled);
 /// 丢弃已摄取接触，不向控件发送释放沿。/ Drop an ingested contact without delivering a release edge.
 void app_input_drop_contact(app_touch_t *latest, bool *was_touched);
 /// 重建采样帧的坐标、触点数和按下状态；不回放多点载荷或原始寄存器。

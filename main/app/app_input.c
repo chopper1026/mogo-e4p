@@ -57,40 +57,33 @@ static void debounce_touch(
     memcpy(latest->raw, raw->raw, sizeof(raw->raw));
 }
 
-static bool app_input_rotate_touch(app_touch_t *touch) {
-    if (!display_orientation_touch(&touch->x, &touch->y)) return false;
+static void app_input_rotate_touch(app_touch_t *touch) {
+    display_orientation_touch(&touch->x, &touch->y);
     for (unsigned i = 0; i < APP_TOUCH_MAX_POINTS; ++i)
-        if (touch->points[i].active &&
-            !display_orientation_touch(&touch->points[i].x, &touch->points[i].y)) return false;
-    return true;
+        if (touch->points[i].active)
+            display_orientation_touch(&touch->points[i].x, &touch->points[i].y);
 }
 
 bool app_input_filter_screen_touch(app_input_touch_filter_t *filter, app_touch_t *touch,
-                                  esp_err_t err, bool disabled, app_ctx_t *ctx, int64_t sample_ms) {
+                                  esp_err_t err, bool disabled) {
     if (err != ESP_OK) {
         filter->blocked = filter->contact;
         if (filter->blocked) memset(touch, 0, sizeof(*touch));
         return filter->blocked;
     }
-    ctx->physical_touch_active = touch->touched;
-    const int64_t cutoff_ms = ctx->screen_touch_cutoff_ms;
-    const bool stale = cutoff_ms && sample_ms <= cutoff_ms;
-    const bool crosses_offset = cutoff_ms && filter->contact && !filter->panel_key &&
-        filter->last_contact_ms <= cutoff_ms;
     if (!touch->touched) {
         *filter = (app_input_touch_filter_t){.disabled = disabled};
-        return crosses_offset;
+        return false;
     }
     const bool panel_key = touch->count == 1 && ui_key_hit_test(touch->x, touch->y) >= 0;
-    if (crosses_offset || (filter->contact && filter->disabled != disabled) ||
-        ((disabled || stale) && !panel_key))
+    if ((filter->contact && filter->disabled != disabled) || (disabled && !panel_key))
         filter->blocked = true;
     filter->contact = true;
-    filter->last_contact_ms = sample_ms;
-    filter->panel_key = panel_key;
     filter->disabled = disabled;
-    if (!filter->blocked && app_input_rotate_touch(touch)) return false;
-    filter->blocked = true;
+    if (!filter->blocked) {
+        app_input_rotate_touch(touch);
+        return false;
+    }
     memset(touch, 0, sizeof(*touch));
     return true;
 }
@@ -142,11 +135,6 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
                                    ui_gesture_t* gesture, esp_err_t err,
                                    bool owned_by_other, app_input_present_t present) {
     if (owned_by_other || !current->on_gesture || err != ESP_OK) return;
-    if (gesture->active && ctx->touch && ctx->touch->touched && ctx->touch->count == 1 &&
-        current->gesture_contact_allowed && !current->gesture_contact_allowed(ctx)) {
-        app_input_cancel_gesture(ctx, current, gesture);
-        return;
-    }
     ui_gesture_event_t event;
     if (ui_gesture_feed_options(gesture, ctx, &event,
             current->gesture_long_drag && current->gesture_long_drag(ctx))) {

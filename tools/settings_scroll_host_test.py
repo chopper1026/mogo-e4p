@@ -56,7 +56,7 @@ unit = r'''
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SETTINGS_MAIN,SETTINGS_UPGRADE,SETTINGS_SHELF_STYLE,
       SETTINGS_SYSTEM_FONT,SETTINGS_READING_BG,SETTINGS_AVATAR,SETTINGS_TEXT_EDIT,SETTINGS_PIN_ENTRY,
-      SETTINGS_MEMORY,SETTINGS_SCREEN_OFFSET};
+      SETTINGS_MEMORY};
 enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #include "ui_nav_layout.h"
 #define UI_LOCK_WIDTH 684
@@ -71,10 +71,6 @@ static bool s_scroll_drag_consumed,s_scroll_present_pending,s_input_layout,s_inp
 static bool s_memory_present_pending;
 static EpdRect s_input_area;
 static int paints,pushes,row_taps;
-static int offset_pushes;
-enum { SCREEN_OFFSET_RETRIES=2 };
-static unsigned s_screen_offset_retries;
-static void screen_offset_present(app_ctx_t *ctx){(void)ctx;assert(s_screen_offset_retries==SCREEN_OFFSET_RETRIES);++offset_pushes;++paints;}
 static int memory_paints;
 static void memory_render_content(uint8_t *fb){(void)fb;++memory_paints;}
 static EpdRect pushed;
@@ -152,9 +148,6 @@ int main(void){
  }
  s_page=SETTINGS_UPGRADE;assert(settings_present(&ctx,APP_REDRAW_AREA)&&pushed.y==468&&pushed.height==64);
  assert(!settings_present(&ctx,APP_REDRAW_NONE));
- s_page=SETTINGS_SCREEN_OFFSET;int before=pushes,paint_before=paints;
- assert(settings_present(&ctx,APP_REDRAW_PAGE)&&offset_pushes==1&&paints==paint_before+1&&pushes==before);
- assert(!settings_present(&ctx,APP_REDRAW_FULL)&&offset_pushes==1);
  puts("PASS: actual generic gestures + restored settings handler/presenter: all three modes use one discrete step and one soft ordinary/original fast-water changed-gray update per swipe; no tracking, momentum, motion ink, extra release/idle frames or periodic full flash; content reaches actual navigation top; selectors and OTA remain");
 }
 '''
