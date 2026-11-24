@@ -52,7 +52,7 @@ uint8_t ui_read_pixel(const uint8_t *fb,int x,int y);
                  'ui_fill_round_rect_raw', 'ui_fill_round_rect', 'ui_inset_rect', 'ui_draw_control_frame',
                  'ui_draw_separator', 'ui_hairline', 'icon_row_decode', 'icon_nibble', 'ui_draw_icon', 'ui_read_pixel',
                  'ui_text_effective_px', 'ui_text_fixed_context_width_px', 'ui_text_fixed_width_px',
-                 'ui_text_fixed_context_vc', 'ui_text_fixed_vc'):
+                 'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_fit_px'):
         code += host.function(name, KIT) + '\n'
     code += host.function('ui_text_box', KIT).replace('void ui_text_box(', 'static void actual_text_box(') + '\n'
     code += r'''
@@ -118,7 +118,7 @@ static bool bookmark_is_current(void){return false;}
                  'reader_font_card', 'reader_slider_rect', 'reader_panel_text_vc', 'reader_panel_text', 'draw_sheet', 'reader_sheet_back_rect', 'draw_sheet_back',
                  'draw_pill_slider', 'draw_reading_font_name', 'draw_font_pair', 'reader_weight_value',
                  'draw_reading_switch', 'draw_font_settings', 'rule_style_rect', 'draw_rule_settings', 'draw_reader_more', 'reading_setting_rect',
-                 'reading_settings_top', 'draw_reading_settings', 'draw_reader_tool_icon'):
+                 'reading_settings_top', 'draw_reading_settings', 'draw_reader_tool_icon', 'draw_reader_toolbar'):
         code += host.function(name, BOOK) + '\n'
     code += re.sub(r'^#include[^\n]*\n', '', (ROOT / 'main/ui/ui_reader_settings.c').read_text(), flags=re.M)
     # Only leaf sheets not shown in this preview are replaced. All new screens use actual production paint.

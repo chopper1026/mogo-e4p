@@ -513,15 +513,16 @@ static void draw_system_font_sync(uint8_t *fb) {
     // 仅一个有界弹窗，不额外打开阅读字体。/ One bounded dialog; never load the reading face here.
     settings_card(fb,(EpdRect){48,389,588,401},28,UI_GRAY_WHITE,0x58);
     ui_text_fixed_vc(fb,342,448,32,"同步到阅读字体？",EPD_DRAW_ALIGN_CENTER,false);
-    char name[80]; snprintf(name,sizeof(name),ui_tr("已选择「%s」"),system_font_label(s_font_sync_path));
+    char name[80]; snprintf(name,sizeof(name),ui_tr("已选择「%s」"),ui_tr(system_font_label(s_font_sync_path)));
     while (ui_text_fixed_width_px(27,name) > 520 && strlen(name) > 6) {
         size_t n = strlen(name) - 1;
         while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
         name[n] = 0;
     }
     ui_text_fixed_vc(fb,342,516,27,name,EPD_DRAW_ALIGN_CENTER,false);
-    ui_text_fixed_vc(fb,342,570,24,"是否让阅读正文也使用这个字体？",EPD_DRAW_ALIGN_CENTER,false);
-    ui_text_fixed_vc(fb,342,614,23,s_notice[0]?s_notice:"不同步时，保留原来的阅读字体。",EPD_DRAW_ALIGN_CENTER,false);
+    ui_text_fixed_vc(fb,342,570,ui_text_fit_px(24,532,42,"是否让阅读正文也使用这个字体？"),"是否让阅读正文也使用这个字体？",EPD_DRAW_ALIGN_CENTER,false);
+    const char *hint = s_notice[0] ? s_notice : "不同步时，保留原来的阅读字体。";
+    ui_text_fixed_vc(fb,342,614,ui_text_fit_px(23,532,42,hint),hint,EPD_DRAW_ALIGN_CENTER,false);
     for (int i=0;i<2;++i) {
         EpdRect r=system_font_sync_button(i);
         settings_card(fb,r,20,i ? UI_GRAY_BLACK : UI_GRAY_WHITE,0x58);
@@ -783,24 +784,24 @@ static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, u
 static void settings_divider(uint8_t *fb, int y, int x, int width) {
     ui_draw_separator(fb, y, x, width, 0x60);
 }
-static void settings_value(uint8_t *fb,int x,int cy,int px,const char *value) {
-    char shown[128]; snprintf(shown,sizeof(shown),"%s",value);
-    size_t n=strlen(shown);
-    bool arrow=n>=3 && !strcmp(shown+n-3,"›");
-    if (arrow) {
-        shown[n-=3]=0;
-        while (n && shown[n-1]==' ') shown[--n]=0;
-        ui_draw_icon(fb,x-4,cy,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
-    }
-    ui_text_vc(fb,x-(arrow?28:0),cy,px,shown,EPD_DRAW_ALIGN_RIGHT,false);
+static void settings_pair(uint8_t *fb, EpdRect box, int label_px, const char *label,
+                          int value_px, const char *value) {
+    // 短值只占实际宽度，长值最多占两栏的四成；给标题与数值留出独立区域。
+    // Short values use only their measured width; cap long ones at 40% and leave a gutter.
+    int w = ui_text_fixed_width_px(ui_text_effective_px(value_px), value);
+    if (w > box.width * 2 / 5) w = box.width * 2 / 5;
+    ui_text_box(fb, (EpdRect){box.x, box.y, box.width - (w ? w + 16 : 0), box.height},
+                label_px, label, EPD_DRAW_ALIGN_LEFT, false);
+    if (w) ui_text_value_box(fb, (EpdRect){box.x + box.width - w, box.y, w, box.height},
+                       value_px, value, EPD_DRAW_ALIGN_RIGHT, false);
 }
-static void row(uint8_t *fb, int y, const char *label, const char *value) {
-    ui_text(fb, 54, y + 17, 27, label, EPD_DRAW_ALIGN_LEFT, false);
-    settings_value(fb,627,y+20+ui_text_effective_px(21)/2,21,value);
+static void row(uint8_t *fb, int y, const char *label, const char *value, bool arrow) {
+    settings_pair(fb, (EpdRect){54, y+5, arrow ? 545 : 573, 58}, 27, label, 21, value);
+    if (arrow) ui_draw_icon(fb, 623, y+34, 26, UI_ICON_CHEVRON_RIGHT, UI_GRAY_BLACK);
     settings_divider(fb, y + 68, 54, 575);
 }
 static void section(uint8_t *fb, int y, const char *title) {
-    ui_text(fb, 40, y, 22, title, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){40, y-2, 604, 40}, 22, title, EPD_DRAW_ALIGN_LEFT, false);
 }
 
 /* ---- 日期与时间页 / Date and time page ---- */
@@ -866,7 +867,7 @@ static void time_auto_hint(char *out, size_t cap) {
 
 static void back_header(uint8_t *fb, const char *title) {
     ui_nav_back(fb, 36, 79);
-    ui_text_vc(fb, 342, 107, 34, title, EPD_DRAW_ALIGN_CENTER, false);
+    ui_text_box(fb, (EpdRect){108, 72, 468, 70}, 34, title, EPD_DRAW_ALIGN_CENTER, false);
     settings_divider(fb, 174, 36, 612);
 }
 
@@ -935,13 +936,7 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
         if (y + row_height <= 160 || y >= UI_NAV_TOP) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
-        char shown[128]; snprintf(shown,sizeof(shown),"%s",ui_tr(values[i]));
-        int value_width = 594 - 100 - 20 - ui_text_fixed_width_px(ui_text_effective_px(25),labels[i]);
-        if (value_width > 215) value_width = 215;
-        if (value_width < 0) value_width = 0;
-        fit_value(shown,value_width);
-        ui_text_vc(fb,100,y+row_height/2,25,labels[i],EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_vc(fb,594,y+row_height/2,20,shown,EPD_DRAW_ALIGN_RIGHT,false);
+        settings_pair(fb, (EpdRect){100, y+4, 494, row_height-8}, 25, labels[i], 20, values[i]);
         // 导航是图标，不依赖用户字体是否包含 › 字形，也不会被截短掉。
         // Navigation is an icon, independent of the font cmap and value truncation.
         ui_draw_icon(fb,625,y+row_height/2,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
@@ -957,8 +952,8 @@ static void setting_toggle_track(uint8_t *fb, EpdRect track, bool active) {
 
 static void setting_toggle(uint8_t *fb, int y, const char *title, const char *detail, bool active) {
     settings_card(fb, (EpdRect){36, y, 612, 126}, 22, UI_GRAY_WHITE, 0x70);
-    ui_text(fb, 59, y + 24, 27, title, EPD_DRAW_ALIGN_LEFT, false);
-    ui_text(fb, 59, y + 75, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){59, y+10, 478, 54}, 27, title, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){59, y+66, 478, 50}, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
     setting_toggle_track(fb, (EpdRect){555, y + 43, 69, 39}, active);
 }
 
@@ -1365,12 +1360,12 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     }
     if (s_page == SETTINGS_LOCK_PIN) {
         back_header(fb, "锁屏密码");
-        row(fb, 266, "四位数字密码", !lock_pin_available() ? "暂不可用" : lock_pin_enabled() ? "已开启" : "已关闭");
+        row(fb, 266, "四位数字密码", !lock_pin_available() ? "暂不可用" : lock_pin_enabled() ? "已开启" : "已关闭", false);
         if (!lock_pin_available()) ui_text_vc(fb, 342, 408, 24, "锁屏设置暂不可用", EPD_DRAW_ALIGN_CENTER, false);
         else if (lock_pin_enabled()) {
-            row(fb, 406, "修改密码", "验证原密码  ›");
-            row(fb, 512, "关闭密码", "验证原密码  ›");
-        } else row(fb, 406, "开启密码", "设置四位密码  ›");
+            row(fb, 406, "修改密码", "验证原密码", true);
+            row(fb, 512, "关闭密码", "验证原密码", true);
+        } else row(fb, 406, "开启密码", "设置四位密码", true);
         if (s_notice[0]) ui_text_vc(fb, 342, 680, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
         ui_text_vc(fb, 342, 752, 21, "修改和关闭密码需验证原密码", EPD_DRAW_ALIGN_CENTER, false);
         ui_nav_draw(fb, 3); return;
@@ -1378,15 +1373,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_PROFILE) {
         back_header(fb, "个人资料");
         ui_text(fb, 42, 214, 21, "自定义名称与头像", EPD_DRAW_ALIGN_LEFT, false);
-        row(fb, 266, "设备名称", app_settings_device_name());
-        row(fb, 366, "更换头像", app_settings_avatar_path()[0] ? "已选择图片  ›" : "默认图标  ›");
+        row(fb, 266, "设备名称", app_settings_device_name(), false);
+        row(fb, 366, "更换头像", app_settings_avatar_path()[0] ? "已选择图片" : "默认图标", true);
         ui_nav_draw(fb, 3);
         return;
     }
     if (s_page == SETTINGS_AVATAR) {
         back_header(fb, "选择头像");
         section(fb, 232, "TF 卡 pictures 文件夹中的 JPG / PNG 图片");
-        row(fb, 270, "使用默认图标", app_settings_avatar_path()[0] ? "选择  ›" : "当前  ✓");
+        row(fb, 270, "使用默认图标", app_settings_avatar_path()[0] ? "选择" : "当前  ✓", app_settings_avatar_path()[0] != 0);
         if (!s_wallpaper_count) ui_text(fb, 52, 384, 23, "未找到图片，请放入 pictures 文件夹", EPD_DRAW_ALIGN_LEFT, false);
         for (int i = 0; i < 7; ++i) {
             int index = s_wallpaper_page * 7 + i;
@@ -1405,7 +1400,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_TEXT_EDIT) {
         back_header(fb, s_editor_signature ? "状态栏签名" : "设备名称");
         ui_text(fb, 642, 95, 24, "完成", EPD_DRAW_ALIGN_RIGHT, false);
-        ui_text(fb, 36, 201, 21, s_editor_signature ? "状态栏中间显示，留空则隐藏" : "显示在设置页的资料卡", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){36, 201, 612, 40}, 21, s_editor_signature ? "状态栏中间显示，留空则隐藏" : "显示在设置页的资料卡", EPD_DRAW_ALIGN_LEFT, false);
         ui_text_input_draw(fb, &s_editor_input, (EpdRect){36, 243, 612, 82}, 28, false, NULL);
         if (s_editor_notice[0]) ui_text_fixed_vc(fb, 36, 510, 22, s_editor_notice, EPD_DRAW_ALIGN_LEFT, false);
         ui_keyboard_draw(fb, 560);
@@ -1415,7 +1410,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_SHELF_STYLE) {
         ui_nav_back(fb, 36, 79);
         ui_text_vc(fb, 342, 107, 34, "书架样式", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text(fb, 36, 207, 23, "选择书架外观与排列方式", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){36, 207, 612, 40}, 23, "选择书架外观与排列方式", EPD_DRAW_ALIGN_LEFT, false);
         if (s_notice[0]) ui_text_vc(fb, 36, 169, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
         for (int i = 0; i < SHELF_STYLE_CARD_COUNT; ++i) {
             EpdRect card = shelf_style_card(i);
@@ -1448,32 +1443,32 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_TIME_EDIT) {
         ui_nav_back(fb, 36, 79);
         ui_text(fb, 36, 151, 47, "日期与时间", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 36, 216, 23, "北京时间 · UTC+8", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){36, 216, 612, 40}, 23, "北京时间 · UTC+8", EPD_DRAW_ALIGN_LEFT, false);
         ui_hairline(fb, 259, 36, 612, UI_GRAY_LIGHT);
-        static const char *const labels[] = {"年", "月", "日", "时", "分"};
+        static const char *const labels[] = {"年", "月", "日期", "时", "分"};
         int values[] = {s_year, s_month, s_day, s_hour, s_minute};
         for (int i = 0; i < 5; ++i) {
             int x = 36 + i * 122;
-            ui_text(fb, x + 52, 300, 24, labels[i], EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){x,288,106,58}, 24, labels[i], EPD_DRAW_ALIGN_CENTER, false);
             ui_draw_control_frame(fb, (EpdRect){x, 354, 106, 62}, 8, UI_GRAY_BLACK);
             ui_text_vc(fb, x + 53, 385, 30, "+", EPD_DRAW_ALIGN_CENTER, false);
             char value[8]; snprintf(value, sizeof(value), i == 0 ? "%04d" : "%02d", values[i]);
-            ui_text(fb, x + 53, 456, i == 0 ? 34 : 39, value, EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){x,428,106,92}, 34, value, EPD_DRAW_ALIGN_CENTER, false);
             ui_draw_control_frame(fb, (EpdRect){x, 535, 106, 62}, 8, UI_GRAY_BLACK);
             ui_text_vc(fb, x + 53, 566, 30, "−", EPD_DRAW_ALIGN_CENTER, false);
         }
-        ui_text(fb, 36, 649, 23, "点上方 + 或下方 − 调整数字", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){36, 649, 612, 40}, 23, "点上方 + 或下方 − 调整数字", EPD_DRAW_ALIGN_LEFT, false);
         ui_draw_button(fb, (EpdRect){36, 767, 612, 78}, "保存时间", false);
         ui_draw_button(fb, (EpdRect){36, 874, 612, 78}, "取消", false);
-        if (s_notice[0]) ui_text(fb, 36, 996, 22, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text_box(fb, (EpdRect){36, 996, 612, 40}, 22, s_notice, EPD_DRAW_ALIGN_LEFT, false);
         return;
     }
     if (s_page == SETTINGS_WIFI) {
         back_header(fb, "WiFi");
         section(fb, 253, "已保存网络");
-        row(fb, 296, s_main_wifi_saved ? s_main_wifi : "尚未配置", s_main_wifi_saved ? "已保存" : "");
-        row(fb, 408, "连接或更改网络", "前往传输  ›");
-        ui_text(fb, 54, 529, 21, "配网后可在日期与时间中进行网络对时。", EPD_DRAW_ALIGN_LEFT, false);
+        row(fb, 296, s_main_wifi_saved ? s_main_wifi : "尚未配置", s_main_wifi_saved ? "已保存" : "", false);
+        row(fb, 408, "连接或更改网络", "前往传输", true);
+        ui_text_box(fb, (EpdRect){54, 529, 576, 40}, 21, "配网后可在日期与时间中进行网络对时。", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1486,17 +1481,17 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             setting_toggle(fb, NETWORK_TOGGLE_Y, "4G 移动网络", settings_cellular_status(&network),
                            network.cellular_enabled);
             section(fb, NETWORK_ROUTE_SECTION_Y, "业务联网方式");
-            row(fb, NETWORK_ROUTE_ROW_Y, "日期、天气、OTA", network_route_name(network.route));
+            row(fb, NETWORK_ROUTE_ROW_Y, "日期、天气、OTA", network_route_name(network.route), false);
             char detail[96];
             char signal[12];
             if (network.cellular_signal == 99) snprintf(signal, sizeof(signal), ui_tr("未知"));
             else snprintf(signal, sizeof(signal), "%d/31", network.cellular_signal);
-            snprintf(detail, sizeof(detail), ui_tr("4G：%s · 信号 %s"), settings_cellular_status(&network), signal);
-            ui_text(fb, 48, 602, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 48, 648, 21, s_network_notice ? s_network_notice :
+            snprintf(detail, sizeof(detail), ui_tr("4G：%s · 信号 %s"), ui_tr(settings_cellular_status(&network)), signal);
+            ui_text_box(fb, (EpdRect){48, 602, 588, 40}, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){48, 648, 588, 40}, 21, s_network_notice ? s_network_notice :
                     "移动网络使用内置 SIM 卡；联网方式单独选择。", EPD_DRAW_ALIGN_LEFT, false);
         } else {
-            ui_text(fb, 48, 340, 21, network.cellular_capability_known
+            ui_text_box(fb, (EpdRect){48, 340, 588, 40}, 21, network.cellular_capability_known
                     ? "当前硬件未检测到移动网络模块。"
                     : "正在检测移动网络硬件，请稍候。",
                     EPD_DRAW_ALIGN_LEFT, false);
@@ -1533,7 +1528,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             EpdRect box=system_font_item_rect(slot);
             settings_card(fb,box,20,active?0xe0:UI_GRAY_WHITE,0x70);
             char label[TTF_FONT_NAME_MAX];
-            snprintf(label,sizeof(label),"%s",item?system_font_label(item->path):ui_tr("思源黑体（内建）"));
+            snprintf(label,sizeof(label),"%s",item?ui_tr(system_font_label(item->path)):ui_tr("思源黑体（内建）"));
             settings_fit_text(label,26,box.width-100);
             ui_text_vc(fb,60,box.y+box.height/2,26,label,EPD_DRAW_ALIGN_LEFT,false);
             if (active) epd_fill_circle(613,box.y+box.height/2,6,UI_GRAY_BLACK,fb);
@@ -1570,8 +1565,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             const bool active = app_settings_main_refresh_mode() == s_main_refresh_choices[i];
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x58);
             ui_text_vc(fb, 64, box.y + 38, 30, names[i], EPD_DRAW_ALIGN_LEFT, false);
-            char detail[128]; snprintf(detail, sizeof(detail), "%s", details[i]); fit_value(detail, 498);
-            ui_text_vc(fb, 64, box.y + 89, 22, detail, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64,box.y+62,556,54}, 22, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(607, box.y + 38, 8, UI_GRAY_BLACK, fb);
         }
         ui_nav_draw(fb, 3);
@@ -1637,7 +1631,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (!s_wallpaper_count) {
             settings_card(fb, (EpdRect){36, READING_BG_CARD_TOP, 612, 210}, 22, 0xf0, 0x88);
             ui_text_vc(fb, 342, READING_BG_CARD_TOP + 84, 24, "未找到图片", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, 342, READING_BG_CARD_TOP + 134, 20, "请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){60, READING_BG_CARD_TOP+110, 564, 48}, 20, "请放入 TF 卡的 pictures 文件夹", EPD_DRAW_ALIGN_CENTER, false);
         }
         ui_draw_button(fb, reading_bg_restore_rect(), "恢复白底", false);
         int pages = s_wallpaper_count > 0 ? (s_wallpaper_count + READING_BG_THUMB_SLOTS - 1) / READING_BG_THUMB_SLOTS : 1;
@@ -1655,28 +1649,28 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (s_reading_bg_ready) ui_reader_background_paint(fb, image, false);
         ui_draw_round_rect(fb, image, 8, 0x70);
         if (!s_reading_bg_ready)
-            ui_text_vc(fb, 342, 507, 23, s_reading_bg_pending ? "正在加载预览…" :
+            ui_text_box(fb, (EpdRect){74,464,536,86}, 23, s_reading_bg_pending ? "正在加载预览…" :
                 (s_reading_bg_notice[0] ? s_reading_bg_notice : "正在加载预览…"),
                 EPD_DRAW_ALIGN_CENTER, false);
         if (s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count) {
             char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[s_wallpaper_selected].name);
             fit_value(name, 570);
-            ui_text_vc(fb, 342, 859, 24, name, EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){56,830,572,58}, 24, name, EPD_DRAW_ALIGN_CENTER, false);
             char position[40];
             snprintf(position, sizeof(position), ui_tr("%d / %d · 上下滑动切换"), s_wallpaper_selected + 1, s_wallpaper_count);
-            ui_text_vc(fb, 342, 908, 20, position, EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){56,882,572,52}, 20, position, EPD_DRAW_ALIGN_CENTER, false);
         }
         if (s_reading_bg_ready) {
             EpdRect button = {94, 962, 496, 70};
             ui_fill_round_rect(fb, button, 22, 0x30);
-            ui_text_vc(fb, 342, 997, 25, "使用阅读背景", EPD_DRAW_ALIGN_CENTER, true);
+            ui_text_box(fb, (EpdRect){106,966,472,62}, 25, "使用阅读背景", EPD_DRAW_ALIGN_CENTER, true);
         }
         if (s_reading_bg_confirm) {
             EpdRect dialog = {68, 435, 548, 306};
             ui_fill_round_rect(fb, dialog, 26, UI_GRAY_WHITE);
             ui_draw_control_frame(fb, dialog, 26, 0x50);
-            ui_text_vc(fb, 342, 503, 31, "使用阅读背景？", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_vc(fb, 342, 565, 20, "确认后，阅读正文以它为底，文字自动加深", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){85,468,514,70}, 31, "使用阅读背景？", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){88,536,508,58}, 20, "确认后，阅读正文以它为底，文字自动加深", EPD_DRAW_ALIGN_CENTER, false);
             EpdRect cancel = {94, 643, 232, 68}, confirm = {358, 643, 232, 68};
             ui_fill_round_rect(fb, cancel, 18, 0xe0);
             ui_fill_round_rect(fb, confirm, 18, 0x30);
@@ -1696,18 +1690,18 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
         }
         section(fb, 253, "当前时间 · 北京时间");
-        row(fb, TIME_ROW_CURRENT_Y, shown, "");
-        row(fb, TIME_ROW_AUTO_Y, "自动对时", app_settings_auto_time_sync() ? "开  ›" : "关  ›");
-        row(fb, TIME_ROW_WIFI_Y, "通过网络对时", "立即同步  ›");
-        row(fb, TIME_ROW_MANUAL_Y, "手动设置", "编辑  ›");
+        row(fb, TIME_ROW_CURRENT_Y, shown, "", false);
+        row(fb, TIME_ROW_AUTO_Y, "自动对时", app_settings_auto_time_sync() ? "开启" : "关闭", true);
+        row(fb, TIME_ROW_WIFI_Y, "通过网络对时", "立即同步", true);
+        row(fb, TIME_ROW_MANUAL_Y, "手动设置", "编辑", true);
         char line[96];
         time_last_sync_text(line, sizeof(line));
-        ui_text(fb, 54, TIME_LAST_LINE_Y, 21, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){54, TIME_LAST_LINE_Y, 576, 40}, 21, line, EPD_DRAW_ALIGN_LEFT, false);
         time_auto_hint(line, sizeof(line));
-        ui_text(fb, 54, TIME_HINT_LINE_Y, 21, line, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, TIME_ADVICE_LINE_Y, 21, "长时间离线可能产生误差，建议定期重新对时。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){54, TIME_HINT_LINE_Y, 576, 40}, 21, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){54, TIME_ADVICE_LINE_Y, 576, 40}, 21, "长时间离线可能产生误差，建议定期重新对时。", EPD_DRAW_ALIGN_LEFT, false);
         if (s_sync_pending || s_sync_waiting || s_notice[0])
-            ui_text(fb, 54, TIME_NOTICE_LINE_Y, 22, s_sync_pending || s_sync_waiting ? "正在获取网络时间…" : s_notice,
+            ui_text_box(fb, (EpdRect){54, TIME_NOTICE_LINE_Y, 576, 40}, 22, s_sync_pending || s_sync_waiting ? "正在获取网络时间…" : s_notice,
                     EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
@@ -1724,8 +1718,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             ui_text_vc(fb, 64, box.y + box.height / 2, 30, labels[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 48, 760, 23, "操作后重新计时，传输和升级期间暂停", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 810, 23, "待机方式可选仅浅睡、定时关机或立即关机", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 760, 588, 40}, 23, "操作后重新计时，传输和升级期间暂停", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 810, 588, 40}, 23, "待机方式可选仅浅睡、定时关机或立即关机", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1740,12 +1734,12 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             EpdRect box = {36, 482 + i * 112, 612, 92};
             bool active = app_settings_haptic_intensity() == (uint8_t)i;
             settings_card(fb, box, 20, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text_vc(fb, 64, box.y + box.height / 2, 30, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text_vc(fb, 132, box.y + box.height / 2, 21, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64,box.y+8,208,76}, 30, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){288,box.y+8,295,76}, 21, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 48, 830, 23, "选中后立即震一下，可反复比较", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 880, 23, "关闭后不再震，档位仍保留", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 830, 588, 40}, 23, "选中后立即震一下，可反复比较", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 880, 588, 40}, 23, "关闭后不再震，档位仍保留", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1756,10 +1750,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         section(fb, 228, "电量校准日志");
         setting_toggle(fb, 272, "写入 batt.log", "每分钟记录电压、电流与充电状态",
                        app_settings_batt_log());
-        ui_text(fb, 48, 440, 23, "写入 TF 卡根目录 batt.log，同时输出到串口", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 485, 23, "卡不在或正在 USB 读卡时自动跳过", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 530, 23, "关闭后不再创建文件，也不写日志", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 575, 23, "默认关闭；开关立即生效", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 440, 588, 40}, 23, "写入 TF 卡根目录 batt.log，同时输出到串口", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 485, 588, 40}, 23, "卡不在或正在 USB 读卡时自动跳过", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 530, 588, 40}, 23, "关闭后不再创建文件，也不写日志", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 575, 588, 40}, 23, "默认关闭；开关立即生效", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1776,8 +1770,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             bool active = i == 2 ? timed :
                 app_settings_shutdown_style() == (app_shutdown_style_t)(APP_SHUTDOWN_STAGED + i);
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 64, box.y + 23, 29, labels[i], EPD_DRAW_ALIGN_LEFT, false);
-            ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64,box.y+12,526,50}, 29, labels[i], EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){64,box.y+74,556,46}, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
         }
         if (timed) {
@@ -1794,15 +1788,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         back_header(fb, "电脑刷机");
         settings_card(fb, (EpdRect){36, 254, 612, 298}, 22, UI_GRAY_WHITE, 0x70);
         ui_text(fb, 60, 288, 29, "进入 BOOT 模式", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 60, 350, 22, "用于官网完整刷机或故障恢复", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){60, 350, 564, 40}, 22, "用于官网完整刷机或故障恢复", EPD_DRAW_ALIGN_LEFT, false);
         ui_draw_button(fb, (EpdRect){60, 438, 564, 78}, s_boot_pending ? "正在进入" : "进入 BOOT 模式", false);
-        ui_text(fb, 48, 620, 22, "请用 USB 连接电脑，再打开官网刷机页", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 620, 588, 40}, 22, "请用 USB 连接电脑，再打开官网刷机页", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3); return;
     }
     if (s_page == SETTINGS_UPGRADE) {
         back_header(fb, "系统升级");
         settings_card(fb, (EpdRect){36, 202, 612, 120}, 22, UI_GRAY_WHITE, 0x70);
-        ui_text(fb, 60, 224, 22, "当前版本", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){60, 224, 564, 40}, 22, "当前版本", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 60, 264, 29, esp_app_get_description()->version, EPD_DRAW_ALIGN_LEFT, false);
         if (s_upgrade_confirm) {
             settings_card(fb, (EpdRect){36, 356, 612, s_upgrade_online ? 574 : 344}, 22, UI_GRAY_WHITE, 0x70);
@@ -1823,7 +1817,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             char detail[96];
             snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : ui_tr("连接网络，检查官网发布的新版本"));
             fit_value(detail, 540);
-            ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text_box(fb, (EpdRect){60, 436, 564, 40}, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_AVAILABLE)
                 ui_text(fb, 60, 477, 24, s_update.release.version, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
@@ -1831,8 +1825,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                 s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
             setting_toggle(fb, 662, "自动检查 OTA 更新", "每 12 小时检查一次", app_settings_auto_ota());
         }
-        if (s_upgrade_notice[0]) ui_text(fb, 48, 957, 21, s_upgrade_notice, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 1010, 20, "首次安装或修复，请通过官网完整刷机", EPD_DRAW_ALIGN_LEFT, false);
+        if (s_upgrade_notice[0]) ui_text_box(fb, (EpdRect){48, 957, 588, 40}, 21, s_upgrade_notice, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 1010, 588, 40}, 20, "首次安装或修复，请通过官网完整刷机", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1841,15 +1835,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         section(fb, 248, "换机或刷机后，快速恢复个性化设置");
         settings_card(fb, (EpdRect){36, 299, 612, 197}, 22, UI_GRAY_WHITE, 0x70);
         ui_text(fb, 60, 326, 26, "TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 60, 377, 23, "配置备份文件", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 60, 435, 19, "文字排版、设备资料、阅读记录与书签", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){60, 377, 564, 40}, 23, "配置备份文件", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){60, 435, 564, 40}, 19, "文字排版、设备资料、阅读记录与书签", EPD_DRAW_ALIGN_LEFT, false);
         ui_draw_button(fb, (EpdRect){36, 561, 612, 83}, "保存当前配置到 TF 卡", false);
         ui_draw_button(fb, (EpdRect){36, 681, 612, 83},
                        s_config_confirm ? "再次点按，确认恢复配置" : "从 TF 卡恢复配置", false);
-        if (s_notice[0]) ui_text(fb, 48, 819, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 899, 19, "包含阅读记录、用户偏好和全部已存 WiFi。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 939, 19, "书籍、字体和图片仍需留在 TF 卡。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 979, 19, "备份含明文 WiFi 密码，请妥善保管。", EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 819, 588, 40}, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 899, 588, 40}, 19, "包含阅读记录、用户偏好和全部已存 WiFi。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 939, 588, 40}, 19, "书籍、字体和图片仍需留在 TF 卡。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_box(fb, (EpdRect){48, 979, 588, 40}, 19, "备份含明文 WiFi 密码，请妥善保管。", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1898,7 +1892,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
                   connection_icons,connection_labels,connection_values,connection_rows);
     char font_name[96],contrast[24],idle[24],signature[96],standby[48];
-    snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
+    snprintf(font_name,sizeof(font_name),"%s · %u%%",ui_tr(system_font_label(app_settings_system_font_path())),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
     unsigned minutes=app_settings_auto_lock_minutes();
     if(minutes)snprintf(idle,sizeof(idle),ui_tr("%u 分钟"),minutes);else strcpy(idle,ui_tr("关闭"));
@@ -1909,7 +1903,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
-        standby,ui_language_name(ui_language()),"›"};
+        standby,ui_language_name(ui_language()),""};
     const int display_icons[]={2,7,15,11,14,9,2,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);

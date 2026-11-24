@@ -16,7 +16,7 @@ static void text(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags 
     ui_text_fixed_vc(fb,x,y,px,s,align,white);
 }
 static void fitted(uint8_t *fb,int x,int y,int px,int width,const char *s,enum EpdFontFlags align,bool white) {
-    while(px>16&&ui_text_fixed_width_px(px,s)>width)--px;
+    px = ui_text_fit_px(px,width,px*2+2,s);
     text(fb,x,y,px,s,align,white);
 }
 static void line(uint8_t *fb,int x,int y,int width,int height) {
@@ -129,6 +129,11 @@ static void number(uint8_t *fb,int value,int x,int top,int height) {
     }
 }
 static void vertical(uint8_t *fb,int x,int cy,const char *s) {
+    s = ui_tr(s);
+    if ((unsigned char)*s < 128) {
+        fitted(fb, x, cy, 33, 108, s, EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
     int count=(int)strlen(s)/3;
     for(int i=0;i<count;++i){char ch[4]={0};memcpy(ch,s+i*3,3);text(fb,x,cy+(2*i-count+1)*21,33,ch,EPD_DRAW_ALIGN_CENTER,false);}
 }
@@ -164,7 +169,7 @@ static void yiji(uint8_t *fb,const char *words,int x,int top,int width,int count
 static void badge(uint8_t *fb,int x,int y,int size,bool yi) {
     EpdRect box={x,y,size,size};
     if(yi)epd_fill_rect(box,UI_GRAY_BLACK,fb);else epd_draw_rect(box,UI_GRAY_BLACK,fb);
-    text(fb,x+size/2,y+size/2,size*2/3,yi?"宜":"忌",EPD_DRAW_ALIGN_CENTER,yi);
+    fitted(fb,x+size/2,y+size/2,size*2/3,size-6,yi?"宜":"忌",EPD_DRAW_ALIGN_CENTER,yi);
 }
 // 按实际字宽排词，末行预留省略号；有高度时整组垂直居中。
 // Wrap measured words with a final-row ellipsis, centering the block within an optional height.
@@ -194,7 +199,7 @@ static void almanac_activities(uint8_t *fb,const calendar_date_t *d) {
         int x=i?492:192;
         if(i){epd_draw_circle(x,538,25,UI_GRAY_BLACK,fb);epd_draw_circle(x,538,23,UI_GRAY_BLACK,fb);}
         else epd_fill_circle(x,538,25,UI_GRAY_BLACK,fb);
-        text(fb,x,538,36,i?"忌":"宜",EPD_DRAW_ALIGN_CENTER,!i);
+        fitted(fb,x,538,36,44,i?"忌":"宜",EPD_DRAW_ALIGN_CENTER,!i);
         for(int side=-1;side<=1;side+=2){
             ornament_curve(fb,(ornament_point_t){x+side*40,538},(ornament_point_t){x+side*58,525},
                 (ornament_point_t){x+side*78,550},(ornament_point_t){x+side*100,537});
@@ -227,7 +232,7 @@ static void almanac_plaque(uint8_t *fb,EpdRect r,const char *s,int px) {
         epd_fill_rect((EpdRect){r.x+inset,r.y+y,r.width-inset*2,1},UI_GRAY_BLACK,fb);
     }
     almanac_cut_frame(fb,(EpdRect){r.x+3,r.y+3,r.width-6,r.height-6},4,UI_GRAY_WHITE);
-    text(fb,r.x+r.width/2,r.y+r.height/2,px,s,EPD_DRAW_ALIGN_CENTER,true);
+    fitted(fb,r.x+r.width/2,r.y+r.height/2,px,r.width-12,s,EPD_DRAW_ALIGN_CENTER,true);
 }
 static void almanac_details(uint8_t *fb,const calendar_date_t *d) {
     almanac_cut_frame(fb,(EpdRect){56,737,572,125},10,UI_GRAY_BLACK);
@@ -263,7 +268,7 @@ static void almanac_details(uint8_t *fb,const calendar_date_t *d) {
     snprintf(s,sizeof(s),ui_tr("%s日"),d->officer);text(fb,532,1099,26,s,EPD_DRAW_ALIGN_LEFT,false);
     almanac_cut_frame(fb,(EpdRect){148,1125,388,33},7,UI_GRAY_BLACK);
     snprintf(s,sizeof(s),ui_tr("冲%s（%s）· 煞%s"),d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
-    text(fb,342,1141,26,s,EPD_DRAW_ALIGN_CENTER,false);
+    fitted(fb,342,1141,26,368,s,EPD_DRAW_ALIGN_CENTER,false);
 }
 static void grid(uint8_t *fb,const calendar_date_t *d,bool large) {
     static const char *const labels[]={"日","一","二","三","四","五","六"};
@@ -306,7 +311,7 @@ void ui_calendar_draw(uint8_t *fb,const calendar_date_t *d,bool monthly) {
         key_corner(fb,48,1155,1,-1);key_corner(fb,635,1155,-1,-1);
         lozenge(fb,342,89);line(fb,280,89,45,1);line(fb,360,89,45,1);
         snprintf(s,sizeof(s),ui_tr("公元 %d年"),d->year);text(fb,48,132,24,s,EPD_DRAW_ALIGN_LEFT,false);
-        snprintf(s,sizeof(s),ui_tr("%s · %s年"),calendar_cycle_name(d->year_cycle),animals[d->year_cycle%12]);
+        snprintf(s,sizeof(s),ui_tr("%s · %s年"),calendar_cycle_name(d->year_cycle),ui_tr(animals[d->year_cycle%12]));
         text(fb,636,132,24,s,EPD_DRAW_ALIGN_RIGHT,false);line(fb,48,158,588,1);
         fret_band(fb,176);
         vertical(fb,96,310,calendar_month_name(d->month));vertical(fb,588,310,weekdays[d->weekday]);
@@ -317,8 +322,13 @@ void ui_calendar_draw(uint8_t *fb,const calendar_date_t *d,bool monthly) {
         almanac_activities(fb,d);almanac_details(fb,d);season(fb,d,1186);
     }else{
         landscape(fb);
-        int w=number_width(d->month,78);number(fb,d->month,48,95,78);
-        text(fb,48+w+20,151,34,"月",EPD_DRAW_ALIGN_LEFT,false);
+        const char *month = ui_tr(calendar_month_name(d->month));
+        if ((unsigned char)month[0] < 128) {
+            fitted(fb,48,135,72,195,month,EPD_DRAW_ALIGN_LEFT,false);
+        } else {
+            int w=number_width(d->month,78);number(fb,d->month,48,95,78);
+            text(fb,48+w+20,151,34,"月",EPD_DRAW_ALIGN_LEFT,false);
+        }
         snprintf(s,sizeof(s),"%d",d->year);text(fb,636,151,28,s,EPD_DRAW_ALIGN_RIGHT,false);line(fb,48,192,588,2);
         number(fb,d->day,48,250,112);
         text(fb,280,260,27,weekdays[d->weekday],EPD_DRAW_ALIGN_LEFT,false);

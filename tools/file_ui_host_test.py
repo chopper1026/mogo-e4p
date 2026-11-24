@@ -48,6 +48,7 @@ static int app_settings_main_refresh_mode(void){return APP_MAIN_REFRESH_NORMAL;}
 #define FILE_ICON_PX 46
 #define FILE_ROWS 9
 '''
+    code += host.function("ui_text_fit_px", KIT) + "\n"
     code += host.function("ui_text_box", KIT).replace("ui_text_fixed_vc(fb,x,", "box_text(fb,box,x,") + "\n"
     for name in ("ui_pager_area", "ui_pager_rect", "ui_pager_hit", "ui_pager_target", "ui_pager_draw"):
         code += host.function(name, KIT) + "\n"

@@ -556,7 +556,7 @@ static void file_card_border(uint8_t *fb, EpdRect rect, int radius) {
 }
 
 static void fit_name(char *name, int px, int width) {
-    while (*name && ttf_text_width_px(ui_text_effective_px(px), name) > width) {
+    while (*name && ui_text_fixed_width_px(ui_text_effective_px(px), name) > width) {
         size_t n = strlen(name) - 1;
         while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
         name[n] = 0;
@@ -650,7 +650,7 @@ static void render_actions(uint8_t *fb) {
     file_card_border(fb, sheet, 28);
     ui_fill_round_rect(fb, (EpdRect){604, 454, 38, 38}, 19, 0xe0);
     ui_text_vc(fb, 623, 473, 24, "×", EPD_DRAW_ALIGN_CENTER, false);
-    char name[128]; copy_utf8(name, sizeof(name), s_selected.name); fit_name(name, 28, 540);
+    char name[128]; copy_utf8(name, sizeof(name), s_selected.name); fit_name(name, 28, 488);
     file_icon(fb, 48, 467, s_selected.is_dir);
     ui_text(fb, 102, 462, 28, name, EPD_DRAW_ALIGN_LEFT, false);
     char detail[48]; file_detail(detail, sizeof(detail), &s_selected);
@@ -660,7 +660,7 @@ static void render_actions(uint8_t *fb) {
     file_rule(fb, 42, 590, 600);
     if (s_message[0]) ui_text(fb, 50, 608, 20, s_message, EPD_DRAW_ALIGN_LEFT, false);
     if (s_delete_confirm) {
-        ui_text_vc(fb, 342, 712, s_selected.is_dir ? 23 : 28,
+        ui_text_box(fb, (EpdRect){46, 674, 592, 76}, s_selected.is_dir ? 23 : 28,
                    s_selected.is_dir ? "将删除文件夹内所有内容，无法恢复" : "删除后无法恢复，是否继续？",
                    EPD_DRAW_ALIGN_CENTER, false);
         ui_draw_button(fb, (EpdRect){50, 788, 278, 76}, "取消", false);
@@ -671,10 +671,10 @@ static void render_actions(uint8_t *fb) {
             EpdRect button = {40 + (i % 2) * 312, 648 + (i / 2) * 122, 292, 100};
             ui_fill_round_rect(fb, button, 20, 0xe8);
             ui_draw_control_frame(fb, button, 20, 0x60);
-            ui_text_vc(fb, button.x + button.width / 2, button.y + 50, 25,
+            ui_text_box(fb, (EpdRect){button.x+10,button.y+8,button.width-20,84}, 25,
                        labels[i], EPD_DRAW_ALIGN_CENTER, false);
         }
-        ui_text_vc(fb, 342, 900, 20, "长按文件或文件夹打开操作", EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_box(fb, (EpdRect){48, 872, 588, 56}, 20, "长按文件或文件夹打开操作", EPD_DRAW_ALIGN_CENTER, false);
         ui_fill_round_rect(fb, (EpdRect){40, 930, 604, 76}, 26, 0xe0);
         ui_text_vc(fb, 342, 968, 23, "取消", EPD_DRAW_ALIGN_CENTER, false);
     }
@@ -754,8 +754,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (s_view == FILE_VIEW_MOVE) {
             ui_draw_control_frame(fb, (EpdRect){36, 875, 293, 76}, 8, UI_GRAY_BLACK);
             ui_draw_control_frame(fb, (EpdRect){355, 875, 293, 76}, 8, UI_GRAY_BLACK);
-            ui_text(fb, 182, 897, 24, "取消移动", EPD_DRAW_ALIGN_CENTER, false);
-            ui_text(fb, 501, 897, 24, "移动到此处", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){46, 883, 272, 60}, 24, "取消移动", EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_box(fb, (EpdRect){365, 883, 272, 60}, 24, "移动到此处", EPD_DRAW_ALIGN_CENTER, false);
         }
     } else {
         EpdRect storage = storage_card_rect();
@@ -796,7 +796,13 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
 #endif
         };
         static const ui_icon_t icons[] = {UI_ICON_WIFI, UI_ICON_RADIO_TOWER, UI_ICON_USB};
-        for (int i = 0; i < home_transfer_count(); ++i) {
+        const int count = home_transfer_count(), inner = home_transfer_rect(0).width - 12;
+        int method_px = ui_text_effective_px(21), detail_px = ui_text_effective_px(16);
+        for (int i = 0; i < count; ++i) {
+            method_px = ui_text_fit_px(method_px, inner, 38, methods[i]);
+            detail_px = ui_text_fit_px(detail_px, inner, 32, details[i]);
+        }
+        for (int i = 0; i < count; ++i) {
             EpdRect card = home_transfer_rect(i);
             const int cx = card.x + card.width / 2;
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
@@ -804,10 +810,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             else
 #endif
                 ui_draw_icon(fb, cx, card.y + 28, 40, icons[i], UI_GRAY_BLACK);
-            ui_text_box(fb, (EpdRect){card.x + 6, card.y + 54, card.width - 12, 38},
-                        21, methods[i], EPD_DRAW_ALIGN_CENTER, false);
-            ui_text_box(fb, (EpdRect){card.x + 6, card.y + 95, card.width - 12, 32},
-                        16, details[i], EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_fixed_vc(fb, cx, card.y + 73, method_px, methods[i], EPD_DRAW_ALIGN_CENTER, false);
+            ui_text_fixed_vc(fb, cx, card.y + 111, detail_px, details[i], EPD_DRAW_ALIGN_CENTER, false);
         }
         ui_fill_rect_fast((EpdRect){36, 422, 612, 2}, 0xc0, fb);
         char summary[48]; snprintf(summary, sizeof(summary), ui_tr("根目录 · %d 项"), s_count);

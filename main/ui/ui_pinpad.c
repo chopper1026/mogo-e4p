@@ -136,7 +136,7 @@ static void paint(uint8_t *fb,const ui_pinpad_t *pad,EpdRect area){
             for(int r=RADIUS;r>=RADIUS-2;--r)epd_draw_circle(cx,cy,r,0,fb);
             for(int r=67;r>=63;--r)epd_draw_circle(cx,cy,r,pressed?0:255,fb);
             char numeral[2]={(char)('0'+hit),0};text(fb,cx,cy,74,numeral,0,pad,hit);
-        }else text(fb,box.x+box.width/2,1132,27,hit==10?"取消":"删除",0,pad,hit);
+        }else text(fb,box.x+box.width/2,1132,27,hit==10?ui_tr("取消"):ui_tr("删除"),0,pad,hit);
     }
 }
 void ui_pinpad_paint(uint8_t *fb,const ui_pinpad_t *pad,EpdRect area){paint(fb,pad,area);}

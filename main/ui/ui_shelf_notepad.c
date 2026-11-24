@@ -3,6 +3,7 @@
  * English: Notepad paper, row layout, and text fitting; does not read books or artwork.
  */
 #include "ui_shelf_notepad.h"
+#include "ui_locale.h"
 #include "assets/shelf_notepad_roll.h"
 #include "ui_image_dither.h"
 #include <stdio.h>
@@ -60,7 +61,7 @@ void ui_notepad_paper(uint8_t *fb, bool selecting, bool fast) {
     paper_outline(fb, (EpdRect){PAPER_X, y, PAPER_W, end - y + 4}, selecting ? 0 : 2, fast);
     if (!selecting)
         paint_roll(fb, (EpdRect){PAPER_X - 12, ROLL_Y, NOTEPAD_ROLL_W, NOTEPAD_ROLL_H}, fast);
-    ui_notepad_line(fb, -1, selecting, false, false, fast, "书名", "作者", 0);
+    ui_notepad_line(fb, -1, selecting, false, false, fast, ui_tr("书名"), ui_tr("作者"), 0);
 }
 
 static void cell_text(uint8_t *fb, int x, int cy, int size, int width, const char *value, uint8_t ink) {

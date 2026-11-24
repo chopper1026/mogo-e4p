@@ -84,7 +84,7 @@ void ui_reading_journal_widget(uint8_t *fb,EpdRect region,const reading_journal_
     char value[160];rect(fb,0,top,684,472,255);rect(fb,36,top,612,1,0x90);
     text(fb,36,top+38,32,"阅读手账",EPD_DRAW_ALIGN_LEFT);
     if(today->serial) {
-        snprintf(value,sizeof(value),"%02d.%02d %s",today->month,today->day,s_week[today->weekday]);
+        snprintf(value,sizeof(value),"%02d.%02d %s",today->month,today->day,ui_tr(s_week[today->weekday]));
         text(fb,610,top+38,25,value,EPD_DRAW_ALIGN_RIGHT);
     }
     ui_draw_icon(fb,636,top+38,24,UI_ICON_CHEVRON_RIGHT,0);
@@ -157,7 +157,7 @@ void ui_reading_journal_detail(uint8_t *fb,const reading_journal_model_t *model,
     if(!today->serial) {text(fb,342,600,29,"请先校准日期和时间",EPD_DRAW_ALIGN_CENTER);return;}
     calendar(fb,model,today,selected);
     int weekday=(today->first_weekday+(int)selected-1)%7;
-    snprintf(value,sizeof(value),ui_tr("%d月%u日  %s"),today->month,selected,s_week[weekday]);
+    snprintf(value,sizeof(value),ui_tr("%d月%u日  %s"),today->month,selected,ui_tr(s_week[weekday]));
     text(fb,36,788,32,value,EPD_DRAW_ALIGN_LEFT);
     if(selected==(unsigned)today->day)text(fb,648,788,24,"今天",EPD_DRAW_ALIGN_RIGHT);
     reading_journal_totals_t day=reading_journal_totals(model,selected);

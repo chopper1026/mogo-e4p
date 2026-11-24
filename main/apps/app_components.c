@@ -30,7 +30,7 @@ static void text(uint8_t *fb, int x, int y, int px, const char *value, enum EpdF
     ui_text_fixed_vc(fb,x,y,px,value,align,false);
 }
 static void fitted(uint8_t *fb, int x, int y, int px, const char *value, int width) {
-    char shown[193];snprintf(shown,sizeof(shown),"%s",value);
+    char shown[193];snprintf(shown,sizeof(shown),"%s",ui_tr(value));
     while(*shown && ui_text_fixed_width_px(px,shown)>width) {
         size_t n=strlen(shown)-1;while(n&&((unsigned char)shown[n]&192)==128)--n;shown[n]=0;
     }

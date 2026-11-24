@@ -42,12 +42,19 @@ static int ui_text_effective_px(int px){return (px+2)*scale/100;}
 static int ui_text_fixed_width_px(int px,const char *value){++measures;return (int)strlen(value)*px/3;}
 static void ui_text(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){(void)fb;(void)x;(void)y;(void)px;(void)align;(void)inv;assert(!strstr(text,"›"));++text_calls;}
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){if(x==100)last_label_y=y;if(x==594){assert(y==last_label_y);++pairs;}ui_text(fb,x,y,px,text,align,inv);}
+static int label_right;
+static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *text,int align,bool inv){
+ assert(r.width>0 && r.height>0);
+ if(align==EPD_DRAW_ALIGN_LEFT)label_right=r.x+r.width;else assert(r.x>=label_right+16);
+ ui_text_vc(fb,align==EPD_DRAW_ALIGN_LEFT?r.x:r.x+r.width,r.y+r.height/2,px,text,align,inv);
+}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int gray){(void)fb;(void)x;(void)y;(void)px;(void)gray;assert(icon==UI_ICON_CHEVRON_RIGHT);++arrows;}
 static void setting_icon(uint8_t *fb,int index,int x,int y){(void)fb;(void)index;(void)x;(void)y;++icons;}
 static void settings_card(uint8_t *fb,EpdRect r,int radius,int fill,int edge){(void)fb;(void)r;(void)radius;(void)fill;(void)edge;}
 static void settings_divider(uint8_t *fb,int y,int x,int width){(void)fb;(void)y;(void)x;(void)width;}
 '''
-for name in ('settings_main_row_height','settings_fit_text','fit_value','settings_value','setting_group'):
+unit+=function('ui_text_value_box',ROOT/'main/ui/ui_kit.c').replace('enum EpdFontFlags','int')+'\n'
+for name in ('settings_main_row_height','settings_pair','row','setting_group'):
  unit+=function(name,settings)+'\n'
 unit+=r'''
 static int s_view=READING;
@@ -139,9 +146,9 @@ int main(void){
   setting_group(pixels,300,"hidden",349,marks,labels,values,6);
   assert(!text_calls&&!icons&&!arrows&&!measures);
  }
- scale=100;arrows=0;settings_value(pixels,627,200,21,"network  ›");assert(arrows==1);
- settings_value(pixels,627,200,21,"›");assert(arrows==2);
- settings_value(pixels,627,200,21,"network");assert(arrows==2);
+ scale=100;arrows=0;row(pixels,200,"Network","Saved",true);assert(arrows==1);
+ row(pixels,200,"Network","",true);assert(arrows==2);
+ row(pixels,200,"Network","Saved",false);assert(arrows==2);
  app_ctx_t ctx={.fb=fb};memset(fb,77,sizeof(fb));
  // 静置期间分钟、电量变化不绘图，翻页时才准备；确认必须来自成功的实际顶部输出。
  // Idle time/power changes do not paint; only turns prepare status and successful top output acknowledges it.

@@ -119,7 +119,16 @@ static void key_paint(uint8_t *fb, EpdRect r, const char *text, int px, bool dar
             epd_draw_line(cx - 2, cy - 5 + d, cx + 8, cy + 5 + d, ink, fb);
             epd_draw_line(cx - 2, cy + 5 + d, cx + 8, cy - 5 + d, ink, fb);
         }
-    } else ui_text_fixed_vc(fb, r.x + r.width / 2, r.y + r.height / 2 + (pressed ? 2 : 0), px, text, EPD_DRAW_ALIGN_CENTER, inverse);
+    } else {
+        // 单字键保留键盘字号；多字标签可能比原键帽宽。/ Keep single keycaps at keyboard size; fit localized multi-letter labels.
+        const char *shown = ui_tr(text);
+        if (strlen(shown) > 1 && (unsigned char)shown[0] < 128) {
+            int width = ui_text_fixed_width_px(px, shown);
+            if (width > r.width - 8) px = px * (r.width - 8) / width;
+            while (px > 1 && ui_text_fixed_width_px(px, shown) > r.width - 8) --px;
+        }
+        ui_text_fixed_vc(fb, r.x + r.width / 2, r.y + r.height / 2 + (pressed ? 2 : 0), px, shown, EPD_DRAW_ALIGN_CENTER, inverse);
+    }
 }
 static size_t visible(size_t start, EpdRect boxes[5], int top) {
     if (!s_candidates || !s_chinese) return 0;

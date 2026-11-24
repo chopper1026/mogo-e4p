@@ -87,7 +87,8 @@ void ui_reading_streak_draw(uint8_t *fb,const reading_streak_view_t *view) {
     while (px>32 && ui_text_fixed_width_px(px,number)>144) --px;
     ui_text_fixed_vc(fb,36,117,px,number,EPD_DRAW_ALIGN_LEFT,false);
     int number_w=ui_text_fixed_width_px(px,number);
-    int book_x=36+number_w+44,label_x=book_x+131+22;
+    int unit_w=ui_text_fixed_width_px(21,"天");
+    int book_x=36+number_w+(unit_w+12>44?unit_w+12:44),label_x=book_x+131+22;
     ui_text_fixed_vc(fb,36+number_w+6,135,21,"天",EPD_DRAW_ALIGN_LEFT,false);
     fitted(fb,label_x,104,25,"连续阅读");
     if (!view->valid) fitted(fb,label_x,136,20,"请先校准时间");

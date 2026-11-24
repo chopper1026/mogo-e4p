@@ -308,7 +308,7 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
     ctx->leaf=next;return APP_REDRAW_AREA;
 }
 '''
-    for name in ("ui_content_width", "ui_text_box", "ui_pager_area", "ui_pager_rect", "ui_pager_hit", "ui_pager_target", "ui_pager_draw"):
+    for name in ("ui_content_width", "ui_text_fit_px", "ui_text_box", "ui_pager_area", "ui_pager_rect", "ui_pager_hit", "ui_pager_target", "ui_pager_draw"):
         code += host.function(name, KIT) + "\n"
     code += host.function("book_cover_crop", ROOT / "main/image/image_decode.c") + "\n"
     code += host.function("icon", NAV) + host.function("ui_nav_draw", NAV) + host.function("ui_nav_hit", NAV)

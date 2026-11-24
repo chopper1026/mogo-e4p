@@ -25,6 +25,7 @@ static void digit_draw(uint8_t *fb, unsigned digit, int column, int baseline) {
     }
 }
 static void centered(uint8_t *fb, int baseline, int em, const char *text, int tracking) {
+    text = ui_tr(text);
     unsigned count = 0;
     for (const unsigned char *p = (const unsigned char *)text; *p; ++p)
         if ((*p & 0xc0) != 0x80) ++count;

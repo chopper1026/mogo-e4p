@@ -40,14 +40,14 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     EpdRect card = {36, 244, 612, 320};
     ui_fill_round_rect(fb, card, 24, 0xf0);
     ui_draw_round_rect(fb, card, 24, 0x38);
-    ui_text(fb, 58, 270, 30, s_removed ? "书籍已删除" : s_confirm ? "确认删除这本书？" : "上次打开此书时中断", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){58,266,568,62}, 30, s_removed ? "书籍已删除" : s_confirm ? "确认删除这本书？" : "上次打开此书时中断", EPD_DRAW_ALIGN_LEFT, false);
     const char *name = strrchr(s_path, '/');
     char label[288]; snprintf(label, sizeof(label), "%s", name ? name + 1 : s_path);
     fit(label, 560);
     ui_text(fb, 58, 345, 27, label, EPD_DRAW_ALIGN_LEFT, false);
-    ui_text(fb, 58, 423, 24, s_confirm ? "删除后需要重新导入这本书。" : "可能是开书时断电或解析异常。", EPD_DRAW_ALIGN_LEFT, false);
-    ui_text(fb, 58, 482, 24, s_confirm ? "其他书籍和设置会保留。" : "已停止自动重试，可先返回首页。", EPD_DRAW_ALIGN_LEFT, false);
-    if (s_message[0]) ui_text(fb, 58, 609, 24, s_message, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){58,419,568,55}, 24, s_confirm ? "删除后需要重新导入这本书。" : "可能是开书时断电或解析异常。", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(fb, (EpdRect){58,478,568,62}, 24, s_confirm ? "其他书籍和设置会保留。" : "已停止自动重试，可先返回首页。", EPD_DRAW_ALIGN_LEFT, false);
+    if (s_message[0]) ui_text_box(fb, (EpdRect){58,605,568,72}, 24, s_message, EPD_DRAW_ALIGN_LEFT, false);
     EpdRect back = {36, 710, 612, 82}, remove = {36, 820, 612, 82};
     ui_fill_round_rect(fb, back, 20, 0xf0); ui_draw_round_rect(fb, back, 20, 0x38);
     ui_text_vc(fb, 342, 751, 28, s_confirm ? "取消删除" : "返回首页", EPD_DRAW_ALIGN_CENTER, false);

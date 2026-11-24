@@ -1240,9 +1240,12 @@ static void draw_shelf_header_button(uint8_t *fb, EpdRect r, int action) {
     if(s_shelf_selecting)ui_draw_control_frame(fb,r,8,0x50);
     if(!action)ui_draw_icon(fb,r.x+r.width/2,r.y+r.height/2+(pressed?2:0),34,UI_ICON_SEARCH,0);
     else {
-        const char *label=action==1?(s_shelf_selecting?"取消":"选择"):action==2?"管理":"导入";
-        r.y+=pressed?2:0;
-        shelf_label(fb,r,24,label,true);
+        const char *labels[] = {s_shelf_selecting ? "取消" : "选择", "管理", "导入"};
+        int px = ui_text_effective_px(24);
+        for (int i = 0; i < (s_shelf_selecting ? 1 : 3); ++i)
+            px = ui_text_fit_px(px, r.width - 4, r.height - 8, labels[i]);
+        ui_text_fixed_vc(fb, r.x + r.width/2, r.y + r.height/2 + (pressed ? 2 : 0),
+                         px, labels[action-1], EPD_DRAW_ALIGN_CENTER, false);
     }
 }
 static EpdRect shelf_page_arrow_rect(int direction) {
@@ -1306,7 +1309,7 @@ static void copy_text(char* dst, size_t cap, const char* src) {
     dst[n] = 0;
 }
 static void fit_text(char* text, int px, int width) {
-    while (*text && ttf_text_width_px(ui_text_effective_px(px), text) > width) {
+    while (*text && ui_text_fixed_width_px(ui_text_effective_px(px), text) > width) {
         size_t n = strlen(text) - 1;
         while (n && ((unsigned char)text[n] & 0xc0) == 0x80) --n;
         text[n] = 0;
@@ -3421,23 +3424,33 @@ static void draw_note_sheet(uint8_t *fb) {
     ttf_font_select(previous_slot);
 }
 
+static void draw_reader_toolbar(uint8_t *fb) {
+    EpdRect band = reader_tools_area();
+    ui_fill_rect_fast(band, UI_GRAY_WHITE, fb);
+    // 1px 浅灰线在白底工具栏上几乎看不见；结构分隔改用深色双像素。
+    // A 1 px light-gray rule reads as almost nothing on the white bar; use the dark two-pixel separator.
+    ui_draw_separator(fb, band.y, 0, READER_WIDTH, 0x70);
+    const char *labels[] = {"目录", "书签", "排版", "设置", "更多"};
+    // 同组共用字号，包括两种书签状态，切换时其他标签也不会跳动。
+    // Fit both bookmark states so changing state never resizes its neighbors.
+    int px = ui_text_effective_px(24);
+    for (int i = 0; i < BOOK_TOOL_COUNT; ++i)
+        px = ui_text_fit_px(px, tool_rect(i).width - 12, 40, labels[i]);
+    px = ui_text_fit_px(px, tool_rect(1).width - 12, 40, "已书签");
+    for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
+        EpdRect rect = tool_rect(i);
+        int cx = rect.x + rect.width / 2;
+        bool bookmarked = i == 1 && bookmark_is_current();
+        draw_reader_tool_icon(fb, cx, rect.y + 42, i, bookmarked);
+        ui_text_fixed_vc(fb, cx, rect.y + 83, px, bookmarked ? "已书签" : labels[i], EPD_DRAW_ALIGN_CENTER, false);
+    }
+}
+
 static void draw_reader_panel(uint8_t* fb) {
     if (s_reader_panel==READER_PANEL_NONE) return;
     ui_text_set_system_scale(true);
     if (s_reader_panel == READER_PANEL_TOOLS) {
-        EpdRect band = reader_tools_area();
-        ui_fill_rect_fast(band, UI_GRAY_WHITE, fb);
-        // 1px 浅灰线在白底工具栏上几乎看不见；结构分隔改用深色双像素。
-        // A 1 px light-gray rule reads as almost nothing on the white bar; use the dark two-pixel separator.
-        ui_draw_separator(fb, band.y, 0, READER_WIDTH, 0x70);
-        const char* labels[] = {"目录", "书签", "排版", "设置", "更多"};
-        for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
-            EpdRect rect = tool_rect(i);
-            int cx = rect.x + rect.width / 2;
-            bool bookmarked = i == 1 && bookmark_is_current();
-            draw_reader_tool_icon(fb, cx, rect.y + 42, i, bookmarked);
-            ui_text_box(fb,(EpdRect){rect.x+6,rect.y+63,rect.width-12,40},24,bookmarked?"已书签":labels[i],EPD_DRAW_ALIGN_CENTER,false);
-        }
+        draw_reader_toolbar(fb);
     } else if (s_reader_panel == READER_PANEL_MORE) draw_reader_more(fb);
     else if (s_reader_panel == READER_PANEL_FONT_SETTINGS) draw_font_settings(fb);
     else if (s_reader_panel == READER_PANEL_WEIGHT_SETTINGS) draw_weight_settings(fb);

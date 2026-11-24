@@ -33,6 +33,7 @@ void ui_draw_pressed_round_rect(uint8_t*f,EpdRect r,int rad) {(void)f;(void)r;(v
 void ui_draw_choice_round_rect(uint8_t*f,EpdRect r,int rad,bool on) {(void)f;(void)r;(void)rad;selected=on;}
 void ui_text(uint8_t*f,int x,int y,int p,const char*t,enum EpdFontFlags a,bool i) {(void)f;(void)x;(void)y;(void)p;(void)t;(void)a;(void)i;texts++;}
 void ui_text_vc(uint8_t*f,int x,int y,int p,const char*t,enum EpdFontFlags a,bool i) {ui_text(f,x,y,p,t,a,i);}
+void ui_text_box(uint8_t*f,EpdRect r,int p,const char*t,enum EpdFontFlags a,bool i) {assert(r.width>0 && r.height>0);ui_text(f,r.x,r.y,p,t,a,i);}
 int main(void) {
     EpdRect r;
     assert(ui_menu_row_rect(1,1,&r));

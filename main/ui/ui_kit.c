@@ -370,31 +370,63 @@ void ui_text_fixed_context_vc(
     }
 }
 
-void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
-                 enum EpdFontFlags align, bool inverted) {
+int ui_text_fit_px(int px, int width_limit, int height_limit, const char *text) {
     text = ui_tr(text);
-    if (!fb || !text || !text[0] || box.width <= 0 || box.height <= 0) return;
-    px = ui_text_effective_px(px);
+    if (px <= 0 || width_limit <= 0 || height_limit <= 0) return 0;
+    if (!text || !*text) return px;
     const bool builtin = (!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text);
-    while (px > 1) {
+    int lo = 1, hi = px, best = 0;
+    while (lo <= hi) {
         int above = 0, below = 0;
         if (builtin) ui_font_measure_line_px(px,text,&above,&below);
         else ttf_measure_line_px(px,text,&above,&below);
         // 基线与居中坐标分别取整，预留两像素避免奇数字形越过控件边界。
         // Reserve two pixels for separate baseline/center rounding on odd glyph bounds.
-        const int width = ui_text_fixed_width_px(px,text), height = above + below + 2;
-        if (width <= box.width && height <= box.height) break;
-        int next = px - 1;
-        if (width > box.width && width > 0 && px * box.width / width < next)
-            next = px * box.width / width;
-        if (height > box.height && height > 0 && px * box.height / height < next)
-            next = px * box.height / height;
-        px = next > 0 ? next : 1;
+        if (ui_text_fixed_width_px(px,text) <= width_limit && above + below + 2 <= height_limit) {
+            best = px;
+            if (px == hi) break;
+            lo = px + 1;
+        } else hi = px - 1;
+        px = lo + (hi - lo) / 2;
     }
+    return best;
+}
+
+void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
+                 enum EpdFontFlags align, bool inverted) {
+    text = ui_tr(text);
+    if (!fb || !text || !*text) return;
+    px = ui_text_fit_px(ui_text_effective_px(px), box.width, box.height, text);
+    if (px <= 0) return;
     int x = box.x;
     if (align == EPD_DRAW_ALIGN_CENTER) x += box.width / 2;
     else if (align == EPD_DRAW_ALIGN_RIGHT) x += box.width;
     ui_text_fixed_vc(fb,x,box.y+box.height/2,px,text,align,inverted);
+}
+
+void ui_text_value_box(uint8_t *fb, EpdRect box, int px, const char *text,
+                       enum EpdFontFlags align, bool inverted) {
+    text = ui_tr(text);
+    if (!fb || !text || !*text || box.width <= 0 || box.height <= 0) return;
+    const int min_px = ui_text_effective_px(px) * 3 / 4;
+    if (ui_text_fixed_width_px(min_px, text) <= box.width) {
+        ui_text_box(fb, box, px, text, align, inverted);
+        return;
+    }
+    // 长文件名等值用省略号，不把全行缩成小字；二分试宽时保持 UTF-8 边界。
+    // Ellipsize long values instead of shrinking the line to tiny type; probe only UTF-8 boundaries.
+    char shown[128];
+    size_t lo = 0, hi = strnlen(text, sizeof(shown) - sizeof("…")), best = 0;
+    while (lo <= hi) {
+        size_t mid = lo + (hi - lo) / 2, end = mid;
+        while (end && ((unsigned char)text[end] & 0xc0) == 0x80) --end;
+        memcpy(shown, text, end); memcpy(shown + end, "…", sizeof("…"));
+        if (ui_text_fixed_width_px(min_px, shown) <= box.width) { best = end; lo = mid + 1; }
+        else if (mid) hi = mid - 1;
+        else break;
+    }
+    memcpy(shown, text, best); memcpy(shown + best, "…", sizeof("…"));
+    ui_text_box(fb, box, px, shown, align, inverted);
 }
 
 void ui_setup_text_box(uint8_t *fb, EpdRect box, int px, const char *text, enum EpdFontFlags align, bool inverted) {
@@ -1081,10 +1113,7 @@ void ui_draw_button(
     uint8_t* framebuffer, EpdRect rect, const char* label, bool on
 ) {
     ui_draw_choice_round_rect(framebuffer, rect, UI_BTN_RADIUS, on);
-    ui_text_vc(
-        framebuffer, rect.x + rect.width / 2, rect.y + rect.height / 2,
-        UI_PX_BTN, label, EPD_DRAW_ALIGN_CENTER, false
-    );
+    ui_text_box(framebuffer, ui_inset_rect(rect, 8), UI_PX_BTN, label, EPD_DRAW_ALIGN_CENTER, false);
 }
 
 void ui_draw_chip(
@@ -1095,10 +1124,7 @@ void ui_draw_chip(
     } else {
         ui_draw_control_frame(framebuffer, rect, UI_CHIP_RADIUS, UI_GRAY_LIGHT);
     }
-    ui_text_vc(
-        framebuffer, rect.x + rect.width / 2, rect.y + rect.height / 2,
-        UI_PX_LABEL_SM, label, EPD_DRAW_ALIGN_CENTER, false
-    );
+    ui_text_box(framebuffer, ui_inset_rect(rect, 8), UI_PX_LABEL_SM, label, EPD_DRAW_ALIGN_CENTER, false);
 }
 
 // Code 39 条码。/ Code 39 barcode.

@@ -32,7 +32,7 @@ static void copy(char *out, size_t cap, const char *s) {
     memcpy(out, s, n); out[n] = 0;
 }
 static void text(uint8_t *fb, EpdRect rect, int px, const char *s, bool center) {
-    char line[292]; copy(line, sizeof(line) - 4, s);
+    char line[292]; copy(line, sizeof(line) - 4, ui_tr(s));
     px = ui_text_effective_px(px); if (px > rect.height - 10) px = rect.height - 10;
     if (ui_text_fixed_width_px(px, line) > rect.width) {
         size_t n = strlen(line);
@@ -63,6 +63,7 @@ static size_t line_end(const char *s, int px, int width) {
     return end;
 }
 static void full_text(uint8_t *fb, EpdRect r, int base_px, const char *s) {
+    s = ui_tr(s);
     int px = ui_text_effective_px(base_px), lines;
     do {
         const char *p = s; lines = 0;
@@ -155,8 +156,8 @@ void book_category_ui_books(book_category_ui_t *ui, uint32_t target, bool select
 }
 static void submit(book_category_ui_t *ui) {
     char clean[BOOK_COLLECTION_NAME_BYTES];
-    if (ui_keyboard_pending()) { copy(ui->notice, sizeof(ui->notice), "请先选择候选字"); return; }
-    if (!book_collection_name(ui->draft, clean) || !book_category_name_valid(clean)) { copy(ui->notice, sizeof(ui->notice), "名称须为1至24字，且不能重复系统分类"); return; }
+    if (ui_keyboard_pending()) { copy(ui->notice, sizeof(ui->notice), ui_tr("请先选择候选字")); return; }
+    if (!book_collection_name(ui->draft, clean) || !book_category_name_valid(clean)) { copy(ui->notice, sizeof(ui->notice), ui_tr("名称须为1至24字，且不能重复系统分类")); return; }
     copy(ui->draft,sizeof(ui->draft),clean);
     ui->command = ui->renaming ? CATEGORY_RENAME : CATEGORY_CREATE;
 }
@@ -168,8 +169,8 @@ static void pager(uint8_t *fb, int page, int count, int y) {
 }
 static void draw_books(const book_category_ui_t *ui, const book_shelf_categories_t *c, uint8_t *fb) {
     char title[160];
-    if (ui->review) copy(title, sizeof(title), "已选图书");
-    else snprintf(title, sizeof(title), ui_tr("添加到「%s」"), name_of(c, ui->destination));
+    if (ui->review) copy(title, sizeof(title), ui_tr("已选图书"));
+    else snprintf(title, sizeof(title), ui_tr("添加到「%s」"), ui_tr(name_of(c, ui->destination)));
     text(fb, (EpdRect){112, 80, 432, 80}, 34, title, false);
     ui_draw_control_frame(fb,(EpdRect){568,80,80,80},8,0x50);
     ui_draw_icon(fb,608,120,34,UI_ICON_SEARCH,0);

@@ -116,10 +116,17 @@ void ui_text_set_system_scale(bool enabled);
 void ui_setup_text_box(uint8_t *fb, EpdRect box, int px, const char *text, enum EpdFontFlags align, bool inverted);
 void ui_text_set_system_font(bool enabled);
 int ui_text_effective_px(int px);
+/// 按当前语言和字面收紧已缩放的字号；等价控件可依次取共同字号。
+/// Fit an already-scaled size using the localized face metrics; fold over peers for a shared size.
+int ui_text_fit_px(int px, int width_limit, int height_limit, const char *text);
 /// 按系统字号绘制单行文字，按字形真实边界适配控件；不打开第二份字体。
 /// Scale one line to the UI preference, fitting native glyphs within a control without loading another face.
 void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
                  enum EpdFontFlags align, bool inverted);
+/// 过长的文件名等数值按完整 UTF-8 字符加省略号，保留可读字号。
+/// Ellipsize long filenames and other values at UTF-8 boundaries to retain a readable size.
+void ui_text_value_box(uint8_t *fb, EpdRect box, int px, const char *text,
+                       enum EpdFontFlags align, bool inverted);
 /// 灰阶图片在绘制时增强明暗差，原始缓存保持不变。/ Increase image contrast at draw time without altering cached pixels.
 uint8_t ui_contrast_gray(uint8_t gray);
 /// 按逻辑旋转坐标读取当前帧，返回0..15灰阶；调用方保证坐标有效。/ Read the rotated frame at valid logical coordinates, returning gray level 0..15.

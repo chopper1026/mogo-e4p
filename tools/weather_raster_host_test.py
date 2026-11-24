@@ -122,6 +122,7 @@ void ui_text_fixed_context_aa_vc(uint8_t *f,int x,int y,int px,const char *s,con
 }
 int ui_text_fixed_width_px(int px,const char *s){return ttf_text_width_px(px,s);}
 """
+unit += host.function("ui_text_fit_px",KIT).replace('(!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text)', 'false').replace('ui_font_measure_line_px', 'ttf_measure_line_px')
 production = (ROOT / "main/ui/ui_weather.c").read_text()
 unit += "\n".join(line for line in production.splitlines() if not line.startswith("#include"))
 unit += '\nstatic const struct {int code; const char *name,*condition; int low,high,humidity;} samples[]={\n'

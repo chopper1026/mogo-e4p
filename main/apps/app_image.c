@@ -178,10 +178,10 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (idx >= s_count) break;
         EpdRect box = {36, 214 + row * 101, 612, 84};
         ui_fill_round_rect(fb, box, 17, UI_GRAY_WHITE);
-        ui_text_vc(fb, 58, box.y + 42, 24, s_items[idx].name, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_value_box(fb, (EpdRect){58,box.y+8,530,68}, 24, s_items[idx].name, EPD_DRAW_ALIGN_LEFT, false);
         ui_text_vc(fb, 623, box.y + 42, 25, "›", EPD_DRAW_ALIGN_RIGHT, false);
     }
-    if (s_message[0]) ui_text(fb, 36, 1035, 21, s_message, EPD_DRAW_ALIGN_LEFT, false);
+    if (s_message[0]) ui_text_box(fb, (EpdRect){36,1025,612,60}, 21, s_message, EPD_DRAW_ALIGN_LEFT, false);
     ui_nav_draw(fb, 3);
 }
 

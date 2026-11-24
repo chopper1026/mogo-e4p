@@ -116,14 +116,11 @@ void ui_draw_menu_row_pressed(uint8_t* framebuffer, const app_desc_t* current,
         framebuffer, badge_cx, rect.y + rect.height / 2, UI_PX_LABEL, line,
         EPD_DRAW_ALIGN_CENTER, false
     );
-    ui_text(
-        framebuffer, text_x, text_top, 36, item->title,
-        EPD_DRAW_ALIGN_LEFT, false
-    );
-    ui_text(
-        framebuffer, text_x, text_top + 44, UI_PX_CAPTION, item->detail,
-        EPD_DRAW_ALIGN_LEFT, false
-    );
+    int width = rect.x + rect.width - 14 - text_x;
+    ui_text_box(framebuffer, (EpdRect){text_x, text_top, width, 42}, 36,
+                item->title, EPD_DRAW_ALIGN_LEFT, false);
+    ui_text_box(framebuffer, (EpdRect){text_x, text_top + 44, width, 36}, UI_PX_CAPTION,
+                item->detail, EPD_DRAW_ALIGN_LEFT, false);
 
 }
 
@@ -137,8 +134,7 @@ void ui_draw_menu_page(uint8_t* framebuffer, const app_desc_t* current, int leaf
     ui_clear_page(framebuffer);
     snprintf(
         line, sizeof(line),
-        ui_tr("第 %d / %d 页　Page %d / %d"),
-        leaf + 1, leaves, leaf + 1, leaves
+        ui_tr("%d / %d 页"), leaf + 1, leaves
     );
     ui_draw_header(framebuffer, "功能", line);
 

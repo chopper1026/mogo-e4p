@@ -99,6 +99,7 @@ static unsigned app_settings_reader_tap_mode(void){return app_settings_reader_ve
 static bool app_settings_reader_statusbar(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}
 '''
+unit+=function('ui_text_fit_px',kit)+'\n'
 unit+=function('ui_text_box',kit).replace('void ui_text_box(', 'static void actual_text_box(')+'\n'
 unit+=r'''
 static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inv){

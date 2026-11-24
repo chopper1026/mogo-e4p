@@ -168,8 +168,9 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
     ui_draw_icon(f,arrow,top+42,24,UI_ICON_CHEVRON_RIGHT,0);
     epd_fill_rect(tabs,255,f);
     epd_fill_rect((EpdRect){left+450+(tomorrow?98:0),top+22,96,40},0,f);
-    text(f,left+498,top+42,24,"今日",EPD_DRAW_ALIGN_CENTER,tomorrow?0:15,tomorrow?15:0);
-    text(f,left+596,top+42,24,"明日",EPD_DRAW_ALIGN_CENTER,tomorrow?15:0,tomorrow?0:15);
+    int tab_px = ui_text_fit_px(ui_text_fit_px(24,88,36,"今日"),88,36,"明日");
+    text(f,left+498,top+42,tab_px,"今日",EPD_DRAW_ALIGN_CENTER,tomorrow?0:15,tomorrow?15:0);
+    text(f,left+596,top+42,tab_px,"明日",EPD_DRAW_ALIGN_CENTER,tomorrow?15:0,tomorrow?0:15);
     if (weather_clock_valid(now)) weather_date_text(weather_local_day(now)+tomorrow,value,sizeof(value));
     else snprintf(value,sizeof(value),ui_tr("请先校准日期与时间"));
     tx(f,left+36,top+101,24,value);

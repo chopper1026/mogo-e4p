@@ -54,6 +54,8 @@ static void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;(void)x;(void)y;}
 static void ui_nav_draw(uint8_t *fb,int tab){(void)fb;(void)tab;}
 static void ui_text_vc(uint8_t *fb,...){(void)fb;}
 static void ui_text(uint8_t *fb,...){(void)fb;}
+static void ui_text_box(uint8_t *fb,EpdRect box,...){(void)fb;assert(box.width>0&&box.height>0);}
+#define ui_text_value_box ui_text_box
 static void ui_hairline(uint8_t *fb,...){(void)fb;}
 static void ui_fill_round_rect(uint8_t *fb,...){(void)fb;}
 static int update_display_image_gray(void *hl){(void)hl;++test_presentations;return 0;}

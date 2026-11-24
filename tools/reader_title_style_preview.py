@@ -244,7 +244,7 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
 '''
     unit += epdiy_slices() + kit_slices()
     for n in ('ui_text_effective_px', 'ui_text_fixed_context_width_px', 'ui_text_fixed_width_px',
-              'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_box'):
+              'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_fit_px', 'ui_text_box'):
         unit += function(n, KIT) + '\n'
     unit += enum_block(ROOT / 'main/settings/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')

@@ -34,7 +34,7 @@ static void inverse(card_t c, int x, int y, int *u, int *v) {
 static bool inside(EpdRect r,int x,int y) { return x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height; }
 static void text(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags align) { ui_text_fixed_vc(fb,x,y,px,s,align,false); }
 static void fitted(uint8_t *fb,int x,int y,int px,const char *value,int width,enum EpdFontFlags align) {
-    char shown[196];snprintf(shown,sizeof(shown),"%s",value); bool clipped=false;
+    char shown[196];snprintf(shown,sizeof(shown),"%s",ui_tr(value)); bool clipped=false;
     while (*shown && ui_text_fixed_width_px(px,shown)+(clipped?ui_text_fixed_width_px(px,"..."):0)>width) {
         size_t n=strlen(shown)-1;while(n && ((unsigned char)shown[n]&192)==128)--n;shown[n]=0;clipped=true;
     }

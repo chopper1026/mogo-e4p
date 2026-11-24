@@ -413,8 +413,10 @@ static void settings_card(uint8_t *fb,EpdRect box,int radius,int gray,int border
     assert(box.height==(cards==2&&timed?222:132)&&box.y+box.height<1112);
     assert(gray==(active?0xd0:UI_GRAY_WHITE));++cards;
 }
-static void ui_text(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
-    (void)fb;(void)x;(void)y;(void)align;(void)inv;assert(text&&text[0]);++texts;
+static void ui_text_box(uint8_t *fb,EpdRect r,int px,const char *text,int align,bool inv){
+    (void)fb;(void)align;(void)inv;assert(text&&text[0]);++texts;
+    EpdRect card=boxes[cards-1];assert(r.x>=card.x&&r.x+r.width<card.x+card.width);
+    assert(r.y>=card.y&&r.y+r.height<card.y+132);
     if(px==29){const char *labels[]={"彻底关机","仅浅睡","浅睡后关机"};assert(!strcmp(text,labels[cards-1]));}
 }
 static void epd_fill_circle(int x,int y,int r,int color,uint8_t *fb){(void)x;(void)r;(void)color;(void)fb;assert(y==300+(chosen>=APP_SHUTDOWN_LIGHT_10?2:(int)chosen-1)*154+66);++circles;}
