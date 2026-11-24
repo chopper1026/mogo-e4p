@@ -1,217 +1,68 @@
 # AGENTS.md
 
-面向 AI agent 的仓库入口。人类也可读。产品概述、硬件表、引脚、编译命令见 [README.md](README.md)。
+面向 AI agent 的仓库入口（人类可读）。目标硬件为 **Metalio E-INK4 Plus（ESP32-S31）**；旧 S3 / CW32 / SY7636A 仅为上游历史背景，勿切回 S3。
 
-Agent entry for this tree. Humans can read it too. Product overview, hardware, pinout and flash commands live in [README.md](README.md).
+- **原厂参考**：本地路径 `~/codespace/Metalio-E-INK4-Plus`（“原厂”均指此仓），含 SC7A20H 驱动与 AOI1 运动中断等硬件基础，不含晃动翻页等功能实现；硬件问题可对照其板级目录排查。
 
-新人（人或 agent）上手看 [docs/ONBOARDING.md](docs/ONBOARDING.md)；接手进行中的任务先看 [docs/HANDOFF.md](docs/HANDOFF.md)。
+## 导航入口
 
-Newcomers (human or agent): read [docs/ONBOARDING.md](docs/ONBOARDING.md). Taking over an in-flight task: read [docs/HANDOFF.md](docs/HANDOFF.md) first.
-
-## 本移植仓库 / This port
-
-当前硬件为 Metalio E-INK4 Plus（ESP32-S31）；构建及硬件入口以根目录 [README.md](README.md) 为准。下文 S3 / CW32 / SY7636A 内容是上游背景；不要据此将产品目标切回 S3。现用 `board_*`、`cst836u_*`、`fca9555_*` 名称包含新板兼容接口，不能仅凭旧芯片名删除。
-This port targets Metalio E-INK4 Plus (ESP32-S31); use the root [README.md](README.md) for its build and hardware entry points. S3 / CW32 / SY7636A details below describe upstream history, not the product target. Existing `board_*`, `cst836u_*` and `fca9555_*` names include active compatibility interfaces for this board; a legacy chip name does not imply dead code.
-
-原厂仓库本地路径：`~/codespace/Metalio-E-INK4-Plus`（`~` 代表当前用户的主目录）。今后提到「原厂」均指此仓库；其固件含 SC7A20H 驱动与 AOI1 运动中断等硬件基础，可作硬件事实参考，但不含晃动翻页这类功能实现，硬件问题可对照其板级目录排查。
-Vendor repo local path: `~/codespace/Metalio-E-INK4-Plus` (`~` denotes the current user's home directory). From now on, "原厂/vendor" refers to this checkout. Its firmware carries the hardware groundwork (SC7A20H driver, AOI1 motion interrupt and alike) and is the reference for hardware facts, but it does not implement features like shake page turning; debug board-level questions against its board directory.
-
-## Git 提交 / Git commits
-
-今后的提交必须遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)：标题使用 `分类（范围）：中文摘要`，正文按分类顺序从 `1.` 连续编号，每项只写一件事，最后如实说明验证结果。标题、分类和正文均使用中文，技术标识保留原文；agent 提交末尾注明 `代理：<名称>`。历史提交不改写。
-Follow the [Chinese commit convention](docs/COMMIT_CONVENTION.md) for all future commits: Chinese category and subject, consecutively numbered changes in category order, and truthful validation results. Keep technical identifiers unchanged, add a Chinese agent label for agent commits, and preserve existing history.
-
-## 构建 / Build
-
-需要 ESP-IDF v6.1；ESP32-S31 仍为 preview，构建命令必须带 `--preview`。
-Requires ESP-IDF v6.1; ESP32-S31 is a preview target, so build commands require `--preview`.
-
-```
-idf.py --preview set-target esp32s31
-idf.py --preview build
-```
-
-- `sdkconfig.defaults`：S31 产品配置，flash 80 MHz、Octal PSRAM 200 MHz。/ S31 product configuration: 80 MHz flash and 200 MHz octal PSRAM.
-- `sdkconfig.ci`：在产品配置之后加载的编译警告叠加项。CI 使用 `-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci"`，同样编译 S31。/ Compile-warning overlay loaded after product defaults; CI builds S31 with the same defaults list.
-
-CI 只证明能编译；真机时序与行为仍须设备验证。/ CI proves compilation; device timing and behavior still need hardware validation.
-
-### 本机环境硬约束 / Local environment hard rules
-
-所有本机构建与宿主测试先遵循[上手指南的固定环境与探针规则](docs/ONBOARDING.md#本机环境硬约束--local-environment-hard-rules)：固定 ESP-IDF v6.1 / Python 3.13 路径与 S31 preview 检查，不得裸跑 idf.py 或改用其他环境试错。macOS 禁用系统 clang/cc/gcc，使用 CLT、限时 sanitizer 探针与项目 runner；无输出超过 30 秒即停止并保留日志，不全局禁用 sanitizer。环境检查失败不得完整回归、冷构建或刷机。
-Use the fixed environment and bounded sanitizer probe in [onboarding](docs/ONBOARDING.md#本机环境硬约束--local-environment-hard-rules). Do not bypass version/path/target checks, use system compilers or globally disable sanitizers; stop silent suites and retain logs. Failed setup blocks full regression, cold builds and flashing.
-
-### 版本号与本地测试 / Versions and local tests
-
-用户 2026-11-05 要求放宽脚本时限，取代此前两分钟总预算；本仓库必须优先使用项目级 [mogo-e4p-flash skill](.agents/skills/mogo-e4p-flash/SKILL.md) 和 `python3 tools/flash_fast.py flash --yes`。脚本默认及上限改为 180 秒，可用 `--timeout 1..180` 缩短本次时限。刷机阶段不重复全量测试、索引或全片备份，不使用固定活动槽地址，不自动退回整机擦写；新功能在开发构建阶段先用 `prepare --build-dir` 准备当前产品构建。冷构建、设备异常或兼容性检查失败时及时停止说明，不刷旧包或虚报成功；超过时限的准备/恢复需另行说明并获授权。skill 仅放在本仓库 `.agents/skills/`，不安装到全局。设计/测试工具不代表刷机授权。
-The user's 2026-11-05 request to relax the script deadline supersedes the two-minute total budget. Use the repository-scoped skill and helper, now defaulting to a 180-second maximum; `--timeout 1..180` can shorten a run. Prepare known product builds during development and omit redundant tests/indexing/full-flash backups during flash-only work. Never hardcode the active slot, fall back to whole-device writes, substitute stale firmware or claim failure as success. Longer preparation/recovery needs separate authorization; tool creation/testing does not authorize flashing.
-
-快速刷机使用官方 S31 RAM stub，不回退到已复现连续读取故障的 ROM 读取接口。180 秒中预留最后 10 秒清理：失败且未写入或已完整校验时，若尚未尝试启动，应复位并确认原应用/首页恢复；仅关闭串口不算恢复。部分写入未校验时不启动未知应用，不自动重刷；已尝试启动仍失败时不循环复位，按实际状态报告。
-Use the official S31 RAM stub rather than the failing ROM read path. Reserve the last ten seconds for cleanup: safely reset and confirm an unbooted intact application after failure. Port closure alone is not recovery. Do not boot an incomplete write, retry flashing or repeatedly reset an unconfirmed boot.
-
-用户 2026-10-06 确认：本地测试沿用当前正式发布的固件版本号，用测试日期和说明区分；正式上线时才递增版本号，并同步设备、刷机页、升级包与日志。不要为每次本地修复另增 rc 编号。
-Per the user's 2026-10-06 decision, local tests retain the current published firmware version and are distinguished by test date and notes. Increment only for publication, keeping the device, flasher, upgrade image and changelog in sync; do not add an rc for each local fix.
-
-本地包放在被忽略的构建目录，禁止用同版本的测试二进制覆盖 `flash/` 中已经发布的固定版本下载文件。联网 OTA 需要不同版本号的专项测试时，先获得用户对该测试版本的明确授权。
-Keep local bundles in ignored build directories; never replace immutable published downloads in `flash/` with a same-version test image. Use a different version for an OTA-specific test only when explicitly authorized by the user.
-
-### 正式发布 / Official releases
-
-正式标签前必须提交准确的中文 OTA 日志；发布须核对当前 origin，并同步 GitHub Release、官网刷机、TF 下载与 OTA 草稿的同源产物。命名、383 字节日志上限、不可覆盖已发布附件和管理员审核边界，完整遵循[正式发布契约](docs/development/guides/RELEASE.md)。调用治理不授予发布权限。
-Follow the [release contract](docs/development/guides/RELEASE.md) for notes before tags, current origin, naming, immutable artifacts, delivery consistency and administrator review. Governance grants no publication authority.
-
-## 目录职责 / Layout
-
-目录与所有权以[架构说明](docs/ARCHITECTURE.md#目录职责--ownership)为权威；`main/` 根目录只保留启动入口与构建配置，新增功能按职责归类。页面互不引用，公共图像模块不依赖书籍、页面或字库。现用旧芯片命名包含当前板兼容接口，不据名称删除。生成字库/波形与第三方 epdiy 不为整理而手改。
-The [architecture ownership table](docs/ARCHITECTURE.md#目录职责--ownership) governs placement. Keep only boot/build wiring at the main root, preserve page/image dependency boundaries and active legacy-named adapters, and do not hand-edit generated/vendor data for cleanup.
-
-### 文档交付边界 / Documentation delivery boundary
-
-对外交付功能实现、可复跑测试、功能说明及必要的维护契约。功能变化只在 `docs/CHANGELOG.md` 按版本轻量记录；代码演进由 Git 管理，不另建逐任务变更账本。
-Deliver implementation, reproducible tests, feature documentation and necessary maintenance contracts. Summarize feature changes only in `docs/CHANGELOG.md`; Git owns code history, not per-task ledgers.
-
-计划、检查点、过程审查、验收结果和调试日志在 `docs/local/` 或被忽略的构建目录内部闭环，不加入提交。长期有效的行为与限制整理进对应功能文档，不要求读者查内部计划。只有需要交接未完功能或责任时才按 `docs/HANDOFF.md` 提供最小必要摘要；本机账本仍不入库。
-Keep plans, checkpoints, review records, acceptance results and debug logs in ignored `docs/local/` or build directories. Put lasting behavior and limits in feature documentation without dependencies on internal plans. Use `docs/HANDOFF.md` for the minimal necessary handoff of unfinished work or responsibility; the local ledger remains untracked.
-
-用户2026-11-02要求持续记录夜间阅读显示/残影试验：每轮先读 `docs/local/reader-night-mode-experiments.md`，按连续编号追加基准、变量、授权、检查/刷入过程、实际样本、用户反馈、结果与设备最终状态；每次尝试或收到反馈后及时更新。区分候选、失效试验、软件验证与实屏结论，未采集/未确认项如实留空；该本地记录不入库，持续记录不代表持续刷机授权。接手入口保留在 `docs/HANDOFF.local.md`。
-Per the user's 2026-11-02 request, maintain the local night-reader display/ghosting log at `docs/local/reader-night-mode-experiments.md`: read it before each trial and append sequential IDs, baseline, variable, authorization, checks/flashing procedure, actual samples, user feedback, outcome and final device state. Update after every attempt or subsequent feedback. Distinguish proposals, invalid trials, software evidence and optical results; leave unmeasured items explicit. Keep this log uncommitted and linked from `docs/HANDOFF.local.md`; ongoing logging does not authorize ongoing flashing.
-
-用户同日最终决定撤回夜间模式，不作为正式功能上线；N00–N21归档后停止试验。后续必须重新取得明确授权，不得沿用旧许可继续刷机或恢复实验功能。
-The user's final decision that day withdraws night mode from release and stops experiments after archiving N00–N21. Any future trial requires renewed explicit authorization; do not reuse prior permission to flash or restore the experimental feature.
-
-### 产品页 / Product pages
-
-页面入口以 `main/CMakeLists.txt` 和 `app_registry.c` 为准；旧板演示页已移除。每页导出 `app_desc_t`，页面之间不直接依赖。
-Use `main/CMakeLists.txt` and `app_registry.c` as page entry points; legacy board demos have been removed. Each page exports an `app_desc_t` and does not depend directly on other pages.
-
-| 文件 / File | 职责 / Role |
+| 资料 | 职责 |
 | --- | --- |
-| `app_dashboard.c` | 首页题头、头像及上下等高组件区；最近阅读/天气唯一，天气直角铺满。/ Home header, avatar and equal widget regions; reading/weather are unique, with edge-to-edge rectangular weather. |
-| `app_components.c` | 组件库与天气城市选择，契约见 `docs/development/guides/WEATHER.md`。/ Component library and weather city picker; see the weather contract. |
-| `app_book.c` | 书架与 TXT / EPUB 阅读。/ Shelf and TXT / EPUB reading. |
-| `app_files.c` | 文件浏览与传输入口。/ Files and transfer entry points. |
-| `app_device_settings.c` | 设备设置、蓝牙翻页与维护。/ Settings, Bluetooth page-turners and maintenance. |
-| `app_image.c` | 内置灰阶图与卡上 JPG / PNG。/ Built-in gray chart and SD JPG / PNG. |
-| `app_transfer.c` | 热点 / 已有 WiFi 传书与配网，离页停止。/ AP / STA transfer and provisioning; stops on exit. |
-| `app_boot_recovery.c` | 启动恢复；不在根导航中。/ Boot recovery, outside root navigation. |
+| [README.md](README.md) | 产品概述、硬件表、引脚与使用说明 |
+| [docs/ONBOARDING.md](docs/ONBOARDING.md) | 固定构建环境、宿主回归、工具链硬约束 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 目录职责、依赖边界、页面按键路由与术语表 |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | 任务交接协议（本机进行中账本为被忽略的 `docs/HANDOFF.local.md`） |
+| [docs/development/INDEX.md](docs/development/INDEX.md) | 开发资料总入口、契约索引与功能全景导航 |
 
-出厂 VCOM 与自检流程仍由 `main/factory/` 和启动入口调用。新增页面需同时加入构建清单和注册表；锁屏前保存状态使用 `on_before_lock`。
-Boot and `main/factory/` retain VCOM and self-test flows. Add new pages to both the build list and registry; use `on_before_lock` to save state before locking.
+## 硬约束
 
-## `app_desc_t` 契约 / Contract
+- **`冻结 / Frozen:` 决策**：文件头中的 `冻结 / Frozen:` 段落是产品决策而非建议；改行为前必须先改写该段并说明决策变更原因。
+- **品牌与服务边界**：固件与项目品牌统一小写 `mogo`（默认设备名、热点前缀、界面与传书网页），仅迁移历史默认设备名、保留用户自定义名称；热点口令 `mogo1234`；网页设备称「墨水屏」、保持纯白底色。天气与 OTA 官方域名为 `mogo.mantake.shop`，联网 OTA 仅读官方服务器清单（无 GitHub 回退源）。源码与新版本发布使用当前 `origin`（现为 `chopper1026/mogo-e4p`）；保留已发布下载/OTA 地址、备份文件名、内部协议标识与历史许可/版权声明。
+- **硬件与电源红线**：
+  - S31 面板 VCOM 标定存于 ESP NVS `panel/vcom`，由 `device_power_metalio.c` 启动读取；仅出厂标定页（`main/factory/vcom_setup.c`）可写入，未标定时拦住开机，产品页只读。
+  - 旧 SY7636A 路径禁写 VCOM / VLDO / 放电 / 延时 / VCOMCTL，电源页只读（不替代 S31 正常上电应用已保存 VCOM 的流程）。
+  - S31 使用 flash 80 MHz、Octal PSRAM 200 MHz；旧 S3 的 Zbit HPM 覆盖不参与 S31 构建。
+  - 现用 `board_*`、`cst836u_*`、`fca9555_*` 包含当前板兼容接口，不得仅凭旧芯片名删除。
+- **禁改文件与文案**：不因“整理注释”修改 `components/epdiy/**`；不手改 `main/font/fallback.h`、`main/font/stb_truetype.h`、`components/e0470_epaper_waveform/waveforms/*.h`；除非任务明确要求，不改 UI 字面量或日志字符串。
+- **夜间阅读模式**：已撤回、不作为正式功能上线，N00–N21 试验已归档停止（历史记录留存于本地 `docs/local/reader-night-mode-experiments.md`）；未经重新明确授权，不得恢复实验功能、继续试验或刷机。
 
-定义在 [`main/app/app.h`](main/app/app.h)。主循环按返回值刷屏，见 [`main/app/app_loop.c`](main/app/app_loop.c) 的 `app_present()`。
+## 构建、测试、刷机与发布
 
-Defined in [`main/app/app.h`](main/app/app.h). The loop presents via `app_present()` in [`main/app/app_loop.c`](main/app/app_loop.c).
+- **构建与本机环境**：使用 ESP-IDF v6.1，`esp32s31` 为 preview 目标，构建必须带 `--preview`（`sdkconfig.defaults` 为产品配置，`sdkconfig.ci` 仅叠加警告；CI 不替代真机验证）。本机构建与宿主回归必须先遵循 [本机环境硬约束](docs/ONBOARDING.md#本机环境硬约束--local-environment-hard-rules)：固定 IDF v6.1 / Python 3.13 路径禁裸跑 `idf.py`；macOS 禁用系统 clang/cc/gcc，使用 CLT、限时 sanitizer 探针与 `tools/run_reader_baseline.py`，无输出超 30 秒即停止并留日志，禁全局关闭 sanitizer；环境检查失败不得跑全量回归、冷构建或刷机。
+- **本地刷机**：优先使用本仓 [mogo-e4p-flash](.agents/skills/mogo-e4p-flash/SKILL.md) 与 `python3 tools/flash_fast.py flash --yes`（默认及上限 180 秒，末尾 10 秒用于安全清理与恢复；使用官方 S31 RAM stub，不回退 ROM 读取、不硬编码活动槽、不自动退回整机擦写、不刷旧包；skill 仅放本仓 `.agents/skills/`，不安装全局）。开发构建阶段可先 `prepare --build-dir` 登记构建。每次刷机、超时准备或整机恢复均须用户明确授权，设计或测试工具不代表刷机授权。
+- **本地版本与产物**：日常本地测试沿用当前正式发布的固件版本号，用日期和说明区分，不另增 rc 编号；本地包放忽略构建目录，严禁覆盖 `flash/` 中已发布的固定下载文件。联网 OTA 不同版本专项测试须先获明确授权。
+- **正式发布**：完整遵循 [正式发布契约](docs/development/guides/RELEASE.md)——正式标签前先提交准确的中文 OTA 日志（≤383 字节），核对当前 `origin`，以同源产物同步 GitHub Release、官网刷机、TF 下载与 OTA 草稿，遵守不可覆盖已发布附件与管理员审核边界。调用治理不授予发布权限。
+- **Git 提交**：遵循 [中文提交规范](docs/COMMIT_CONVENTION.md)——标题 `分类（范围）：中文摘要`，正文按分类顺序从 `1.` 连续编号、每项一事，末尾如实写验证结果；agent 提交末尾注明 `代理：<名称>`；不改写历史提交。
 
-| 返回值 / Return | 主循环做什么 / Loop does |
-| --- | --- |
-| `APP_REDRAW_NONE` | 不刷。/ No update. |
-| `APP_REDRAW_AREA` | 只推 `area_hint()`。回调必须先画好 fb。模式是 `APP_DYNAMIC_REFRESH_MODE`（DU）。/ Push `area_hint()` only. Caller paints fb first. |
-| `APP_REDRAW_PAGE` | 调 `render()`，整页 `APP_PAGE_REFRESH_MODE`（均衡档是 GL16）。/ `render()` then page mode. |
-| `APP_REDRAW_FULL` | 调 `render()`；`APP_PAGE_FORCE_FULL` 时整屏 GC16，否则仍走页模式。/ `render()`; GC16 when force-full is on. |
-| `APP_REDRAW_DONE` | 页面自己已经刷完。/ Page already presented. |
+## 架构与页面契约
 
-回调纯度：
+- **目录与依赖**：以 [目录职责](docs/ARCHITECTURE.md#目录职责--ownership) 为准。`main/` 根目录仅留启动入口与构建配置；页面互不直接依赖；公共图像模块（`main/image/`）不依赖书籍、页面或字库。
+- **页面注册**：产品页清单以 `main/CMakeLists.txt` 与 [app_registry.c](main/app/app_registry.c) 为准；新增页面须同时登记两者，出厂 VCOM 与自检由 `main/factory/` 与启动入口调用。
+- **`app_desc_t` 核心红线**：完整定义见 [main/app/app.h](main/app/app.h)，主循环推屏见 [app_loop.c](main/app/app_loop.c)，回调与三键/全局快捷键路由契约见 [页面回调与按键路由](docs/ARCHITECTURE.md#页面回调与按键路由--page-callbacks-and-key-routing)。
+  - `render()` 必须纯绘制，严禁 I2C 写、蜂鸣、睡眠或改设置。
+  - `normalize_hold_gray()`、`screen_touch_disabled()` 等纯查询须按当前可见画面判断，不可用全局设置替代。
+  - 锁屏前保存状态使用 `on_before_lock()`；失卡清理用 `on_media_lost()`（不画屏、不重挂载）。
 
-- `render()`：纯绘制。禁止 I2C 写、蜂鸣、睡眠、改设置。KEY2 整屏强刷会复用它。/ Paint only. No I2C writes, buzzer, sleep, or settings. KEY2 reuses it.
-- `on_enter()`：上电、唤醒传感器、拉一次数据。/ Power-up and first sample.
-- `on_before_lock()` 可选：锁屏绘制前保存阅读进度与统计。/ Optional pre-lock flush of reading progress and statistics.
-- `on_media_lost()` 可选：主循环检测已挂载卡失效时调用，先停止文件/后台消费者，不画屏、不重挂载；返回后主循环回退字体并重绘。/ Optional mounted-media-loss callback: stop file/background consumers without drawing or remounting; the loop then falls back fonts and redraws.
-- `on_exit()`：掉电、停传感器。/ Power-down.
-- `present()`：自定义推屏。返回 true 表示已经刷过，主循环不再推。/ Custom present; true means done.
-- `on_touch()` / `on_gesture()` / `on_key()` / `on_tick()`：可有副作用，用返回值要刷屏。/ Side effects OK; return the redraw.
-- `on_key_long()` 可选：仅接管三键的页面在同键单指保持500ms后触发一次；`defer_middle_short` 页面中键短按在抬起时执行，长按不触发短按；滑出、多点、读错、睡眠、字体重载或切页取消。/ Optional owned-key hold callback fires once at 500ms; with `defer_middle_short`, a middle short press fires on release and a hold skips it. Leaving, multitouch, read errors, sleep, font reload and page switches cancel.
-- `on_power_short()` 可选：页面可消费电源键短按；返回 `APP_REDRAW_NONE` 时主循环继续锁屏。阅读正文的“电源键翻页”开关开启后短按翻下一页，长按由主循环锁屏；其他页面保留原电源键逻辑。/ Optional short-power callback may consume the press; `APP_REDRAW_NONE` keeps the lock path. With reader power-turn enabled, short presses advance in the reader body and long presses lock; other pages keep their usual power behavior.
-- `on_media_ready()` 可选：首次无卡启动后插卡或显式重挂完成时通知当前页面更新目录；不要用它绕过拔卡后的句柄清理。/ Optional callback refreshes page listings after a first insertion or explicit remount; it must not bypass handle cleanup after removal.
-- `on_gesture()` 可选；提供后不再接收 `on_touch()`。主循环负责识别与全局中断取消，页面解释动作。/ Optional gesture callback replaces `on_touch`; the loop recognizes and cancels, the page interprets.
-- `screen_touch_disabled()` 可选纯查询：主循环在摄取实时与回放帧前屏蔽屏幕接触，保留底部三键。阅读正文及其弹层可禁触，离开后恢复；开启须已有「触摸开关」快捷键，禁触期间不得移除最后一个绑定，长按电源键直接锁屏。/ Optional pure query filters live/replayed screen contacts while retaining panel keys. Reader body/sheets may disable touch, restoring it outside reading; require and retain a recovery binding, and long power locks directly.
-- `normalize_hold_gray()` 可选：归一属性按当前画面判断，只有显示阅读背景正文时返回 true。不要用全局背景设置代替这个判断。快捷栏收起整屏归一与阅读呈现共用此属性。/ Optional: derive normalization attributes from the visible frame, returning true only for reading text over a background. Never substitute the global background setting. Whole-screen quick-layer close normalization and reader presentation share this property.
-- `on_key()` 默认只收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接收三键。主页面左右键循环切换四个主页，中键长按全刷；书架中键短按切换分页控制并沿左右箭头轮廓描边，可通过导航随时打断。系统子页左返回、中首页、右返回；阅读正文三键短按可自定义，两套推荐默认上一页/工具栏/下一页；触摸开启时底部上滑固定呼出工具栏，三键短按和中键长按不强制工具栏映射；中键长按可自定义，默认返回首页；中键双击可自定义，默认不操作；用户2026-11-14取消独立全屏模式，由状态栏、页眉、页脚分别控制显隐；隐藏栏回收正文空间，隐藏页脚同时隐藏进度，三栏全关即纯正文；新开书与恢复沿用当前显隐，翻页只收起工具栏与滑块。/ Normally KEY1 only; `owns_keys` pages receive all three outside the menu. Root pages use left/right to cycle and a middle hold for full refresh; shelf middle short press toggles paging controls. Product system pages use Back/Home/Back; reader short actions are configurable, defaulting to previous/tools/next; with touch enabled, bottom-edge swipes open the toolbar without a required short/hold mapping; middle holds and middle double presses are configurable (the double press defaults to no action); the user retired independent full screen on 2026-11-14: status/header/footer switches control visibility and reclaim body space; footer progress hides with its bar, and disabling all three yields text-only reading; opening/resuming uses current settings and turns dismiss only tools/sliders.
+## 文档交付、许可与代码注释
 
-- 按键控制的「返回主页」「手动全刷」「前光开关」在普通页面对绑定手势优先；未绑定全局动作时沿用页面原行为。系统覆盖层及独占流程不执行全局快捷动作，阅读保留原开书返回来源。/ Mapped Home, full refresh and frontlight take precedence for that gesture on ordinary pages. Other mappings retain native page behavior outside reading. System overlays and exclusive flows do not dispatch global shortcuts; the reader retains its opening return target.
-
-标志：
-
-- `holds_pmu`：长时间独占 PMU（自检）。主循环的锁屏按键轮询让路。/ Page owns the PMU; lock-key poll yields.
-- `owns_keys`：接管三键；不影响菜单打开时的全局键和菜单把手。/ Own all three keys outside the menu; global menu keys and the handle remain.
-- `defer_middle_short`：中键短按在抬起时触发，以区分长按。/ Defer middle short action until release to distinguish a hold.
-- `menu_handle_enabled`：按页面状态决定右下角菜单把手是否响应。/ Control bottom-right menu-handle hit testing by page state.
-- `enter_full`：进页走 `APP_REDRAW_FULL`，避免差分刷留边。/ Enter with a full refresh.
-
-`app_ctx_t.request_app` 非空时，主循环在本轮末尾切页；`request_menu` 请求打开根菜单。同时设置时切页优先。/ At tick end, `request_app` switches pages and `request_menu` opens the root menu; a page request takes priority.
-
-## 术语表 / Glossary
-
-| 术语 / Term | 中文 | English |
-| --- | --- | --- |
-| DU | 快速差分刷新，只驱动变化像素，灰阶少、残影多。 | Fast differential update. Drives changed pixels only. |
-| GC16 | 16 级灰度全像素刷新。区域内白像素先压黑再擦白，刷新处一条黑带。 | 16-gray full-pixel update. Whites go black then white; a black flash. |
-| GL16 | 16 级灰度，白底保持，不先压黑。 | 16-gray update that keeps an already-white background. |
-| 跟随 DU / FOLLOW DU | 开机生成的 8 帧短波形，一次刷新连 diff 带扫描，用来跟手数字或读数。 | Boot-built 8-frame short waveform: one refresh does diff + scan. Used for live digits. |
-| 连续 DU / continuous DU | 每轮只扫一个相位，软件记每像素剩余相位。帧率与黑度解耦。 | One DU phase per scan; software tracks leftover phases per pixel. |
-| 跟手 | 手指或传感器在动时用 DU/连续 DU 追画面。 | Live tracking with DU / continuous DU while the finger or sensor moves. |
-| 定稿 | 动作停下后用 GC16/GL16 整页（或指定区）清残影。 | Settle after motion with GC16/GL16 to clear ghosting. |
-| 把手 | 底栏菜单按钮；演示页的 KEY3 也可触发。打开/关闭全屏一级菜单。 | Bottom-right menu handle; KEY3 can also toggle it on demo pages. |
-| 冻结 / Frozen | 文件头里的产品决策。agent 不得改行为去“优化”它。 | Product decisions in the file banner. Do not “improve” them. |
-| 均衡配置 | `APP_REFRESH_BALANCED`：整页 GL16，周期 GC16 压灰底，动态区 DU。 | Default refresh profile: GL16 pages, periodic GC16, DU for motion. |
-| ALL_DU | 实验档：整机都走 DU，只看速度。 | Experimental profile: everything is DU. |
-| 锁屏 | 电源键短按后的锁页。浅睡按键或拿起回原页。 | Lock face after a short power-key press. |
-| 软睡 | `SOFT_SLEEP`：PMU 拉低 EN，再短按开机，不是硬复位。 | Soft sleep: PMU drops EN; a short press powers on without a hard reset. |
-| VCOM | 面板公共电压（绝对值 mV）。S31 出厂标定保存在 ESP NVS `panel/vcom`，产品页只读。 | Panel common voltage (absolute mV). S31 factory calibration is stored in ESP NVS `panel/vcom`; product pages are read-only. |
-
-注释里不要再展开这些词。/ Do not re-explain these terms in comments.
-
-## 硬约束 / Hard rules
-
-- 用户 2026-11-04 明确将固件与项目品牌统一改为小写 `mogo`，取代此前品牌决策；设备默认名、热点前缀、固件界面与传书网页均使用 `mogo`。仅迁移历史默认设备名，保留用户自定义名称；热点口令为满足 WPA2 长度要求的 `mogo1234`。网页设备仍称「墨水屏」，页面底色保持明亮纯白；GitHub Release 的标题和下载文件名继续按上述发布规范执行。源码与新版本发布使用本仓库当前 `origin`（现为 `chopper1026/mogo-e4p`）；保留已发布下载/OTA 地址、备份文件名、内部协议标识以及历史许可标识和真实版权声明。天气和 OTA 的正式接口域名仍为 `mogo.mantake.shop`。用户 2026-11-14 要求移除 GitHub OTA 回退源，联网升级只从官方服务器读取清单。
-  Per the user's 2026-11-04 rebranding decision, use lowercase `mogo` for the firmware and project, including default device names, hotspot prefixes, firmware UI and transfer pages. Migrate only historical default device names, preserving custom names; use `mogo1234` for the WPA2 hotspot password. Keep the bright-white website and device label “墨水屏”, existing Release naming rules, current `origin`, published download/OTA URLs, backup names, protocol identifiers, historical license identifiers and accurate copyright notices. Weather and OTA continue using `mogo.mantake.shop`. Per the user's 2026-11-14 request, remove the GitHub OTA fallback and read online update manifests only from the official server.
-
-`冻结 / Frozen:` 段落是产品决策，不是建议。改行为前必须先改这段，并说明为什么决策变了。
-
-A `冻结 / Frozen:` block is a decision, not a hint. Change the behavior only after rewriting that block and saying why the decision changed.
-
-- S31 面板 VCOM 标定保存在 ESP NVS `panel/vcom`，由 `device_power_metalio.c` 启动时读取；仅出厂标定页（`main/factory/vcom_setup.c`）可通过后端接口保存，未标定时拦住开机，产品页不提供修改入口。/ S31 VCOM calibration lives in ESP NVS `panel/vcom` and is loaded by `device_power_metalio.c` at startup. Only factory calibration (`main/factory/vcom_setup.c`) may save it through the backend API; unset calibration gates boot, and product pages provide no editing entry.
-- 旧 SY7636A 路径禁止写 VCOM / VLDO / 放电 / 延时 / VCOMCTL，电源页只读；此约束不替代 S31 板级正常上电时应用已保存 VCOM 的流程。/ The legacy SY7636A path must not write VCOM / VLDO / discharge / delay / VCOMCTL; the power page is read-only. This does not replace the S31 board path that applies saved VCOM during normal panel power-on.
-- S31 使用 flash 80 MHz、Octal PSRAM 200 MHz；旧 S3 的 Zbit HPM 覆盖不参与 S31 构建。/ S31 uses 80 MHz flash and 200 MHz octal PSRAM; the legacy S3 Zbit HPM override is outside the S31 build.
-- 不要改 `components/epdiy/**` 来“整理注释”。/ Do not touch `components/epdiy/**` for comment cleanup.
-- 不要手改 `main/font/fallback.h`、`main/font/stb_truetype.h`、`components/e0470_epaper_waveform/waveforms/*.h`。/ Do not hand-edit generated or vendored tables.
-- 不改 UI 字面量或日志字符串，除非任务明确要求。/ Do not change UI strings or log text unless asked.
-
-## 注释规范 / Comment style
-
-### 授权声明 / License notices
-
-用户 2026-10-15 要求新增原创内容仅限个人学习、不得未经书面授权商用。适用边界以根目录 [LICENSE](LICENSE) 和 [CONTRIBUTING.md](CONTRIBUTING.md) 为准；这是今后明确标注的新原创内容的许可，不撤销 rc93 及以前的授权，不覆盖第三方或其他贡献者的权利。新原创文件只有在权利人明确同意时使用 `LicenseRef-Kiikoread-Personal-Study-1.0`，保留真实版权人。不要将下面的 Apache 文件头示例机械用于新原创文件，也不要批量替换既有文件头。
-Per the user's 2026-10-15 decision, explicitly marked new original material is for personal study, with commercial use requiring written permission. [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md) define the scope; rc93 and earlier grants and third-party or other contributors' rights remain intact. Use `LicenseRef-Kiikoread-Personal-Study-1.0` on new original files only with the rights holder's explicit consent and accurate attribution. Do not mechanically apply the Apache example below to new original files or replace existing headers in bulk.
-
-全仓中英双语。只改注释，不改逻辑。
-
-Every comment is bilingual. Comments only; no logic changes.
-
-文件头：
-
-```
-/*
- * SPDX-FileCopyrightText: 2026 mindreset
- * SPDX-License-Identifier: Apache-2.0
- *
- * 中文：这个文件负责什么、边界在哪。
- *
- * English: what this file owns and where it stops.
- *
- * 冻结：不得做的事。
- * Frozen: things this file must not do.
- */
-```
-
-- 头文件公开 API 与 struct 成员用 `///`。/ Public API and struct fields: `///`.
-- `.c` 内部用 `//`。不要 `/** */`。/ `.c` internals: `//`. No `/** */`.
-- 单行：`// 中文。/ English.`
-- 超过一行：中文一行，英文紧跟一行。/ Multi-line: Chinese line, then English line.
-- `enum` 成员短尾注：`///< 中文 / English`
-- 大 `.c` 用 `/* ---- 区块名 / Section ---- */` 分区。/ Large `.c` files use section banners.
-- 术语见表，不在注释里重复解释。/ Use the glossary; do not redefine terms.
+- **文档交付边界**：计划、检查点、过程审查、验收结果与调试日志留在 `docs/local/` 或忽略构建目录，不入库；长期有效行为与限制写入对应功能文档；用户可见功能变化仅在 `docs/CHANGELOG.md` 按版本轻量记录，不另建逐任务变更账本；未完交接按 [docs/HANDOFF.md](docs/HANDOFF.md) 维护。
+- **授权声明**：适用边界以 [LICENSE](LICENSE) 与 [CONTRIBUTING.md](CONTRIBUTING.md) 为准。新增原创内容仅在权利人明确同意时标注 `LicenseRef-Kiikoread-Personal-Study-1.0` 并保留真实版权人；不撤销 rc93 及以前授权，不覆盖第三方权利；不得将下方 Apache 文件头示例机械用于新原创文件，也不得批量替换既有文件头。
+- **源码注释规范**：全仓源码注释保持**中英双语**；纯整理注释时不改逻辑；术语以 [术语表](docs/ARCHITECTURE.md#术语表--glossary) 为准，注释中不重复展开。
+  - 头文件公开 API / struct 成员用 `///`；`.c` 内部用 `//`（禁用 `/** */`）；`enum` 尾注 `///< 中文 / English`；大 `.c` 用 `/* ---- 区块名 / Section ---- */` 分区。
+  - 单行 `// 中文。/ English.`；多行中文在前、英文紧跟。
+  - 既有 Apache 文件头参考格式（新原创文件按上方授权规则选择 SPDX）：
+    ```c
+    /*
+     * SPDX-FileCopyrightText: 2026 mindreset
+     * SPDX-License-Identifier: Apache-2.0
+     *
+     * 中文：这个文件负责什么、边界在哪。
+     * English: what this file owns and where it stops.
+     *
+     * 冻结：不得做的事。
+     * Frozen: things this file must not do.
+     */
+    ```
 
 <!-- tidy:start -->
 ## 项目开发治理

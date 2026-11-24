@@ -33,6 +33,13 @@ The Bluetooth helper owns subviews, visible peer snapshots and layout; Device Se
 
 电量学习由 `components/device_power/battery_calibration.c` 持有纯计算与记录校验，Metalio后端负责本机NVS双槽和原子电量检查点；设置页只查询/发命令，`main/power`交接锁屏边界。该数据不进入普通配置备份，不依赖TF日志，也不新增采样任务或唤醒。/ Battery learning owns pure computation and record validation in `components/device_power/battery_calibration.c`; the Metalio backend owns local NVS dual slots and atomic SOC checkpoints. Settings queries/issues commands and `main/power` hands off lock boundaries. Ordinary backups exclude this data; there is no card-log dependency, sampling task or additional wake.
 
+### 页面回调与按键路由 / Page callbacks and key routing
+
+- `app_desc_t` 定义在 [`main/app/app.h`](../main/app/app.h)，主循环通过 [`main/app/app_loop.c`](../main/app/app_loop.c) 的 `app_present()` 按返回值（`APP_REDRAW_*`）刷屏。`render()` 必须纯绘制，禁止 I2C 写、蜂鸣、睡眠或改设置；副作用放在 `on_enter()`、`on_exit()`、`on_before_lock()` 及输入/轮询回调。`app_ctx_t.request_app` 优先于 `request_menu`，`request_return` 优先于其他请求。/ `app_desc_t` lives in `main/app/app.h` and `app_present()` dispatches `APP_REDRAW_*`. `render()` is paint-only (no I2C writes, buzzer, sleep or settings changes); side effects belong in lifecycle and input/tick callbacks. `request_return` overrides other requests, and `request_app` takes priority over `request_menu`.
+- `on_media_lost()` 在已挂载 TF 失效时先停止文件/后台消费者，不画屏、不重挂载；返回后主循环回退字体并重绘。`on_media_ready()` 在首次无卡启动后插卡或显式重挂完成时通知页面更新目录，不得绕过拔卡后的句柄清理。`on_gesture()` 提供后替代 `on_touch()`，主循环负责识别与全局中断取消。`normalize_hold_gray()` 按当前画面判断，仅在显示阅读背景正文时返回 true，不用全局背景设置代替，供快捷栏收起整屏归一与阅读呈现共用。/ `on_media_lost()` stops file/background consumers without drawing or remounting before loop font fallback and redraw. `on_media_ready()` refreshes listings after first insertion or explicit remount without bypassing handle cleanup. `on_gesture()` replaces `on_touch()`, with loop-owned recognition and cancellation. `normalize_hold_gray()` inspects the visible frame rather than global settings and returns true only for reading text over a background.
+- `on_key()` 默认仅接收 `UI_KEY_1`；`owns_keys` 页面在菜单关闭时接管三键。`on_key_long()` 仅对 `owns_keys` 页面在同键单指保持 500ms 后触发一次；`defer_middle_short` 页面中键短按在抬起时执行，长按不补发短按；滑出、多点、读错、睡眠、字体重载或切页取消。`on_power_short()` 可消费电源键短按，返回 `APP_REDRAW_NONE` 时继续锁屏；阅读正文开启「电源键翻页」后短按翻下一页、长按由主循环锁屏，其他页面保留原逻辑。/ `on_key()` normally receives `UI_KEY_1`, while `owns_keys` pages own all three keys outside the menu. `on_key_long()` fires once after a 500ms single-finger hold; with `defer_middle_short`, middle short presses fire on release and holds suppress them; leaving, multitouch, read errors, sleep, font reload or page switches cancel. `on_power_short()` consumes short power presses (with `APP_REDRAW_NONE` keeping lock); reader power-turn advances on short press and locks on long press.
+- 默认按键映射与全局快捷键：主页面左右键循环四主页、中键长按全刷；书架中键短按切换分页控制并沿左右箭头轮廓描边，可随时被导航打断；系统子页为左返回、中首页、右返回。阅读正文三键短按可自定义（两套推荐默认上一页/工具栏/下一页），触摸开启时底部上滑固定呼出工具栏，三键短按与中键长按不强制绑定工具栏；中键长按可自定义（默认返回首页），中键双击可自定义（默认不操作）；翻页只收起工具栏与滑块，状态栏/页眉/页脚分别控制显隐（无独立全屏模式），开书与恢复沿用当前显隐。按键绑定的「返回主页」「手动全刷」「前光开关」在普通页面优先于同一手势的页面原生行为，其余映射在页外保持原行为；系统覆盖层与独占流程不执行全局快捷动作，阅读保留原开书返回来源。/ Default mappings and global shortcuts: root pages cycle with left/right and full-refresh on middle hold; shelf middle short press toggles paging controls with arrow outlines and yields to navigation; system subpages use Back/Home/Back. Reader body short keys are configurable (defaulting to previous/tools/next); bottom-edge swipes open the toolbar with touch enabled without requiring a key binding; middle hold defaults to Home and double press defaults to none; turns dismiss only tools/sliders, and status/header/footer switches control visibility independently without a separate full-screen mode. Mapped Home, full refresh and frontlight take precedence for that gesture on ordinary pages, while overlays and exclusive flows suppress global shortcuts and the reader keeps its return target.
+
 ## 存储与外部边界 / Storage And External Boundaries
 
 | 数据 / Data | 所有者与兼容要求 / Ownership And Compatibility |
@@ -189,3 +196,24 @@ The clock owns read-only RTC anchors and successful-paint identities. Sleep upda
 
 独立关机图片由 `services/shutdown_wallpaper` 独占异步解码和TF双槽缓存，`settings` 仅提交 `off_art` 配置，`ui_power_shutdown_prepare` 在事件路径读TF成品缓存，或调用票根、拼贴、独立日历版式生成画面，`sleep` 与 `app_loop` 拥有推屏、断电及失败恢复。标准竖屏缓存通过逻辑像素输出，UI的 `render` 不访问文件。任务纳入存储交还；v47备份不携带像素。立即关机跳过锁屏，定时浅睡到期先切换关机画面，失败恢复原锁屏且保留PIN门控；此恢复路径允许临时整帧副本，不改变时钟正常分钟更新和PIN等待的无副本契约。
 The shutdown service owns asynchronous decoding and dual SD slots; settings owns configuration commits, event-only preparation loads custom art or generates ticket/collage/calendar faces, and sleep/the loop own presentation, power-off and recovery. Canonical art uses logical pixel output; UI render remains file-free. Storage handoffs join the worker and v47 backups exclude pixels. Immediate-off bypasses lock art, timed expiry switches art before off, and failed handoff restores the protected lock. Only this recovery path may retain a temporary frame; ordinary clock/PIN updates keep their no-copy contract.
+
+## 术语表 / Glossary
+
+源码注释直接使用下表术语，不再重复展开。/ Use these terms directly in comments without redefining them.
+
+| 术语 / Term | 中文 | English |
+| --- | --- | --- |
+| DU | 快速差分刷新，只驱动变化像素，灰阶少、残影多。 | Fast differential update. Drives changed pixels only. |
+| GC16 | 16 级灰度全像素刷新。区域内白像素先压黑再擦白，刷新处一条黑带。 | 16-gray full-pixel update. Whites go black then white; a black flash. |
+| GL16 | 16 级灰度，白底保持，不先压黑。 | 16-gray update that keeps an already-white background. |
+| 跟随 DU / FOLLOW DU | 开机生成的 8 帧短波形，一次刷新连 diff 带扫描，用来跟手数字或读数。 | Boot-built 8-frame short waveform: one refresh does diff + scan. Used for live digits. |
+| 连续 DU / continuous DU | 每轮只扫一个相位，软件记每像素剩余相位。帧率与黑度解耦。 | One DU phase per scan; software tracks leftover phases per pixel. |
+| 跟手 | 手指或传感器在动时用 DU/连续 DU 追画面。 | Live tracking with DU / continuous DU while the finger or sensor moves. |
+| 定稿 | 动作停下后用 GC16/GL16 整页（或指定区）清残影。 | Settle after motion with GC16/GL16 to clear ghosting. |
+| 把手 | 底栏菜单按钮，打开/关闭全屏一级菜单。 | Bottom-right menu handle toggling the root menu. |
+| 冻结 / Frozen | 文件头里的产品决策，agent 不得擅自改行为去“优化”。 | Product decisions in the file banner; do not “improve” away. |
+| 均衡配置 | `APP_REFRESH_BALANCED`：整页 GL16，周期 GC16 压灰底，动态区 DU。 | Default refresh profile: GL16 pages, periodic GC16, DU for motion. |
+| ALL_DU | 实验档：整机都走 DU，只看速度。 | Experimental profile: everything is DU. |
+| 锁屏 | 电源键短按后的锁页。浅睡按键或拿起回原页。 | Lock face after a short power-key press. |
+| 软睡 | `SOFT_SLEEP`：PMU 拉低 EN，再短按开机，不是硬复位。 | Soft sleep: PMU drops EN; a short press powers on without a hard reset. |
+| VCOM | 面板公共电压（绝对值 mV）。S31 出厂标定保存在 ESP NVS `panel/vcom`，产品页只读。 | Panel common voltage (absolute mV). S31 factory calibration is stored in ESP NVS `panel/vcom`; product pages are read-only. |
