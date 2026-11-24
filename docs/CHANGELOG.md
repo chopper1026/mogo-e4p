@@ -3,7 +3,7 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 未发布 / Unreleased
+## v1.2.0 · 2026-11-24
 
 - 修复英文界面中书架、阅读工具栏和文件传输入口的同组字号不一，以及设置行、弹窗和部分锁屏文案的错位；更正分页、开关及阅读统计等英文提示。/ Keep peer labels the same size on the shelf, reader toolbar and file transfer tiles. Fix text alignment in settings, dialogs and lock screens, and correct English pagination, switch states and reading statistics.
 
