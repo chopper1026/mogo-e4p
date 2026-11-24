@@ -84,15 +84,15 @@ static font_job_state_t receive_pack(const pack_t* p) {
         if (!sta || esp_netif_get_netif_impl_name(sta, iface.ifr_name) != ESP_OK) goto done;
         esp_http_client_config_t config = { .url = p->url,
                                             .if_name = &iface,
-                                            .timeout_ms = 2500,
+                                            .timeout_ms = 10000,
                                             .disable_auto_redirect = true,
                                             .crt_bundle_attach = esp_crt_bundle_attach,
                                             .buffer_size = 4096,
                                             .buffer_size_tx = 1024 };
         http = esp_http_client_init(&config);
         if (!http || atomic_load(&cancelled) || esp_http_client_open(http, 0) != ESP_OK ||
-            esp_http_client_fetch_headers(http) != (int64_t)p->bytes ||
-            esp_http_client_get_status_code(http) != 200)
+            atomic_load(&cancelled) || esp_http_client_fetch_headers(http) != (int64_t)p->bytes ||
+            atomic_load(&cancelled) || esp_http_client_get_status_code(http) != 200)
             goto done;
         // 此工作目录只存本安装器的未提交数据；断电后从头校验。/ Only uncommitted installer data lives here; restart verification after power loss.
         if (mkdir(PENDING, 0775) && errno != EEXIST) goto done;
@@ -106,7 +106,8 @@ static font_job_state_t receive_pack(const pack_t* p) {
         unsigned n = p->bytes - total;
         if (n > sizeof(buf)) n = sizeof(buf);
         int got = exists ? (int)fread(buf, 1, n, file) : esp_http_client_read(http, buf, n);
-        if (got <= 0 || (!exists && fwrite(buf, 1, got, file) != (size_t)got) ||
+        if (got <= 0 || atomic_load(&cancelled) ||
+            (!exists && fwrite(buf, 1, got, file) != (size_t)got) ||
             psa_hash_update(&hash, (uint8_t*)buf, got) != PSA_SUCCESS)
             goto done;
         total += got;

@@ -7,7 +7,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 修复英文界面中书架、阅读工具栏和文件传输入口的同组字号不一，以及设置行、弹窗和部分锁屏文案的错位；更正分页、开关及阅读统计等英文提示。/ Keep peer labels the same size on the shelf, reader toolbar and file transfer tiles. Fix text alignment in settings, dialogs and lock screens, and correct English pagination, switch states and reading statistics.
 
-- 增加简体中文、繁體中文和 English，以及新设备四步开机引导（系统语言 → Wi-Fi → 系统字体 → 首页组件，配网可跳过）；语言同步到手机传书页，推荐文楷 Medium 系统字体可经 Wi-Fi 选装到 TF 卡，下载进度仅用局部 DU 更新。引导和系统字体设置均提供本语言的三行大字样句预览。/ Add three UI languages shared with the transfer page and a first-run guide for language, optional Wi-Fi setup, optional WenKai Medium with local DU progress, and Home widgets. Preview one localized sentence in three large-print lines in both setup and system font settings.
+- 增加简体中文、繁體中文和 English，以及新设备四步开机引导（系统语言 → Wi-Fi → 系统字体 → 首页组件，配网可跳过）；语言同步到手机传书页，推荐文楷 Medium 系统字体可经 Wi-Fi 选装到 TF 卡，网络超时为 10 秒，下载进度仅用局部 DU 更新。引导和系统字体设置均提供本语言的三行大字样句预览。/ Add three UI languages shared with the transfer page and a first-run guide for language, optional Wi-Fi setup, optional WenKai Medium with a 10-second network timeout and local DU progress, and Home widgets. Preview one localized sentence in three large-print lines in both setup and system font settings.
 
 - 修复书架「选择」「管理」「导入」等题头按钮按下时误用阅读波形导致黑闪；分类下拉选中项改为白底黑色实线边框。/ Route shelf header presses to short local feedback instead of a reader waveform; outline the selected category in black on white.
 - 移除屏幕偏移修正。升级后显示与触摸自动恢复居中，不影响其他设置。/ Remove screen offset correction. Display and touch return to centered coordinates on upgrade without resetting other settings.

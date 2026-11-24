@@ -103,20 +103,15 @@ static FILE* esp_http_client_init(const esp_http_client_config_t* cfg) {
     assert(
         !strcmp(cfg->if_name->ifr_name, "sta") && cfg->disable_auto_redirect &&
         cfg->crt_bundle_attach);
+    assert(cfg->timeout_ms == 10000);
     ++clients;
     ++requests;
     FILE* f = fopen(payload, "rb");
     assert(f);
     return f;
 }
-static int esp_http_client_open(FILE* f, int size) {
-    assert(f && !size);
-    return 0;
-}
-static long esp_http_client_fetch_headers(FILE* f) {
-    (void)f;
-    return declared;
-}
+static int esp_http_client_open(FILE* f, int size);
+static long esp_http_client_fetch_headers(FILE* f);
 static int esp_http_client_get_status_code(FILE* f) {
     (void)f;
     return status;
@@ -127,6 +122,15 @@ static void esp_http_client_cleanup(FILE* f) {
     --clients;
 }
 #include "receive.inc"
+static int esp_http_client_open(FILE* f, int size) {
+    assert(f && !size);
+    if (fault == 3) atomic_store(&cancelled, true);
+    return 0;
+}
+static long esp_http_client_fetch_headers(FILE* f) {
+    assert(f && !atomic_load(&cancelled));
+    return declared;
+}
 static int esp_http_client_read(FILE* f, char* buf, int n) {
     if (fault == 1) return -1;
     if (fault == 2) atomic_store(&cancelled, true);
@@ -166,6 +170,10 @@ int main(int argc, char** argv) {
     fault = 1;
     run(&demo, FONT_FAILED);
     fault = 2;
+    atomic_store(&percent, 0);
+    run(&demo, FONT_CANCELLED);
+    assert(!font_download_percent());
+    fault = 3;
     run(&demo, FONT_CANCELLED);
     fault = 0;
     write_file(payload, "x");
