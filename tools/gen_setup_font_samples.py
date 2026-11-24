@@ -1,4 +1,4 @@
-"""生成三语文楷大字样句（不是字库）。/ Generate offline WenKai sentence specimens, not a font subset."""
+"""生成三语霞鹜新晰黑大字样句（不是字库）。/ Generate offline LXGW Neo XiHei Screen specimens, not a font subset."""
 import argparse
 import hashlib
 import json
@@ -9,11 +9,11 @@ from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / 'main/assets/setup_wenkai.h'
+OUTPUT = ROOT / 'main/assets/setup_font_samples.h'
 WIDTH, PITCH = 600, 56
 HEIGHT = 3 * PITCH
-FACES = {'LXGWWenKai': 'f4b8a34d1f838fe411540cb7c97b1c384ac9738a876c4104500bc42508b2312a',
-         'LXGWWenKaiTC': '649efd8516f42d36eacc05480d5dbd2713fb28fbd2bbee8ea76fc40875045c49'}
+FACE_FILE = 'LXGWNeoXiHeiScreen.ttf'
+FACE_SHA256 = '6f69412d8307c055b7f247e67669b0e4ab4b79bf199fe58ee93545429b586092'
 
 
 def sentences():
@@ -59,17 +59,21 @@ def encode(data):
         start = end
 
 
-def render(directory):
-    paths = {family: directory / f'{family}-Medium.ttf' for family in FACES}
-    for family, path in paths.items():
-        if hashlib.sha256(path.read_bytes()).hexdigest() != FACES[family]:
-            raise ValueError(f'Unexpected font: {path}')
-    lines = ['/* 文楷 v1.530 Medium 样句；用 tools/gen_setup_font_samples.py 生成。',
-             ' * Printed LXGW WenKai specimens. See THIRD_PARTY_NOTICES.md. */',
+def resolve_font(source):
+    path = source if source.is_file() else source / FACE_FILE
+    if hashlib.sha256(path.read_bytes()).hexdigest() != FACE_SHA256:
+        raise ValueError(f'Unexpected font: {path}')
+    return path
+
+
+def render(source):
+    path = resolve_font(source)
+    lines = ['/* 霞鹜新晰黑（屏显版）v1.305 样句；用 tools/gen_setup_font_samples.py 生成。',
+             ' * Printed LXGW Neo XiHei Screen specimens. See THIRD_PARTY_NOTICES.md. */',
              '#pragma once', '#include <stdint.h>', '#include "ui_language.h"',
              f'#define SETUP_SAMPLE_WIDTH {WIDTH}', f'#define SETUP_SAMPLE_HEIGHT {HEIGHT}']
-    for lang, family, text in zip(('CN', 'TW', 'EN'), ('LXGWWenKai', 'LXGWWenKaiTC', 'LXGWWenKai'), sentences(), strict=True):
-        data = bytes(encode(specimen(paths[family], text)))
+    for lang, text in zip(('CN', 'TW', 'EN'), sentences(), strict=True):
+        data = bytes(encode(specimen(path, text)))
         lines.append(f'static const uint8_t setup_sample_{lang}[] = {{')
         for i in range(0, len(data), 24):
             lines.append('        ' + ','.join(f'0x{x:02x}' for x in data[i:i+24]) + ',')
@@ -81,10 +85,10 @@ def render(directory):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('directory', type=Path, help='Directory containing both original Medium TTF files')
+    parser.add_argument('source', type=Path, help=f'Path to {FACE_FILE} or directory containing it')
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    header = render(args.directory)
+    header = render(args.source)
     if args.check:
         if header != OUTPUT.read_text():
             raise SystemExit('Specimens do not match')

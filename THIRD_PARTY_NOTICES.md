@@ -58,8 +58,8 @@ MIT notices linked above. Only ordinary text turns select it; vendor LUTs,
 scan timing and other screens are unchanged. Panel validation remains required.
 
 The firmware bundles the embedded Noto Sans SC subset, common-Han bitmap supplement and Libre Bodoni/Chakra Petch numeral bitmaps; users may supply
-their own fonts on a TF card. The optional Wi-Fi downloads are the unmodified [LXGW WenKai Medium](https://github.com/lxgw/LxgwWenKai) and [LXGW WenKai TC Medium](https://github.com/lxgw/LxgwWenKaiTC), release v1.530, under SIL OFL 1.1. The platform distributes the original TTFs and their respective upstream copyright/license files together; only three multiline specimens rendered from these faces (Simplified Chinese, Traditional Chinese and English), not either full font, are bundled for offline preview. TC uses heritage glyph forms, not a claim of Taiwanese educational-standard forms.
+their own fonts on a TF card. The optional Wi-Fi download fetches the unmodified [LXGW Neo XiHei Screen](https://github.com/lxgw/LxgwNeoXiHei) (`LXGWNeoXiHeiScreen.ttf`, IPA Font License 1.0) directly from mainland China CTAN mirrors (`lxgw-fonts`); only three multiline specimens rendered from this face (Simplified Chinese, Traditional Chinese and English), not the font binary itself, are bundled for offline preview.
 
-可选下载为霞鹜文楷及其 TC 版 v1.530 原版 Medium；分别随包保留上游版权和 OFL 1.1，不是 mogo 自有字体。离线预览只附由对应字体绘制的简中、繁中和英文三行大字样句位图，不附完整字库。
+可选下载为霞鹜新晰黑屏显版原版 TTF（`LXGWNeoXiHeiScreen.ttf`，采用 IPA Font License 1.0 开源许可，直接取自国内 CTAN `lxgw-fonts` 镜像，不是 mogo 自有字体）。离线预览只附由该字体绘制的简中、繁中和英文三行大字样句位图，不附完整字库。
 
 BLE 蓝牙翻页器的报告解析与按键映射参考 CrossMux 的 BleKeyboardHost，保留组件头部来源说明与 CrossMux MIT 许可。JPEGDEC 使用 BitBank Apache-2.0，具体适配与修正见 `components/jpegdec/FORK.md`。

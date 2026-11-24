@@ -5,7 +5,7 @@
 #include "app_font_context.h"
 #include "app_registry.h"
 #include "app_transfer_mode.h"
-#include "assets/setup_wenkai.h"
+#include "assets/setup_font_samples.h"
 #include "display_geometry.h"
 #include "font_download.h"
 #include "home_components.h"
@@ -48,7 +48,7 @@ const app_desc_t* app_setup_start(app_setup_mode_t requested) {
     return app_setup_page();
 }
 static void start_download(app_ctx_t* ctx) {
-    pending = font_download_start(preview == UI_LANG_TW);
+    pending = font_download_start();
     progress = 0;
     last_meter_ms = ctx->now_ms;
     notice = pending ? NULL : "下载失败，请重试";
@@ -199,11 +199,10 @@ static void draw_font(uint8_t* fb) {
     char meta[64];
     rule(fb, 346);
     left(fb, (EpdRect){ LEFT, 358, WIDTH, 45 }, 25, "推荐字体");
-    left(fb, (EpdRect){ LEFT, 403, WIDTH, 66 }, 52,
-         preview == UI_LANG_TW ? "霞鶩文楷 TC" : "霞鹜文楷");
+    left(fb, (EpdRect){ LEFT, 403, WIDTH, 66 }, 52, "霞鹜新晰黑");
     snprintf(
-        meta, sizeof(meta), "Medium   /   v1.530   /   %.1f MiB",
-        font_download_bytes(preview == UI_LANG_TW) / 1048576.0);
+        meta, sizeof(meta), "Screen   /   %.1f MiB",
+        font_download_bytes() / 1048576.0);
     left(fb, (EpdRect){ LEFT, 469, WIDTH, 45 }, 28, meta);
     enum { PAIRS = SETUP_SAMPLE_WIDTH / 2 };
     _Static_assert(SETUP_SAMPLE_WIDTH <= WIDTH && SETUP_SAMPLE_WIDTH % 2 == 0, "Specimen width");
@@ -430,7 +429,7 @@ static app_redraw_t tick(app_ctx_t* ctx) {
         return APP_REDRAW_NONE;
     }
     if (s == FONT_READY) {
-        const char* path = font_download_path(preview == UI_LANG_TW);
+        const char* path = font_download_path();
         bool ok = ttf_font_open(path) == ESP_OK && !strcmp(ttf_font_path(), path);
         if (ok) app_settings_set_system_font_path(path);
         ok = ok && !strcmp(app_settings_system_font_path(), path);

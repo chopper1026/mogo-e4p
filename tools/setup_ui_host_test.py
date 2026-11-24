@@ -11,7 +11,7 @@ rows=[json.loads('['+line[1:-2]+']') for line in (root/'main/ui/locale_catalog.i
 keys=[r[0] for r in rows]
 assert keys==sorted(set(keys))
 formats=re.compile(r'%(?:%|[-+ #0]*\d*(?:\.\d+)?(?:hh|ll|[lhzjtL])?[diuoxXfFeEgGaAcsp])')
-chars=set('简体中文繁體中文English霞鹜文楷霞鶩文楷')
+chars=set('简体中文繁體中文English霞鹜新晰黑霞鶩新晰黑')
 for key,tw,en in rows:
     assert formats.findall(key)==formats.findall(tw)==formats.findall(en),key
     for value in (key,tw,en):chars.update(value)

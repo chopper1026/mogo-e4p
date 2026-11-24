@@ -16,7 +16,7 @@ def unit():
 #include "ui_language.h"
 #include "ui_font_sample.h"
 #include "home_components.h"
-#include "assets/setup_wenkai.h"
+#include "assets/setup_font_samples.h"
 '''
     code += host.enum_block(ROOT / 'main/app/app_setup.h', 'APP_SETUP_RESUME', 'app_setup_mode_t')
     source = PAGE.read_text()
@@ -27,7 +27,7 @@ def unit():
     code += locale[locale.index('typedef struct'):locale.index('const char* ui_tr(const')].replace(
         '    extern const char _rodata_start[], _rodata_end[];', '').replace(
         ' || (uintptr_t)key < (uintptr_t)_rodata_start ||\n        (uintptr_t)key >= (uintptr_t)_rodata_end', '')
-    code += 'static uint32_t font_download_bytes(bool tc){return tc?15122300:25800076;}\n'
+    code += 'static uint32_t font_download_bytes(void){return 7666968;}\n'
     code += 'static void ui_clear_rect_fast(uint8_t* f,EpdRect r){ui_fill_rect_fast(r,255,f);}\n'
     code += host.function('ui_setup_text_box', native.KIT)
     code += '\n#undef ui_tr\n#define ui_tr(key) ui_tr_for(preview,key)\n'
@@ -43,7 +43,7 @@ int main(int argc,char **argv){
         preview=l;step=pages[i];wifi_ready=false;font_percent=scale;pending=step==SETUP_FONT;progress=35;render(NULL,fb);
         if(pending){
             // 原版 TTF 生成的未压缩像素摘要，不依赖设备解码器。/ Golden hashes of raw upstream TTF pixels, independent of the decoder.
-            static const uint32_t expected[]={0x0217ef1b,0x73781d1e,0xe5d32754};
+            static const uint32_t expected[]={0xb93cc36a,0xbde161ab,0xa07736bf};
             uint32_t hash=2166136261u;
             for(int y=0;y<SETUP_SAMPLE_HEIGHT;++y)for(int x=0;x<SETUP_SAMPLE_WIDTH;x+=2){
                 unsigned a=15-pixel_at(fb,LEFT+x,SAMPLE_TOP+y)/16;

@@ -117,9 +117,9 @@ static uint8_t *owned_font_copy(const char *path,size_t *bytes){
 int main(int argc,char **argv){
  if(argc==3 && !strcmp(argv[1],"--check-pack")) {
   assert(ttf_font_open(argv[2])==ESP_OK && !ttf_font_is_builtin() && !strcmp(ttf_font_path(),argv[2]));
-  const char *sample="文楷Aa";assert(ttf_font_has_text(sample));record_coverage=true;
+  const char *sample="新晰黑繁體Aa";assert(ttf_font_has_text(sample));record_coverage=true;
   for(int px=18;px<=32;px+=7){painted=0;ttf_draw_text_px(pixels,10,80,px,sample,EPD_DRAW_ALIGN_LEFT,0,15);assert(painted>0);}
-  ttf_font_unload();puts("WenKai pack: loaded and painted at 18/25/32px");return 0;
+  ttf_font_unload();puts("Recommended pack: loaded and painted at 18/25/32px");return 0;
  }
  assert(argc==3&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){

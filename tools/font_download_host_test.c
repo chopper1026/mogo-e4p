@@ -1,4 +1,5 @@
-/* 真正的分块收取、文件操作和 SHA-256；只替换卡、网络、任务平台接口。/ Real streamed file I/O and SHA-256 with card, network and task adapters replaced. */
+/* 真正的分块收取、镜像回退、文件操作和 TrueType SFNT 校验；只替换卡、网络、任务平台接口。
+ * Real streamed file I/O, mirror failover and TrueType SFNT validation with card, network and task adapters replaced. */
 #include <assert.h>
 #include <errno.h>
 #include <net/if.h>
@@ -9,47 +10,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "font_download.h"
-#ifdef __APPLE__
-#include <CommonCrypto/CommonDigest.h>
-#define HASH_CTX CC_SHA256_CTX
-#define HASH_INIT CC_SHA256_Init
-#define HASH_UPDATE CC_SHA256_Update
-#define HASH_FINISH CC_SHA256_Final
-#else
-#include <openssl/sha.h>
-#define HASH_CTX SHA256_CTX
-#define HASH_INIT SHA256_Init
-#define HASH_UPDATE SHA256_Update
-#define HASH_FINISH SHA256_Final
-#endif
+
 #define ESP_OK 0
-#define PSA_SUCCESS 0
-#define PSA_ALG_SHA_256 1
-#define PSA_HASH_OPERATION_INIT { 0 }
-typedef HASH_CTX psa_hash_operation_t;
-static int psa_crypto_init(void) {
-    return 0;
-}
-static int psa_hash_setup(HASH_CTX* c, int alg) {
-    assert(alg == 1);
-    return !HASH_INIT(c);
-}
-static int psa_hash_update(HASH_CTX* c, uint8_t* buf, size_t n) {
-    return !HASH_UPDATE(c, buf, n);
-}
-static int psa_hash_finish(HASH_CTX* c, uint8_t* out, size_t cap, size_t* n) {
-    assert(cap == 32);
-    *n = 32;
-    return !HASH_FINISH(out, c);
-}
-static void psa_hash_abort(HASH_CTX* c) {
-    (void)c;
-}
+
 typedef struct {
     bool mounted;
     uint64_t free_bytes;
 } board_sd_info_t;
-static board_sd_info_t card = { true, UINT32_MAX };
+static board_sd_info_t card = { true, UINT64_C(1) << 30 };
 static int board_sd_get_info(board_sd_info_t* out) {
     *out = card;
     return 0;
@@ -94,117 +62,237 @@ typedef struct {
     bool disable_auto_redirect;
     void (*crt_bundle_attach)(void);
 } esp_http_client_config_t;
-typedef FILE* esp_http_client_handle_t;
+typedef struct {
+    FILE* file;
+    int status;
+    int64_t declared;
+    int fault;
+} mock_http_t;
+typedef mock_http_t* esp_http_client_handle_t;
 static void esp_crt_bundle_attach(void) {}
-static const char* payload = "payload";
-static long declared = 3;
-static int status = 200, fault;
-static FILE* esp_http_client_init(const esp_http_client_config_t* cfg) {
-    assert(
-        !strcmp(cfg->if_name->ifr_name, "sta") && cfg->disable_auto_redirect &&
-        cfg->crt_bundle_attach);
+
+typedef struct {
+    const char* payload;
+    int64_t declared;
+    int status;
+    int fault;
+} mirror_plan_t;
+static mirror_plan_t plans[4];
+static int plan_count;
+static const char* seen_urls[8];
+
+static esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t* cfg) {
+    assert(!strcmp(cfg->if_name->ifr_name, "sta") && cfg->disable_auto_redirect &&
+           cfg->crt_bundle_attach);
     assert(cfg->timeout_ms == 10000);
+    int idx = requests < plan_count ? requests : plan_count - 1;
+    if (requests < 8) seen_urls[requests] = cfg->url;
     ++clients;
     ++requests;
-    FILE* f = fopen(payload, "rb");
-    assert(f);
-    return f;
+    mock_http_t* h = calloc(1, sizeof(*h));
+    assert(h);
+    h->status = plans[idx].status;
+    h->declared = plans[idx].declared;
+    h->fault = plans[idx].fault;
+    h->file = fopen(plans[idx].payload, "rb");
+    assert(h->file);
+    return h;
 }
-static int esp_http_client_open(FILE* f, int size);
-static long esp_http_client_fetch_headers(FILE* f);
-static int esp_http_client_get_status_code(FILE* f) {
-    (void)f;
-    return status;
+static int esp_http_client_open(esp_http_client_handle_t h, int size);
+static int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h);
+static int esp_http_client_get_status_code(esp_http_client_handle_t h) {
+    return h->status;
 }
-static int esp_http_client_read(FILE* f, char* buf, int n);
-static void esp_http_client_cleanup(FILE* f) {
-    assert(!fclose(f));
+static int esp_http_client_read(esp_http_client_handle_t h, char* buf, int n);
+static void esp_http_client_cleanup(esp_http_client_handle_t h) {
+    assert(!fclose(h->file));
+    free(h);
     --clients;
 }
+
 #include "receive.inc"
-static int esp_http_client_open(FILE* f, int size) {
-    assert(f && !size);
-    if (fault == 3) atomic_store(&cancelled, true);
+
+static int esp_http_client_open(esp_http_client_handle_t h, int size) {
+    assert(h && !size);
+    if (h->fault == 3) atomic_store(&cancelled, true);
+    if (h->fault == 4) return -1;
     return 0;
 }
-static long esp_http_client_fetch_headers(FILE* f) {
-    assert(f && !atomic_load(&cancelled));
-    return declared;
+static int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h) {
+    assert(h && !atomic_load(&cancelled));
+    return h->declared;
 }
-static int esp_http_client_read(FILE* f, char* buf, int n) {
-    if (fault == 1) return -1;
-    if (fault == 2) atomic_store(&cancelled, true);
-    return fread(buf, 1, n, f);
+static int esp_http_client_read(esp_http_client_handle_t h, char* buf, int n) {
+    if (h->fault == 1) return -1;
+    if (h->fault == 2) atomic_store(&cancelled, true);
+    return (int)fread(buf, 1, (size_t)n, h->file);
 }
-static void write_file(const char* p, const char* s) {
-    FILE* f = fopen(p, "wb");
+
+static void put_be16(uint8_t* p, uint16_t v) {
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+static void put_be32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+static void write_ttf_fixture(
+    const char* path, uint32_t size, uint32_t sfnt_tag, uint32_t head_magic, bool bad_bounds) {
+    uint8_t buf[512] = { 0 };
+    put_be32(buf, sfnt_tag);
+    put_be16(buf + 4, 7);
+    static const char* const tags[7] = { "cmap", "glyf", "head", "hhea", "hmtx", "loca", "maxp" };
+    for (unsigned i = 0; i < 7; ++i) {
+        uint8_t* rec = buf + 12 + i * 16;
+        memcpy(rec, tags[i], 4);
+        uint32_t off = (i == 2) ? 256u : 320u + i * 16u;
+        uint32_t len = (i == 2) ? 54u : (bad_bounds && i == 1 ? size : 16u);
+        put_be32(rec + 8, off);
+        put_be32(rec + 12, len);
+    }
+    put_be32(buf + 256 + 12, head_magic);
+    FILE* f = fopen(path, "wb");
+    assert(f && fwrite(buf, 1, sizeof(buf), f) == sizeof(buf));
+    if (size > sizeof(buf)) {
+        assert(fseek(f, (long)(size - 1u), SEEK_SET) == 0 && fputc(0, f) != EOF);
+    }
+    assert(!fclose(f));
+}
+static void write_raw(const char* path, const char* s) {
+    FILE* f = fopen(path, "wb");
     assert(f && fwrite(s, 1, strlen(s), f) == strlen(s) && !fclose(f));
 }
-static void run(const pack_t* p, font_job_state_t expected) {
+static void set_uniform_plan(const char* payload, int64_t declared, int status, int fault) {
+    plan_count = 1;
+    plans[0] = (mirror_plan_t){ payload, declared, status, fault };
+}
+static void run(font_job_state_t expected) {
+    requests = 0;
+    memset(seen_urls, 0, sizeof(seen_urls));
     atomic_store(&cancelled, false);
-    assert(receive_pack(p) == expected);
+    assert(receive_font() == expected);
     assert(!leases && !clients && access(PENDING "/font.part", F_OK) != 0);
 }
+
 int main(int argc, char** argv) {
-    assert(!strcmp(packs[0].url, "https://mogo.mantake.shop/files/fonts/1.530/LXGWWenKai-Medium.ttf"));
-    assert(!strcmp(packs[1].url, "https://mogo.mantake.shop/files/fonts/1.530/LXGWWenKaiTC-Medium.ttf"));
-    pack_t demo = { "https://example.invalid/fixture", DIR "/target.ttf",
-                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", 3 };
-    write_file(payload, "abc");
+    assert(MIRROR_COUNT == 4);
+    assert(!strcmp(
+        mirrors[0],
+        "https://mirrors.huaweicloud.com/repository/toolkit/CTAN/fonts/lxgw-fonts/LXGWNeoXiHeiScreen.ttf"));
+    assert(!strcmp(
+        mirrors[1],
+        "https://mirrors.cloud.tencent.com/CTAN/fonts/lxgw-fonts/LXGWNeoXiHeiScreen.ttf"));
+    assert(!strcmp(
+        mirrors[2],
+        "https://mirrors.pku.edu.cn/ctan/fonts/lxgw-fonts/LXGWNeoXiHeiScreen.ttf"));
+    assert(!strcmp(
+        mirrors[3],
+        "https://mirrors.ustc.edu.cn/CTAN/fonts/lxgw-fonts/LXGWNeoXiHeiScreen.ttf"));
+    assert(!strcmp(font_download_path(), "fonts/LXGWNeoXiHeiScreen.ttf"));
+    assert(font_download_bytes() == FONT_NOMINAL_BYTES);
+
+    write_ttf_fixture("valid.ttf", FONT_MIN_BYTES, 0x00010000u, 0x5F0F3CF5u, false);
+    write_ttf_fixture("otf.ttf", FONT_MIN_BYTES, 0x4F54544Fu, 0x5F0F3CF5u, false);
+    write_ttf_fixture("badmagic.ttf", FONT_MIN_BYTES, 0x00010000u, 0x12345678u, false);
+    write_ttf_fixture("badbounds.ttf", FONT_MIN_BYTES, 0x00010000u, 0x5F0F3CF5u, true);
+    write_raw("short.bin", "short");
+
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES, 200, 0);
     card.mounted = false;
-    run(&demo, FONT_NO_CARD);
-    card.mounted = true;
-    card.free_bytes = 3;
-    run(&demo, FONT_NO_SPACE);
-    card.free_bytes = UINT32_MAX;
-    wifi = false;
-    run(&demo, FONT_NEEDS_WIFI);
-    wifi = true;
+    run(FONT_NO_CARD);
     assert(!requests);
-    declared = 2;
-    run(&demo, FONT_FAILED);
-    declared = 3;
-    status = 404;
-    run(&demo, FONT_FAILED);
-    status = 200;
-    fault = 1;
-    run(&demo, FONT_FAILED);
-    fault = 2;
-    atomic_store(&percent, 0);
-    run(&demo, FONT_CANCELLED);
-    assert(!font_download_percent());
-    fault = 3;
-    run(&demo, FONT_CANCELLED);
-    fault = 0;
-    write_file(payload, "x");
-    run(&demo, FONT_FAILED);
-    write_file(payload, "bad");
-    run(&demo, FONT_FAILED);
-    assert(access(demo.path, F_OK));
-    write_file(payload, "abc");
-    run(&demo, FONT_READY);
-    int before = requests;
+    card.mounted = true;
+    card.free_bytes = FONT_MIN_BYTES;
+    run(FONT_NO_SPACE);
+    assert(!requests);
+    card.free_bytes = UINT64_C(1) << 30;
     wifi = false;
-    run(&demo, FONT_READY);
-    assert(before == requests);
-    write_file(demo.path, "bad");
-    run(&demo, FONT_CONFLICT);
+    run(FONT_NEEDS_WIFI);
+    assert(!requests);
+    wifi = true;
+
+    // 响应声明体积超过剩余空间时直接中止，不再尝试后续镜像。
+    // Stop immediately on FONT_NO_SPACE without retrying remaining mirrors.
+    card.free_bytes = FONT_MIN_BYTES + 131072u;
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES + 1048576u, 200, 0);
+    run(FONT_NO_SPACE);
+    assert(requests == 1);
+    card.free_bytes = UINT64_C(1) << 30;
+
+    // 所有镜像返回异常大小、错误状态、OTF/魔数错/表越界/截断均应失败且不留文件。
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES - 1u, 200, 0);
+    run(FONT_FAILED);
+    assert(requests == MIRROR_COUNT);
+    set_uniform_plan("valid.ttf", FONT_MAX_BYTES + 1u, 200, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES, 404, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("otf.ttf", FONT_MIN_BYTES, 200, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("badmagic.ttf", FONT_MIN_BYTES, 200, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("badbounds.ttf", FONT_MIN_BYTES, 200, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("short.bin", FONT_MIN_BYTES, 200, 0);
+    run(FONT_FAILED);
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES, 200, 1);
+    run(FONT_FAILED);
+    assert(access(FONT_PATH, F_OK) != 0);
+
+    // 取消下载立即中止，不再切到下一个镜像。
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES, 200, 2);
+    atomic_store(&percent, 0);
+    run(FONT_CANCELLED);
+    assert(requests == 1 && !font_download_percent());
+    set_uniform_plan("valid.ttf", FONT_MIN_BYTES, 200, 3);
+    run(FONT_CANCELLED);
+    assert(requests == 1);
+
+    // 镜像顺序回退：前 3 个分别 404 / 连接失败 / 错格式，第 4 个成功。
+    plan_count = 4;
+    plans[0] = (mirror_plan_t){ "valid.ttf", FONT_MIN_BYTES, 404, 0 };
+    plans[1] = (mirror_plan_t){ "valid.ttf", FONT_MIN_BYTES, 200, 4 };
+    plans[2] = (mirror_plan_t){ "otf.ttf", FONT_MIN_BYTES, 200, 0 };
+    plans[3] = (mirror_plan_t){ "valid.ttf", FONT_MIN_BYTES, 200, 0 };
+    run(FONT_READY);
+    assert(requests == 4);
+    for (int i = 0; i < 4; ++i) assert(!strcmp(seen_urls[i], mirrors[i]));
+    assert(font_download_percent() == 100);
+
+    // 已存在合法 TTF 时离线复用，不发起任何网络请求。
+    wifi = false;
+    run(FONT_READY);
+    assert(!requests);
+
+    // 同名文件不是合法 TrueType 时报冲突且绝不覆盖。
+    write_raw(FONT_PATH, "bad");
+    run(FONT_CONFLICT);
     char b[4] = { 0 };
-    FILE* f = fopen(demo.path, "rb");
+    FILE* f = fopen(FONT_PATH, "rb");
     assert(f && fread(b, 1, 3, f) == 3 && !strcmp(b, "bad") && !fclose(f));
-    assert(argc == 1 || argc == 3);
-    for (int i = 1; i < argc; i++) {
-        const pack_t* p = &packs[i - 1];
-        payload = argv[i];
-        declared = p->bytes;
+
+    // 即使体积够大但非 TrueType（如 OTF）同样报冲突。
+    assert(!unlink(FONT_PATH));
+    write_ttf_fixture(FONT_PATH, FONT_MIN_BYTES, 0x4F54544Fu, 0x5F0F3CF5u, false);
+    run(FONT_CONFLICT);
+    assert(!unlink(FONT_PATH));
+
+    // 可选传入真实 LXGWNeoXiHeiScreen.ttf 验证流式落盘与离线复用。
+    assert(argc == 1 || argc == 2);
+    if (argc == 2) {
+        struct stat st;
+        assert(stat(argv[1], &st) == 0);
+        set_uniform_plan(argv[1], st.st_size, 200, 0);
         wifi = true;
-        run(p, FONT_READY);
+        run(FONT_READY);
+        assert(requests == 1);
         wifi = false;
-        before = requests;
-        run(p, FONT_READY);
-        assert(requests == before);
+        run(FONT_READY);
+        assert(!requests);
     }
     puts(
-        "PASS: Wi-Fi binding, no card, low space, cancelled/disconnected/short/corrupt responses, "
-        "no overwrite, offline reuse and resource cleanup");
+        "PASS: CTAN mirror failover, Wi-Fi binding, no card, low space, cancelled/disconnected/"
+        "short/non-TTF rejection, no overwrite, offline reuse and resource cleanup");
 }

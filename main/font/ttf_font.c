@@ -471,6 +471,7 @@ const char* ttf_font_localized_name(const char* stem) {
     if (!strcasecmp(stem, "Kai")) return "思源楷体";
     if (!strcasecmp(stem, "FangSong")) return "思源仿宋";
     if (!strcasecmp(stem, "WenKai")) return "文楷";
+    if (!strcasecmp(stem, "LXGWNeoXiHeiScreen")) return "霞鹜新晰黑";
     if (!strcasecmp(stem, "KingHwa")) return "京华老宋";
     if (!strcasecmp(stem, "ChillKai")) return "寒蝉正楷";
     if (!strcasecmp(stem, "CangErYunHei05")) return "仓耳云黑05";

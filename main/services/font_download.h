@@ -1,4 +1,4 @@
-/* 文楷安装任务；工作线程只取得文件，UI 线程启用字体。/ WenKai download worker; only the UI thread activates a face. */
+/* 霞鹜新晰黑安装任务；工作线程只取得并校验 TTF，UI 线程启用字体。/ LXGW Neo XiHei installer worker; only the UI thread activates a face. */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,9 +13,9 @@ typedef enum {
     FONT_FAILED,
     FONT_CANCELLED
 } font_job_state_t;
-bool font_download_start(bool traditional);
+bool font_download_start(void);
 font_job_state_t font_download_state(void);
 unsigned font_download_percent(void);
-const char* font_download_path(bool traditional);
-uint32_t font_download_bytes(bool traditional);
+const char* font_download_path(void);
+uint32_t font_download_bytes(void);
 bool font_download_quiesce(unsigned timeout_ms);

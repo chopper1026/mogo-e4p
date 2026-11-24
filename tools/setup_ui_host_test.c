@@ -1,6 +1,6 @@
 /* 离线完整引导及配网返回；只替换平台 I/O。/ Exercise the actual offline wizard and provisioning return using platform fakes. */
 #include <assert.h>
-#include "../main/assets/setup_wenkai.h"
+#include "../main/assets/setup_font_samples.h"
 #include "app_setup.h"
 #include "font_download.h"
 #include "home_components.h"
@@ -54,8 +54,7 @@ static const struct {
     bool enabled;
 } weather = { false };
 #define app_weather_view() (&weather)
-bool font_download_start(bool tc) {
-    assert(tc == (saved == UI_LANG_TW));
+bool font_download_start(void) {
     ++downloads;
     return true;
 }
@@ -70,12 +69,10 @@ static unsigned received;
 unsigned font_download_percent(void) {
     return received;
 }
-const char* font_download_path(bool t) {
-    (void)t;
+const char* font_download_path(void) {
     return "font";
 }
-uint32_t font_download_bytes(bool t) {
-    (void)t;
+uint32_t font_download_bytes(void) {
     return 0;
 }
 void app_transfer_open_setup_wifi(app_ctx_t* c) {
