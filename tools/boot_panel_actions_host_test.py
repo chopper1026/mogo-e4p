@@ -67,6 +67,7 @@ ACTIONS = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "ui_locale.h"
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
 typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
 enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT };
@@ -128,6 +129,6 @@ with tempfile.TemporaryDirectory(prefix='mogo-boot-panel-') as directory:
     for name, unit in [('boot', BOOT), ('actions', ACTIONS)]:
         (work/f'{name}.c').write_text(unit, encoding='utf-8')
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g',
-                        '-I'+str(work),'-I'+str(CRASH),'-I'+str(CRASH/'include'),
+                        '-I'+str(work),'-I'+str(CRASH),'-I'+str(CRASH/'include'),'-I'+str(ROOT/'main/ui'),
                         str(work/f'{name}.c'),'-o',str(work/name)],check=True)
         subprocess.run([str(work/name)],check=True)

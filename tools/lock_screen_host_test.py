@@ -24,6 +24,7 @@ with tempfile.TemporaryDirectory() as folder:
 #include <sys/stat.h>
 #include <setjmp.h>
 #include "ui_pinpad.h"
+#include "ui_locale.h"
 #include "cst836u.h"
 #include "platform/s31_input.h"
 #define FRAME_BYTES (684u*1216u/2u)
