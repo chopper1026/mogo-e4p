@@ -12,6 +12,7 @@
  * 用户修订：键盘与候选使用白底黑字；候选变化三次、停手400ms后仅整理词栏，不打断连打、不全屏黑闪。
  * User revision: white keys/candidates with black text; settle the word strip after three changes and a 400ms pause, without interrupting typing or flashing the whole screen.
  */
+#include "../ui/ui_locale.h"
 #include "ui_keyboard.h"
 #include "ui_ime.h"
 #include <ui_kit.h>
@@ -61,7 +62,7 @@ static void refresh(void) {
     s_best_roman[0] = 0; s_best_consume = 0;
     if (!s_candidates || !s_edit || !s_chinese) return;
     ++s_candidates_revision;
-    if (!load_candidates(0)) snprintf(s_notice, sizeof(s_notice), "内存不足，请缩短拼音后重试");
+    if (!load_candidates(0)) snprintf(s_notice, sizeof(s_notice), ui_tr("内存不足，请缩短拼音后重试"));
     else if (s_candidates->count) {
         snprintf(s_best_roman, sizeof(s_best_roman), "%s", s_candidates->items[0].roman);
         s_best_consume = s_candidates->items[0].consume;
@@ -79,13 +80,13 @@ void ui_keyboard_begin(ui_text_edit_t *edit, bool ascii_only) {
     ui_keyboard_end(); s_edit = edit; s_ascii = ascii_only;
     s_chinese = !ascii_only; s_nine = !ascii_only; s_upper = false; s_panel = 0;
     if (!ascii_only) s_candidates = heap_caps_malloc(sizeof(*s_candidates), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!ascii_only && !s_candidates) { s_chinese = s_nine = false; snprintf(s_notice, sizeof(s_notice), "内存不足，暂用英文键盘"); }
+    if (!ascii_only && !s_candidates) { s_chinese = s_nine = false; snprintf(s_notice, sizeof(s_notice), ui_tr("内存不足，暂用英文键盘")); }
     refresh();
 }
 bool ui_keyboard_pending(void) { return s_raw[0] != 0; }
 static bool insert(const char *text) {
     if (s_edit && ui_text_edit_insert(s_edit, text)) { s_notice[0] = 0; return true; }
-    snprintf(s_notice, sizeof(s_notice), "文字已达到长度上限"); return false;
+    snprintf(s_notice, sizeof(s_notice), ui_tr("文字已达到长度上限")); return false;
 }
 static bool commit(size_t index) {
     if (!s_candidates || index >= s_candidates->count) return false;
@@ -268,7 +269,7 @@ static void backspace(void) {
 static void letter_key(char letter) {
     if (!s_chinese) { char text[2] = {s_upper ? letter - 32 : letter, 0}; insert(text); return; }
     size_t n = strlen(s_raw);
-    if (n == UI_IME_RAW_MAX) { snprintf(s_notice, sizeof(s_notice), "拼音过长，请先选词"); return; }
+    if (n == UI_IME_RAW_MAX) { snprintf(s_notice, sizeof(s_notice), ui_tr("拼音过长，请先选词")); return; }
     s_notice[0] = 0; s_raw[n] = letter; s_raw[n + 1] = 0; refresh();
 }
 static ui_keyboard_result_t tap(int x, int y, int top) {
@@ -281,7 +282,7 @@ static ui_keyboard_result_t tap(int x, int y, int top) {
             if (nine && ui_ime_digits(s_raw, converted, sizeof(converted))) snprintf(s_raw, sizeof(s_raw), "%s", converted);
             else if (!nine && s_best_consume == strlen(s_raw) && s_best_roman[0])
                 snprintf(s_raw, sizeof(s_raw), "%s", s_best_roman);
-            else { snprintf(s_notice, sizeof(s_notice), "请先选词或重输，再切换键盘"); return UI_KEYBOARD_CHANGED; }
+            else { snprintf(s_notice, sizeof(s_notice), ui_tr("请先选词或重输，再切换键盘")); return UI_KEYBOARD_CHANGED; }
         }
         s_nine = nine; s_panel = 0;
         if (nine) { s_chinese = true; s_upper = false; }
@@ -297,16 +298,16 @@ static ui_keyboard_result_t tap(int x, int y, int top) {
     if (y >= top + 430 && y < top + 502) {
         if (x >= 534) {
             if (!s_raw[0]) return UI_KEYBOARD_DONE;
-            snprintf(s_notice, sizeof(s_notice), "请先选择词语，再保存");
+            snprintf(s_notice, sizeof(s_notice), ui_tr("请先选择词语，再保存"));
         } else if (x >= 434) {
             if (s_nine) return UI_KEYBOARD_NONE;
-            if (s_raw[0]) snprintf(s_notice, sizeof(s_notice), "请先选词，再切换语言");
+            if (s_raw[0]) snprintf(s_notice, sizeof(s_notice), ui_tr("请先选词，再切换语言"));
             else if (!s_ascii && s_candidates) { s_chinese = !s_chinese; refresh(); }
-            else snprintf(s_notice, sizeof(s_notice), "密码使用英文、数字与符号");
+            else snprintf(s_notice, sizeof(s_notice), ui_tr("密码使用英文、数字与符号"));
         } else if (x >= 206) {
-            if (s_raw[0]) { if (!commit(s_page)) snprintf(s_notice, sizeof(s_notice), "未识别拼音，请继续输入或重输"); }
+            if (s_raw[0]) { if (!commit(s_page)) snprintf(s_notice, sizeof(s_notice), ui_tr("未识别拼音，请继续输入或重输")); }
             else insert(" ");
-        } else if (s_raw[0]) snprintf(s_notice, sizeof(s_notice), "请先选词，再输入数字符号");
+        } else if (s_raw[0]) snprintf(s_notice, sizeof(s_notice), ui_tr("请先选词，再输入数字符号"));
         else if (x < 110) s_panel = s_panel ? 0 : 1;
         else s_panel = s_panel == 2 ? 3 : 2;
         return UI_KEYBOARD_CHANGED;
@@ -347,12 +348,12 @@ static ui_keyboard_result_t tap(int x, int y, int top) {
         }
         for (int i = 0; i < 9; ++i) if (ui_rect_hit(rect(116 + (i % 3) * 150, 180 + (i / 3) * 78, 140, 68, top), x, y)) {
             if (!i) {
-                if (!commit(s_page)) snprintf(s_notice, sizeof(s_notice), "请先输入拼音并选择词语");
+                if (!commit(s_page)) snprintf(s_notice, sizeof(s_notice), ui_tr("请先输入拼音并选择词语"));
                 return UI_KEYBOARD_CHANGED;
             }
             size_t len = strlen(s_raw);
             if (len < UI_IME_RAW_MAX) { s_notice[0] = 0; s_raw[len] = (char)('1' + i); s_raw[len + 1] = 0; refresh(); }
-            else snprintf(s_notice, sizeof(s_notice), "拼音过长，请先选词");
+            else snprintf(s_notice, sizeof(s_notice), ui_tr("拼音过长，请先选词"));
             return UI_KEYBOARD_CHANGED;
         }
     }

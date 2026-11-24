@@ -2,6 +2,7 @@
  * 中文：按 PDB 记录读取 MOBI6，索引可丢弃，原书只读。
  * English: Record-based MOBI6 reader with disposable indices and read-only originals.
  */
+#include "../ui/ui_locale.h"
 #include "book_mobi.h"
 #include "book_mobi_markup.h"
 #include "book_index_cache.h"
@@ -495,7 +496,7 @@ esp_err_t book_mobi_chapter_title(const book_mobi_t *b, size_t i, char *buf, siz
     if (!b || i >= b->count) return ESP_ERR_INVALID_ARG;
     for (size_t n = 0; n < b->nav_count; ++n)
         if (chapter_at(b, b->navigation[n].offset) == i) return copy_title(b->navigation[n].title, buf, cap);
-    char name[64]; snprintf(name, sizeof(name), "第%u节", (unsigned)i + 1);
+    char name[64]; snprintf(name, sizeof(name), ui_tr("第%u节"), (unsigned)i + 1);
     return copy_title(name, buf, cap);
 }
 esp_err_t book_mobi_chapter_name(const book_mobi_t *b, size_t i, char *buf, size_t cap) {

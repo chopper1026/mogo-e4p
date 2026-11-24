@@ -2,6 +2,7 @@
  * 中文：白底阅读提示卡，标题、说明和边框共用固定布局。
  * English: White reader notices with shared geometry for headings, details and frames.
  */
+#include "ui_locale.h"
 #include "ui_reader_notice.h"
 #include "ui_kit.h"
 #include <string.h>
@@ -23,6 +24,7 @@ static int notice_lines(const char *message) {
 }
 
 EpdRect ui_reader_notice_area(const char *message, unsigned system_font_size) {
+    message=ui_tr(message);
     int lines = notice_lines(message);
     if (!lines) return (EpdRect){0, 0, 0, 0};
     int height = 164 + notice_extra(system_font_size, 50);
@@ -31,6 +33,7 @@ EpdRect ui_reader_notice_area(const char *message, unsigned system_font_size) {
 }
 
 void ui_reader_notice_draw(uint8_t *fb, const char *message, unsigned system_font_size) {
+    message=ui_tr(message);
     int lines = notice_lines(message);
     if (!fb || !lines) return;
     unsigned scale = notice_scale(system_font_size);

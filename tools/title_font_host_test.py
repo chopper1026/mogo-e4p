@@ -115,6 +115,12 @@ static uint8_t *owned_font_copy(const char *path,size_t *bytes){
  uint8_t *data=heap_caps_malloc((size_t)size,3);assert(fread(data,1,(size_t)size,file)==(size_t)size&&!fclose(file));*bytes=(size_t)size;return data;
 }
 int main(int argc,char **argv){
+ if(argc==3 && !strcmp(argv[1],"--check-pack")) {
+  assert(ttf_font_open(argv[2])==ESP_OK && !ttf_font_is_builtin() && !strcmp(ttf_font_path(),argv[2]));
+  const char *sample="文楷Aa";assert(ttf_font_has_text(sample));record_coverage=true;
+  for(int px=18;px<=32;px+=7){painted=0;ttf_draw_text_px(pixels,10,80,px,sample,EPD_DRAW_ALIGN_LEFT,0,15);assert(painted>0);}
+  ttf_font_unload();puts("WenKai pack: loaded and painted at 18/25/32px");return 0;
+ }
  assert(argc==3&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){
   assert(ttf_font_open(argv[face+1])==ESP_OK&&ttf_font_ready()&&!ttf_font_is_builtin());
@@ -267,3 +273,5 @@ int main(int argc,char **argv){
     subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'), str(work / 'source.o'), str(ROOT / 'main/font/ttf_block_cache.c'), str(ROOT / 'main/font/ttf_glyph_cache.c'),
                             str(ROOT / 'main/ui/ui_kit.c'), '-lm', gc, '-o', str(work / 'test')], check=True)
     subprocess.run([str(work / 'test'), str(work / 'system.ttf'), str(work / 'reader.ttf')], check=True)
+    for pack in filter(None, os.environ.get('MOGO_TEST_FONT_PACKS', '').split(os.pathsep)):
+        subprocess.run([str(work / 'test'), '--check-pack', pack], check=True)

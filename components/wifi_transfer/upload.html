@@ -162,12 +162,277 @@ ul{list-style:none;padding:0;margin:0}svg{fill:none;stroke:currentColor;stroke-l
 <dialog id="editor"><form id="editorForm"><div class="dialog-heading"><h2 id="editorTitle"></h2><button id="editorClose" type="button" class="icon-button" aria-label="关闭" title="关闭"><svg aria-hidden="true"><use href="#icon-x"/></svg></button></div><p id="editorDescription"></p><label id="editorLabel" for="editorName">名称</label><input id="editorName" type="text"><p id="editorNameBudget" class="result" aria-live="polite" hidden></p><p id="editorError" class="danger" role="alert"></p><div class="dialog-actions"><button id="editorCancel" class="secondary" type="button">取消</button><button id="editorConfirm" class="primary" type="submit">保存</button></div></form></dialog>
 <div id="rowMenu" class="row-menu" hidden aria-label="文件操作"></div>
 <script>
+// 仅捕获初始静态节点；文件名、签名等后来插入的内容不翻译。/ Capture initial markup only, never later filenames or signatures.
+const webCopy = {
+  " · 未完成 ": [" · 未完成 ", " • Not completed "],
+  " · 等待 ": [" · 等待 ", " • Waiting "],
+  " · 等待写入结果": [" · 等待寫入結果", " • Waiting for writing results"],
+  " · 跳过 ": [" · 跳過 ", " • Skipping "],
+  " 不变）": [" 不變）", " (No change)"],
+  " 个 UTF-8 字节（含扩展名）": [" 個 UTF-8 位元組（含副檔名）", " UTF-8 bytes including the extension"],
+  " 个 UTF-8 字节（含扩展名）。同名文件上传前确认。": [" 個 UTF-8 位元組（含副檔名）。同名檔案上傳前確認。", " UTF-8 bytes including the extension. Confirm before replacing an existing file."],
+  " 个已跳过": [" 個已跳過", " skipped"],
+  " 个文件到 /": [" 個檔案到 /", " files to /"],
+  " 个文件已处理": [" 個檔案已處理", " files processed"],
+  " 个未完成": [" 個未完成", " Not completed"],
+  " 中的保存名称，不会更改本地文件。": [" 中的儲存名稱，不會更改本地檔案。", " on the reader, not the local file."],
+  " 副本": [" 副本", " Copy"],
+  " 副本$1": [" 副本$1", " Copy $1"],
+  " 的更多操作": [" 的更多操作", " actions"],
+  " 项": [" 項", " Item"],
+  " 项 · ": [" 項 · ", " Item: "],
+  " 项 · 按选择顺序": [" 項 · 按選擇順序", " items · In selection order"],
+  " 项 · 每页最多 20 项": [" 項 · 每頁最多 20 項", " items · Up to 20 per page"],
+  "684 × 1216 像素": ["684 × 1216 畫素", "684 x 1216 pixels"],
+  "684 × 1216 锁屏裁剪预览，方向键移动图片": ["684 × 1216 鎖定畫面裁剪預覽，方向鍵移動圖片", "684 x 1216 Screen crop preview, direction keys moving pictures"],
+  "JPG、PNG 及浏览器支持的图片": ["JPG、PNG 及瀏覽器支援的圖片", "Images supported by JPG, PNG and browser"],
+  "SSID须为1至32字节；密码留空，或8至63个ASCII字符、64位十六进制密钥": ["SSID須為1至32位元組；密碼留空，或8至63個ASCII字元、64位十六進位制金鑰", "SSID: 1–32 bytes. Leave the password empty, or enter 8–63 ASCII characters or 64 hex digits."],
+  "TF 卡剩余 ": ["TF 卡剩餘 ", "TF Card Remaining "],
+  "TF 卡剩余空间不足": ["TF 卡剩餘空間不足", "Not enough space on the TF card"],
+  "TF 卡存储": ["TF 卡儲存", "TF Card Storage"],
+  "TF 卡尚未就绪": ["TF 卡尚未就緒", "TF card not ready"],
+  "TF 卡已就绪 · 剩余 ": ["TF 卡已就緒 · 剩餘 ", "TF card ready · Remaining "],
+  "TF 卡未就绪": ["TF 卡未就緒", "TF card not ready"],
+  "TF 卡根目录": ["TF 卡根目錄", "TF card root"],
+  "TF 卡空间不足": ["記憶卡空間不足", "Not enough space on the TF card"],
+  "TF 卡空间不足或读写失败": ["TF 卡空間不足或讀寫失敗", "TF card full or read/write failed"],
+  "WiFi 传书": ["WiFi 傳書", "Wi-Fi transfer"],
+  "WiFi 连接": ["WiFi 連線", "WiFi Connection"],
+  "mogo / 让阅读回到阅读": ["mogo / 讓閱讀回到閱讀", "mogo / Made for reading"],
+  "mogo · WiFi 传书": ["mogo · WiFi 傳書", "mogo · Wi-Fi transfer"],
+  "上一级": ["上一級", "Up one level"],
+  "上一页": ["上一頁", "Previous"],
+  "上传与传输状态": ["上傳與傳輸狀態", "Upload and Transfer Status"],
+  "上传失败": ["上傳失敗", "Upload Failed"],
+  "上传速率": ["上傳速率", "Upload Rate"],
+  "下一页": ["下一頁", "Next"],
+  "不经过云端服务器": ["不經過雲端伺服器", "No cloud server."],
+  "主导航": ["主導航", "Main Navigation"],
+  "书籍": ["書籍", "Books"],
+  "书籍、字体与图片，都在你的 TF 卡里。": ["書籍、字型與圖片，都在你的 TF 卡里。", "Your books, fonts and images stay on your TF card."],
+  "仅修改设备 /": ["僅修改裝置 /", "Changes only the filename in /"],
+  "任意文件格式": ["任意檔案格式", "Any file type"],
+  "传输结束": ["傳輸結束", "Transfer complete."],
+  "传输结束 · 有未完成项": ["傳輸結束 · 有未完成項", "Transfer over · There's an incomplete item"],
+  "传输长时间无响应，请检查设备文件后重试": ["傳輸長時間無響應，請檢查裝置檔案後重試", "Transfer timed out. Check the files on the reader before retrying."],
+  "传输队列": ["傳輸佇列", "Transfer queue"],
+  "位置：/": ["位置：/", "Location: /"],
+  "你的下一张锁屏": ["你的下一張鎖定畫面", "Your next lock screen."],
+  "保存": ["儲存", "Save"],
+  "保存到 /": ["儲存到 /", "Save to /"],
+  "保存后重启仍会保留，留空保存即可隐藏。": ["儲存後重啟仍會保留，留空儲存即可隱藏。", "Saved across restarts. Save an empty signature to hide it."],
+  "保存失败": ["儲存失敗", "Save Failed"],
+  "保存并重试": ["儲存並重試", "Save and try again"],
+  "保存签名": ["儲存簽名", "Save signature"],
+  "保存网络失败，原配置未主动清除，请重试": ["儲存網路失敗，原配置未主動清除，請重試", "Failed to save network. The original configuration was not manually cleared, please try again"],
+  "保持墨水屏停留在传输页面": ["保持墨水屏停留在傳輸頁面", "Keep the ink screen on the transfer page"],
+  "修改保存名称": ["修改儲存名稱", "Modify Save Name"],
+  "全部 ": ["全部 ", "All "],
+  "全部文件": ["全部檔案", "All Files"],
+  "共 ": ["共 ", "Total "],
+  "关闭": ["關閉", "Close"],
+  "内存不足": ["記憶體不足", "Memory deficit"],
+  "写下你的签名": ["寫下你的簽名", "Write your signature."],
+  "准备传输": ["準備傳輸", "Ready for transmission."],
+  "删除": ["刪除", "Delete"],
+  "删除所选文件": ["刪除所選檔案", "Remove Selected File"],
+  "刷新目录和存储状态": ["重新整理目錄和儲存狀態", "Refresh Directory and Storage"],
+  "单文件不超过 ": ["單檔案不超過 ", "Maximum file size: "],
+  "即将发送 · ": ["即將傳送 · ", "Sending: "],
+  "取消": ["取消", "Cancel"],
+  "取消选择": ["取消選擇", "Unselect"],
+  "同名文件已存在，请选择替换或跳过": ["同名檔案已存在，請選擇替換或跳過", "File with the same name already exists, choose to replace or skip"],
+  "名称": ["名稱", "Name"],
+  "名称不能包含斜杠或特殊符号": ["名稱不能包含斜槓或特殊符號", "Name cannot contain slash or special symbol"],
+  "名称无效，请检查空格、斜杠或特殊符号": ["名稱無效，請檢查空格、斜槓或特殊符號", "Name is invalid. Check spaces, slashes or special symbols"],
+  "图书不存在": ["圖書不存在", "Book not found"],
+  "图片": ["圖片", "Images"],
+  "图片仍过大，请换一张图片": ["圖片仍過大，請換一張圖片", "The picture's still too big. Please change it."],
+  "图片尺寸无效": ["圖片尺寸無效", "Image size invalid"],
+  "图片已上传，但设置锁屏壁纸失败": ["圖片已上傳，但設定鎖定畫面桌布失敗", "Image uploaded, but could not set the wallpaper"],
+  "在墨水屏顶部居中显示。": ["在墨水屏頂部居中顯示。", "Shown at the top center of the reader."],
+  "在阅读的页眉，留下一句话。": ["在閱讀的頁首，留下一句話。", "Add a personal note to the reader header."],
+  "墨水屏签名效果示意": ["墨水屏簽名效果示意", "Signature preview on the reader"],
+  "壁纸上传失败": ["桌布上傳失敗", "Failed to upload wallpaper"],
+  "复制": ["複製", "Copy"],
+  "大小": ["大小", "Size"],
+  "字体": ["字型", "Fonts"],
+  "存储空间不足或写入失败": ["儲存空間不足或寫入失敗", "Storage space is insufficient or writing failed"],
+  "定位当前": ["定位當前", "Show current file"],
+  "居中重置": ["居中重置", "Reset to center"],
+  "展开列表": ["展開列表", "Expand List"],
+  "已保存 ": ["已儲存 ", "Saved "],
+  "已处理 ": ["已處理 ", "Processed "],
+  "已完成": ["已完成", "Completed"],
+  "已完成 ": ["已完成 ", "Completed "],
+  "已设为壁纸锁屏": ["已設為桌布鎖定畫面", "Lock screen wallpaper set"],
+  "已跳过": ["已跳過", "Skipped"],
+  "已选 ": ["已選 ", "Selected "],
+  "当前操作不支持该文件": ["當前操作不支援該檔案", "This file is not supported by the current operation"],
+  "快捷目录": ["快捷目錄", "Quick folders"],
+  "我的墨水屏": ["我的墨水屏", "My reader"],
+  "所选 ": ["所選 ", "Selected "],
+  "把喜欢的画面，留在每一次合书之后。": ["把喜歡的畫面，留在每一次合書之後。", "Choose an image to see when you close your book."],
+  "按选择顺序排列的传输记录": ["按選擇順序排列的傳輸記錄", "Transmission records in order of selection"],
+  "接收配置超时，请重试": ["接收配置超時，請重試", "Receive configuration timed out, please try again"],
+  "搜索本页文件": ["搜尋本頁檔案", "Search for this page file"],
+  "操作参数无效": ["操作引數無效", "Operation parameter is invalid"],
+  "操作失败": ["操作失敗", "Operation failed"],
+  "操作失败，请重试": ["操作失敗，請重試", "Operation failed, please try again"],
+  "收起列表": ["收起列表", "Collapse List"],
+  "文件": ["檔案", "Files"],
+  "文件为空": ["檔案為空", "File is empty"],
+  "文件传输": ["檔案傳輸", "File transfer"],
+  "文件列表": ["檔案列表", "File List"],
+  "文件只保存在墨水屏": ["檔案只儲存在墨水屏", "Files stay on the reader"],
+  "文件名": ["檔名", "File name"],
+  "文件名、格式或请求无效": ["檔名、格式或請求無效", "Invalid filename, format or request"],
+  "文件名仍然过长，请再缩短一些": ["檔名仍然過長，請再縮短一些", "The filename is still too long. Please shorten it a little bit."],
+  "文件名最多 ": ["檔名最多 ", "Maximum filename "],
+  "文件名最多 %u 个 UTF-8 字节（含扩展名）": ["檔名最多 %u 個 UTF-8 位元組（含副檔名）", "Maximum filename %u Bytes of UTF-8 (including extensions)"],
+  "文件名称": ["檔名稱", "File Name"],
+  "文件名过长：": ["檔名過長：", "File name too long:"],
+  "文件名（扩展名 ": ["檔名（副檔名 ", "Filename (Extension) "],
+  "文件夹": ["資料夾", "Folder"],
+  "文件已保存，状态更新失败：": ["檔案已儲存，狀態更新失敗：", "File saved, status update failed:"],
+  "文件或目录不存在": ["檔案或目錄不存在", "File or directory does not exist"],
+  "文件操作": ["檔案操作", "File actions"],
+  "文件格式不支持": ["檔案格式不支援", "File Format Not Supported"],
+  "文件超过上限": ["檔案超過上限", "File too large"],
+  "文件超过单文件上限": ["檔案超過單檔案上限", "File exceeds the size limit"],
+  "文件路径无效": ["檔案路徑無效", "File Path Invalid"],
+  "文件路径过长": ["檔案路徑過長", "File Path Too Long"],
+  "新建文件夹": ["新建資料夾", "New Folder"],
+  "无法读取存储状态": ["無法讀取儲存狀態", "Could not read storage status"],
+  "无法读取签名": ["無法讀取簽名", "Cannot read signature"],
+  "无法遗忘网络，请重试": ["無法遺忘網路，請重試", "Can't forget the network. Please try again."],
+  "暂无传输": ["暫無傳輸", "No transfer at present"],
+  "暂无传输记录": ["暫無傳輸記錄", "No transmission record yet."],
+  "最多 95 字节，约 31 个汉字": ["最多 95 位元組，約 31 個漢字", "Up to 95 bytes, about 31 Chinese characters"],
+  "未完成": ["未完成", "Not completed"],
+  "未检测到 TF 卡，请插卡后重新进入传输页面": ["未檢測到 TF 卡，請插卡後重新進入傳輸頁面", "TF card not detected, please re-enter the transfer page after you plug in"],
+  "本地 WiFi 传输": ["本地 WiFi 傳輸", "Local WiFi Transfer"],
+  "本批完成": ["本批完成", "Batch complete"],
+  "本批已处理 ": ["本批已處理 ", "Processed in this batch: "],
+  "本批文件处理进度": ["本批檔案處理進度", "Transfer progress for this batch"],
+  "本页匹配 ": ["本頁匹配 ", "Page Match "],
+  "本页名称升序排列": ["本頁名稱升序排列", "Sort names A to Z"],
+  "本页名称排序": ["本頁名稱排序", "Sort by name"],
+  "本页名称降序排列": ["本頁名稱降序排列", "Sort names Z to A"],
+  "本页没有匹配的文件": ["本頁沒有匹配的檔案", "There are no matching files on this page"],
+  "正在上传": ["正在上傳", "Uploading"],
+  "正在上传或切换网络，请稍后重试": ["正在上傳或切換網路，請稍後重試", "Uploading or switching the network, please try again later"],
+  "正在传输，请完成后再设置签名": ["正在傳輸，請完成後再設定簽名", "Transferring. Please set the signature when it's finished."],
+  "正在保存…": ["正在儲存…", "Saving..."],
+  "正在制作 684 × 1216 壁纸…": ["正在製作 684 × 1216 桌布…", "Making 684 x 1216 wallpapers..."],
+  "正在读取图片…": ["正在讀取圖片…", "Reading pictures..."],
+  "正在读取存储状态…": ["正在讀取儲存狀態…", "Reading storage status..."],
+  "正在读取目录…": ["正在讀取目錄…", "Reading directory..."],
+  "正在读取签名…": ["正在讀取簽名…", "Reading signature..."],
+  "正在读取设备状态…": ["正在讀取裝置狀態…", "Reading device status..."],
+  "正在连接…": ["正在連線…", "Connecting..."],
+  "此图片无法读取，请换一张": ["此圖片無法讀取，請換一張", "This image cannot be read. Please change it."],
+  "浏览 TF 卡": ["瀏覽 TF 卡", "Browse TF Cards"],
+  "浏览器无法生成裁剪图片": ["瀏覽器無法生成裁剪圖片", "The browser could not generate a crop image"],
+  "添加": ["新增", "Add"],
+  "添加书籍": ["新增書籍", "Add books"],
+  "添加其他文件": ["新增其他檔案", "Add other files"],
+  "添加图片": ["新增圖片", "Add images"],
+  "添加字体": ["新增字型", "Add fonts"],
+  "添加文件": ["新增檔案", "Add files"],
+  "清除记录": ["清除記錄", "Clear Record"],
+  "热点连接": ["熱點連線", "Hotspot Connection"],
+  "状态栏签名": ["狀態列簽名", "Status bar signature"],
+  "目录不存在或无法读取": ["目錄不存在或無法讀取", "Directory does not exist or cannot be read"],
+  "目录地址无效": ["目錄地址無效", "Invalid directory path"],
+  "目录地址过长": ["目錄地址過長", "Directory path too long"],
+  "目录读取失败": ["目錄讀取失敗", "Could not read directory"],
+  "目标文件已存在": ["目標檔案已存在", "Target file already exists"],
+  "确认删除": ["確認刪除", "Confirm deletion"],
+  "第 ": ["第 ", "Item "],
+  "等待中": ["等待中", "Waiting"],
+  "等待确认": ["等待確認", "Waiting for confirmation"],
+  "等待设备确认": ["等待裝置確認", "Waiting for device confirmation"],
+  "签名不能包含换行或控制字符": ["簽名不能包含換行或控制字元", "Signature cannot contain line breaks or control characters"],
+  "签名保存或读取失败，请重试": ["簽名儲存或讀取失敗，請重試", "Could not read or save the signature. Try again."],
+  "签名内容": ["簽名內容", "Signature Contents"],
+  "签名已保存，mogo 状态栏已更新": ["簽名已儲存，mogo 狀態列已更新", "Signature saved, mogo status bar updated"],
+  "签名已清除": ["簽名已清除", "Signature cleared"],
+  "签名效果示意": ["簽名效果示意", "Signature preview"],
+  "签名最多95字节，不能含换行或控制字符": ["簽名最多95位元組，不能含換行或控制字元", "Use up to 95 bytes. No newlines or control characters."],
+  "签名过长，最多95字节（约31个汉字）": ["簽名過長，最多95位元組（約31個漢字）", "Sign too long, up to 95 bytes (approximately 31 Chinese)"],
+  "类型": ["型別", "Type"],
+  "缩放图片": ["縮放圖片", "Scale Images"],
+  "网络正在切换，请稍后重试": ["網路正在切換，請稍後重試", "The network is switching. Please try again later."],
+  "网络正在切换，请连接后重试": ["網路正在切換，請連線後重試", "The network is switching. Please try again after connecting"],
+  "网络配置正文长度无效": ["網路配置正文長度無效", "Network Configuration Body Length Invalid"],
+  "计算中…": ["計算中…", "Calculating..."],
+  "记录可滚动查看": ["記錄可滾動檢視", "Scroll to see all records"],
+  "设为锁屏": ["設為鎖定畫面", "Use as lock screen"],
+  "设备响应无法解析，请检查文件是否已保存": ["裝置響應無法解析，請檢查檔案是否已儲存", "Invalid device response. Check whether the file was saved."],
+  "设备响应无法解析，请重试": ["裝置響應無法解析，請重試", "Invalid device response. Try again."],
+  "设备响应超时，请重试": ["裝置響應超時，請重試", "Device response timed out, please try again"],
+  "设备正忙，请稍后重试": ["裝置正忙，請稍後重試", "Device busy. Try again later."],
+  "请从设备显示的地址打开": ["請從裝置顯示的地址開啟", "Please open from the device's address"],
+  "请从设备显示的地址打开管理页面": ["請從裝置顯示的地址開啟管理頁面", "Please open the management page from the device's displayed address"],
+  "请先选择图片": ["請先選擇圖片", "Please select the picture first."],
+  "请在设备热点页面配置网络": ["請在裝置熱點頁面配置網路", "Please configure the network on the device hotspot page"],
+  "请插入 TF 卡后重试": ["請插入 TF 卡後重試", "Please insert a TF card and try again"],
+  "路径过长，请缩短名称": ["路徑過長，請縮短名稱", "The path is too long. Please shorten the name"],
+  "这个文件夹还是空的": ["這個資料夾還是空的", "This folder is still empty."],
+  "连接不可用": ["連線不可用", "Connection not available"],
+  "连接中断或接收超时，请重试": ["連線中斷或接收超時，請重試", "Connection interrupted or received timed out, please try again"],
+  "连接中断，操作尚未发送": ["連線中斷，操作尚未傳送", "Connection interrupted, operation not yet sent"],
+  "连接中断，文件尚未发送": ["連線中斷，檔案尚未傳送", "Connection interrupted, file not yet sent"],
+  "连接中断，请保持连接设备所在网络，并确认墨水屏仍停留在传输页面。": ["連線中斷，請保持連線裝置所在網路，並確認墨水屏仍停留在傳輸頁面。", "Lost connection. Stay on the same network and keep the reader on its transfer screen."],
+  "连接中断，请检查文件是否已保存后重试": ["連線中斷，請檢查檔案是否已儲存後重試", "Connection interrupted. Check if files have been saved and retryed"],
+  "连接中断，请检查设备网络后重试": ["連線中斷，請檢查裝置網路後重試", "Connection interrupted. Please check the network and try again."],
+  "选择 ": ["選擇 ", "Selection "],
+  "选择上传文件": ["選擇上傳檔案", "Select Upload File"],
+  "选择任意格式文件": ["選擇任意格式檔案", "Select any format file"],
+  "选择图片": ["選擇圖片", "Select Picture"],
+  "选择文件": ["選擇檔案", "Select File"],
+  "选择本页可见文件": ["選擇本頁可見檔案", "Select a visible file for this page"],
+  "选择锁屏图片": ["選擇鎖定畫面圖片", "Select Lockscreen Images"],
+  "遗忘请求不应包含正文": ["遺忘請求不應包含正文", "The request to forget should not contain the text."],
+  "重命名": ["重新命名", "Rename"],
+  "重试": ["重試", "Retry"],
+  "重试读取签名": ["重試讀取簽名", "Retry reading signature"],
+  "锁屏壁纸": ["鎖定畫面桌布", "Lock screen wallpaper"],
+  "锁屏壁纸设置不可用": ["鎖定畫面桌布設定不可用", "Wallpaper settings unavailable"],
+  "锁屏裁剪": ["鎖定畫面裁剪", "Lock Screen Crop"],
+  "页码无效": ["頁碼無效", "Invalid page number"],
+  "（文件夹会删除其中所有文件）": ["（資料夾會刪除其中所有檔案）", "(folders remove all files)"],
+  "，未发送": ["，未傳送", ", not sent"],
+  "同名文件已存在，是否替换？\n": ["已有同名檔案，要取代嗎？\n", "A file with this name exists. Replace it?\n"]
+};
+let webLocale='zh-CN';
+function tr(key){return webLocale==='zh-CN'||!Object.hasOwn(webCopy,key)?key:webCopy[key][webLocale==='zh-TW'?0:1];}
+const staticCopy=[];
+if(document.createTreeWalker){
+  const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  while(walker.nextNode()){
+    const n=walker.currentNode,key=n.data.trim();
+    if(n.parentElement?.closest('script,style') || !Object.hasOwn(webCopy,key))continue;
+    const initial=n.data;staticCopy.push(()=>{n.data=initial.replace(key,()=>tr(key));});
+  }
+  for(const el of document.querySelectorAll('[title],[aria-label],[placeholder]'))
+    for(const attr of ['title','aria-label','placeholder']){
+      const key=el.getAttribute(attr);if(Object.hasOwn(webCopy,key))staticCopy.push(()=>el.setAttribute(attr,tr(key)));
+    }
+}
+function setLocale(tag){
+  const next=tag==='en'||tag==='zh-TW'?tag:'zh-CN';if(next===webLocale)return;
+  webLocale=next;document.documentElement.lang=next;document.title=tr('mogo · WiFi 传书');
+  staticCopy.forEach(apply=>apply());route();renderQueue();
+}
+
 const $ = id => document.getElementById(id);
 const types = {
-  file: {title:'添加文件', formats:'任意文件格式', accept:'', re:null, url:'/file-upload', limit:0},
-  book: {title:'添加书籍', formats:'EPUB / TXT / MOBI', accept:'.epub,.txt,.mobi', re:/\.(epub|txt|mobi)$/i, url:'/upload', limit:0},
-  font: {title:'添加字体', formats:'TTF / OTF', accept:'.ttf,.otf', re:/\.(ttf|otf)$/i, url:'/font-upload', limit:33554432},
-  picture: {title:'添加图片', formats:'JPG / JPEG / PNG', accept:'.jpg,.jpeg,.png', re:/\.(jpg|jpeg|png)$/i, url:'/image-upload', limit:20971520}
+  file: {get title(){return tr('添加文件')}, get formats(){return tr('任意文件格式')}, accept:'', re:null, url:'/file-upload', limit:0},
+  book: {get title(){return tr('添加书籍')}, formats:'EPUB / TXT / MOBI', accept:'.epub,.txt,.mobi', re:/\.(epub|txt|mobi)$/i, url:'/upload', limit:0},
+  font: {get title(){return tr('添加字体')}, formats:'TTF / OTF', accept:'.ttf,.otf', re:/\.(ttf|otf)$/i, url:'/font-upload', limit:33554432},
+  picture: {get title(){return tr('添加图片')}, formats:'JPG / JPEG / PNG', accept:'.jpg,.jpeg,.png', re:/\.(jpg|jpeg|png)$/i, url:'/image-upload', limit:20971520}
 };
 const fixedPaths = {book:'books', font:'fonts', picture:'pictures'};
 const size = n => n >= 1073741824 ? (n/1073741824).toFixed(1)+' GB' : n >= 1048576 ? (n/1048576).toFixed(1)+' MB' : n >= 1024 ? Math.ceil(n/1024)+' KB' : n+' B';
@@ -180,7 +445,7 @@ function uploadNameLimit(kind,destination) {
   return (kind==='book'?policy?.book_name_limit:policy?.media_name_limit) ?? 120;
 }
 function uploadNameBudget(name,kind,destination) {
-  return nameBytes(name)+' / '+uploadNameLimit(kind,destination)+' 个 UTF-8 字节（含扩展名）';
+  return nameBytes(name)+' / '+uploadNameLimit(kind,destination)+tr(' 个 UTF-8 字节（含扩展名）');
 }
 function uploadNameTooLong(name,kind,destination) {
   return nameBytes(name)>uploadNameLimit(kind,destination);
@@ -211,11 +476,11 @@ function connection(ok) {
   connected=ok;
   $('connectionSignal').classList.toggle('online',ok);
   $('deviceSignal').classList.toggle('online',ok);
-  $('connectionText').textContent=ok ? (policy.mode==='ap'?'热点连接':'WiFi 连接') : '连接不可用';
+  $('connectionText').textContent=ok ? (policy.mode==='ap'?tr('热点连接'):tr('WiFi 连接')) : tr('连接不可用');
 }
 function disconnected() {
   connection(false);
-  $('connectionError').textContent='连接中断，请保持连接设备所在网络，并确认墨水屏仍停留在传输页面。';
+  $('connectionError').textContent=tr('连接中断，请保持连接设备所在网络，并确认墨水屏仍停留在传输页面。');
   $('connectionError').hidden=false;
 }
 async function request(url, options={}) {
@@ -223,9 +488,10 @@ async function request(url, options={}) {
   try {
     let response;
     try { response=await fetch(url,{cache:'no-store',...options,signal:controller.signal}); }
-    catch(error) { disconnected(); throw Error(error.name==='AbortError'?'设备响应超时，请重试':'连接中断，请检查设备网络后重试'); }
+    catch(error) { disconnected(); throw Error(error.name==='AbortError'?tr('设备响应超时，请重试'):tr('连接中断，请检查设备网络后重试')); }
     let body;
-    try { body=await response.json(); } catch { throw Error('设备响应无法解析，请重试'); }
+    try { body=await response.json(); } catch { throw Error(tr('设备响应无法解析，请重试')); }
+    if (body && typeof body.error==='string') body.error=tr(body.error);
     return {status:response.status,body};
   } finally { clearTimeout(timer); }
 }
@@ -258,51 +524,51 @@ function lock(value) {
 }
 async function info() {
   const r=await request('/info');
-  if(r.status!==200) throw Error(r.body.error||'无法读取存储状态');
-  policy=r.body; connection(true); $('connectionError').hidden=false;
-  $('connectionError').textContent=policy.is_flash?'未检测到 TF 卡，请插卡后重新进入传输页面':'';
+  if(r.status!==200) throw Error(tr(r.body.error)||tr('无法读取存储状态'));
+  policy=r.body; setLocale(policy.locale); connection(true); $('connectionError').hidden=false;
+  $('connectionError').textContent=policy.is_flash?tr('未检测到 TF 卡，请插卡后重新进入传输页面'):'';
   $('connectionError').hidden=!policy.is_flash;
-  $('storage').textContent=policy.is_flash?'TF 卡未就绪':'TF 卡已就绪 · 剩余 '+size(policy.free_bytes);
-  $('mobileStorage').textContent=policy.is_flash?'TF 卡未就绪':'TF 卡剩余 '+size(policy.free_bytes);
+  $('storage').textContent=policy.is_flash?tr('TF 卡未就绪'):tr('TF 卡已就绪 · 剩余 ')+size(policy.free_bytes);
+  $('mobileStorage').textContent=policy.is_flash?tr('TF 卡未就绪'):tr('TF 卡剩余 ')+size(policy.free_bytes);
   $('deviceAddress').textContent=location.host;
   updateUpload(); syncControls();
 }
 function updateUpload() {
   const kind=uploadKind(), config=types[kind];
   $('uploadTitle').textContent=config.title; $('uploadFormats').textContent=config.formats;
-  $('filePicker').accept=config.accept; $('uploadDestination').textContent='保存到 /'+path;
+  $('filePicker').accept=config.accept; $('uploadDestination').textContent=tr('保存到 /')+path;
   const limit=config.limit || (kind==='book' && policy && policy.file_limit);
-  $('uploadLimit').textContent=(limit?'单文件不超过 '+size(limit)+'。':'')+'文件名最多 '+uploadNameLimit(kind,path)+' 个 UTF-8 字节（含扩展名）。同名文件上传前确认。';
+  $('uploadLimit').textContent=(limit?tr('单文件不超过 ')+size(limit)+'。':'')+tr('文件名最多 ')+uploadNameLimit(kind,path)+tr(' 个 UTF-8 字节（含扩展名）。同名文件上传前确认。');
   document.querySelectorAll('[data-folder]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.folder===path)));
 }
 function filteredItems() {
   const text=$('search').value.trim().toLocaleLowerCase();
-  return directoryItems.filter(item=>item.name.toLocaleLowerCase().includes(text)).sort((a,b)=>Number(b.directory)-Number(a.directory) || a.name.localeCompare(b.name,'zh-CN')*(descending?-1:1));
+  return directoryItems.filter(item=>item.name.toLocaleLowerCase().includes(text)).sort((a,b)=>Number(b.directory)-Number(a.directory) || a.name.localeCompare(b.name,webLocale)*(descending?-1:1));
 }
 function renderDirectory() {
   const items=filteredItems(); $('entries').replaceChildren();
   for(const item of items) {
     const row=node('li','file-row'), identity=node('div','file-identity');
     const check=node('input'); check.type='checkbox'; check.checked=selected.has(item.name);
-    check.setAttribute('aria-label','选择 '+item.name); check.setAttribute('data-file-action','');
+    check.setAttribute('aria-label',tr('选择 ')+item.name); check.setAttribute('data-file-action','');
     check.onchange=()=>{ check.checked?selected.add(item.name):selected.delete(item.name); renderDirectory(); };
-    const extension=item.directory?'文件夹':item.name.includes('.')?item.name.split('.').pop().toUpperCase():'文件';
+    const extension=item.directory?tr('文件夹'):item.name.includes('.')?item.name.split('.').pop().toUpperCase():tr('文件');
     const glyph=item.directory?'folder':/\.(png|jpe?g)$/i.test(item.name)?'image':/\.(ttf|otf)$/i.test(item.name)?'type':'file-text';
     const name=node(item.directory?'button':'div','filename',item.name); name.title=item.name;
     name.append(node('small','filename-detail',extension));
     if(item.directory) { name.type='button'; name.setAttribute('data-file-action',''); name.onclick=()=>navigate(join(path,item.name)); }
     identity.append(check,icon(glyph),name);
-    const more=button(item.name+' 的更多操作','ellipsis'); more.setAttribute('data-file-action','');
+    const more=button(item.name+tr(' 的更多操作'),'ellipsis'); more.setAttribute('data-file-action','');
     more.onclick=event=>{ if(event) event.stopPropagation(); openMenu(more,item); };
     row.classList.toggle('selected',selected.has(item.name));
     row.append(identity,node('span','file-size number',item.directory?'-':size(item.size)),node('span','file-kind',extension),more);
     $('entries').append(row);
   }
-  $('selectionBar').hidden=!selected.size; $('selectionCount').textContent='已选 '+selected.size+' 项';
+  $('selectionBar').hidden=!selected.size; $('selectionCount').textContent=tr('已选 ')+selected.size+tr(' 项');
   $('selectAll').checked=items.length>0 && items.every(item=>selected.has(item.name));
   $('selectAll').indeterminate=selected.size>0 && !$('selectAll').checked;
-  if(directoryReady) $('listState').textContent=items.length?'':directoryItems.length?'本页没有匹配的文件':'这个文件夹还是空的';
-  $('fileTotal').textContent=directoryReady?(($('search').value?'本页匹配 '+items.length+' 项 · ':'')+'共 '+total+' 项'):'';
+  if(directoryReady) $('listState').textContent=items.length?'':directoryItems.length?tr('本页没有匹配的文件'):tr('这个文件夹还是空的');
+  $('fileTotal').textContent=directoryReady?(($('search').value?tr('本页匹配 ')+items.length+tr(' 项 · '):'')+tr('共 ')+total+tr(' 项')):'';
   $('pageState').textContent=(pages?page+1:0)+' / '+pages;
   syncControls();
 }
@@ -310,19 +576,19 @@ async function loadDirectory() {
   const epoch=++directoryEpoch, requestedPath=path, requestedPage=page;
   directoryLoading=true; directoryReady=false; selected.clear(); directoryItems=[]; pages=0; total=0;
   $('rowMenu').hidden=true; $('retryDirectory').hidden=true;
-  $('path').textContent='/'+path; $('directoryCount').textContent='正在读取目录…';
-  $('listState').textContent='正在读取目录…'; renderDirectory(); updateUpload();
+  $('path').textContent='/'+path; $('directoryCount').textContent=tr('正在读取目录…');
+  $('listState').textContent=tr('正在读取目录…'); renderDirectory(); updateUpload();
   try {
-    if(!policy || policy.is_flash) { $('listState').textContent='TF 卡未就绪'; $('directoryCount').textContent=''; return; }
+    if(!policy || policy.is_flash) { $('listState').textContent=tr('TF 卡未就绪'); $('directoryCount').textContent=''; return; }
     const r=await request('/files?'+(requestedPath?'path='+encodeURIComponent(requestedPath)+'&':'')+'page='+requestedPage);
     if(epoch!==directoryEpoch) return;
-    if(r.status!==200) throw Error(r.body.error||'目录读取失败');
+    if(r.status!==200) throw Error(tr(r.body.error)||tr('目录读取失败'));
     pages=r.body.pages; total=r.body.total;
     if(page>=pages && page) { page=0; return loadDirectory(); }
     directoryItems=r.body.items; directoryReady=true;
-    $('directoryCount').textContent=total+' 项 · 每页最多 20 项';
+    $('directoryCount').textContent=total+tr(' 项 · 每页最多 20 项');
     renderDirectory();
-  } catch(error) { if(epoch===directoryEpoch) { showError(error); $('directoryCount').textContent='目录读取失败'; $('retryDirectory').hidden=false; } }
+  } catch(error) { if(epoch===directoryEpoch) { showError(error); $('directoryCount').textContent=tr('目录读取失败'); $('retryDirectory').hidden=false; } }
   finally { if(epoch===directoryEpoch) { directoryLoading=false; syncControls(); } }
 }
 function showError(error) { $('listState').textContent=error.message||String(error); }
@@ -339,7 +605,7 @@ async function refresh() {
 function openMenu(anchor,item) {
   if(busy || directoryLoading) return;
   const menu=$('rowMenu'); menu.replaceChildren();
-  for(const [action,label,glyph] of [['rename','重命名','pencil'],['copy','复制','copy'],['delete','删除','trash2']]) {
+  for(const [action,label,glyph] of [['rename',tr('重命名'),'pencil'],['copy',tr('复制'),'copy'],['delete',tr('删除'),'trash2']]) {
     const el=button(label,glyph,action==='delete'?'danger':''); el.append(node('span','',label));
     el.onclick=()=>{ menu.hidden=true; openEditor(action,item); }; menu.append(el);
   }
@@ -353,12 +619,12 @@ function openEditor(action,item) {
   const bulk=action==='bulk-delete', deleting=action==='delete'||bulk;
   const items=bulk?directoryItems.filter(entry=>selected.has(entry.name)):[item];
   editorAction={action,source:item?join(path,item.name):path,dir:path,item,items};
-  $('editorTitle').textContent={rename:'重命名',copy:'复制',delete:'删除',mkdir:'新建文件夹','bulk-delete':'删除所选文件'}[action];
-  $('editorDescription').textContent=deleting?(bulk?'所选 '+items.length+' 项':join(path,item.name))+'（文件夹会删除其中所有文件）':'位置：/'+path;
+  $('editorTitle').textContent={rename:tr('重命名'),copy:tr('复制'),delete:tr('删除'),mkdir:tr('新建文件夹'),'bulk-delete':tr('删除所选文件')}[action];
+  $('editorDescription').textContent=deleting?(bulk?tr('所选 ')+items.length+tr(' 项'):join(path,item.name))+tr('（文件夹会删除其中所有文件）'):tr('位置：/')+path;
   $('editorError').textContent=''; $('editorNameBudget').hidden=true;
-  $('editorLabel').textContent='名称'; $('editorName').hidden=$('editorLabel').hidden=deleting;
-  $('editorName').value=action==='copy'?(item.directory?item.name+' 副本':item.name.replace(/(\.[^.]+)?$/,' 副本$1')):item?item.name:'';
-  $('editorConfirm').textContent=deleting?'确认删除':'保存';
+  $('editorLabel').textContent=tr('名称'); $('editorName').hidden=$('editorLabel').hidden=deleting;
+  $('editorName').value=action==='copy'?(item.directory?item.name+tr(' 副本'):item.name.replace(/(\.[^.]+)?$/,tr(' 副本$1'))):item?item.name:'';
+  $('editorConfirm').textContent=deleting?tr('确认删除'):tr('保存');
   $('editor').showModal(); if(!deleting) $('editorName').focus();
 }
 function openUploadNameEditor(entry) {
@@ -366,12 +632,12 @@ function openUploadNameEditor(entry) {
   const dot=entry.name.lastIndexOf('.');
   const extension=dot>0?entry.name.slice(dot):'';
   editorAction={action:'upload-name',entry,extension};
-  $('editorTitle').textContent='修改保存名称';
-  $('editorDescription').textContent='仅修改设备 /'+entry.destination+' 中的保存名称，不会更改本地文件。';
-  $('editorLabel').textContent=extension?'文件名（扩展名 '+extension+' 不变）':'文件名';
+  $('editorTitle').textContent=tr('修改保存名称');
+  $('editorDescription').textContent=tr('仅修改设备 /')+entry.destination+tr(' 中的保存名称，不会更改本地文件。');
+  $('editorLabel').textContent=extension?tr('文件名（扩展名 ')+extension+tr(' 不变）'):tr('文件名');
   $('editorName').hidden=$('editorLabel').hidden=false;
   $('editorName').value=extension?entry.name.slice(0,dot):entry.name;
-  $('editorConfirm').textContent='保存并重试';
+  $('editorConfirm').textContent=tr('保存并重试');
   $('editorNameBudget').hidden=false;
   updateEditorNameBudget();
   $('editor').showModal(); $('editorName').focus();
@@ -393,23 +659,23 @@ async function submitEditor() {
   if(action==='upload-name') {
     const {entry,extension}=editorAction, stem=$('editorName').value, name=stem+extension;
     updateEditorNameBudget();
-    if(!stem || !uploadNameIsValid(name,entry.kind)) { $('editorError').textContent='名称无效，请检查空格、斜杠或特殊符号'; return; }
-    if(uploadNameTooLong(name,entry.kind,entry.destination)) { $('editorError').textContent='文件名仍然过长，请再缩短一些'; return; }
+    if(!stem || !uploadNameIsValid(name,entry.kind)) { $('editorError').textContent=tr('名称无效，请检查空格、斜杠或特殊符号'); return; }
+    if(uploadNameTooLong(name,entry.kind,entry.destination)) { $('editorError').textContent=tr('文件名仍然过长，请再缩短一些'); return; }
     entry.name=name;
     $('editor').close(); editorAction=null;
     return sendFiles([entry.file],entry.kind,entry.destination,entry);
   }
   const name=$('editorName').value.trim(), target=join(dir,name);
-  if(!deleting && (!name || name==='.' || name==='..' || /[\\/:*?"<>|]/.test(name))) { $('editorError').textContent='名称不能包含斜杠或特殊符号'; return; }
-  if(!deleting && nameBytes(target)>relativePathLimit()) { $('editorError').textContent='路径过长，请缩短名称'; return; }
+  if(!deleting && (!name || name==='.' || name==='..' || /[\\/:*?"<>|]/.test(name))) { $('editorError').textContent=tr('名称不能包含斜杠或特殊符号'); return; }
+  if(!deleting && nameBytes(target)>relativePathLimit()) { $('editorError').textContent=tr('路径过长，请缩短名称'); return; }
   lock(true);
   try {
-    try { await info(); if(policy.is_flash) throw Error('TF 卡未就绪'); }
+    try { await info(); if(policy.is_flash) throw Error(tr('TF 卡未就绪')); }
     catch(error) { $('editorError').textContent=error.message; return; }
     const operations=deleting?items.map(item=>({action:'delete',path:join(dir,item.name)})):[{action,path:source,target}];
     const failed=[], retryItems=[];
     for(const payload of operations) {
-      try { if(!connected) throw Error('连接中断，操作尚未发送'); const r=await request('/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(r.status!==200) throw Error(r.body.error||'操作失败'); selected.delete(payload.path.slice(dir.length+(dir?1:0))); }
+      try { if(!connected) throw Error(tr('连接中断，操作尚未发送')); const r=await request('/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(r.status!==200) throw Error(tr(r.body.error)||tr('操作失败')); selected.delete(payload.path.slice(dir.length+(dir?1:0))); }
       catch(error) { failed.push(payload.path+'：'+error.message); if(deleting) retryItems.push(items.find(item=>join(dir,item.name)===payload.path)); }
     }
     if(failed.length) { $('editorError').textContent=failed.join('；'); if(deleting) editorAction.items=retryItems; }
@@ -440,7 +706,7 @@ function updateTransferProgress(entry,done,length) {
   while(entry.samples.length>64) entry.samples.shift();
   const row=queueRows.get(entry);
   if(row) {
-    row.label.textContent=entry.progress>=100?'等待确认':entry.progress+'%';
+    row.label.textContent=entry.progress>=100?tr('等待确认'):entry.progress+'%';
     row.bytes.textContent=size(entry.loaded)+' / '+size(entry.size);
     row.fill.style.width=entry.progress+'%';
   }
@@ -456,17 +722,17 @@ function updateTransferStatus() {
   const focus=current || (busy?activeBatch.find(entry=>entry.status==='waiting'):null);
   const percent=activeBatch.length?Math.min(100,Math.floor((processed+(current?Math.min(.99,current.progress/100):0))*100/activeBatch.length)):0;
   $('queueCurrent').classList.toggle('idle',!busy);
-  $('queueState').textContent=current?(current.progress>=100?'等待设备确认':'正在上传'):focus?'准备传输':failed?'传输结束 · 有未完成项':skipped?'传输结束':activeBatch.length?'本批完成':'暂无传输';
-  $('queuePosition').textContent=focus?'第 '+(activeBatch.indexOf(focus)+1)+' / '+activeBatch.length+' 项':'';
-  $('queueCurrentName').textContent=focus?focus.name:activeBatch.length?activeBatch.length+' 个文件已处理':'暂无传输记录';
-  $('queueCurrentDetail').textContent=current?size(current.loaded)+' / '+size(current.size)+(current.progress>=100?' · 等待写入结果':' · '+current.progress+'%'):focus?'即将发送 · '+size(focus.size):'';
+  $('queueState').textContent=current?(current.progress>=100?tr('等待设备确认'):tr('正在上传')):focus?tr('准备传输'):failed?tr('传输结束 · 有未完成项'):skipped?tr('传输结束'):activeBatch.length?tr('本批完成'):tr('暂无传输');
+  $('queuePosition').textContent=focus?tr('第 ')+(activeBatch.indexOf(focus)+1)+' / '+activeBatch.length+tr(' 项'):'';
+  $('queueCurrentName').textContent=focus?focus.name:activeBatch.length?activeBatch.length+tr(' 个文件已处理'):tr('暂无传输记录');
+  $('queueCurrentDetail').textContent=current?size(current.loaded)+' / '+size(current.size)+(current.progress>=100?tr(' · 等待写入结果'):' · '+current.progress+'%'):focus?tr('即将发送 · ')+size(focus.size):'';
   const speed=current && current.progress<100?transferSpeed(current):0;
-  $('queueSpeed').textContent=current && current.progress<100?(speed>0?size(speed)+'/s':current.loaded?'0 B/s':'计算中…'):'—';
-  $('queueProcessed').textContent='已处理 '+processed+' / '+activeBatch.length+' 项';
+  $('queueSpeed').textContent=current && current.progress<100?(speed>0?size(speed)+'/s':current.loaded?'0 B/s':tr('计算中…')):'—';
+  $('queueProcessed').textContent=tr('已处理 ')+processed+' / '+activeBatch.length+tr(' 项');
   $('queueProgressFill').style.width=percent+'%';
   $('queueProgress').setAttribute('aria-valuenow',String(percent));
-  $('queueProgress').setAttribute('aria-valuetext','本批已处理 '+processed+' / '+activeBatch.length+' 项');
-  const summary=activeBatch.length?'已完成 '+done+' · 等待 '+waiting+(failed?' · 未完成 '+failed:'')+(skipped?' · 跳过 '+skipped:''):'暂无传输记录';
+  $('queueProgress').setAttribute('aria-valuetext',tr('本批已处理 ')+processed+' / '+activeBatch.length+tr(' 项'));
+  const summary=activeBatch.length?tr('已完成 ')+done+tr(' · 等待 ')+waiting+(failed?tr(' · 未完成 ')+failed:'')+(skipped?tr(' · 跳过 ')+skipped:''):tr('暂无传输记录');
   if($('queueSummary').textContent!==summary) $('queueSummary').textContent=summary;
   $('queueFollow').hidden=!current; $('queueFollow').disabled=!current;
 }
@@ -480,7 +746,7 @@ function renderQueue() {
     if(entry.status==='uploading') row.setAttribute('aria-current','true');
     identity.append(node('small','queue-order',String(index+1)),icon(entry.kind==='font'?'type':'file-text'),name);
     const detail=node('div','queue-info'), status=node('span','queue-status '+entry.status);
-    const label=node('span','',{waiting:'等待中',uploading:entry.progress>=100?'等待确认':entry.progress+'%',complete:'已完成',error:'未完成',skipped:'已跳过'}[entry.status]);
+    const label=node('span','',{waiting:tr('等待中'),uploading:entry.progress>=100?tr('等待确认'):entry.progress+'%',complete:tr('已完成'),error:tr('未完成'),skipped:tr('已跳过')}[entry.status]);
     const bytes=node('span','',entry.status==='uploading'?size(entry.loaded)+' / '+size(entry.size):size(entry.size));
     if(entry.status==='complete') status.append(icon('check'));
     status.append(label); detail.append(bytes,status);
@@ -490,7 +756,7 @@ function renderQueue() {
     queueRows.set(entry,{row,label,bytes,fill});
     if(entry.message) row.append(node('p','queue-error',entry.message));
     if(entry.status==='error' && entry.file) {
-      const label=entry.nameTooLong?'修改保存名称':'重试';
+      const label=entry.nameTooLong?tr('修改保存名称'):tr('重试');
       const retry=button(label+' '+entry.name,entry.nameTooLong?'pencil':'refresh-cw','text-button');
       retry.append(node('span','',label));
       retry.onclick=()=>entry.nameTooLong?openUploadNameEditor(entry):sendFiles([entry.file],entry.kind,entry.destination,entry);
@@ -502,9 +768,9 @@ function renderQueue() {
   $('transferQueue').hidden=!records.length;
   $('files-view').classList.toggle('has-transfers',records.length>0);
   $('queueCount').textContent=records.length||'';
-  $('queueListLabel').textContent='全部 '+records.length+' 项 · 按选择顺序';
+  $('queueListLabel').textContent=tr('全部 ')+records.length+tr(' 项 · 按选择顺序');
   $('queueList').classList.toggle('expanded',expandedQueue);
-  $('expandQueue').hidden=records.length<=4; $('expandQueue').textContent=expandedQueue?'收起列表':'展开列表';
+  $('expandQueue').hidden=records.length<=4; $('expandQueue').textContent=expandedQueue?tr('收起列表'):tr('展开列表');
   $('expandQueue').setAttribute('aria-expanded',String(expandedQueue));
   syncControls(); updateTransferStatus();
 }
@@ -512,10 +778,10 @@ function upload(file,url,onProgress) {
   return new Promise((resolve,reject)=>{
     const xhr=new XMLHttpRequest(); let timer, stalled=false;
     const arm=()=>{ clearTimeout(timer); timer=setTimeout(()=>{ stalled=true; xhr.abort(); },120000); };
-    const failure=()=>{ clearTimeout(timer); disconnected(); reject(Error(stalled?'传输长时间无响应，请检查设备文件后重试':'连接中断，请检查文件是否已保存后重试')); };
+    const failure=()=>{ clearTimeout(timer); disconnected(); reject(Error(stalled?tr('传输长时间无响应，请检查设备文件后重试'):tr('连接中断，请检查文件是否已保存后重试'))); };
     xhr.open('PUT',url);
     xhr.upload.onprogress=event=>{ arm(); onProgress(event.loaded,event.total||file.size); };
-    xhr.onload=()=>{ clearTimeout(timer); try { resolve({status:xhr.status,body:JSON.parse(xhr.responseText)}); } catch { reject(Error('设备响应无法解析，请检查文件是否已保存')); } };
+    xhr.onload=()=>{ clearTimeout(timer); try { resolve({status:xhr.status,body:JSON.parse(xhr.responseText)}); } catch { reject(Error(tr('设备响应无法解析，请检查文件是否已保存'))); } };
     xhr.onerror=xhr.onabort=failure; arm(); try { xhr.send(file); } catch(error) { clearTimeout(timer); reject(error); }
   });
 }
@@ -529,13 +795,13 @@ async function sendFiles(files,kind=uploadKind(),destination=path,retry=null) {
   lock(true); renderQueue();
   let saved=0,failed=0,skipped=0;
   try {
-    try { await info(); if(policy.is_flash) throw Error('TF 卡未就绪'); }
+    try { await info(); if(policy.is_flash) throw Error(tr('TF 卡未就绪')); }
     catch(error) { for(const entry of batch) { entry.status='error'; entry.message=error.message; } $('uploadResult').textContent=error.message; return; }
     for(const entry of batch) {
       if(!records.includes(entry)) records.push(entry);
       if(uploadNameTooLong(entry.name,kind,destination)) {
         entry.status='error'; entry.nameTooLong=true;
-        entry.message='文件名过长：'+uploadNameBudget(entry.name,kind,destination)+'，未发送';
+        entry.message=tr('文件名过长：')+uploadNameBudget(entry.name,kind,destination)+tr('，未发送');
         ++failed;
       }
     }
@@ -547,35 +813,35 @@ async function sendFiles(files,kind=uploadKind(),destination=path,retry=null) {
       entry.status='uploading'; entry.message=''; beginTransfer(entry); renderQueue();
       const file=entry.file;
       try {
-        if(!connected) throw Error('连接中断，文件尚未发送');
-        if(config.re && (!config.re.test(entry.name)||entry.name.startsWith('.'))) throw Error('文件格式不支持');
-        if(kind!=='file' && !file.size) throw Error('文件为空');
-        if((config.limit && file.size>config.limit)||(kind==='book' && policy.file_limit && file.size>policy.file_limit)) throw Error('文件超过上限');
-        if(file.size>policy.free_bytes) throw Error('TF 卡剩余空间不足');
+        if(!connected) throw Error(tr('连接中断，文件尚未发送'));
+        if(config.re && (!config.re.test(entry.name)||entry.name.startsWith('.'))) throw Error(tr('文件格式不支持'));
+        if(kind!=='file' && !file.size) throw Error(tr('文件为空'));
+        if((config.limit && file.size>config.limit)||(kind==='book' && policy.file_limit && file.size>policy.file_limit)) throw Error(tr('文件超过上限'));
+        if(file.size>policy.free_bytes) throw Error(tr('TF 卡剩余空间不足'));
         const target=join(destination,entry.name);
         const url=config.url+(kind==='file'?'?path='+encodeURIComponent(target):'?name='+encodeURIComponent(entry.name));
         const progress=(done,length)=>updateTransferProgress(entry,done,length);
         let response=await upload(file,url,progress);
         if(response.status===409) {
-          if(!confirm('同名文件已存在，是否替换？\n'+target)) { entry.status='skipped'; entry.file=null; ++skipped; continue; }
+          if(!confirm(tr('同名文件已存在，是否替换？\n')+target)) { entry.status='skipped'; entry.file=null; ++skipped; continue; }
           beginTransfer(entry); updateTransferProgress(entry,0,file.size);
           response=await upload(file,url+'&overwrite=1',progress);
         }
-        if(response.status!==200) throw Error(response.body.error||'上传失败');
+        if(response.status!==200) throw Error(tr(response.body.error)||tr('上传失败'));
         entry.status='complete'; entry.file=null; entry.progress=100; ++saved;
         try { await info(); if(path===(kind==='file'?destination:fixedPaths[kind])) await loadDirectory(); }
-        catch(error) { showError(Error('文件已保存，状态更新失败：'+error.message)); }
+        catch(error) { showError(Error(tr('文件已保存，状态更新失败：')+error.message)); }
       } catch(error) { entry.status='error'; entry.message=error.message; ++failed; }
       finally { renderQueue(); }
     }
-    $('uploadResult').textContent='已保存 '+saved+' 个文件到 /'+(kind==='file'?destination:fixedPaths[kind])+(skipped?' · '+skipped+' 个已跳过':'')+(failed?' · '+failed+' 个未完成':'');
+    $('uploadResult').textContent=tr('已保存 ')+saved+tr(' 个文件到 /')+(kind==='file'?destination:fixedPaths[kind])+(skipped?' · '+skipped+tr(' 个已跳过'):'')+(failed?' · '+failed+tr(' 个未完成'):'');
   } finally { renderQueue(); lock(false); }
 }
 async function loadSignature() {
   if(busy) return;
-  $('signatureResult').textContent='正在读取签名…'; $('signatureRetry').hidden=true;
+  $('signatureResult').textContent=tr('正在读取签名…'); $('signatureRetry').hidden=true;
   try {
-    const r=await request('/signature'); if(r.status!==200) throw Error(r.body.error||'无法读取签名');
+    const r=await request('/signature'); if(r.status!==200) throw Error(tr(r.body.error)||tr('无法读取签名'));
     $('signatureText').value=r.body.signature||''; $('signaturePreview').textContent=$('signatureText').value;
     signatureLoaded=true; $('signatureResult').textContent='';
   } catch(error) { $('signatureResult').textContent=error.message; $('signatureRetry').hidden=false; }
@@ -584,14 +850,14 @@ async function loadSignature() {
 async function saveSignature() {
   if(busy || !signatureLoaded) return;
   const text=$('signatureText').value;
-  if(new TextEncoder().encode(text).length>95) { $('signatureResult').textContent='签名过长，最多95字节（约31个汉字）'; return; }
-  if(/[\x00-\x1f\x7f\u2028\u2029]/.test(text)) { $('signatureResult').textContent='签名不能包含换行或控制字符'; return; }
+  if(new TextEncoder().encode(text).length>95) { $('signatureResult').textContent=tr('签名过长，最多95字节（约31个汉字）'); return; }
+  if(/[\x00-\x1f\x7f\u2028\u2029]/.test(text)) { $('signatureResult').textContent=tr('签名不能包含换行或控制字符'); return; }
   lock(true);
   try {
-    $('signatureResult').textContent='正在保存…';
+    $('signatureResult').textContent=tr('正在保存…');
     const r=await request('/signature',{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:text});
-    if(r.status!==200) throw Error(r.body.error||'保存失败');
-    $('signatureResult').textContent=text?'签名已保存，mogo 状态栏已更新':'签名已清除';
+    if(r.status!==200) throw Error(tr(r.body.error)||tr('保存失败'));
+    $('signatureResult').textContent=text?tr('签名已保存，mogo 状态栏已更新'):tr('签名已清除');
   } catch(error) { $('signatureResult').textContent=error.message; }
   finally { lock(false); }
 }
@@ -618,35 +884,35 @@ function chooseWallpaper() {
   if(busy) return;
   const file=$('wallpaperFile').files[0], epoch=++cropEpoch;
   cropImage=null; cropPointer=null; drawCrop($('cropPreview')); syncControls();
-  if(!file) { $('wallpaperResult').textContent='请先选择图片'; return; }
+  if(!file) { $('wallpaperResult').textContent=tr('请先选择图片'); return; }
   const url=URL.createObjectURL(file), image=new Image();
-  $('wallpaperResult').textContent='正在读取图片…';
+  $('wallpaperResult').textContent=tr('正在读取图片…');
   image.onload=()=>{
     URL.revokeObjectURL(url); if(epoch!==cropEpoch) return;
-    if(!image.naturalWidth||!image.naturalHeight) { $('wallpaperResult').textContent='图片尺寸无效'; return; }
+    if(!image.naturalWidth||!image.naturalHeight) { $('wallpaperResult').textContent=tr('图片尺寸无效'); return; }
     cropImage=image; resetCrop(); syncControls(); $('wallpaperResult').textContent=file.name;
   };
-  image.onerror=()=>{ URL.revokeObjectURL(url); if(epoch===cropEpoch) $('wallpaperResult').textContent='此图片无法读取，请换一张'; };
+  image.onerror=()=>{ URL.revokeObjectURL(url); if(epoch===cropEpoch) $('wallpaperResult').textContent=tr('此图片无法读取，请换一张'); };
   image.src=url;
 }
 async function sendWallpaper() {
   if(!cropImage || busy) return;
   lock(true); let entry=null;
   try {
-    await info(); if(policy.is_flash) throw Error('TF 卡未就绪');
-    $('wallpaperResult').textContent='正在制作 684 × 1216 壁纸…';
+    await info(); if(policy.is_flash) throw Error(tr('TF 卡未就绪'));
+    $('wallpaperResult').textContent=tr('正在制作 684 × 1216 壁纸…');
     const canvas=document.createElement('canvas'); canvas.width=cropWidth; canvas.height=cropHeight; drawCrop(canvas);
     let blob=null;
     for(const quality of [0.86,0.72,0.56,0.42]) { blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality)); if(blob && blob.size<=2097152) break; }
-    if(!blob) throw Error('浏览器无法生成裁剪图片');
-    if(blob.size>2097152) throw Error('图片仍过大，请换一张图片');
-    if(blob.size>policy.free_bytes) throw Error('TF 卡空间不足');
+    if(!blob) throw Error(tr('浏览器无法生成裁剪图片'));
+    if(blob.size>2097152) throw Error(tr('图片仍过大，请换一张图片'));
+    if(blob.size>policy.free_bytes) throw Error(tr('TF 卡空间不足'));
     const name='pico-wallpaper-'+Date.now()+'.jpg';
     entry=createRecord({name,size:blob.size},'picture','pictures'); entry.file=null; entry.status='uploading';
     activeBatch=[entry]; beginTransfer(entry); renderQueue();
     const response=await upload(blob,'/image-upload?name='+encodeURIComponent(name)+'&wallpaper=1',(done,length)=>updateTransferProgress(entry,done,length));
-    if(response.status!==200) throw Error(response.body.error||'壁纸上传失败');
-    entry.status='complete'; $('wallpaperResult').textContent='已设为壁纸锁屏';
+    if(response.status!==200) throw Error(tr(response.body.error)||tr('壁纸上传失败'));
+    entry.status='complete'; $('wallpaperResult').textContent=tr('已设为壁纸锁屏');
     try { await info(); if(path==='pictures') await loadDirectory(); } catch(error) { showError(error); }
   } catch(error) { if(entry) { entry.status='error'; entry.message=error.message; } $('wallpaperResult').textContent=error.message; }
   finally { renderQueue(); lock(false); }
@@ -656,8 +922,8 @@ function route() {
   document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==view+'-view');
   document.querySelectorAll('[data-view]').forEach(el=>{ el.classList.toggle('active',el.dataset.view===view); if(el.dataset.view===view) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current'); });
   $('mobile-upload').hidden=view!=='files';
-  $('pageTitle').textContent={files:'文件传输',wallpaper:'锁屏壁纸',signature:'状态栏签名'}[view];
-  $('pageSubtitle').textContent={files:'书籍、字体与图片，都在你的 TF 卡里。',wallpaper:'把喜欢的画面，留在每一次合书之后。',signature:'在阅读的页眉，留下一句话。'}[view];
+  $('pageTitle').textContent={files:tr('文件传输'),wallpaper:tr('锁屏壁纸'),signature:tr('状态栏签名')}[view];
+  $('pageSubtitle').textContent={files:tr('书籍、字体与图片，都在你的 TF 卡里。'),wallpaper:tr('把喜欢的画面，留在每一次合书之后。'),signature:tr('在阅读的页眉，留下一句话。')}[view];
   window.scrollTo(0,0);
 }
 $('editorName').oninput=updateEditorNameBudget;
@@ -671,7 +937,7 @@ $('newFolder').onclick=()=>openEditor('mkdir');
 $('previous').onclick=()=>{ if(!busy && !directoryLoading && page>0) { --page; return loadDirectory(); } };
 $('next').onclick=()=>{ if(!busy && !directoryLoading && page+1<pages) { ++page; return loadDirectory(); } };
 $('search').oninput=()=>{ selected.clear(); renderDirectory(); };
-$('sort').onclick=()=>{ if(directoryLoading || !directoryReady) return; descending=!descending; $('sort').setAttribute('aria-label',descending?'本页名称升序排列':'本页名称降序排列'); renderDirectory(); };
+$('sort').onclick=()=>{ if(directoryLoading || !directoryReady) return; descending=!descending; $('sort').setAttribute('aria-label',descending?tr('本页名称升序排列'):tr('本页名称降序排列')); renderDirectory(); };
 $('selectAll').onchange=()=>{ for(const item of filteredItems()) $('selectAll').checked?selected.add(item.name):selected.delete(item.name); renderDirectory(); };
 $('clearSelection').onclick=()=>{ selected.clear(); renderDirectory(); };
 $('deleteSelected').onclick=()=>{ if(selected.size) openEditor('bulk-delete'); };
@@ -684,7 +950,7 @@ $('dropZone').ondragover=event=>{ event.preventDefault(); if(!busy) $('dropZone'
 $('dropZone').ondragleave=()=>$('dropZone').classList.remove('dragover');
 $('dropZone').ondrop=event=>{ event.preventDefault(); $('dropZone').classList.remove('dragover'); return sendFiles([...event.dataTransfer.files]); };
 $('clearQueue').onclick=()=>{ if(!busy) { records=[]; activeBatch=[]; expandedQueue=false; renderQueue(); } };
-$('expandQueue').onclick=()=>{ expandedQueue=!expandedQueue; $('queueList').classList.toggle('expanded',expandedQueue); $('expandQueue').textContent=expandedQueue?'收起列表':'展开列表'; $('expandQueue').setAttribute('aria-expanded',String(expandedQueue)); };
+$('expandQueue').onclick=()=>{ expandedQueue=!expandedQueue; $('queueList').classList.toggle('expanded',expandedQueue); $('expandQueue').textContent=expandedQueue?tr('收起列表'):tr('展开列表'); $('expandQueue').setAttribute('aria-expanded',String(expandedQueue)); };
 $('queueFollow').onclick=()=>{
   const entry=records.find(item=>item.status==='uploading'), row=entry && queueRows.get(entry);
   if(row) $('queueList').scrollTop+=row.row.getBoundingClientRect().top-$('queueList').getBoundingClientRect().top;

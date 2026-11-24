@@ -4,6 +4,7 @@
  * 冻结：只处理启动记录中确切的普通 TXT/EPUB；无卡/删除失败可重试；绘制无文件操作。
  * Frozen: Handle only the exact regular TXT/EPUB in the startup record; allow retries after absent media or failed deletion. Rendering has no file operations.
  */
+#include "../ui/ui_locale.h"
 #include "app.h"
 #include "app_registry.h"
 #include "boot_state.h"
@@ -114,8 +115,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (!s_removed && ui_rect_hit((EpdRect){36, 820, 612, 82}, ev->x0, ev->y0)) {
         if (!s_confirm) { s_confirm = true; return APP_REDRAW_PAGE; }
         esp_err_t err = delete_book();
-        snprintf(s_message, sizeof(s_message), "%s", err == ESP_OK ? "已删除，可返回首页" :
-            s_removed ? "已删除，阅读记录清理失败" : err == ESP_ERR_INVALID_STATE ? "存储未就绪，请插卡后重试" : "删除失败，请重试或用文件管理处理");
+        snprintf(s_message, sizeof(s_message), "%s", err == ESP_OK ? ui_tr("已删除，可返回首页") :
+            s_removed ? ui_tr("已删除，阅读记录清理失败") : err == ESP_ERR_INVALID_STATE ? ui_tr("存储未就绪，请插卡后重试") : ui_tr("删除失败，请重试或用文件管理处理"));
         if (s_removed) s_confirm = false;
         return APP_REDRAW_PAGE;
     }

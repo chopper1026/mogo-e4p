@@ -31,3 +31,6 @@ void app_home_components_apply(uint8_t value);
 /// 迷你书库模式和两槽布局同事务保存，并随既有版本化尾块备份。/ Persist the library mode with both slots and back it up in the versioned tail.
 bool app_home_library_recent(void);
 bool app_home_library_set_recent(bool recent);
+
+/// 整体提交引导布局。/ Commit both wizard slots together.
+bool app_home_components_save_pair(app_home_widget_t top, app_home_widget_t bottom);

@@ -2,6 +2,7 @@
  * 中文：已确认的全宽版画天气组件，纯绘制；生命周期只分配一个组件区的4bpp暂存。
  * English: Approved full-width print-style weather widget, paint only; lifecycle allocates one region-sized 4bpp scratch.
  */
+#include "../ui/ui_locale.h"
 #include "ui_weather.h"
 #include "ui_kit.h"
 #include "esp_heap_caps.h"
@@ -160,7 +161,7 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
     EpdRect tabs = {left+448,top+20,200,44};
     epd_fill_rect(region,255,f);
     char value[128];
-    snprintf(value,sizeof(value),"%s",view->has_city ? view->city.name : "选择城市");
+    snprintf(value,sizeof(value),"%s",view->has_city ? view->city.name : ui_tr("选择城市"));
     fit_label(value,30,360);
     tx(f,left+36,top+42,30,value);
     int arrow = left+46 + ui_text_fixed_width_px(30,value);
@@ -170,7 +171,7 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
     text(f,left+498,top+42,24,"今日",EPD_DRAW_ALIGN_CENTER,tomorrow?0:15,tomorrow?15:0);
     text(f,left+596,top+42,24,"明日",EPD_DRAW_ALIGN_CENTER,tomorrow?15:0,tomorrow?0:15);
     if (weather_clock_valid(now)) weather_date_text(weather_local_day(now)+tomorrow,value,sizeof(value));
-    else snprintf(value,sizeof(value),"请先校准日期与时间");
+    else snprintf(value,sizeof(value),ui_tr("请先校准日期与时间"));
     tx(f,left+36,top+101,24,value);
     if (day) {
         snprintf(value,sizeof(value),"%.0f / %.0f°",day->min_c,day->max_c);
@@ -182,7 +183,7 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
         tx(f,left+32,top+178,84,"--°");
         const char *message = view->state == APP_WEATHER_LOADING ? "正在获取天气…" :
             view->notice[0] ? view->notice : !view->has_city ? "自动识别或手动选择城市" : "暂无这一天的有效预报";
-        snprintf(value,sizeof(value),"%s",message);fit_label(value,24,612);
+        snprintf(value,sizeof(value),"%s",ui_tr(message));fit_label(value,24,612);
         tx(f,left+36,top+243,24,value);
     }
     tx(f,left+36,top+282,21,"最低 / 最高 · °C");
@@ -192,16 +193,16 @@ void ui_weather_draw(uint8_t *f, EpdRect region, bool tomorrow, const app_weathe
     tc(f,left+126,top+369,34,value);
     weather_time_text(day?day->sunrise:0,value,sizeof(value));tc(f,left+342,top+369,34,value);
     weather_time_text(day?day->sunset:0,value,sizeof(value));tc(f,left+558,top+369,34,value);
-    if(view->state==APP_WEATHER_LOADING)snprintf(value,sizeof(value),"正在更新…");
+    if(view->state==APP_WEATHER_LOADING)snprintf(value,sizeof(value),ui_tr("正在更新…"));
     else if (view->notice[0]) {
         const bool cached = day && (view->forecast.stale || now >= view->forecast.fresh);
-        snprintf(value, sizeof(value), "%s%s", cached ? "缓存 · " : "", view->notice);
+        snprintf(value, sizeof(value), "%s%s", cached ? ui_tr("缓存 · ") : "", view->notice);
     }
     else if(day) {
         char updated[16];weather_time_text(view->forecast.fetched,updated,sizeof(updated));
-        snprintf(value,sizeof(value),"%s 更新%s",updated,
-            view->forecast.stale||now>=view->forecast.fresh?" · 缓存":"");
-    } else snprintf(value,sizeof(value),"点城市名称设置，或重试刷新");
+        snprintf(value,sizeof(value),ui_tr("%s 更新%s"),updated,
+            view->forecast.stale||now>=view->forecast.fresh?ui_tr(" · 缓存"):"");
+    } else snprintf(value,sizeof(value),ui_tr("点城市名称设置，或重试刷新"));
     const EpdRect refresh=refresh_button(region);
     const int footer=refresh.y+refresh.height/2;
     fit_label(value,21,400);tx(f,left+36,footer,21,value);

@@ -4,6 +4,7 @@
 /* 中文：老黄历与万年历的纯绘制；保持白底黑字和固定画幅，不改变字体设置。
  * English: Pure almanac/month-calendar drawing in black on white, without changing font preferences.
  */
+#include "../ui/ui_locale.h"
 #include "ui_calendar.h"
 #include "ui_kit.h"
 #include "assets/calendar_digits.h"
@@ -132,18 +133,18 @@ static void vertical(uint8_t *fb,int x,int cy,const char *s) {
     for(int i=0;i<count;++i){char ch[4]={0};memcpy(ch,s+i*3,3);text(fb,x,cy+(2*i-count+1)*21,33,ch,EPD_DRAW_ALIGN_CENTER,false);}
 }
 static void stems(const calendar_date_t *d,char *out,unsigned capacity) {
-    snprintf(out,capacity,"%s年 · %s月 · %s日",calendar_cycle_name(d->year_cycle),calendar_cycle_name(d->month_cycle),calendar_cycle_name(d->day_cycle));
+    snprintf(out,capacity,ui_tr("%s年 · %s月 · %s日"),calendar_cycle_name(d->year_cycle),calendar_cycle_name(d->month_cycle),calendar_cycle_name(d->day_cycle));
 }
 static void folk(uint8_t *fb,const calendar_date_t *d,int x,int right,int y) {
     char s[96];
-    snprintf(s,sizeof(s),"冲%s（%s）· 煞%s",d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
+    snprintf(s,sizeof(s),ui_tr("冲%s（%s）· 煞%s"),d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
     fitted(fb,x,y,24,(right-x)*2/3,s,EPD_DRAW_ALIGN_LEFT,false);
-    snprintf(s,sizeof(s),"财神 · %s",d->wealth);text(fb,right,y,24,s,EPD_DRAW_ALIGN_RIGHT,false);
+    snprintf(s,sizeof(s),ui_tr("财神 · %s"),d->wealth);text(fb,right,y,24,s,EPD_DRAW_ALIGN_RIGHT,false);
 }
 static void season(uint8_t *fb,const calendar_date_t *d,int y) {
     for(int i=0;i<2;++i){
         char s[64];int day;const char *term=calendar_term(d->year,d->month,i,&day);
-        snprintf(s,sizeof(s),"%s · %d月%d日",term,d->month,day);
+        snprintf(s,sizeof(s),ui_tr("%s · %d月%d日"),term,d->month,day);
         text(fb,i?636:48,y,24,s,i?EPD_DRAW_ALIGN_RIGHT:EPD_DRAW_ALIGN_LEFT,false);
     }
 }
@@ -157,7 +158,7 @@ static void yiji(uint8_t *fb,const char *words,int x,int top,int width,int count
         ++items;p=end?end+1:p+n;
     }
     if(*p)strcat(rows[1],"…");
-    if(!rows[0][0])snprintf(rows[0],sizeof(rows[0]),"无");
+    if(!rows[0][0])snprintf(rows[0],sizeof(rows[0]),ui_tr("无"));
     for(int i=0;i<2;++i)if(rows[i][0])fitted(fb,x,top+i*(px+10),px,width,rows[i],EPD_DRAW_ALIGN_LEFT,false);
 }
 static void badge(uint8_t *fb,int x,int y,int size,bool yi) {
@@ -182,7 +183,7 @@ static int almanac_words(uint8_t *fb,const char *words,int x,int y,int width,int
         memcpy(rows[row]+offset,p,length);rows[row][offset+length]=0;
         p=end?end+1:p+length;
     }
-    if(!rows[0][0]&&row==0)snprintf(rows[0],sizeof(rows[0]),"无");
+    if(!rows[0][0]&&row==0)snprintf(rows[0],sizeof(rows[0]),ui_tr("无"));
     if(height)y+=(height-row*34)/2;
     for(int i=0;i<=row;++i)if(rows[i][0])text(fb,x,y+i*34,px,rows[i],align,false);
     return row+1;
@@ -259,9 +260,9 @@ static void almanac_details(uint8_t *fb,const calendar_date_t *d) {
     snprintf(s,sizeof(s),"%s（%s）",d->guardian,d->guardian_type);
     fitted(fb,146,1099,24,270,s,EPD_DRAW_ALIGN_LEFT,false);
     almanac_plaque(fb,(EpdRect){450,1083,66,32},"建除",22);
-    snprintf(s,sizeof(s),"%s日",d->officer);text(fb,532,1099,26,s,EPD_DRAW_ALIGN_LEFT,false);
+    snprintf(s,sizeof(s),ui_tr("%s日"),d->officer);text(fb,532,1099,26,s,EPD_DRAW_ALIGN_LEFT,false);
     almanac_cut_frame(fb,(EpdRect){148,1125,388,33},7,UI_GRAY_BLACK);
-    snprintf(s,sizeof(s),"冲%s（%s）· 煞%s",d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
+    snprintf(s,sizeof(s),ui_tr("冲%s（%s）· 煞%s"),d->clash,calendar_cycle_name((d->day_cycle+54)%60),d->sha);
     text(fb,342,1141,26,s,EPD_DRAW_ALIGN_CENTER,false);
 }
 static void grid(uint8_t *fb,const calendar_date_t *d,bool large) {
@@ -304,8 +305,8 @@ void ui_calendar_draw(uint8_t *fb,const calendar_date_t *d,bool monthly) {
         key_corner(fb,48,85,1,1);key_corner(fb,635,85,-1,1);
         key_corner(fb,48,1155,1,-1);key_corner(fb,635,1155,-1,-1);
         lozenge(fb,342,89);line(fb,280,89,45,1);line(fb,360,89,45,1);
-        snprintf(s,sizeof(s),"公元 %d年",d->year);text(fb,48,132,24,s,EPD_DRAW_ALIGN_LEFT,false);
-        snprintf(s,sizeof(s),"%s · %s年",calendar_cycle_name(d->year_cycle),animals[d->year_cycle%12]);
+        snprintf(s,sizeof(s),ui_tr("公元 %d年"),d->year);text(fb,48,132,24,s,EPD_DRAW_ALIGN_LEFT,false);
+        snprintf(s,sizeof(s),ui_tr("%s · %s年"),calendar_cycle_name(d->year_cycle),animals[d->year_cycle%12]);
         text(fb,636,132,24,s,EPD_DRAW_ALIGN_RIGHT,false);line(fb,48,158,588,1);
         fret_band(fb,176);
         vertical(fb,96,310,calendar_month_name(d->month));vertical(fb,588,310,weekdays[d->weekday]);

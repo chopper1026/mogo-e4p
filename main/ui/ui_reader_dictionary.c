@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：纯视图；文字来自已完成查询，不读词库或改变阅读状态。
  * English: Pure view using completed query data, without dictionary I/O or reader mutations. */
+#include "ui_locale.h"
 #include "ui_reader_dictionary.h"
 #include "ui_kit.h"
 #include "ttf_font.h"
@@ -66,7 +67,7 @@ EpdRect ui_reader_dictionary_selection(uint8_t *fb, const reader_selection_t *s,
     return box;
 }
 static void text(uint8_t *fb, int x, int y, int px, const char *value) {
-    ttf_draw_text_px(fb, x, y + ttf_ascender_px(px), px, value, EPD_DRAW_ALIGN_LEFT, 0, 15);
+    ttf_draw_text_px(fb, x, y + ttf_ascender_px(px), px, ui_tr(value), EPD_DRAW_ALIGN_LEFT, 0, 15);
 }
 void ui_reader_dictionary_notice(uint8_t *fb) {
     int previous = ttf_font_select(TTF_FONT_SLOT_SYSTEM);
@@ -91,10 +92,10 @@ static size_t wrap(const char *value, size_t offset, char line[512], int width, 
 // 分段正文保留所有读音、对应词头和例句，无整条拼接分配。/ Segmented content retains every reading, alias and example without concatenation allocations.
 static size_t content_segments(const book_dictionary_result_t *r, const char *segments[10]) {
     size_t n = 0;
-    if (r->reading[0]) { segments[n++] = "读音："; segments[n++] = r->reading; segments[n++] = "\n"; }
-    if (r->variant[0]) { segments[n++] = "对应词头："; segments[n++] = r->variant; segments[n++] = "\n"; }
-    segments[n++] = r->definition[0] ? r->definition : "词库未提供中文释义";
-    if (r->example[0]) { segments[n++] = "\n例句："; segments[n++] = r->example; }
+    if (r->reading[0]) { segments[n++] = ui_tr("读音："); segments[n++] = r->reading; segments[n++] = "\n"; }
+    if (r->variant[0]) { segments[n++] = ui_tr("对应词头："); segments[n++] = r->variant; segments[n++] = "\n"; }
+    segments[n++] = r->definition[0] ? r->definition : ui_tr("词库未提供中文释义");
+    if (r->example[0]) { segments[n++] = ui_tr("\n例句："); segments[n++] = r->example; }
     return n;
 }
 size_t ui_reader_dictionary_content_size(const book_dictionary_result_t *r) {
@@ -172,6 +173,7 @@ void ui_reader_dictionary_draw(uint8_t *fb, const ui_reader_dictionary_t *v,
         case BOOK_DICTIONARY_CANCELLED:message="查询已取消";break;
         case BOOK_DICTIONARY_BUSY:message="查询资源不足，请关闭后重试";break;
     }
+    message=ui_tr(message);
     size_t offset=message?0:v->offset;
     char line[512];
     size_t length = message ? strlen(message) : ui_reader_dictionary_content_size(r);
@@ -181,6 +183,6 @@ void ui_reader_dictionary_draw(uint8_t *fb, const ui_reader_dictionary_t *v,
     }
     if (!ttf_font_has_text(query)) text(fb,40,top+438,22,"当前字体缺字，可更换 TF 卡字体");
     if (v->can_browse) {text(fb,50,top+490,28,"上一屏");text(fb,300,top+490,28,"逐字");text(fb,520,top+490,28,"下一屏");}
-    (void)wrap(r->source[0]?r->source:"离线中文词典",0,line,588,22);text(fb,40,top+550,22,line);
+    (void)wrap(r->source[0]?r->source:ui_tr("离线中文词典"),0,line,588,22);text(fb,40,top+550,22,line);
     ttf_font_select(previous);
 }

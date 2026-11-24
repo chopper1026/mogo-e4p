@@ -12,6 +12,7 @@
  * 目录兼容 EPUB 3 的 type/role 标记和无标记单导航；正文编号题头优先并写入索引。
  * Navigation accepts EPUB 3 type/role markers and an unmarked nav; numbered body headings take priority and are cached.
  */
+#include "../ui/ui_locale.h"
 #include "book_epub.h"
 #include "../diagnostics/reader_memory.h"
 #include "book_cover.h"
@@ -716,7 +717,7 @@ static esp_err_t package_parse(book_epub_t *book, const char *opf, char ncx[EPUB
             if (bytes > EPUB_ENTRY_MAX || bytes > UINT32_MAX - book->total) { err = ESP_ERR_INVALID_SIZE; break; }
             chapter_t *chapter = &book->chapters[book->count]; chapter->zip_index = entry; chapter->offset = book->total;
             char fallback[EPUB_TITLE_CAP];
-            snprintf(fallback, sizeof(fallback), "第 %u 节", (unsigned)book->count + 1);
+            snprintf(fallback, sizeof(fallback), ui_tr("第 %u 节"), (unsigned)book->count + 1);
             chapter->title = text_intern_cap(book, fallback, sizeof(fallback));
             book->total += (uint32_t)bytes; ++book->count;
         }
@@ -878,7 +879,7 @@ static esp_err_t navigation_parse(book_epub_t *book, const char *path, bool ncx)
             book->chapters[i].titled = false;
             book->chapters[i].nav_titled = false;
             char fallback[EPUB_TITLE_CAP];
-            snprintf(fallback, sizeof(fallback), "第 %u 节", (unsigned)i + 1);
+            snprintf(fallback, sizeof(fallback), ui_tr("第 %u 节"), (unsigned)i + 1);
             book->chapters[i].title = text_intern_cap(book, fallback, sizeof(fallback));
         }
     }

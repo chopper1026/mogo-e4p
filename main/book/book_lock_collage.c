@@ -12,6 +12,7 @@
  * 冻结：拼贴布局、缓存结构和校验保持；延后写入只引用调用者画布，不增加整帧副本。
  * Frozen: Preserve layout, cache structure and checksums. Deferred persistence borrows the caller's frame without a copy.
  */
+#include "../ui/ui_locale.h"
 #include "book_lock_collage.h"
 #include <dirent.h>
 #include <errno.h>
@@ -590,7 +591,7 @@ static bool captions_draw(uint8_t *fb, unsigned count) {
     const int title_px = ttf_em_height_px(48), unit_px = ttf_em_height_px(27);
     snprintf(name, sizeof(name), "%s", app_settings_device_name());
     do {
-        snprintf(title, sizeof(title), "%s 的书架", name);
+        snprintf(title, sizeof(title), ui_tr("%s 的书架"), name);
         if (ttf_text_width_px(title_px, title) <= 600) break;
         truncate_name(name);
     } while (name[0]);

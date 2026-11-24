@@ -47,6 +47,9 @@ int app_index_of(const app_desc_t* app) {
     return -1;
 }
 
+extern const app_desc_t app_setup;
+const app_desc_t* app_setup_page(void) { return &app_setup; }
+
 const app_desc_t* app_home_page(void) {
     return &app_dashboard;
 }

@@ -39,6 +39,7 @@ typedef struct {
     wifi_transfer_mode_t mode; ///< 网络模式，默认热点 / Network mode, default AP
     bool network_only; ///< 仅连接已有 WiFi，不启动上传服务或访问存储 / Connect saved WiFi without upload server or storage
     uint32_t session_id; ///< 本地页面会话标识，跨恢复保留；零表示无页面所有者。/ Local owner ID, preserved on restore; zero means no page owner.
+    const char *locale; ///< 静态语言标签 / Static UI language tag
     const char *root_dir; ///< 已挂载根目录，start 内复制 / Mounted root, copied by start
     bool is_flash; ///< 内置存储标志 / Internal storage flag
     size_t file_limit; ///< 单文件上限，零表示不限 / Per-file limit, zero means unlimited

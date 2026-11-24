@@ -3,6 +3,7 @@
  *
  * 中文：复用书架扫描与隐藏规则，目录只在刷新时短暂持有，静止不扫描或刷屏。
  * English: Reuse shelf scanning and hidden rules, holding catalogs only during refresh and doing no idle scanning or repaint. */
+#include "../ui/ui_locale.h"
 #include "home_library.h"
 #include "home_library_jobs.h"
 #include "home_components.h"
@@ -144,7 +145,7 @@ bool home_library_quiesce(unsigned timeout_ms) {
 bool home_library_recent(bool recent) {
     if (recent == app_home_library_recent()) return true;
     if (!app_home_library_set_recent(recent)) {
-        snprintf(s_notice, sizeof(s_notice), "设置保存失败，请稍后重试"); return false;
+        snprintf(s_notice, sizeof(s_notice), "%s",ui_tr("设置保存失败，请稍后重试")); return false;
     }
     (void)reconcile_covers(NULL); s_need_generation = true; s_notice[0] = 0; return true;
 }
@@ -315,7 +316,7 @@ static bool poll_scan(void) {
     }
     const bool repaint = s_work >= LIBRARY_PROGRESS;
     s_work = LIBRARY_NONE; s_shuffle = false;
-    if (repaint) snprintf(s_notice, sizeof(s_notice), "书目较多，暂不能完整读取");
+    if (repaint) snprintf(s_notice, sizeof(s_notice), "%s",ui_tr("书目较多，暂不能完整读取"));
     return repaint;
 }
 

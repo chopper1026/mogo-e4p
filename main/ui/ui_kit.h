@@ -112,6 +112,8 @@ void ui_draw_frosted_pocket(uint8_t *framebuffer, EpdRect rect);
 /// Text is placed by the top of the line; the baseline comes from the size so callers skip the ascender.
 /// 系统页面字号放大 1.2 倍；阅读正文保持原字号。/ Enlarge system text by 1.2x while preserving reader text size.
 void ui_text_set_system_scale(bool enabled);
+/// 按给定对齐及反色绘制引导文案；自选字库不完整时回退。/ Fit setup copy with alignment and contrast, falling back for missing glyphs.
+void ui_setup_text_box(uint8_t *fb, EpdRect box, int px, const char *text, enum EpdFontFlags align, bool inverted);
 void ui_text_set_system_font(bool enabled);
 int ui_text_effective_px(int px);
 /// 按系统字号绘制单行文字，按字形真实边界适配控件；不打开第二份字体。

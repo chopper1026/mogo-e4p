@@ -51,7 +51,10 @@ enum{UI_GESTURE_TAP,UI_GESTURE_SWIPE_U};
 typedef struct{int unused;}app_desc_t;
 typedef struct{const app_desc_t*request_app;uint8_t *fb;int64_t now_ms;}app_ctx_t;
 const app_desc_t app_transfer={0};
-const app_desc_t app_components={0};
+const app_desc_t app_components={0},setup={0};
+enum{APP_SETUP_LANGUAGE_ONLY,APP_SETUP_REPLAY,APP_SETUP_FONT_ONLY};
+static int setup_mode; static app_ctx_t font_ctx;
+static const app_desc_t *app_setup_start(int mode){setup_mode=mode;return &setup;}
 static void app_components_open(app_ctx_t *ctx,bool city){assert(!city);ctx->request_app=&app_components;}
 typedef struct{const char *path;}ttf_font_item_t;
 static ttf_font_item_t fonts[513]={{"/sdcard/fonts/A.ttf"},{"/sdcard/fonts/B.ttf"},{"/sdcard/fonts/C.ttf"}};
@@ -106,7 +109,7 @@ unit += fn('settings_wireless_rows') + '\n'
 unit += fn('settings_stacked')+'\n'+fn('settings_profile_height')+'\n'+fn('settings_main_row_height')+'\n'
 unit += fn('settings_version_center_y')+'\n'+fn('settings_scroll_max')+'\n'
 unit += layout+fn('system_font_layout')+'\n'+fn('system_font_item_rect')+'\n'+fn('system_font_sync_button')+'\n'
-unit+='static app_redraw_t font_tap(int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+modal+choose+'return APP_REDRAW_NONE;}\n'
+unit+='static app_redraw_t font_tap(int x,int y){app_ctx_t *ctx=&font_ctx;ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+modal+choose+'return APP_REDRAW_NONE;}\n'
 unit+='static app_redraw_t modal_swipe(void){ui_gesture_event_t e={UI_GESTURE_SWIPE_U,400,700};const ui_gesture_event_t*ev=&e;'+modal+'return APP_REDRAW_NONE;}\n'
 unit+='static void upgrade_open(void){s_page=SETTINGS_UPGRADE;}\n'
 unit+='static app_redraw_t main_tap(app_ctx_t*ctx,int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+main+'}\n'
@@ -121,12 +124,12 @@ int main(void){
    for(int i=0;i<l.slots;++i){EpdRect r=system_font_item_rect(i);assert(r.y+r.height<UI_NAV_TOP);if(i)assert(system_font_item_rect(i-1).y+system_font_item_rect(i-1).height<r.y);}
    assert(SETTINGS_WIRELESS_Y>=180+settings_profile_height()+70);
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
-   assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+6*SETTINGS_ROW_H);
+   assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+8*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y,SETTINGS_POWER_Y};
-   const int counts[]={3,6,8,3,3};
-   assert(SETTINGS_DISPLAY_ROWS==6&&SETTINGS_POWER_ROWS==3);
+   const int counts[]={3,8,8,3,3};
+   assert(SETTINGS_DISPLAY_ROWS==8&&SETTINGS_POWER_ROWS==3);
    const int destinations[][8]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
-     {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP},
+     {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP,-6,-7},
      {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,SETTINGS_HAPTIC,SETTINGS_READING_BG,-5,SETTINGS_QUICK_BAR},
      {SETTINGS_CONFIG,-4,SETTINGS_UPGRADE},{SETTINGS_BATT_CALIBRATION,SETTINGS_POWER_LOG,SETTINGS_CHARGE_CURRENT}};
    for(int group=0;group<5;++group)for(int i=0;i<counts[group];++i){
@@ -137,6 +140,7 @@ int main(void){
      else if(destinations[group][i]==-2)assert(s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-4)assert(s_panel_repair_pending&&s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-5)assert(ctx.request_app==&app_components);
+     else if(destinations[group][i]<=-6)assert(ctx.request_app==&setup && setup_mode==(i==6?APP_SETUP_LANGUAGE_ONLY:APP_SETUP_REPLAY));
      else assert(profile_edits>0);
      if(destinations[group][i]==SETTINGS_QUICK_BAR)assert(!s_quick_notice[0]);
      if(destinations[group][i]==SETTINGS_BATT_CALIBRATION)assert(!s_batt_calibration_confirm&&s_batt_calibration_status.total_bins==21&&s_batt_calibration_next_ms==ctx.now_ms+1000);
@@ -151,6 +155,7 @@ int main(void){
  }
  scale=100;s_page=SETTINGS_SYSTEM_FONT;s_font_page=0;s_main_scroll=0;s_font_sync_confirm=false;
  for(int i=0;i<11;++i){EpdRect r=system_font_layout().size;assert(font_tap(300,r.y+r.height/2)==APP_REDRAW_PAGE);assert(scale==((i+1)%11)*10+100);}
+ assert(font_tap(500,system_font_layout().font_title+12)==APP_REDRAW_NONE && font_ctx.request_app==&setup && setup_mode==APP_SETUP_FONT_ONLY);
  EpdRect r=system_font_item_rect(1);
  assert(font_tap(300,r.y+r.height/2)==APP_REDRAW_PAGE&&s_font_sync_confirm);
  assert(!strcmp(system_path,fonts[0].path)&&!strcmp(reader_path,"/sdcard/fonts/Reader.ttf")&&!reader_writes&&system_activations==1);

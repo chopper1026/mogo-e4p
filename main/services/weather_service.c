@@ -4,6 +4,7 @@
  * 冻结：不抢占传书/升级；离页仅通知取消，防止弱网阻塞导航；休眠/关机前仍确认交还。按用户要求，非天气页空闲时可借用已就绪网络静默刷新。
  * Frozen: Never steal transfer/update sessions. Navigation signals cancellation without waiting on weak links; sleep/shutdown still require handoff. Per user request, idle non-weather pages may refresh quietly over an already-ready link.
  */
+#include "../ui/ui_locale.h"
 #include "weather_service.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -160,7 +161,7 @@ static bool cancelled(void) {
     return atomic_load(&s_cancel) || esp_timer_get_time() >= s_deadline;
 }
 static void result_notice(app_weather_state_t state, const char *message) {
-    s_result.state = state; snprintf(s_result.notice, sizeof(s_result.notice), "%s", message);
+    s_result.state = state; snprintf(s_result.notice, sizeof(s_result.notice), "%s", ui_tr(message));
 }
 static void api_error(int status, const char *body) {
     char code[65];weather_error_code(body,strlen(body),code,sizeof(code));
@@ -334,7 +335,7 @@ static bool search_show_page(unsigned page) {
     }
     s_view.result_count = count; s_view.result_total = s_search_total; s_view.result_page = page;
     s_view.state = APP_WEATHER_READY;
-    snprintf(s_view.notice, sizeof(s_view.notice), "%s", count ? "请选择城市（自动识别仅作参考）" : "未找到城市，请换个名称");
+    snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr(count ? "请选择城市（自动识别仅作参考）" : "未找到城市，请换个名称"));
     ++s_view.revision;
     return true;
 }
@@ -456,7 +457,7 @@ static bool collect_result(void) {
             s_view.city = s_result.city; s_view.has_city = true; s_view.has_forecast = false;
         } else {
             s_result.has_forecast = false;
-            snprintf(s_view.notice, sizeof(s_view.notice), "城市保存失败，请检查设置存储");
+            snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("城市保存失败，请检查设置存储"));
         }
     }
     if (s_result.clear_cache) {
@@ -557,12 +558,12 @@ static bool start_request(app_weather_request_t request, const char *query, unsi
     }
     if (!weather_clock_valid(time(NULL))) {
         s_view.state = APP_WEATHER_UNAVAILABLE;
-        snprintf(s_view.notice, sizeof(s_view.notice), "请先校准系统日期与时间"); ++s_view.revision; return false;
+        snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("请先校准系统日期与时间")); ++s_view.revision; return false;
     }
     if (ble_pt_connected()) {
         if (manual) {
             s_view.state = APP_WEATHER_UNAVAILABLE;
-            snprintf(s_view.notice, sizeof(s_view.notice), "翻页器正在使用，请先关闭蓝牙");
+            snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("翻页器正在使用，请先关闭蓝牙"));
             ++s_view.revision;
         }
         return false;
@@ -571,7 +572,7 @@ static bool start_request(app_weather_request_t request, const char *query, unsi
     int percent = pmu_battery_percent(pmu);
     if (percent >= 0 && percent < 10 && !pmu_battery_charging(pmu)) {
         s_view.state = APP_WEATHER_UNAVAILABLE;
-        snprintf(s_view.notice, sizeof(s_view.notice), "电量较低，请充电后更新天气"); ++s_view.revision; return false;
+        snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("电量较低，请充电后更新天气")); ++s_view.revision; return false;
     }
     if (request == APP_WEATHER_SEARCH) {
         if (!weather_query_valid(query) || page >= (WEATHER_SEARCH_TOTAL_LIMIT + WEATHER_CITY_LIMIT - 1) / WEATHER_CITY_LIMIT) return false;
@@ -595,7 +596,7 @@ static bool start_request(app_weather_request_t request, const char *query, unsi
         memory_peak_finish(peak);
         if (manual) {
             s_view.state = APP_WEATHER_FAILED;
-            snprintf(s_view.notice, sizeof(s_view.notice), "内存不足，请稍后重试");
+            snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("内存不足，请稍后重试"));
             ++s_view.revision;
         }
         return false;
@@ -627,7 +628,7 @@ static bool start_request(app_weather_request_t request, const char *query, unsi
         memory_peak_finish(peak);
         atomic_store(&s_busy, false);
         s_view.state = APP_WEATHER_FAILED;
-        snprintf(s_view.notice, sizeof(s_view.notice), "内存不足，请稍后重试"); ++s_view.revision; return false;
+        snprintf(s_view.notice, sizeof(s_view.notice), "%s", ui_tr("内存不足，请稍后重试")); ++s_view.revision; return false;
     }
     s_pending = true;
     s_requested_search_generation = s_search_generation;

@@ -10,6 +10,8 @@
 static bool shutdown_ok, image_ok, cover_ok, avatar_ok, library_ok;
 static unsigned expected_timeout, calls;
 
+static bool font_ok=true;
+bool font_download_quiesce(unsigned timeout_ms) {assert(timeout_ms==expected_timeout);return font_ok;}
 bool shutdown_wallpaper_quiesce(unsigned timeout_ms) {
     assert(timeout_ms==expected_timeout && calls++==0);return shutdown_ok;
 }
@@ -52,5 +54,6 @@ int main(void) {
             }
         }
     }
+    calls=0;font_ok=false;assert(!storage_jobs_quiesce(expected_timeout) && !calls);
     puts("PASS: shutdown art and lock images before cover, avatar and mini-library, short-circuit failure, repeated handoffs and per-job timeout propagation");
 }

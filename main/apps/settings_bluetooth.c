@@ -9,6 +9,7 @@
  * 蓝牙协议、最近设备和持久化仍由 ble_page_turner 持有；协议栈启停仍由主循环协调。
  * The BLE component owns protocol, recent peers and persistence; the app loop owns stack lifecycle.
  */
+#include "../ui/ui_locale.h"
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -75,15 +76,15 @@ static bool ble_receive_feedback(void) {
             ble_pt_action_t action = s_ble_learning == 1 ? BLE_PT_ACTION_PREV : BLE_PT_ACTION_NEXT;
             esp_err_t error = ble_pt_bind(action, &raw.frame);
             snprintf(s_ble_feedback, sizeof(s_ble_feedback), "%s", error == ESP_OK ?
-                     (action == BLE_PT_ACTION_PREV ? "识别成功 · 已绑定上一页" : "识别成功 · 已绑定下一页") :
-                     "识别成功 · 绑定保存失败，请重试");
+                     (action == BLE_PT_ACTION_PREV ? ui_tr("识别成功 · 已绑定上一页") : ui_tr("识别成功 · 已绑定下一页")) :
+                     ui_tr("识别成功 · 绑定保存失败，请重试"));
             s_ble_learning = 0;
             changed = true;
             while (ble_pt_pop_raw(&raw)) {}
             break;
         }
         if (!s_ble_feedback[0]) {
-            snprintf(s_ble_feedback, sizeof(s_ble_feedback), "识别成功 · 已收到翻页器按键");
+            snprintf(s_ble_feedback, sizeof(s_ble_feedback), ui_tr("识别成功 · 已收到翻页器按键"));
             changed = true;
         }
     }
@@ -221,7 +222,7 @@ static void draw_home(uint8_t *fb) {
                        s_model.network_busy ? (s_model.cellular_busy ? "关闭移动网络后再连接" : "结束 WiFi 使用后再连接") : s_model.connected ? "按键只在阅读时翻页" : "请让翻页器进入配对模式";
     text(fb, (EpdRect){64, 323, 556, 30}, 19, hint, false);
     if (s_model.connected && available()) button(fb, CONTROL_DISCONNECT, "断开", false, true);
-    char label[40]; snprintf(label, sizeof(label), "已配对 %u", s_model.bond_count);
+    char label[40]; snprintf(label, sizeof(label), ui_tr("已配对 %u"), s_model.bond_count);
     text(fb, (EpdRect){42, 386, 300, 38}, 24, label, false);
     button(fb, CONTROL_ADD, "添加设备", true, available());
     ble_layout_t l = ble_layout();
@@ -284,15 +285,15 @@ static void draw_scan(uint8_t *fb) {
         const ble_pt_device_t *peer = &s_model.devices[index];
         EpdRect r = peer_rect(row, true);
         if (row) rule(fb, r.y);
-        char detail[64]; snprintf(detail, sizeof(detail), "%s · %s", peer->rssi > -60 ? "信号强" :
-                                 peer->rssi > -75 ? "信号良好" : "信号一般", peer->bonded ? "已配对" : "未配对");
+        char detail[64]; snprintf(detail, sizeof(detail), "%s · %s", peer->rssi > -60 ? ui_tr("信号强") :
+                                 peer->rssi > -75 ? ui_tr("信号良好") : ui_tr("信号一般"), peer->bonded ? ui_tr("已配对") : ui_tr("未配对"));
         draw_peer(fb, r, peer->name, detail, false);
     }
     int pages = (s_model.device_count + BLE_ROWS - 1) / BLE_ROWS;
     if (pages < 1) pages = 1;
     button(fb, CONTROL_SCAN_PREV, "", false, s_scan_page > 0);
     button(fb, CONTROL_SCAN_NEXT, "", false, s_scan_page + 1 < pages);
-    char page[48]; snprintf(page, sizeof(page), "已发现 %u 台 · %d/%d", s_model.device_count, s_scan_page + 1, pages);
+    char page[48]; snprintf(page, sizeof(page), ui_tr("已发现 %u 台 · %d/%d"), s_model.device_count, s_scan_page + 1, pages);
     text(fb, (EpdRect){112, 978, 460, 66}, 23, page, true);
     text(fb, (EpdRect){42, 1060, 600, 32}, 20, "仅支持 BLE 设备，轻点名称连接", true);
 }
@@ -304,7 +305,7 @@ static void draw_detail(uint8_t *fb) {
     bool live = live_peer(s_selected.addr);
     const char *state = live ? "已连接 · 可以翻页" : s_model.connecting && !strcasecmp(s_connect_addr, s_selected.addr) ? "正在连接…" : "已配对 · 未连接";
     text(fb, (EpdRect){64, 282, 556, 36}, 22, state, false);
-    char address[48]; snprintf(address, sizeof(address), "地址  %s", s_selected.addr);
+    char address[48]; snprintf(address, sizeof(address), ui_tr("地址  %s"), s_selected.addr);
     text(fb, (EpdRect){64, 325, 556, 30}, 19, address, false);
     button(fb, CONTROL_CONNECT, live ? "断开连接" : "连接", !live, available() && !s_model.connecting);
     button(fb, CONTROL_FORGET, "遗忘设备", false, !s_model.connecting);
@@ -351,7 +352,7 @@ bool settings_bluetooth_back(void) {
         s_view = BLE_HOME;
     } else if (s_ble_learning) {
         s_ble_learning = 0;
-        snprintf(s_ble_feedback, sizeof(s_ble_feedback), "已取消学习");
+        snprintf(s_ble_feedback, sizeof(s_ble_feedback), ui_tr("已取消学习"));
     } else return false;
     s_ble_notice[0] = 0;
     capture();
@@ -380,7 +381,7 @@ static void connect_peer(const char *addr) {
     esp_err_t error = ble_pt_connect(s_connect_addr);
     const char *hint = memory_peak_hint(error);
     snprintf(s_ble_notice, sizeof(s_ble_notice), "%s",
-             error == ESP_OK ? "正在连接…" : hint ? hint : "连接失败，请重试");
+             error == ESP_OK ? ui_tr("正在连接…") : hint ? hint : ui_tr("连接失败，请重试"));
     capture();
 }
 bool settings_bluetooth_tick(int64_t now_ms) {
@@ -389,7 +390,7 @@ bool settings_bluetooth_tick(int64_t now_ms) {
                                            strcasecmp(s_learning_addr, ble_pt_connected_addr()));
     if (learning_lost) {
         s_ble_learning = 0;
-        snprintf(s_ble_feedback, sizeof(s_ble_feedback), "连接已变化，请重新学习");
+        snprintf(s_ble_feedback, sizeof(s_ble_feedback), ui_tr("连接已变化，请重新学习"));
         drain_keys();
         changed = true;
     }
@@ -404,7 +405,7 @@ bool settings_bluetooth_tick(int64_t now_ms) {
                 ble_pt_scan_start(BLE_PT_SCAN_FOREVER);
                 s_scan_started = ble_pt_scanning();
                 s_scan_retry_at = now_ms + 2000;
-                snprintf(s_ble_notice, sizeof(s_ble_notice), "%s", s_scan_started ? "" : "扫描未启动，正在重试");
+                snprintf(s_ble_notice, sizeof(s_ble_notice), "%s", s_scan_started ? "" : ui_tr("扫描未启动，正在重试"));
                 changed = true;
             }
         }
@@ -443,12 +444,12 @@ bool settings_bluetooth_gesture(const ui_gesture_event_t *ev) {
         if (!ui_rect_hit(control_rect(CONTROL_CONFIRM), x, y)) return false;
         if (s_view == BLE_SCAN_CONFIRM) {
             if (app_settings_ble_turner() && ble_pt_running()) begin_scan();
-            else { s_view = BLE_HOME; snprintf(s_ble_notice, sizeof(s_ble_notice), "蓝牙不可用，请稍后重试"); capture(); }
+            else { s_view = BLE_HOME; snprintf(s_ble_notice, sizeof(s_ble_notice), ui_tr("蓝牙不可用，请稍后重试")); capture(); }
         } else {
             if (ble_pt_connected() && !strcasecmp(s_selected.addr, ble_pt_connected_addr())) ble_pt_disconnect();
             ble_pt_forget(s_selected.addr);
             s_view = BLE_HOME;
-            snprintf(s_ble_notice, sizeof(s_ble_notice), "已遗忘该设备");
+            snprintf(s_ble_notice, sizeof(s_ble_notice), ui_tr("已遗忘该设备"));
             capture();
         }
         return true;
@@ -470,7 +471,7 @@ bool settings_bluetooth_gesture(const ui_gesture_event_t *ev) {
         if (!ui_rect_hit(control_rect(CONTROL_CONNECT), x, y) || !available() || ble_pt_connecting()) return false;
         if (ble_pt_connected() && !strcasecmp(s_selected.addr, ble_pt_connected_addr())) {
             s_disconnect_pending = true;
-            ble_pt_disconnect(); snprintf(s_ble_notice, sizeof(s_ble_notice), "正在断开…"); capture();
+            ble_pt_disconnect(); snprintf(s_ble_notice, sizeof(s_ble_notice), ui_tr("正在断开…")); capture();
         } else connect_peer(s_selected.addr);
         return true;
     }
@@ -483,7 +484,7 @@ bool settings_bluetooth_gesture(const ui_gesture_event_t *ev) {
             return true;
         }
         app_settings_set_ble_turner(wanted);
-        if (app_settings_ble_turner() != wanted) snprintf(s_ble_notice, sizeof(s_ble_notice), "保存失败，请重试");
+        if (app_settings_ble_turner() != wanted) snprintf(s_ble_notice, sizeof(s_ble_notice), ui_tr("保存失败，请重试"));
         else {
             if (!wanted) { ble_pt_cancel_recent(); ble_pt_reset_failure(); }
             s_ble_learning = 0; s_ble_feedback[0] = 0;
@@ -494,7 +495,7 @@ bool settings_bluetooth_gesture(const ui_gesture_event_t *ev) {
     if (ui_rect_hit(control_rect(CONTROL_DISCONNECT), x, y) && can_learn()) {
         s_disconnect_pending = true;
         ble_pt_cancel_recent(); ble_pt_disconnect(); s_ble_learning = 0; s_ble_feedback[0] = 0;
-        snprintf(s_ble_notice, sizeof(s_ble_notice), "正在断开…"); capture(); return true;
+        snprintf(s_ble_notice, sizeof(s_ble_notice), ui_tr("正在断开…")); capture(); return true;
     }
     if (ui_rect_hit(control_rect(CONTROL_ADD), x, y) && available()) {
         s_ble_learning = 0; s_ble_feedback[0] = 0;
@@ -504,7 +505,7 @@ bool settings_bluetooth_gesture(const ui_gesture_event_t *ev) {
     }
     for (int i = 0; i < 2; ++i) {
         if (!ui_rect_hit(control_rect(i ? CONTROL_LEARN_NEXT : CONTROL_LEARN_PREV), x, y) || !can_learn()) continue;
-        if (s_ble_learning == i + 1) { s_ble_learning = 0; snprintf(s_ble_feedback, sizeof(s_ble_feedback), "已取消学习"); }
+        if (s_ble_learning == i + 1) { s_ble_learning = 0; snprintf(s_ble_feedback, sizeof(s_ble_feedback), ui_tr("已取消学习")); }
         else if (!s_ble_learning && ble_pt_connected() && !strcasecmp(s_model.addr, ble_pt_connected_addr())) {
             drain_keys(); ble_pt_learn_begin(); s_ble_learning = i + 1;
             snprintf(s_learning_addr, sizeof(s_learning_addr), "%s", s_model.addr);

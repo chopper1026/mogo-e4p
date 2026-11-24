@@ -2,6 +2,7 @@
  * 中文：内置组件库与天气选城，复用共用键盘；不直接访问供应商。
  * English: Built-in component library and weather city picker using the shared keyboard, never the provider directly.
  */
+#include "../ui/ui_locale.h"
 #include "app.h"
 #include "app_components_mode.h"
 #include "ui_weather.h"
@@ -128,7 +129,7 @@ static void render(app_ctx_t *ctx,uint8_t *fb) {
             }
             if(v->result_total) {
                 EpdRect prev=city_page_button(false),next=city_page_button(true);
-                char page[64];snprintf(page,sizeof(page),"%u / %u   共%u个地点",v->result_page+1,
+                char page[64];snprintf(page,sizeof(page),ui_tr("%u / %u   共%u个地点"),v->result_page+1,
                     (v->result_total+WEATHER_CITY_LIMIT-1)/WEATHER_CITY_LIMIT,v->result_total);
                 text(fb,342,1068,24,page,EPD_DRAW_ALIGN_CENTER);
                 if(v->result_page)ui_draw_icon(fb,prev.x+prev.width/2,1068,32,UI_ICON_CHEVRON_LEFT,0);
@@ -151,12 +152,12 @@ static bool keyboard_hide(void) {
     return true;
 }
 static app_redraw_t submit(void) {
-    if(ui_keyboard_pending())snprintf(s_notice,sizeof(s_notice),"请先选择候选字");
-    else if(!weather_query_valid(s_query))snprintf(s_notice,sizeof(s_notice),"请输入2至64个汉字或字母");
+    if(ui_keyboard_pending())snprintf(s_notice,sizeof(s_notice),ui_tr("请先选择候选字"));
+    else if(!weather_query_valid(s_query))snprintf(s_notice,sizeof(s_notice),ui_tr("请输入2至64个汉字或字母"));
     else {
         keyboard_hide();
         s_notice[0]=0;
-        if(!app_weather_request(APP_WEATHER_SEARCH,s_query))snprintf(s_notice,sizeof(s_notice),"暂不能搜索，请稍后重试并检查网络与时间");
+        if(!app_weather_request(APP_WEATHER_SEARCH,s_query))snprintf(s_notice,sizeof(s_notice),ui_tr("暂不能搜索，请稍后重试并检查网络与时间"));
     }
     return APP_REDRAW_PAGE;
 }
@@ -207,14 +208,14 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
             if(x<108&&next)--next;
             else if(x>=576&&(next+1)*WEATHER_CITY_LIMIT<page->result_total)++next;
             if(next!=page->result_page&&!app_weather_search(s_query,next))
-                snprintf(s_notice,sizeof(s_notice),"暂不能搜索，请稍后重试并检查网络与时间");
+                snprintf(s_notice,sizeof(s_notice),ui_tr("暂不能搜索，请稍后重试并检查网络与时间"));
             return APP_REDRAW_PAGE;
         }
         bool results_visible=!s_keyboard_visible;
         bool hidden=keyboard_hide();
         if(y>=165&&y<221&&x>=440&&x<648) {
             s_notice[0]=0;
-            if(!app_weather_request(APP_WEATHER_LOCATE,NULL))snprintf(s_notice,sizeof(s_notice),"暂不能定位，请稍后重试并检查网络与时间");
+            if(!app_weather_request(APP_WEATHER_LOCATE,NULL))snprintf(s_notice,sizeof(s_notice),ui_tr("暂不能定位，请稍后重试并检查网络与时间"));
             return APP_REDRAW_PAGE;
         }
         if(results_visible) {
@@ -222,7 +223,7 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
             for(unsigned i=0;i<v->result_count;i++)if(ui_rect_hit(city_result_row(i),x,y)) {
                 weather_location_t city=v->results[i];
                 if(app_weather_select(&city)){ui_keyboard_end();s_city=false;s_notice[0]=0;(void)app_weather_request(APP_WEATHER_FETCH,NULL);}
-                else snprintf(s_notice,sizeof(s_notice),"保存失败，请检查设置存储");
+                else snprintf(s_notice,sizeof(s_notice),ui_tr("保存失败，请检查设置存储"));
                 return APP_REDRAW_PAGE;
             }
         }
@@ -234,7 +235,7 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
             for(unsigned slot=0;slot<APP_HOME_SLOT_COUNT;++slot)for(unsigned choice=0;choice<sizeof(s_choices)/sizeof(s_choices[0]);++choice) {
                 int row=component_row(slot,choice);
                 if(y>=row-30&&y<row+30) {
-                    if(!app_home_component_set(slot,s_choices[choice]))snprintf(s_notice,sizeof(s_notice),"设置保存失败，请稍后重试");
+                    if(!app_home_component_set(slot,s_choices[choice]))snprintf(s_notice,sizeof(s_notice),ui_tr("设置保存失败，请稍后重试"));
                     else {s_notice[0]=0;if(!app_home_has_widget(APP_HOME_WIDGET_WEATHER))app_weather_cancel();}
                     return APP_REDRAW_PAGE;
                 }
@@ -244,7 +245,7 @@ static app_redraw_t gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
     } else if(ev->type==UI_GESTURE_TAP) {
         int x=ev->x0,y=ev->y0;
         if(y>=800&&y<876) {
-            if(!app_weather_set_auto_refresh(!app_weather_view()->auto_refresh))snprintf(s_notice,sizeof(s_notice),"设置保存失败，请稍后重试");
+            if(!app_weather_set_auto_refresh(!app_weather_view()->auto_refresh))snprintf(s_notice,sizeof(s_notice),ui_tr("设置保存失败，请稍后重试"));
             else s_notice[0]=0;
             return APP_REDRAW_PAGE;
         }

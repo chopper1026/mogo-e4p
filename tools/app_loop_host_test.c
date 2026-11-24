@@ -1487,6 +1487,7 @@ const char *ble_pt_enable_block_reason(void) { return NULL; }
 // Scheduler regressions link the actual lifecycle service; dedicated lifecycle tests control failure combinations.
 bool network_service_pause_for_sleep(void) { return true; }
 void network_service_resume_after_sleep(void) {}
+bool font_download_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 bool shutdown_wallpaper_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 void lock_images_close(void){}

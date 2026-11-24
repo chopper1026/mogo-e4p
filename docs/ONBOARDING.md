@@ -30,6 +30,8 @@ idf.py --preview build
   sdkconfig and build are ignored. Existing local values persist, so verify generated configuration after changing defaults.
 - 需要在本地开发固件中使用 CloudZao 时，按[本机开发包配置](development/guides/CLOUDZAO_TRANSFER.md#本机开发包--local-development-builds)设置一次本机接入 ID；它与正式发布独立。
   To use CloudZao in local firmware, set up the [local integration ID](development/guides/CLOUDZAO_TRANSFER.md#本机开发包--local-development-builds) once; it is separate from official releases.
+- 推荐系统字体只从 `https://mogo.mantake.shop/files/fonts/1.530/` 下载。官网更新需包含两份 Medium TTF 及各自的 OFL 许可；设备按固定长度和 SHA-256 校验，不使用局域网或第三方回退源。
+  Recommended system fonts are served only from this official HTTPS directory. Ship both Medium TTFs and their respective OFL notices; the device pins sizes and SHA-256 digests without a LAN or third-party fallback.
 - 日常本地测试沿用当前正式版本号，通过测试日期和说明区分；构建默认版本与 PICO_PROJECT_VER 的覆盖逻辑见根 CMakeLists.txt。
   Local tests retain the current published version and use dates/notes for identification; root CMakeLists.txt defines the fallback and PICO_PROJECT_VER override.
 - 本地包不得覆盖已发布的固定下载文件；创建新 OTA 版本标签前先提交准确的更新日志，详见[正式发布契约](development/guides/RELEASE.md)。

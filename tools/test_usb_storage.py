@@ -75,6 +75,7 @@ bool tud_mounted(void);
 void tud_disconnect(void);
 bool book_cover_jobs_quiesce(unsigned timeout_ms);
 void book_lock_collage_invalidate(void);
+bool font_download_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 bool shutdown_wallpaper_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 bool lock_images_quiesce(unsigned timeout_ms){(void)timeout_ms;return true;}
 void lock_images_close(void);

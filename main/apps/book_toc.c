@@ -5,6 +5,7 @@
  * 用户修复：书名与章名统一使用当前系统字体的标题路径；原生字号、整行字体来源和灰阶抗锯齿保持一致，不放大补充点阵。
  * User fix: book/chapter names share the active system title path with native sizes, stable whole-line font selection and gray antialiasing, without enlarged bitmap supplements.
  */
+#include "../ui/ui_locale.h"
 #include "book_toc.h"
 
 #include <stdio.h>
@@ -139,10 +140,10 @@ void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
 
     char title[160];
     one_line(title, sizeof(title), book_title ? book_title : "");
-    if (!title[0]) strcpy(title, "当前书籍");
+    if (!title[0]) strcpy(title, ui_tr("当前书籍"));
     toc_title(fb, (EpdRect){TOC_LEFT,160,420,48}, 23, title, 0xe0);
     char total[48];
-    snprintf(total, sizeof(total), "%u 节", (unsigned)chapters);
+    snprintf(total, sizeof(total), ui_tr("%u 节"), (unsigned)chapters);
     ui_text_box(fb,(EpdRect){482,160,166,48},23,total,EPD_DRAW_ALIGN_RIGHT,false);
     ui_fill_rect_fast((EpdRect){TOC_LEFT, 213, TOC_RIGHT - TOC_LEFT, 2}, UI_GRAY_BLACK, fb);
 
@@ -165,13 +166,13 @@ void book_toc_render(uint8_t *fb, const char *book_title, size_t chapters,
             ui_text_box(fb,(EpdRect){r.x+14,r.y+11,58,72},21,number,EPD_DRAW_ALIGN_LEFT,false);
             char raw[160] = "", label[160];
             if (book_navigation_title(index, raw, sizeof(raw)) != ESP_OK || !raw[0])
-                snprintf(raw, sizeof(raw), "第 %u 节", (unsigned)index + 1);
+                snprintf(raw, sizeof(raw), ui_tr("第 %u 节"), (unsigned)index + 1);
             char spine_default[32];
-            snprintf(spine_default, sizeof(spine_default), "第 %u 节", (unsigned)source_index + 1);
+            snprintf(spine_default, sizeof(spine_default), ui_tr("第 %u 节"), (unsigned)source_index + 1);
             if (strcmp(raw, spine_default) == 0)
-                snprintf(raw, sizeof(raw), "第 %u 节", (unsigned)index + 1);
+                snprintf(raw, sizeof(raw), ui_tr("第 %u 节"), (unsigned)index + 1);
             one_line(label, sizeof(label), raw);
-            if (!label[0]) snprintf(label, sizeof(label), "第 %u 节", (unsigned)index + 1);
+            if (!label[0]) snprintf(label, sizeof(label), ui_tr("第 %u 节"), (unsigned)index + 1);
             toc_title(fb, (EpdRect){r.x+79,r.y+9,selected?420:495,76}, 30, label,
                        selected ? 0xc0 : UI_GRAY_WHITE);
             if (selected)
@@ -225,9 +226,9 @@ void book_toc_render_jump(uint8_t *fb, size_t chapters, int percent) {
     if (last > chapters) last = chapters;
     char summary[160];
     if (chapters)
-        snprintf(summary, sizeof(summary), "约第 %d / %d 页 · 第 %u～%u 节",
+        snprintf(summary, sizeof(summary), ui_tr("约第 %d / %d 页 · 第 %u～%u 节"),
                  target + 1, pages, (unsigned)first, (unsigned)last);
-    else snprintf(summary, sizeof(summary), "这本书没有可用目录");
+    else snprintf(summary, sizeof(summary), ui_tr("这本书没有可用目录"));
     fit_line(summary, 25, 486);
     ui_text_box(fb,(EpdRect){99,783,486,34},25,summary,EPD_DRAW_ALIGN_LEFT,false);
     toc_pill(fb, (EpdRect){75, 850, 255, 57}, "取消", 26, false);

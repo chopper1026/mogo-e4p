@@ -8,6 +8,7 @@
  * come from the app registry.
  */
 
+#include "../ui/ui_locale.h"
 #include "ui_menu.h"
 
 #include <stdio.h>
@@ -136,7 +137,7 @@ void ui_draw_menu_page(uint8_t* framebuffer, const app_desc_t* current, int leaf
     ui_clear_page(framebuffer);
     snprintf(
         line, sizeof(line),
-        "第 %d / %d 页　Page %d / %d",
+        ui_tr("第 %d / %d 页　Page %d / %d"),
         leaf + 1, leaves, leaf + 1, leaves
     );
     ui_draw_header(framebuffer, "功能", line);

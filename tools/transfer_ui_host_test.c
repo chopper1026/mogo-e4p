@@ -8,6 +8,7 @@
 #include "transfer_ui_test_env.h"
 #define TRANSFER_UI_RECORD_REFRESH
 #include "../main/apps/app_transfer.c"
+const char *ui_locale_tag(void){return "zh-CN";}
 #include <assert.h>
 #include "../components/wifi_transfer/transfer_signature.h"
 static bool test_usb_active;
@@ -965,6 +966,21 @@ static void transfer_entry_regression(app_ctx_t *ctx) {
     transfer_on_media_lost(ctx);
     transfer_on_exit(ctx);
     assert(test_stop_count == stops && test_wifi_running && test_status.network_ready);
+    app_transfer_open_setup_wifi(ctx);
+    assert(ctx->request_app == &app_transfer); ctx->request_app = NULL;
+    on_enter(ctx);
+    assert(transfer_modal(ctx) && !ctx->request_return);
+    network_ui_tick(ctx);
+    assert(ctx->request_return); ctx->request_return = false;
+    transfer_on_exit(ctx);
+    assert(app_transfer_take_setup_wifi_success() && !app_transfer_take_setup_wifi_success());
+    assert(test_stop_count == stops && test_wifi_running);
+    app_transfer_open_setup_wifi(ctx); ctx->request_app = NULL;
+    on_enter(ctx);
+    tap(ctx, back);
+    assert(ctx->request_return); ctx->request_return = false;
+    transfer_on_exit(ctx);
+    assert(!app_transfer_take_setup_wifi_success());
     test_wifi_running = false;
     test_status = (wifi_transfer_status_t){0};
     ctx->now_ms = 0;

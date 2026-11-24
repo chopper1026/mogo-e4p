@@ -18,6 +18,7 @@ esp_err_t nvs_get_u32(nvs_handle_t, const char *, uint32_t *);
 esp_err_t nvs_set_u32(nvs_handle_t, const char *, uint32_t);
 esp_err_t nvs_get_str(nvs_handle_t, const char *, char *, size_t *);
 esp_err_t nvs_set_str(nvs_handle_t, const char *, const char *);
+esp_err_t nvs_get_used_entry_count(nvs_handle_t, size_t *);
 esp_err_t nvs_get_blob(nvs_handle_t, const char *, void *, size_t *);
 esp_err_t nvs_set_blob(nvs_handle_t, const char *, const void *, size_t);
 esp_err_t nvs_erase_key(nvs_handle_t, const char *);

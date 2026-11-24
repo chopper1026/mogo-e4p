@@ -5,6 +5,7 @@
  * 中文：首页连续阅读题头；纯绘制七日书脊，不读取日期或写入统计。
  * English: Home streak header; paint seven daily spines without clock or statistics IO.
  */
+#include "../ui/ui_locale.h"
 #include "ui_reading_streak.h"
 #include "ui_kit.h"
 #include <stdio.h>
@@ -94,7 +95,7 @@ void ui_reading_streak_draw(uint8_t *fb,const reading_streak_view_t *view) {
         line2(fb,label_x+1,137,label_x+5,141,0);line2(fb,label_x+5,141,label_x+12,131,0);
         fitted(fb,label_x+22,136,20,"今日已达标");
     } else {
-        char progress[40];snprintf(progress,sizeof(progress),"今日 %u / 30 分钟",(unsigned)(view->milliseconds[6]/60000));
+        char progress[40];snprintf(progress,sizeof(progress),ui_tr("今日 %u / 30 分钟"),(unsigned)(view->milliseconds[6]/60000));
         fitted(fb,label_x,136,20,progress);
     }
     const int heights[]={44,49,54,59,64,69,74};

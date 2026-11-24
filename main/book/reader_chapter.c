@@ -5,6 +5,7 @@
  * 中文：保留章节读取、题头折叠、布局回滚与会话交接顺序；页面处理绘制和导航。
  * English: Preserve chapter reads, heading folding, layout rollback and session handoff order; the page owns drawing and navigation.
  */
+#include "../ui/ui_locale.h"
 #include "reader_chapter.h"
 #include "book_source.h"
 #include <stdio.h>
@@ -42,7 +43,7 @@ esp_err_t reader_chapter_read(reader_chapter_t *out, size_t chapter, const char 
         // 已识别的正文编号题头优先；没有时沿用书内导航或备用标题。
         // Prefer a recognized numbered body heading, then authored navigation or a fallback title.
         if (book_chapter_title(chapter, toc_title, sizeof(toc_title)) != ESP_OK)
-            snprintf(toc_title, sizeof(toc_title), "第 %u 节", (unsigned)chapter + 1);
+            snprintf(toc_title, sizeof(toc_title), ui_tr("第 %u 节"), (unsigned)chapter + 1);
         memcpy(heading, toc_title, sizeof(out->heading));
         char *chapter_mark = strstr(heading, "章");
         if (chapter_mark && chapter_mark - heading < 24) {

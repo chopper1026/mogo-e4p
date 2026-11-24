@@ -4,6 +4,7 @@
  * 用户修订：读取失败或确认未开启时直接返回；正常读取的已有密码必须摘要验证，模糊缓存与局部输入保持。
  * User revision: return for read failure or confirmed disabled state; require digest verification for readable enabled PINs, retaining cached frost and local input.
  */
+#include "../ui/ui_locale.h"
 #include "lock_screen.h"
 #include "platform/s31_input.h"
 #include "lock_pin.h"
@@ -132,7 +133,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
         }
         app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");
-        if(esp_timer_get_time()/1000<retry_at){pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
+        if(esp_timer_get_time()/1000<retry_at){pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"%s",ui_tr("请等待 10 秒后重试"));}
         // 直接推送完整密码画面一次，不再补刷第二段背景。/ Present the complete PIN screen once, without a second backdrop stage.
         ui_pinpad_paint(fb,&pad,ui_pinpad_full());present(hl,ui_pinpad_full());
         // 密码等待不是启动失败；待验证时保留一次性恢复，不提前开书。
@@ -161,7 +162,7 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
                     bool verified=lock_pin_verify(pad.digits);
                     if(verified){ui_pinpad_end(&pad);free(original);device_power_drain_events();ble_pt_event_t e;while(ble_pt_pop_key(&e)){}ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}return;}
                     ui_pinpad_reset(&pad,NULL,"密码不正确，请重试");
-                    if(++failures>=3){failures=0;retry_at=now+10000;pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
+                    if(++failures>=3){failures=0;retry_at=now+10000;pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"%s",ui_tr("请等待 10 秒后重试"));}
                     ui_pinpad_paint(fb,&pad,ui_pinpad_entry_area());present(hl,ui_pinpad_entry_area());
                 }
             }

@@ -13,6 +13,7 @@ CHARSET = ROOT / "main/font/charset.txt"
 OUT = ROOT / "main/assets/builtin.ttf"
 SCAN_DIRS = [
     ROOT / "main/ui",
+    ROOT / "main/ui/locale_catalog.inc",
     ROOT / "main/app",
     ROOT / "main/apps",
     ROOT / "main/factory",

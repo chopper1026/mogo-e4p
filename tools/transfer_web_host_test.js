@@ -37,7 +37,7 @@ async function setup(options={}) {
     const el=create(match[1]);el.className=attrs.match(/\bclass="([^"]+)"/)?.[1]||'';el.hidden=/\bhidden\b/.test(attrs);
     if(id){el.id=id[1];nodes.set(el.id,el);}if(view)el.dataset.view=view[1];if(folder)el.dataset.folder=folder[1];
   }
-  const document={
+  const document={documentElement:{},
     getElementById(id){assert.ok(nodes.has(id),'Missing HTML id '+id);return nodes.get(id);},
     createElement:create,createElementNS:(_,tag)=>create(tag),addEventListener(){},
     querySelectorAll(selector){
@@ -59,7 +59,7 @@ async function setup(options={}) {
     if(url==='/info'){
       ++state.infoReads;
       if(options.infoError||(options.infoErrorAfter&&state.infoReads>=options.infoErrorAfter))throw Error('offline');
-      return json({mode:options.mode||'ap',is_flash:!!options.isFlash,free_bytes:options.freeBytes??100000000,file_limit:options.fileLimit||0,
+      return json({mode:options.mode||'ap',locale:options.locale,is_flash:!!options.isFlash,free_bytes:options.freeBytes??100000000,file_limit:options.fileLimit||0,
         ...(options.legacyInfo?{}:{book_name_limit:options.isFlash?120:232,media_name_limit:120,relative_path_limit:238})});
     }
     if(url.startsWith('/files?')){
@@ -99,6 +99,14 @@ async function edit(t,action,name){
   t.context.openEditor(action,t.run('directoryItems[0]'));if(name!==undefined)t.get('editorName').value=name;await t.context.submitEditor();
 }
 (async()=>{
+  for (const mode of ['ap','sta']) for (const locale of ['zh-TW','en']) {
+    const t=await setup({mode,locale});
+    assert.equal(t.run('document.documentElement.lang'),locale);
+    assert.notEqual(t.run("tr('正在上传')"),'正在上传');
+    assert.equal(t.run('document.title'),t.run("tr('mogo · WiFi 传书')"));
+    const filename='正在上传.txt';await t.context.sendFiles([file(filename,12)],'file','');
+    assert.equal(t.run('records[0].name'),filename);
+  }
   for(const root of ['main','components'])for(const relative of fs.readdirSync(root,{recursive:true})){
     const path=root+'/'+relative;
     if(!/\.(?:c|h|cpp|html|json|md|txt)$/.test(path)||!fs.statSync(path).isFile())continue;

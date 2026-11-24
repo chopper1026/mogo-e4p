@@ -17,6 +17,7 @@
 #include <time.h>
 
 #include "app_loop.h"
+#include "app_setup.h"
 #if CONFIG_APP_LOCK_SLEEP_TRACE
 #include "lock_sleep_trace.h"
 #endif
@@ -265,6 +266,8 @@ void app_main(void) {
     }
     char interrupted[PICO_BOOT_PATH_MAX];
     if (pico_boot_interrupted_book(interrupted, sizeof(interrupted))) first = &app_boot_recovery;
+    if (first == app_home_page() && !pico_boot_recovery() && app_setup_step() != SETUP_DONE)
+        first = app_setup_start(APP_SETUP_RESUME);
     if(resuming && !lock_pin_enabled()) {
         if(first==app_at(1) && resume.reader)app_font_activate_reading();
         else app_font_activate_system();

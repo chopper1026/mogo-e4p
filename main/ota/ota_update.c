@@ -8,6 +8,7 @@
  * 冻结：不得覆盖当前运行分区，不在校验结束前切换启动分区。
  * Frozen: never overwrite the running partition or switch boot slots before validation completes.
  */
+#include "../ui/ui_locale.h"
 #include "epdiy.h"
 #include "ota_update.h"
 
@@ -27,7 +28,7 @@ static const char *TAG = "mogo_ota";
 
 static void set_message(char *out, size_t size, const char *text) {
     if (!out || !size) return;
-    snprintf(out, size, "%s", text ? text : "");
+    snprintf(out, size, "%s", text ? ui_tr(text) : "");
 }
 
 static bool copy_field(char *out, size_t out_size, const char *field, size_t field_size) {
@@ -54,7 +55,7 @@ esp_err_t pico_ota_inspect(const char *path, pico_ota_info_t *info) {
     memset(info, 0, sizeof(*info));
     const esp_app_desc_t *running_desc = esp_app_get_description();
     if (!copy_field(info->current_version, sizeof(info->current_version), running_desc->version,
-                    sizeof(running_desc->version))) snprintf(info->current_version, sizeof(info->current_version), "未知");
+                    sizeof(running_desc->version))) snprintf(info->current_version, sizeof(info->current_version), "%s", ui_tr("未知"));
 
     struct stat file_stat = {0};
     if (stat(path, &file_stat) != 0) {

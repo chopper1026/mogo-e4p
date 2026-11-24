@@ -3,6 +3,7 @@
  *
  * 中文：五本实体封面的环形扇列；逆向定点旋转、绘制和命中使用同一几何。
  * English: Circular fan of five covers, sharing inverse fixed-point rotation for drawing and hit testing. */
+#include "../ui/ui_locale.h"
 #include "ui_mini_library.h"
 #include "ui_kit.h"
 #include "ui_nav_layout.h"
@@ -86,8 +87,8 @@ void ui_mini_library_draw(uint8_t *fb,EpdRect r,const home_library_view_t *v,ui_
         }
         const book_mini_item_t *b=&v->books[v->selected];
         fitted(fb,36,r.y+386,34,b->title,612,EPD_DRAW_ALIGN_LEFT);
-        if(b->has_progress)snprintf(meta,sizeof(meta),"%s%s已读 %u%%",b->author,b->author[0]?" · ":"",b->pct);
-        else snprintf(meta,sizeof(meta),"%s%s还未翻开",b->author,b->author[0]?" · ":"");
+        if(b->has_progress)snprintf(meta,sizeof(meta),ui_tr("%s%s已读 %u%%"),b->author,b->author[0]?" · ":"",b->pct);
+        else snprintf(meta,sizeof(meta),ui_tr("%s%s还未翻开"),b->author,b->author[0]?" · ":"");
     } else {
         ui_draw_icon(fb,342,r.y+168,54,UI_ICON_BOOK_OPEN,0);
         text(fb,342,r.y+237,30,v->loading?"正在整理书匣":v->recent?"还没有阅读记录":"书匣等你放入第一本书",EPD_DRAW_ALIGN_CENTER);

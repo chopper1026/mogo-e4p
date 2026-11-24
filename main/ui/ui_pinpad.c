@@ -4,6 +4,7 @@
  * 冻结：不切字体、不写凭据、不调用显示；缓存和输入在退出时释放/清零。
  * Frozen: No face switches, credentials or presentation; release cache and wipe input on exit.
  */
+#include "../ui/ui_locale.h"
 #include "ui_pinpad.h"
 #include "ui_kit.h"
 #include "ui_image_dither.h"
@@ -40,8 +41,8 @@ void ui_pinpad_end(ui_pinpad_t *pad){
 }
 void ui_pinpad_reset(ui_pinpad_t *pad,const char *title,const char *notice){
     lock_pin_wipe(pad->digits,sizeof(pad->digits));pad->count=0;pad->pressed=-1;pad->dirty_key=-1;pad->blocked=false;
-    if(title)snprintf(pad->title,sizeof(pad->title),"%s",title);
-    snprintf(pad->notice,sizeof(pad->notice),"%s",notice?notice:"");
+    if(title)snprintf(pad->title,sizeof(pad->title),"%s",ui_tr(title));
+    snprintf(pad->notice,sizeof(pad->notice),"%s",notice?ui_tr(notice):"");
 }
 void ui_pinpad_begin(ui_pinpad_t *pad,const uint8_t *frame,const char *title){
     ui_pinpad_end(pad);ui_pinpad_reset(pad,title,"");

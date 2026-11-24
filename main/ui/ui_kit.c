@@ -15,6 +15,7 @@
  */
 
 #include "ui_kit.h"
+#include "ui_locale.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -308,6 +309,7 @@ void ui_text(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text);
     px = ui_text_effective_px(px);
     uint8_t fg = inverted ? UI_INK_WHITE : UI_INK_BLACK;
     uint8_t bg = inverted ? UI_INK_BLACK : UI_INK_WHITE;
@@ -317,10 +319,12 @@ void ui_text(
 }
 
 int ui_text_fixed_width_px(int px, const char* text) {
+    text = ui_tr(text);
     return ui_text_fixed_context_width_px(px, text, text);
 }
 
 int ui_text_fixed_context_width_px(int px, const char* text, const char* font_sample) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!text || px <= 0) return 0;
     return (!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(font_sample ? font_sample : text)
         ? ui_font_text_width_px(px, text)
@@ -331,6 +335,7 @@ void ui_text_fixed(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text);
     uint8_t fg = inverted ? UI_INK_WHITE : UI_INK_BLACK;
     uint8_t bg = inverted ? UI_INK_BLACK : UI_INK_WHITE;
     if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text))
@@ -343,6 +348,7 @@ void ui_text_fixed_vc(
     uint8_t* framebuffer, int x, int center_y, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text);
     ui_text_fixed_context_vc(framebuffer, x, center_y, px, text, text, align, inverted);
 }
 
@@ -350,6 +356,7 @@ void ui_text_fixed_context_vc(
     uint8_t* framebuffer, int x, int center_y, int px, const char* text,
     const char* font_sample, enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!framebuffer || !text || !text[0] || px <= 0) return;
     int above = 0, below = 0;
     uint8_t fg = inverted ? UI_INK_WHITE : UI_INK_BLACK;
@@ -365,6 +372,7 @@ void ui_text_fixed_context_vc(
 
 void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
                  enum EpdFontFlags align, bool inverted) {
+    text = ui_tr(text);
     if (!fb || !text || !text[0] || box.width <= 0 || box.height <= 0) return;
     px = ui_text_effective_px(px);
     const bool builtin = (!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text);
@@ -389,8 +397,16 @@ void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
     ui_text_fixed_vc(fb,x,box.y+box.height/2,px,text,align,inverted);
 }
 
+void ui_setup_text_box(uint8_t *fb, EpdRect box, int px, const char *text, enum EpdFontFlags align, bool inverted) {
+    bool previous = s_system_ttf;
+    if (previous && !ttf_font_has_text(text)) s_system_ttf = false;
+    ui_text_box(fb, box, px, text, align, inverted);
+    s_system_ttf = previous;
+}
+
 void ui_text_fixed_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                           enum EpdFontFlags align, uint8_t gray) {
+    text = ui_tr(text);
     if (!fb || !text || !*text || px <= 0) return;
     int above = 0, below = 0;
     uint8_t ink = gray >= 0xF0 ? UI_INK_WHITE : UI_INK_BLACK;
@@ -411,6 +427,7 @@ static bool title_uses_active_font(const char *sample) {
 
 void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const char *text,
                                const char *font_sample,enum EpdFontFlags align,uint8_t gray,uint8_t background) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if(!fb||!text||!*text||px<=0)return;
     int above=0,below=0;
     uint8_t ink=gray>=0xF0?UI_INK_WHITE:UI_INK_BLACK,back=ui_control_gray(background)>>4;
@@ -462,6 +479,7 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
 
 void ui_text_title_background_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                                  const char *font_sample, enum EpdFontFlags align, uint8_t background) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!fb || !text || !*text) return;
     int above = 0, below = 0;
     uint8_t back = background >> 4;
@@ -494,6 +512,7 @@ void ui_text_title_background_vc(uint8_t *fb, int x, int center_y, int px, const
 // edges. Both keep the original advances, so fitting and layout are untouched.
 void ui_text_title_bold_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                            const char *font_sample, enum EpdFontFlags align) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!fb || !text || !*text) return;
     const char *sample = font_sample ? font_sample : text;
     if (!title_uses_active_font(sample) && ui_font_has_text(sample)) {
@@ -513,6 +532,7 @@ void ui_text_title_bold_vc(uint8_t *fb, int x, int center_y, int px, const char 
 
 int ui_text_title_measure_sized(int preferred_px, const char *text, const char *font_sample,
                                 int supplement_px, int *out_px) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     const char *sample = font_sample ? font_sample : text;
     int px = title_face_px(preferred_px, sample, supplement_px);
     if (out_px) *out_px = px;
@@ -522,6 +542,7 @@ int ui_text_title_measure_sized(int preferred_px, const char *text, const char *
 }
 
 int ui_text_title_measure(int preferred_px, const char *text, const char *font_sample, int *out_px) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     return ui_text_title_measure_sized(preferred_px, text, font_sample, 0, out_px);
 }
 
@@ -529,6 +550,7 @@ int ui_text_title_measure(int preferred_px, const char *text, const char *font_s
 // Raw measurements for wrapping: px is already the resolved size from ui_text_title_fit, so this
 // picks the face only and never converts the size again.
 int ui_text_title_width_px(int px, const char *text, const char *font_sample) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!text || !text[0] || px <= 0) return 0;
     const char *sample = font_sample ? font_sample : text;
     return !title_uses_active_font(sample) && ui_font_has_text(sample)
@@ -536,6 +558,7 @@ int ui_text_title_width_px(int px, const char *text, const char *font_sample) {
 }
 
 int ui_text_title_line_height_px(int px, const char *text, const char *font_sample) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!text || !text[0] || px <= 0) return 0;
     const char *sample = font_sample ? font_sample : text;
     int above = 0, below = 0;
@@ -548,6 +571,7 @@ int ui_text_title_line_height_px(int px, const char *text, const char *font_samp
 void ui_text_title_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                           const char *font_sample, enum EpdFontFlags align,
                           uint8_t ink, uint8_t paper) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     if (!fb || !text || !*text) return;
     int above = 0, below = 0;
     if (!title_uses_active_font(font_sample ? font_sample : text) &&
@@ -564,6 +588,7 @@ void ui_text_title_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *
 
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                       const char *font_sample, enum EpdFontFlags align) {
+    text = ui_tr(text); font_sample = ui_tr(font_sample);
     ui_text_title_background_vc(fb, x, center_y, px, text, font_sample, align, UI_GRAY_WHITE);
 }
 
@@ -571,6 +596,7 @@ void ui_text_bw(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text);
     px = ui_text_effective_px(px);
     uint8_t fg = inverted ? UI_INK_WHITE : UI_INK_BLACK;
     uint8_t bg = inverted ? UI_INK_BLACK : UI_INK_WHITE;
@@ -583,6 +609,7 @@ void ui_text_vc(
     uint8_t* framebuffer, int x, int center_y, int px, const char* text,
     enum EpdFontFlags align, bool inverted
 ) {
+    text = ui_tr(text);
     px = ui_text_effective_px(px);
     int above = 0;
     int below = 0;

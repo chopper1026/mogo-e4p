@@ -9,6 +9,7 @@
  * 用户修订：锁屏入口统一系统字体，截短测量须与实际界面字体及字号一致。
  * User revision: lock entry selects the system face; truncation must measure the actual UI face and size.
  */
+#include "../ui/ui_locale.h"
 #include "book_ticket.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,7 +272,7 @@ static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
 static void ticket_stat(uint8_t *fb, int y, int height, int px, const char *text) {
     px = ui_text_effective_px(px);
     if (px > height) px = height;
-    char line[128]; snprintf(line, sizeof(line), "%s", text);
+    char line[128]; snprintf(line, sizeof(line), "%s", ui_tr(text));
     while (px > 18 && ui_text_fixed_width_px(px, line) > 520) --px;
     if (ui_text_fixed_width_px(px, line) <= 520) {
         ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
@@ -304,7 +305,7 @@ bool book_ticket_preview(uint8_t *fb, bool cover_background) {
     book_progress_t progress = {0};
     bool progress_valid = file_valid && book_progress_load(path, st.st_size, &progress);
     char title[256] = {0}, author[128] = {0};
-    if (!book_title_from_path(path, title, sizeof(title))) snprintf(title, sizeof(title), "未命名");
+    if (!book_title_from_path(path, title, sizeof(title))) snprintf(title, sizeof(title), ui_tr("未命名"));
     if (book_metadata_supported(path)) {
         char meta_title[256] = {0};
         (void)book_metadata_cached(path, meta_title, sizeof(meta_title), author, sizeof(author));
@@ -324,19 +325,19 @@ bool book_ticket_preview(uint8_t *fb, bool cover_background) {
     free(gray);
     ui_hairline(fb, 768, 82, 520, UI_GRAY_BLACK);
     char line[96];
-    if (progress_valid) snprintf(line, sizeof(line), "已读 %u%%  ·  第 %u 章", progress.pct,
+    if (progress_valid) snprintf(line, sizeof(line), ui_tr("已读 %u%%  ·  第 %u 章"), progress.pct,
                                  (unsigned)progress.chapter + 1);
-    else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
+    else snprintf(line, sizeof(line), ui_tr("已读 —  ·  章节 —"));
     ticket_stat(fb, 802, 54, 34, line);
     EpdRect track = {82, 868, 520, 10};
     ui_fill_rect_fast(track, UI_GRAY_LIGHT, fb);
     track.width = progress_valid ? track.width * progress.pct / 100 : 0;
     if (track.width) ui_fill_rect_fast(track, UI_GRAY_BLACK, fb);
-    if (day && stats.day == day) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
+    if (day && stats.day == day) snprintf(line, sizeof(line), ui_tr("今日阅读 %llu 分钟  ·  翻页 %u 次"),
         (unsigned long long)(stats.today_seconds / 60), (unsigned)stats.today_turns);
-    else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");
+    else snprintf(line, sizeof(line), ui_tr("今日阅读 —  ·  日期未同步"));
     ticket_stat(fb, 914, 48, 28, line);
-    snprintf(line, sizeof(line), "累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次",
+    snprintf(line, sizeof(line), ui_tr("累计阅读 %llu 小时 %llu 分钟  ·  翻页 %u 次"),
              (unsigned long long)(stats.total_seconds / 3600),
              (unsigned long long)((stats.total_seconds / 60) % 60), (unsigned)stats.total_turns);
     ticket_stat(fb, 969, 74, 28, line);

@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+#include "../ui/ui_locale.h"
 #include "ui_reader_tap_grid.h"
 #include "ui_kit.h"
 #include <stdio.h>
@@ -45,7 +46,7 @@ void ui_reader_tap_picker_draw(uint8_t *fb, unsigned cell, const char *const opt
     ui_draw_control_frame(fb,(EpdRect){12,494,660,722},26,UI_GRAY_BLACK);
     EpdRect back=ui_reader_tap_picker_back_rect();
     ui_draw_icon(fb,back.x+30,back.y+34,32,UI_ICON_CHEVRON_LEFT,UI_GRAY_BLACK);
-    char title[48];snprintf(title,sizeof(title),"区域 %u 的功能",cell+1);
+    char title[48];snprintf(title,sizeof(title),ui_tr("区域 %u 的功能"),cell+1);
     ui_text_box(fb,(EpdRect){162,522,462,64},30,title,EPD_DRAW_ALIGN_LEFT,false);
     for(unsigned i=0;i<UI_READER_TAP_ACTION_COUNT;++i){
         EpdRect r=ui_reader_tap_option_rect(i);bool active=(int)i==selected;

@@ -5,6 +5,7 @@
  * 中文：从 app_book 提取的阅读设置绘制与共用几何；调用方持有设置和页面状态。
  * English: Reader-setting painting and shared geometry extracted from app_book; callers own settings and page state.
  */
+#include "../ui/ui_locale.h"
 #include "ui_reader_settings.h"
 #include "ui_kit.h"
 #include <stdio.h>
@@ -91,8 +92,8 @@ void ui_reader_settings_draw(uint8_t *fb, const ui_reader_settings_values_t *val
         draw_reading_toggle(fb, scale, 8, "书内样式", "关闭后使用统一排版", values->book_styles);
     } else if (values->group == UI_READER_SETTINGS_REFRESH) {
         char interval[24];
-        if (values->full_pages) snprintf(interval, sizeof(interval), "每 %u 页", values->full_pages);
-        else snprintf(interval, sizeof(interval), "%s", "不强制");
+        if (values->full_pages) snprintf(interval, sizeof(interval), ui_tr("每 %u 页"), values->full_pages);
+        else snprintf(interval, sizeof(interval), "%s", ui_tr("不强制"));
         draw_reading_card(fb, scale, 0, "自动全刷", interval, true);
         draw_reading_card(fb, scale, 1, "翻页效果", values->turn_effect ? "水波纹" : "普通", true);
     }

@@ -2,6 +2,7 @@
  * 中文：中国城市天气的有界解析与日期策略。未知天气代码不冒充晴天。
  * English: Bounded parsing and date policy for Chinese cities. Unknown codes never imply sunshine.
  */
+#include "../ui/ui_locale.h"
 #include "weather_model.h"
 #include "cJSON.h"
 #include <math.h>
@@ -131,7 +132,7 @@ void weather_date_text(int32_t day, char *out, size_t cap) {
     while (y < 2100 && civil_day(y + 1, 1, 1) <= day) ++y;
     int m = 1; while (m < 12 && civil_day(y, m + 1, 1) <= day) ++m;
     static const char *week[] = {"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
-    snprintf(out, cap, "%02d月%02d日  %s", m, (int)(day - civil_day(y, m, 1) + 1), week[(day + 4) % 7]);
+    snprintf(out, cap, ui_tr("%02d月%02d日  %s"), m, (int)(day - civil_day(y, m, 1) + 1), ui_tr(week[(day + 4) % 7]));
 }
 void weather_time_text(int64_t utc, char *out, size_t cap) {
     if (!utc) { snprintf(out, cap, "--:--"); return; }

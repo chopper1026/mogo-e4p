@@ -129,6 +129,9 @@ SUITES = {
     "turn": [sys.executable, "tools/reader_turn_host_test.py"],
     "reflow": [sys.executable, "tools/reader_reflow_host_test.py"],
     "font_source": [sys.executable, "tools/ttf_font_source_host_test.py"],
+    "setup_raster": [sys.executable, "tools/setup_ui_raster_host_test.py"],
+    "setup_ui": [sys.executable, "tools/setup_ui_host_test.py"],
+    "font_download": [sys.executable, "tools/font_download_host_test.py"],
     "font_faces": [sys.executable, "tools/title_font_host_test.py"],
     "font_catalog": [sys.executable, "tools/font_catalog_host_test.py"],
     "settings_font": [sys.executable, "tools/settings_layout_font_host_test.py"],
@@ -213,17 +216,20 @@ def toolchain(folder):
         result = run([str(binary)], env, 10)
     if result["exit_code"]:
         raise RuntimeError("Sanitizer compiler/runtime probe failed:\n" + result["output"])
+    # 源码切片夹具没有翻译单元的 include；共享默认语言契约，不修改其断言。
+    # Extracted C fixtures lack TU includes; share the default locale contract without changing assertions.
+    fixture_flags = ["-idirafter", str(ROOT / "main/ui"), "-include", str(ROOT / "main/ui/ui_locale.h")]
     # 旧测试直接调用 cc/gcc；仅本次子进程使用同一编译器。/ Legacy tests invoke cc/gcc directly; share one compiler only within this run.
     for name in ("cc", "gcc", "clang"):
         wrapper = folder / name
         wrapper.write_text("#!" + sys.executable + "\nimport os,sys\ncommand=" +
-                           repr(compiler) + "\nos.execv(command[0],command+sys.argv[1:])\n"
+                           repr(compiler + fixture_flags) + "\nos.execv(command[0],command+sys.argv[1:])\n"
                            if Path(compiler[0]).is_absolute() else
                            "#!/bin/sh\nexec " + shlex.join(compiler) + ' "$@"\n')
         wrapper.chmod(0o755)
     # 默认 cc 先解析为绝对路径，避免包装器再次找到自己。/ Resolve a default compiler before its wrapper can find itself.
     env["PATH"] = str(folder) + os.pathsep + env["PATH"]
-    return env, compiler
+    return env, compiler + fixture_flags
 
 
 def main():

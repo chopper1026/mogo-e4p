@@ -1,5 +1,6 @@
 /* 中文：分类管理、稳定ID目标选择和跨筛选选书；绘制保持纯函数。
  * English: Category management, stable-ID target picking and selections across filters; drawing stays pure. */
+#include "../ui/ui_locale.h"
 #include "book_category_ui.h"
 #include "book_selection_ui.h"
 #include "book_shelf_categories.h"
@@ -168,7 +169,7 @@ static void pager(uint8_t *fb, int page, int count, int y) {
 static void draw_books(const book_category_ui_t *ui, const book_shelf_categories_t *c, uint8_t *fb) {
     char title[160];
     if (ui->review) copy(title, sizeof(title), "已选图书");
-    else snprintf(title, sizeof(title), "添加到「%s」", name_of(c, ui->destination));
+    else snprintf(title, sizeof(title), ui_tr("添加到「%s」"), name_of(c, ui->destination));
     text(fb, (EpdRect){112, 80, 432, 80}, 34, title, false);
     ui_draw_control_frame(fb,(EpdRect){568,80,80,80},8,0x50);
     ui_draw_icon(fb,608,120,34,UI_ICON_SEARCH,0);
@@ -179,7 +180,7 @@ static void draw_books(const book_category_ui_t *ui, const book_shelf_categories
     if(!ui->review)ui_draw_icon(fb,360,222,26,UI_ICON_CHEVRON_DOWN,0);
     if(ui->query[0] && !ui->review)text(fb,(EpdRect){416,184,232,76},24,ui->query,false);
     book_selection_button(fb,select_rect(false),22,"全选本页",n>0,false);
-    char results[64]; snprintf(results, sizeof(results), "全选结果 (%d)", n);
+    char results[64]; snprintf(results, sizeof(results), ui_tr("全选结果 (%d)"), n);
     book_selection_button(fb,select_rect(true),22,results,n>0,false);
     if(ui->notice[0])text(fb,(EpdRect){36,380,612,56},22,ui->notice,false);
     int page = book_shelf_saved_page(ui->page, n, rows);
@@ -204,9 +205,9 @@ static void draw_books(const book_category_ui_t *ui, const book_shelf_categories
     unsigned selected = book_shelf_selected_count(ui->books, ui->count);
     char count[64];snprintf(count,sizeof(count),"%d / %d",page+1,n?(n+rows-1)/rows:1);
     book_selection_pager_draw(fb,count,page,n?(n+rows-1)/rows:1);
-    snprintf(count,sizeof(count),"%s %u 本",ui->review?"返回选书":"已选",selected);
+    snprintf(count,sizeof(count),ui_tr("%s %u 本"),ui->review?ui_tr("返回选书"):ui_tr("已选"),selected);
     book_selection_button(fb,book_selection_rect(BOOK_SELECTION_REVIEW),26,count,true,false);
-    snprintf(count,sizeof(count),"%s %u 本",ui->selecting_only?"归类":"添加",selected);
+    snprintf(count,sizeof(count),ui_tr("%s %u 本"),ui->selecting_only?ui_tr("归类"):ui_tr("添加"),selected);
     book_selection_button(fb,book_selection_rect(BOOK_SELECTION_SUBMIT),28,count,selected!=0,true);
 }
 void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_categories_t *c, uint8_t *fb) {
@@ -215,7 +216,7 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
         const book_folder_plan_t *p=ui->preview;
         const char *labels[]={"新建文件夹","沿用文件夹","移动原书","删除空文件夹","保留原位","跳过：不参与迁移","冲突：不会执行"};
         text(fb,(EpdRect){112,79,448,65},32,ui->conflict_preview?"整理冲突":ui->migrating?"旧分类迁移预览":"删除分类预览",true);
-        char summary[110]; snprintf(summary,sizeof(summary),"移动 %u 本 · %s",(unsigned)p->moves,p->error?"预检未通过":"未写入");
+        char summary[110]; snprintf(summary,sizeof(summary),ui_tr("移动 %u 本 · %s"),(unsigned)p->moves,p->error?ui_tr("预检未通过"):ui_tr("未写入"));
         text(fb,(EpdRect){32,166,620,64},26,summary,true);
         if (p->count && (size_t)ui->page<p->count) {
             const book_folder_item_t *r=&p->items[ui->page];

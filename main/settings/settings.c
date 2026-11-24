@@ -51,6 +51,8 @@
 #include "book/book_store.h"
 #include "reading_journal.h"
 
+#include "ui_language.h"
+
 #define TAG "settings"
 #define NVS_NS "read_pico"
 #define NVS_KEY_OFF_ART "off_art"
@@ -485,6 +487,61 @@ static void migrate_device_name(char *name, size_t capacity) {
         strlcpy(name, DEFAULT_DEVICE_NAME, capacity);
 }
 
+static _Atomic ui_language_t s_language;
+static uint8_t setup_state(ui_language_t language, setup_step_t step) {
+    return (uint8_t)(0x80u | ((unsigned)step << 2) | language);
+}
+static setup_step_t s_setup = SETUP_DONE;
+ui_language_t ui_language(void) { return s_language; }
+const char *ui_locale_tag(void) {
+    static const char *const tags[] = {"zh-CN", "zh-TW", "en"};
+    return tags[s_language];
+}
+const char *ui_language_name(ui_language_t language) {
+    static const char *const names[] = {"简体中文", "繁體中文", "English"};
+    return (unsigned)language < UI_LANG_COUNT ? names[language] : names[0];
+}
+setup_step_t app_setup_step(void) { return s_setup; }
+bool app_setup_save(ui_language_t language, setup_step_t step) {
+    if ((unsigned)language >= UI_LANG_COUNT || (unsigned)step >= SETUP_STEP_COUNT) return false;
+    nvs_handle_t h;
+    if (settings_write_open(&h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, "setup_state", setup_state(language, step));
+    if (err == ESP_OK) err = nvs_commit(h);
+    settings_write_close(h);
+    if (err != ESP_OK) return false;
+    s_language = language; s_setup = step;
+    return true;
+}
+// 在启动保护创建本轮记录前鉴别旧机；读取异常不能推断为新设备。
+// Detect legacy installs before startup creates its record; read failures never mean fresh.
+static void load_setup(void) {
+    nvs_handle_t h;
+    s_language = UI_LANG_CN; s_setup = SETUP_DONE;
+    esp_err_t e = nvs_open(NVS_NS, NVS_READONLY, &h);
+    if (e == ESP_OK) {
+        uint8_t v = 0;
+        e = nvs_get_u8(h, "setup_state", &v);
+        unsigned code = (v & 0x7fu) >> 2;
+        if (e == ESP_OK && (v & 0x80u) && code < SETUP_STEP_COUNT && (v & 3u) < UI_LANG_COUNT) {
+            s_language = (ui_language_t)(v & 3u);
+            s_setup = (setup_step_t)code;
+        }
+        size_t entries = 0;
+        bool empty = e == ESP_ERR_NVS_NOT_FOUND &&
+            nvs_get_used_entry_count(h, &entries) == ESP_OK && entries == 0;
+        nvs_close(h);
+        if (!empty) return;
+    } else if (e != ESP_ERR_NVS_NOT_FOUND) return;
+    e = nvs_open("pico_startup", NVS_READONLY, &h);
+    if (e == ESP_OK) {
+        size_t bytes = 0;
+        e = nvs_get_blob(h, "state", NULL, &bytes);
+        nvs_close(h);
+    }
+    if (e == ESP_ERR_NVS_NOT_FOUND) (void)app_setup_save(UI_LANG_CN, SETUP_LANGUAGE);
+}
+
 void app_settings_init(void) {
     s_shelf_titles = 0;
     s_quick_layout = (app_quick_layout_t)APP_QUICK_LAYOUT_DEFAULT;
@@ -498,6 +555,7 @@ void app_settings_init(void) {
         return;
     }
 
+    load_setup();
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return;
     // 旧校正从不生效；仅有旧键时才申请写事务清理。/ Never apply legacy calibration; request a write only if the retired key exists.
@@ -2203,7 +2261,7 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // m appends portable preferences, weather and WiFi; n records the book-cover style in existing fields.
     // o 仅保存目录显示偏好；旧版逻辑归属不得写进目录偏好副本。
     // o stores only folder preferences; never import legacy assignments into a folder snapshot.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : c == 'p' ? 51 : 0;
 }
 
 typedef struct { char encoded[OFF_CONFIG_BYTES]; uint8_t checksum[4]; } settings_backup_off_art_t;
@@ -2398,7 +2456,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
     // v50 仅备份目录显示偏好，不恢复书籍文件布局。/ V50 backs up folder preferences, never file placement.
-    memcpy(backup.magic, portable_format ? "PICOSETo" : "PICOSETl", sizeof(backup.magic));
+    memcpy(backup.magic, portable_format ? "PICOSETp" : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2622,6 +2680,11 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
         ok = backup_portable_capture(&portable, card.identity) == ESP_OK &&
             fwrite(&portable, 1, BACKUP_PORTABLE_BYTES, file) == BACKUP_PORTABLE_BYTES;
         backup_erase_secret(&portable, sizeof(portable));
+    }
+    if (ok && portable_format) {
+        uint8_t selected = ui_language();
+        uint8_t lang[2] = {selected, (uint8_t)(selected ^ 0xff)};
+        ok = fwrite(lang, 1, sizeof(lang), file) == sizeof(lang);
     }
     if (ok && portable_format) ok = book_store_prepare_data() == ESP_OK &&
         app_reading_journal_backup_write(file) == ESP_OK &&
@@ -2866,6 +2929,8 @@ esp_err_t app_settings_backup_restore(void) {
                            off_art.encoded[1] >= '0' && off_art.encoded[1] <= '1'));
     if (ok && version >= 48) ok = fread(&portable, 1, BACKUP_PORTABLE_BYTES, file) == BACKUP_PORTABLE_BYTES &&
         backup_portable_valid(&portable);
+    uint8_t lang[2] = {0};
+    if (ok && version >= 51) ok = fread(lang, 1, 2, file) == 2 && lang[0] < UI_LANG_COUNT && (lang[0] ^ lang[1]) == 255;
     long user_data_position = -1;
     if (ok && version >= 48) {
         user_data_position = ftell(file);
@@ -3059,6 +3124,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_B, margins.bottom);
     BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
+    if (err == ESP_OK && version >= 51) err = nvs_set_u8(h, "setup_state", setup_state(lang[0], s_setup));
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
     BACKUP_SET_STR(NVS_KEY_BOOK_BACKGROUND, background.path);
@@ -3099,6 +3165,7 @@ esp_err_t app_settings_backup_restore(void) {
         s_frontlight_brightness = portable.frontlight_brightness;
         s_frontlight_cct = portable.frontlight_cct;
     }
+    if (version >= 51) s_language = lang[0];
     if (version >= 33) app_home_components_apply(regions.value);
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;

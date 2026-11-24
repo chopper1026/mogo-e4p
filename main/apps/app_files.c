@@ -15,6 +15,7 @@
  * 用户修订：去掉文件大标题与外框，根目录六行；传输入口使用图标和文字。
  * User revision: remove the large title and frames, show six root rows and icon-labelled transfer routes.
  */
+#include "../ui/ui_locale.h"
 #include "storage_jobs.h"
 #include <dirent.h>
 #include <errno.h>
@@ -153,7 +154,7 @@ static int file_pager_pages(void) {
     return s_count?1+(s_count-1)/rows:1;
 }
 static void draw_file_pager(uint8_t *fb) {
-    char label[48];snprintf(label,sizeof(label),"第 %d 页 · 共 %d 页",s_page+1,file_pager_pages());
+    char label[48];snprintf(label,sizeof(label),ui_tr("第 %d 页 · 共 %d 页"),s_page+1,file_pager_pages());
     ui_pager_draw(fb,label,s_page,file_pager_pages(),false,s_pager_pressed);
 }
 static app_redraw_t file_pager_paint(app_ctx_t *ctx) {
@@ -218,6 +219,7 @@ static EpdRect storage_card_rect(void) { return (EpdRect){36, 87, 612, 126}; }
 static bool sd_needs_format(void) { return s_sd.present && !s_sd.mounted && s_sd.needs_format; }
 
 static void copy_utf8(char *dst, size_t cap, const char *src) {
+    src = ui_tr(src);
     size_t n = strlen(src);
     if (n >= cap) {
         n = cap - 1;
@@ -262,8 +264,8 @@ static esp_err_t copy_selected_item(char out_name[128]) {
     memcpy(stem, s_selected.name, stem_len); stem[stem_len] = 0;
     const char *ext = dot && dot != s_selected.name ? dot : "";
     for (int number = 1; number < 100; ++number) {
-        int used = number == 1 ? snprintf(candidate, sizeof(candidate), "%s 副本%s", stem, ext) :
-            snprintf(candidate, sizeof(candidate), "%s 副本 %d%s", stem, number, ext);
+        int used = number == 1 ? snprintf(candidate, sizeof(candidate), ui_tr("%s 副本%s"), stem, ext) :
+            snprintf(candidate, sizeof(candidate), ui_tr("%s 副本 %d%s"), stem, number, ext);
         if (used < 0 || used >= (int)sizeof(candidate)) return ESP_ERR_INVALID_SIZE;
         if (!sibling_path(candidate, destination)) return ESP_ERR_INVALID_ARG;
         struct stat exists;
@@ -389,29 +391,29 @@ static void leave_move(bool changed) {
 static app_redraw_t move_selected(void) {
     board_sd_get_info(&s_sd);
     if (!s_sd.mounted) {
-        snprintf(s_message, sizeof(s_message), "TF 卡不可用"); return APP_REDRAW_PAGE;
+        snprintf(s_message, sizeof(s_message), ui_tr("TF 卡不可用")); return APP_REDRAW_PAGE;
     }
     char destination[288];
     if (snprintf(destination, sizeof(destination), "%s/%s", s_dir, s_selected.name) >= sizeof(destination)) {
-        snprintf(s_message, sizeof(s_message), "目标路径过长"); return APP_REDRAW_PAGE;
+        snprintf(s_message, sizeof(s_message), ui_tr("目标路径过长")); return APP_REDRAW_PAGE;
     }
     if (!strcmp(destination, s_selected.path)) {
-        snprintf(s_message, sizeof(s_message), "已在此文件夹"); return APP_REDRAW_PAGE;
+        snprintf(s_message, sizeof(s_message), ui_tr("已在此文件夹")); return APP_REDRAW_PAGE;
     }
     if (!moved_settings_fit(s_selected.path, destination)) {
-        snprintf(s_message, sizeof(s_message), "设置路径过长，无法移动"); return APP_REDRAW_PAGE;
+        snprintf(s_message, sizeof(s_message), ui_tr("设置路径过长，无法移动")); return APP_REDRAW_PAGE;
     }
     esp_err_t err = file_tree_move(s_selected.path, destination);
     if (err != ESP_OK) {
-        snprintf(s_message, sizeof(s_message), err == ESP_ERR_INVALID_STATE ? "目标已有同名项目" :
-                 err == ESP_ERR_INVALID_ARG ? "不能移入自身文件夹" : "移动失败，请检查 TF 卡");
+        snprintf(s_message, sizeof(s_message), err == ESP_ERR_INVALID_STATE ? ui_tr("目标已有同名项目") :
+                 err == ESP_ERR_INVALID_ARG ? ui_tr("不能移入自身文件夹") : ui_tr("移动失败，请检查 TF 卡"));
         return APP_REDRAW_PAGE;
     }
     sync_moved_settings(s_selected.path, destination);
     notify_moved_tree(s_selected.path, destination, 0);
     book_store_notify_changed();
     leave_move(true);
-    snprintf(s_message, sizeof(s_message), "移动完成");
+    snprintf(s_message, sizeof(s_message), ui_tr("移动完成"));
     return APP_REDRAW_PAGE;
 }
 
@@ -446,7 +448,7 @@ static void scan_folder(int folder) {
     s_message[0] = 0;
     s_scan_retry_ms = 0;
     board_sd_get_info(&s_sd);
-    if (!s_sd.mounted) { snprintf(s_message, sizeof(s_message), "TF 卡尚未挂载"); return; }
+    if (!s_sd.mounted) { snprintf(s_message, sizeof(s_message), ui_tr("TF 卡尚未挂载")); return; }
     const char *root = folder_root(folder);
     errno = 0;
     DIR *dir = opendir(root);
@@ -454,9 +456,9 @@ static void scan_folder(int folder) {
         // 「没有这个目录」和「卡读不出来」不能给同一个结论。
         // "No such directory" and "the card cannot be read" are different answers.
         if (errno == ENOENT || errno == ENOTDIR)
-            snprintf(s_message, sizeof(s_message), "目录不存在：%.60s", root);
+            snprintf(s_message, sizeof(s_message), ui_tr("目录不存在：%.60s"), root);
         else {
-            snprintf(s_message, sizeof(s_message), "TF 卡读取失败，请稍后重试");
+            snprintf(s_message, sizeof(s_message), ui_tr("TF 卡读取失败，请稍后重试"));
             s_scan_retry_ms = esp_timer_get_time() / 1000 + FILE_SCAN_RETRY_MS;
         }
         return;
@@ -492,7 +494,7 @@ static void scan_folder(int folder) {
             closedir(dir);
             files_free();
             s_count = 0;
-            snprintf(s_message, sizeof(s_message), "内存不足，无法加载目录");
+            snprintf(s_message, sizeof(s_message), ui_tr("内存不足，无法加载目录"));
             return;
         }
         s_files[s_count++] = candidate;
@@ -502,7 +504,7 @@ static void scan_folder(int folder) {
     // Retry only when most entries failed: one odd entry must not repaint the page every 1.5 s.
     if (failed && (s_count == 0 || failed > s_count)) {
         s_scan_retry_ms = esp_timer_get_time() / 1000 + FILE_SCAN_RETRY_MS;
-        if (!s_count) snprintf(s_message, sizeof(s_message), "TF 卡读取失败，请稍后重试");
+        if (!s_count) snprintf(s_message, sizeof(s_message), ui_tr("TF 卡读取失败，请稍后重试"));
     }
     if (s_count > 1) qsort(s_files, s_count, sizeof(s_files[0]), compare_files);
     if (folder >= 0 && folder < 3) s_counts[folder] = s_count;
@@ -535,7 +537,7 @@ static void file_icon(uint8_t *fb, int x, int y, bool folder) {
 }
 
 static void file_detail(char *dst, size_t cap, const file_item_t *item) {
-    if (item->is_dir) snprintf(dst, cap, "文件夹");
+    if (item->is_dir) snprintf(dst, cap, ui_tr("文件夹"));
     else if (item->size >= 1024 * 1024) snprintf(dst, cap, "%.1f MB", item->size / 1048576.0);
     else if (item->size >= 1024) snprintf(dst, cap, "%.1f KB", item->size / 1024.0);
     else snprintf(dst, cap, "%lld B", (long long)item->size);
@@ -619,7 +621,7 @@ static void draw_file_row(uint8_t *fb, int row, int index) {
 
 static void editor_start(void) {
     if (strlen(s_selected.name) >= sizeof(s_editor)) {
-        snprintf(s_message, sizeof(s_message), "名称过长，无法在设备上编辑");
+        snprintf(s_message, sizeof(s_message), ui_tr("名称过长，无法在设备上编辑"));
         return;
     }
     copy_utf8(s_editor, sizeof(s_editor), s_selected.name);
@@ -702,11 +704,11 @@ static void storage_amount(char *text,size_t size,uint64_t bytes) {
 }
 static void storage_usage(const board_sd_info_t *info,char *total,size_t total_size,char *usage,size_t usage_size) {
     storage_amount(total,total_size,info->space_valid?info->filesystem_bytes:info->capacity_bytes);
-    if (!storage_space_valid(info)) { snprintf(usage,usage_size,"空间统计暂不可用，请重新进入此页"); return; }
+    if (!storage_space_valid(info)) { snprintf(usage,usage_size,ui_tr("空间统计暂不可用，请重新进入此页")); return; }
     char used[24],available[24];
     storage_amount(used,sizeof(used),info->filesystem_bytes-info->free_bytes);
     storage_amount(available,sizeof(available),info->free_bytes);
-    snprintf(usage,usage_size,"已用 %s · 可用 %s",used,available);
+    snprintf(usage,usage_size,ui_tr("已用 %s · 可用 %s"),used,available);
 }
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_view == FILE_VIEW_ACTIONS) {
@@ -730,15 +732,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_text_box(fb, (EpdRect){112, 90, s_view == FILE_VIEW_MOVE ? 536 : 270, 48}, 28,
                     s_view == FILE_VIEW_MOVE ? "选择目标文件夹" : names[s_folder], EPD_DRAW_ALIGN_LEFT, false);
         char path[144];
-        snprintf(path, sizeof(path), "TF卡%s", folder_root(s_folder) + 7);
+        snprintf(path, sizeof(path), ui_tr("TF卡%s"), folder_root(s_folder) + 7);
         fit_name(path, 18, 612);
         ui_text_box(fb, (EpdRect){36, 160, 612, 40}, 18,
                     s_message[0] ? s_message : path, EPD_DRAW_ALIGN_LEFT, false);
         int folders = 0, files = 0;
         for (int i = 0; i < s_count; ++i) s_files[i].is_dir ? ++folders : ++files;
         char summary[64];
-        if (folders) snprintf(summary, sizeof(summary), "%d 个文件夹 · %d 个文件", folders, files);
-        else snprintf(summary, sizeof(summary), "%d 个文件", files);
+        if (folders) snprintf(summary, sizeof(summary), ui_tr("%d 个文件夹 · %d 个文件"), folders, files);
+        else snprintf(summary, sizeof(summary), ui_tr("%d 个文件"), files);
         if (s_view != FILE_VIEW_MOVE)
             ui_text_box(fb, (EpdRect){398, 94, 250, 40}, 18, summary, EPD_DRAW_ALIGN_RIGHT, false);
         ui_fill_rect_fast((EpdRect){36, 211, 612, 2}, 0xc0, fb);
@@ -764,15 +766,15 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         } else if (sd_needs_format()) {
             // 卡在但读不了：说清是文件系统的问题，并给出可点的出路。
             // Present but unreadable: say the filesystem is the problem and offer the way out.
-            snprintf(total, sizeof(total), "需要格式化");
+            snprintf(total, sizeof(total), ui_tr("需要格式化"));
             snprintf(usage, sizeof(usage), "%s", s_sd_notice[0] ? s_sd_notice
-                     : (s_sd_format_confirm ? "将清空卡内全部数据，再点确认" : "格式化可能可以解决此问题"));
+                     : (s_sd_format_confirm ? ui_tr("将清空卡内全部数据，再点确认") : ui_tr("格式化可能可以解决此问题")));
         } else {
-            snprintf(total, sizeof(total), "未挂载");
+            snprintf(total, sizeof(total), ui_tr("未挂载"));
             // 探测失败不会自动重试，卡片本身就是重挂入口：提示语直接写出来。
             // A failed probe never retries on its own and the card is the remount entry: say so in the hint.
             snprintf(usage, sizeof(usage),
-                     s_scan_pending ? "正在尝试挂载…" : "请检查 TF 卡，点击重新挂载");
+                     s_scan_pending ? ui_tr("正在尝试挂载…") : ui_tr("请检查 TF 卡，点击重新挂载"));
         }
         ui_text_box(fb, (EpdRect){348, storage.y + 10, 300, 40}, 20, total, EPD_DRAW_ALIGN_RIGHT, false);
         ui_text_box(fb, (EpdRect){storage.x, storage.y + 55, storage.width, 38}, 16, usage, EPD_DRAW_ALIGN_LEFT, false);
@@ -808,7 +810,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                         16, details[i], EPD_DRAW_ALIGN_CENTER, false);
         }
         ui_fill_rect_fast((EpdRect){36, 422, 612, 2}, 0xc0, fb);
-        char summary[48]; snprintf(summary, sizeof(summary), "根目录 · %d 项", s_count);
+        char summary[48]; snprintf(summary, sizeof(summary), ui_tr("根目录 · %d 项"), s_count);
         ui_text_box(fb, (EpdRect){36, 440, 440, 40}, 20, summary, EPD_DRAW_ALIGN_LEFT, false);
         ui_text_box(fb, (EpdRect){500, 440, 148, 40}, 16, "名称 ↑", EPD_DRAW_ALIGN_RIGHT, false);
         int first = s_page * root_rows();
@@ -892,7 +894,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
 
 static void open_selected(app_ctx_t *ctx) {
     const char *ext = strrchr(s_selected.name, '.');
-    if (!ext) { snprintf(s_message, sizeof(s_message), "没有可用的打开方式"); return; }
+    if (!ext) { snprintf(s_message, sizeof(s_message), ui_tr("没有可用的打开方式")); return; }
     if (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt") || !strcasecmp(ext, ".mobi")) {
         extern const app_desc_t app_book;
         if (app_book_request_open(s_selected.path)) ctx->request_app = &app_book;
@@ -903,9 +905,9 @@ static void open_selected(app_ctx_t *ctx) {
         if (ttf_font_open(s_selected.path) == ESP_OK) {
             app_settings_set_system_font_path(s_selected.path);
             app_font_activate_system();
-            snprintf(s_message, sizeof(s_message), "已设为系统字体");
-        } else snprintf(s_message, sizeof(s_message), "字体无法加载");
-    } else snprintf(s_message, sizeof(s_message), "没有可用的打开方式");
+            snprintf(s_message, sizeof(s_message), ui_tr("已设为系统字体"));
+        } else snprintf(s_message, sizeof(s_message), ui_tr("字体无法加载"));
+    } else snprintf(s_message, sizeof(s_message), ui_tr("没有可用的打开方式"));
 }
 
 static void delete_selected(void) {
@@ -916,19 +918,19 @@ static void delete_selected(void) {
         repair_deleted_directories();
         book_store_notify_changed();
         rescan_current();
-        snprintf(s_message, sizeof(s_message), "删除未完成，请检查 TF 卡");
+        snprintf(s_message, sizeof(s_message), ui_tr("删除未完成，请检查 TF 卡"));
         return;
     }
     repair_deleted_directories();
     book_store_notify_changed();
     s_view = FILE_VIEW_LIST; s_delete_confirm = false;
     rescan_current();
-    snprintf(s_message, sizeof(s_message), s_selected.is_dir ? "文件夹已删除" : "文件已删除");
+    snprintf(s_message, sizeof(s_message), s_selected.is_dir ? ui_tr("文件夹已删除") : ui_tr("文件已删除"));
 }
 
 static app_redraw_t save_rename(void) {
     if (ui_keyboard_pending()) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "请先选择候选字");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("请先选择候选字"));
         return APP_REDRAW_PAGE;
     }
     char *start = s_editor;
@@ -937,28 +939,28 @@ static app_redraw_t save_rename(void) {
     size_t len = strlen(s_editor);
     while (len && (s_editor[len - 1] == ' ' || s_editor[len - 1] == '.')) s_editor[--len] = 0;
     if (!len || strchr(s_editor, '/') || strchr(s_editor, '\\') || strchr(s_editor, ':')) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "请输入有效文件名");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("请输入有效文件名"));
         return APP_REDRAW_PAGE;
     }
     char name[128], destination[288];
     if (snprintf(name, sizeof(name), "%s%s", s_editor, s_editor_ext) >= sizeof(name) ||
         !sibling_path(name, destination)) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "文件名过长");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("文件名过长"));
         return APP_REDRAW_PAGE;
     }
     if (!strcmp(destination, s_selected.path)) { s_view = FILE_VIEW_ACTIONS; return APP_REDRAW_PAGE; }
     struct stat existing;
     if (stat(destination, &existing) == 0) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "同名文件已经存在");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("同名文件已经存在"));
         return APP_REDRAW_PAGE;
     }
     char old_path[288]; copy_utf8(old_path, sizeof(old_path), s_selected.path);
     if (!moved_settings_fit(old_path, destination)) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "设置路径过长");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("设置路径过长"));
         return APP_REDRAW_PAGE;
     }
     if (file_tree_move(old_path, destination) != ESP_OK) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "重命名失败，请检查 TF 卡");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("重命名失败，请检查 TF 卡"));
         return APP_REDRAW_PAGE;
     }
     sync_moved_settings(old_path, destination);
@@ -968,7 +970,7 @@ static app_redraw_t save_rename(void) {
     copy_utf8(s_selected.name, sizeof(s_selected.name), name);
     s_view = FILE_VIEW_ACTIONS;
     ui_keyboard_end();
-    snprintf(s_message, sizeof(s_message), "重命名完成");
+    snprintf(s_message, sizeof(s_message), ui_tr("重命名完成"));
     return APP_REDRAW_PAGE;
 }
 
@@ -991,8 +993,8 @@ static app_redraw_t action_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev)
         else if (action == 1) {
             char copied[128] = {0};
             esp_err_t err = copy_selected_item(copied);
-            if (err == ESP_OK) snprintf(s_message, sizeof(s_message), "已复制：%.74s", copied);
-            else snprintf(s_message, sizeof(s_message), err == ESP_ERR_NO_MEM ? "内存不足，复制失败" : "复制失败，请检查空间");
+            if (err == ESP_OK) snprintf(s_message, sizeof(s_message), ui_tr("已复制：%.74s"), copied);
+            else snprintf(s_message, sizeof(s_message), err == ESP_ERR_NO_MEM ? ui_tr("内存不足，复制失败") : ui_tr("复制失败，请检查空间"));
         } else if (action == 2) start_move();
         else { s_delete_confirm = true; s_message[0] = 0; }
         return ctx->request_app ? APP_REDRAW_NONE : APP_REDRAW_PAGE;
@@ -1099,7 +1101,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             }
             if (s_folder == 3 && s_files[index].is_dir) {
                 if (strlen(s_files[index].path) >= sizeof(s_dir)) {
-                    snprintf(s_message, sizeof(s_message), "目录路径过长"); return APP_REDRAW_PAGE;
+                    snprintf(s_message, sizeof(s_message), ui_tr("目录路径过长")); return APP_REDRAW_PAGE;
                 }
                 snprintf(s_dir, sizeof(s_dir), "%s", s_files[index].path);
                 scan_folder(3);
@@ -1120,14 +1122,14 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             s_sd_notice[0] = 0;
         } else {
             s_sd_format_confirm = false;
-            snprintf(s_sd_notice, sizeof(s_sd_notice), "正在格式化…");
+            snprintf(s_sd_notice, sizeof(s_sd_notice), ui_tr("正在格式化…"));
             esp_err_t err = storage_jobs_quiesce(2000) ? board_sd_format() : ESP_ERR_NOT_FINISHED;
             board_sd_get_info(&s_sd);
             if (err == ESP_OK) {
                 s_sd_notice[0] = 0;
                 s_scan_pending = true;
             } else {
-                snprintf(s_sd_notice, sizeof(s_sd_notice), "格式化失败：%s", esp_err_to_name(err));
+                snprintf(s_sd_notice, sizeof(s_sd_notice), ui_tr("格式化失败：%s"), esp_err_to_name(err));
             }
         }
         return APP_REDRAW_PAGE;

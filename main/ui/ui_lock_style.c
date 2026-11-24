@@ -7,6 +7,7 @@
  * 用户2026-11-17确认：壁纸入口分为待机壁纸与关机壁纸，选择相互独立，关机图片缓存在TF卡。
  * User-approved 2026-11-17: one wallpaper entry with separate standby/shutdown tabs, selections and SD-cached shutdown art.
  */
+#include "../ui/ui_locale.h"
 #include "ui_lock_style.h"
 #include "lock_style_images.h"
 #include "shutdown_wallpaper.h"
@@ -156,7 +157,7 @@ void ui_lock_style_media_lost(void){
     shutdown_wallpaper_cancel();s_off_commit=s_off_loading=false;
     lock_images_close();invalidate_cache();s_catalogue_ready=true;s_scan_pending=false;s_offline=true;s_preview=s_pending=-1;s_batch_changed=true;
     free(s_background);s_background=NULL;
-    snprintf(s_notice,sizeof(s_notice),"TF 卡已断开");
+    snprintf(s_notice,sizeof(s_notice),ui_tr("TF 卡已断开"));
 }
 void ui_lock_style_media_ready(void){
     lock_images_close();invalidate_cache();s_pending=s_preview=-1;
@@ -170,7 +171,7 @@ static void label(uint8_t *fb,EpdRect r,int px,const char *text,bool center){
     // Bound enlarged labels by their card while keeping the artwork's physical size fixed.
     px=ui_text_effective_px(px);if(px>r.height-2)px=r.height-2;
     while(px>18&&ui_text_fixed_width_px(px,text)>r.width) --px;
-    char fit[288];snprintf(fit,sizeof(fit),"%s",text);
+    char fit[288];snprintf(fit,sizeof(fit),"%s",ui_tr(text));
     while(fit[0]&&ui_text_fixed_width_px(px,fit)>r.width){size_t n=strlen(fit)-1;while(n&&((unsigned char)fit[n]&0xc0)==0x80)--n;fit[n]=0;}
     ui_text_fixed_context_aa_vc(fb,center?r.x+r.width/2:r.x,r.y+r.height/2,px,fit,fit,center?EPD_DRAW_ALIGN_CENTER:EPD_DRAW_ALIGN_LEFT,0,255);
 }
@@ -430,18 +431,18 @@ static bool save_choice(const char *path,unsigned option){
     bool ok=app_settings_select_lock(values[s_tab],path,option);
     if(ok&&s_tab==3)book_lock_bookmark_prepare_mode(app_settings_bookmark_path(),
         app_settings_bookmark_mode()==APP_BOOKMARK_MODE_CROP);
-    snprintf(s_notice,sizeof(s_notice),"%s",ok?"已保存":"保存失败，请重试");
+    snprintf(s_notice,sizeof(s_notice),"%s",ok?ui_tr("已保存"):ui_tr("保存失败，请重试"));
     return ok;
 }
 static bool save_wallpaper_mode(unsigned mode){
     bool ok=app_settings_set_wallpaper_mode((app_wallpaper_mode_t)mode);
-    snprintf(s_notice,sizeof(s_notice),"%s",ok?"显示方式已保存":"保存失败，请重试");
+    snprintf(s_notice,sizeof(s_notice),"%s",ok?ui_tr("显示方式已保存"):ui_tr("保存失败，请重试"));
     return ok;
 }
 static bool save_bookmark_mode(unsigned mode){
     bool ok=app_settings_set_bookmark_mode((app_bookmark_mode_t)mode);
     if(ok)book_lock_bookmark_prepare_mode(app_settings_bookmark_path(),mode==APP_BOOKMARK_MODE_CROP);
-    snprintf(s_notice,sizeof(s_notice),"%s",ok?"显示方式已保存":"保存失败，请重试");
+    snprintf(s_notice,sizeof(s_notice),"%s",ok?ui_tr("显示方式已保存"):ui_tr("保存失败，请重试"));
     return ok;
 }
 static void off_cancel(void){
@@ -451,7 +452,7 @@ static void off_request(app_shutdown_wallpaper_t value,bool rebuild){
     if(rebuild)value.slot=(uint8_t)(1u-app_settings_shutdown_wallpaper()->slot);
     s_off_commit=rebuild;s_off_loading=true;
     shutdown_wallpaper_request(&value,rebuild);
-    if(rebuild)snprintf(s_notice,sizeof(s_notice),"正在保存到TF卡，可继续挑选");
+    if(rebuild)snprintf(s_notice,sizeof(s_notice),ui_tr("正在保存到TF卡，可继续挑选"));
 }
 static void off_select_image(const char *path){
     app_shutdown_wallpaper_t value=*app_settings_shutdown_wallpaper();
@@ -460,7 +461,7 @@ static void off_select_image(const char *path){
 }
 static bool off_save(app_shutdown_wallpaper_t value){
     off_cancel();bool ok=app_settings_set_shutdown_wallpaper(&value);
-    snprintf(s_notice,sizeof(s_notice),"%s",ok?"已保存":"保存失败，请重试");
+    snprintf(s_notice,sizeof(s_notice),"%s",ok?ui_tr("已保存"):ui_tr("保存失败，请重试"));
     return ok;
 }
 bool ui_lock_style_tick(int64_t now_ms){
@@ -473,8 +474,8 @@ bool ui_lock_style_tick(int64_t now_ms){
         if(s_off_commit&&off_ok)off_ok=app_settings_set_shutdown_wallpaper(&off_value);
         if(off_ok){mm_free(s_off_thumb);s_off_thumb=off_thumb;off_thumb=NULL;}
         mm_free(off_thumb);
-        if(off_ok)snprintf(s_notice,sizeof(s_notice),"%s",s_off_commit?"壁纸已保存到TF卡":"TF壁纸已就绪");
-        else snprintf(s_notice,sizeof(s_notice),"%s，保留原选择",error);
+        if(off_ok)snprintf(s_notice,sizeof(s_notice),"%s",s_off_commit?ui_tr("壁纸已保存到TF卡"):ui_tr("TF壁纸已就绪"));
+        else snprintf(s_notice,sizeof(s_notice),ui_tr("%s，保留原选择"),error);
         s_off_commit=s_off_loading=false;
         if(s_off_tab){dirty((EpdRect){0,0,684,1216});changed=true;}
     }
@@ -506,7 +507,7 @@ bool ui_lock_style_tick(int64_t now_ms){
     if(s_pending>=0){
         lock_image_state_t state;const uint8_t *p=image_pixels(s_items[s_pending].path,s_tab==3,false,&state);
         if(p){save_choice(s_items[s_pending].path,0);s_pending=-1;request_images();dirty((EpdRect){36,148,612,944});changed=true;}
-        else if(state==LOCK_IMAGE_FAILED){snprintf(s_notice,sizeof(s_notice),"图片无法加载，请换一张");s_pending=-1;dirty((EpdRect){36,148,612,38});changed=true;}
+        else if(state==LOCK_IMAGE_FAILED){snprintf(s_notice,sizeof(s_notice),ui_tr("图片无法加载，请换一张"));s_pending=-1;dirty((EpdRect){36,148,612,38});changed=true;}
     }
     // 分tick准备但不逐张刷屏；完成当前可见批次后统一定稿。
     // Prepare across ticks without presenting each thumbnail; settle the visible batch once.
@@ -620,8 +621,8 @@ bool ui_lock_style_gesture(const ui_gesture_event_t *ev){
             s_pending=-1;
             lock_image_state_t state;const uint8_t *p=image_pixels(s_items[at].path,s_tab==3,false,&state);
             if(p){save_choice(s_items[at].path,0);request_images();}
-            else if(state==LOCK_IMAGE_FAILED)snprintf(s_notice,sizeof(s_notice),"图片无法加载，请换一张");
-            else{s_pending=at;snprintf(s_notice,sizeof(s_notice),"加载后应用，可继续挑选");}
+            else if(state==LOCK_IMAGE_FAILED)snprintf(s_notice,sizeof(s_notice),ui_tr("图片无法加载，请换一张"));
+            else{s_pending=at;snprintf(s_notice,sizeof(s_notice),ui_tr("加载后应用，可继续挑选"));}
             return true;
         }
     }else if(tap&&!s_off_tab&&(s_tab==1||s_tab==4))for(int i=0;i<2;++i)if(ui_rect_hit(option_rect(i),ev->x0,ev->y0)){save_choice(NULL,i);return true;}

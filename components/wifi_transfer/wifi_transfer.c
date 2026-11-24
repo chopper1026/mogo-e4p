@@ -1466,7 +1466,8 @@ static esp_err_t info_handler(httpd_req_t *req) {
     wifi_transfer_get_status(&status);
     cJSON *json = cJSON_CreateObject();
     if (!json) return ESP_ERR_NO_MEM;
-    if (!cJSON_AddBoolToObject(json, "is_flash", s_cfg.is_flash) ||
+    if (!cJSON_AddStringToObject(json, "locale", s_cfg.locale ? s_cfg.locale : "zh-CN") ||
+        !cJSON_AddBoolToObject(json, "is_flash", s_cfg.is_flash) ||
         !cJSON_AddNumberToObject(json, "free_bytes", (double)s_cfg.free_bytes_cb(s_cfg.free_bytes_ctx)) ||
         !cJSON_AddNumberToObject(json, "file_limit", (double)s_cfg.file_limit) ||
         !cJSON_AddNumberToObject(json, "book_name_limit", book_upload_name_limit(s_root, s_cfg.is_flash)) ||

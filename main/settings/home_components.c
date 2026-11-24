@@ -73,6 +73,12 @@ static bool save(uint8_t value) {
     return true;
 }
 
+bool app_home_components_save_pair(app_home_widget_t top, app_home_widget_t bottom) {
+    if ((unsigned)top > APP_HOME_WIDGET_MINI_LIBRARY || (unsigned)bottom > APP_HOME_WIDGET_MINI_LIBRARY ||
+        (top == bottom && top != APP_HOME_WIDGET_EMPTY)) return false;
+    return save(encode(top, bottom, s_library_recent));
+}
+
 bool app_home_component_set(unsigned slot, app_home_widget_t widget) {
     if (slot >= APP_HOME_SLOT_COUNT || (unsigned)widget > APP_HOME_WIDGET_MINI_LIBRARY) return false;
     app_home_components_init(false);

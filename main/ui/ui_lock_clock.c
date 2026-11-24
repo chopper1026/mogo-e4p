@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：确认稿的数字位图与固件电量，不读时间、不切字体。/ Approved digit masks and firmware battery; no clock IO or font switching.
  */
+#include "../ui/ui_locale.h"
 #include "ui_lock_clock.h"
 #include "ui_kit.h"
 #include "ui_nav.h"
@@ -43,7 +44,7 @@ void ui_lock_clock_draw(uint8_t *fb, const ui_lock_clock_face_t *face) {
         digit_draw(fb,(unsigned)face->hour%10,1,480);
         digit_draw(fb,(unsigned)face->minute/10,0,688);
         digit_draw(fb,(unsigned)face->minute%10,1,688);
-        char date[32];snprintf(date,sizeof(date),"%02d 月 %02d 日",face->month,face->day);
+        char date[32];snprintf(date,sizeof(date),ui_tr("%02d 月 %02d 日"),face->month,face->day);
         static const char *const weekdays[] = {"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
         centered(fb,800,30,date,3);
         centered(fb,857,26,weekdays[face->weekday%7],4);

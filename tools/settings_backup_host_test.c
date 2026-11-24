@@ -300,8 +300,10 @@ static struct { char key[12]; uint8_t data[44]; size_t size; } shelf_preferences
 static uint8_t pending_shelf_data[44];
 static int pending_shelf_slot=-1;
 static bool shelf_write_fails;
+static bool missing_profile, empty_profile, legacy_boot;
+esp_err_t nvs_get_used_entry_count(nvs_handle_t h,size_t *n) { assert(h==1); *n=empty_profile?0:1;return ESP_OK; }
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size) {
-    (void)h;
+    if(h==2){assert(!strcmp(key,"state") && !out);*size=8;return legacy_boot?ESP_OK:ESP_ERR_NVS_NOT_FOUND;}
     for (int i=0;i<4;++i) if (!strcmp(shelf_preferences[i].key,key)) {
         if (*size<shelf_preferences[i].size) return ESP_FAIL;
         memcpy(out,shelf_preferences[i].data,shelf_preferences[i].size);*size=shelf_preferences[i].size;return ESP_OK;
@@ -317,7 +319,12 @@ esp_err_t nvs_set_blob(nvs_handle_t h,const char *key,const void *data,size_t si
     assert(slot>=0);strlcpy(shelf_preferences[slot].key,key,sizeof(shelf_preferences[slot].key));
     memcpy(pending_shelf_data,data,size);pending_shelf_slot=slot;return ESP_OK;
 }
+
+static int durable_setup=-1, pending_setup=-1;
 esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
+    if (!strcmp(ns,"pico_startup")) { assert(mode==NVS_READONLY); *h=2;return ESP_OK; }
+    if (missing_profile && mode==NVS_READONLY) return ESP_ERR_NVS_NOT_FOUND;
+    pending_setup=-1;
     assert(!strcmp(ns, "read_pico"));
     screen_pending = false;
     pending_tap[0] = 0;
@@ -339,6 +346,7 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
 }
 void backup_nvs_close(nvs_handle_t h) { pending_shelf_slot=-1; pending_off[0]=0; pending_quick[0]=0; pending_chrome=-1; pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; pending_chrome_visible[0] = pending_chrome_visible[1] = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key,"setup_state")) { if (durable_setup<0)return ESP_ERR_NVS_NOT_FOUND; *value=durable_setup;return ESP_OK; }
     if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
         if (durable_chrome < 0) return ESP_ERR_NVS_NOT_FOUND;
         *value = (uint8_t)durable_chrome; return ESP_OK;
@@ -384,6 +392,7 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key,"setup_state")) { pending_setup=value;return ESP_OK; }
     if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
         if (chrome_write_fail_bar >= 0) return ESP_FAIL;
         pending_chrome = value; return ESP_OK;
@@ -455,6 +464,7 @@ esp_err_t backup_nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_setup>=0) { durable_setup=pending_setup;missing_profile=false; }
     if (err == ESP_OK && screen_pending) has_screen = false;
     if (err == ESP_OK && pending_shelf_slot>=0) {
         memcpy(shelf_preferences[pending_shelf_slot].data,pending_shelf_data,sizeof(pending_shelf_data));
@@ -1828,7 +1838,9 @@ static void test_portable_backup(void) {
         {.configured = 1, .ssid = "One", .password = "password1"},
         {.configured = 1, .ssid = "Two", .password = "password2"},
     }};
+    assert(app_setup_save(UI_LANG_EN, SETUP_DONE));
     assert((app_settings_backup_save)() == ESP_OK);
+    assert(app_setup_save(UI_LANG_TW, SETUP_WIFI));
     app_settings_set_auto_time_sync(true);
     app_settings_set_auto_ota(true);
     app_settings_set_frontlight_on(false);
@@ -1850,6 +1862,7 @@ static void test_portable_backup(void) {
     assert(weather_view.has_city && !weather_view.auto_refresh && !strcmp(weather_view.city.id, "CITY123"));
     assert(saved_profiles.count == 2 && !strcmp(saved_profiles.items[1].ssid, "Two"));
     app_settings_init();
+    assert(ui_language()==UI_LANG_EN && app_setup_step()==SETUP_WIFI);
     assert(!app_settings_auto_time_sync() && !app_settings_auto_ota());
     assert(app_settings_frontlight_on() && app_settings_frontlight_brightness() == 67 &&
         app_settings_frontlight_cct() == 31 && app_settings_bookmark_mode() == APP_BOOKMARK_MODE_CROP);
@@ -1888,7 +1901,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETo",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
+    assert(!memcmp(header.magic,"PICOSETp",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
     app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
     assert(app_settings_shutdown_wallpaper()->style==APP_OFF_BOOK_COVER);
     off.style=APP_OFF_SYSTEM;
@@ -1921,7 +1934,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     file=fopen(BACKUP_FILE,"rb");
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETo",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
+    assert(!memcmp(header.magic,"PICOSETp",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
     off.cover_crop=0;
     assert(app_settings_set_shutdown_wallpaper(&off));
     assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));
@@ -1932,7 +1945,26 @@ static void test_cover_wallpaper_backup(void) {
     puts("PASS: v49 cover wallpaper and independent crop options round trip, legacy/prototype defaults and failed commit");
 }
 
+static void test_setup_resume(void) {
+    missing_profile=true;legacy_boot=true;load_setup();assert(app_setup_step()==SETUP_DONE);
+    missing_profile=false;legacy_boot=false;load_setup();assert(app_setup_step()==SETUP_DONE);
+    empty_profile=true;load_setup();assert(app_setup_step()==SETUP_LANGUAGE);empty_profile=false;durable_setup=-1;
+    missing_profile=true;load_setup();assert(app_setup_step()==SETUP_LANGUAGE && ui_language()==UI_LANG_CN);
+    const setup_step_t steps[] = { SETUP_LANGUAGE, SETUP_WIFI, SETUP_FONT, SETUP_HOME, SETUP_DONE };
+    for (unsigned i = 1; i < sizeof(steps)/sizeof(steps[0]); ++i) {
+        commit_fails=true;assert(!app_setup_save(UI_LANG_EN,steps[i]));commit_fails=false;
+        load_setup();assert(app_setup_step()==steps[i-1]);
+        assert(app_setup_save(UI_LANG_TW,steps[i]));load_setup();assert(ui_language()==UI_LANG_TW && app_setup_step()==steps[i]);
+    }
+    const setup_step_t legacy[] = { SETUP_LANGUAGE, SETUP_FONT, SETUP_HOME, SETUP_DONE };
+    for (unsigned i = 0; i < sizeof(legacy)/sizeof(legacy[0]); ++i) {
+        durable_setup=0x82 | (i << 2);load_setup();assert(ui_language()==UI_LANG_EN && app_setup_step()==legacy[i]);
+    }
+    durable_setup=0x96;load_setup();assert(ui_language()==UI_LANG_CN && app_setup_step()==SETUP_DONE);
+    assert(app_setup_save(UI_LANG_CN,SETUP_DONE));commit_count=0;
+}
 int main(void) {
+    test_setup_resume();
     // 重新读取持久记录模拟重启；同名ID在不同书库间隔离，失败不覆盖原选择。
     // Re-read durable records as after a reboot; isolate equal IDs across libraries and retain choices after failures.
     assert(app_settings_shelf_category("card-a")==UINT32_MAX);

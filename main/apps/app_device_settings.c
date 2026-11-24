@@ -43,6 +43,8 @@
  * 用户 2026-11-03 新增：阅读背景下面保留组件库入口，天气隐藏后仍可重新添加。
  * User addition of 2026-11-03: keep Components below Reading background so hidden weather can be enabled again.
  */
+#include "../ui/ui_locale.h"
+#include "../ui/ui_font_sample.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include "esp_heap_caps.h"
@@ -75,6 +77,7 @@
 #include "ttf_font.h"
 #include "app_font_context.h"
 #include "ui_gesture.h"
+#include "app_setup.h"
 #include "ui_kit.h"
 #include "ui_shelf_notepad.h"
 #include "ui_text_input.h"
@@ -221,7 +224,7 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     esp_err_t error = lock_pin_flow_input(&s_pinflow, s_pinpad.digits);
     if (error == ESP_OK && s_pinflow.step == PIN_FLOW_DONE) {
         pin_setup_close(); s_page = SETTINGS_LOCK_PIN;
-        snprintf(s_notice, sizeof(s_notice), "%s", lock_pin_enabled() ? "锁屏密码已保存" : "锁屏密码已关闭");
+        snprintf(s_notice, sizeof(s_notice), "%s", lock_pin_enabled() ? ui_tr("锁屏密码已保存") : ui_tr("锁屏密码已关闭"));
         return APP_REDRAW_PAGE;
     }
     const char *notice = error == ESP_OK ? "" : error == ESP_ERR_INVALID_RESPONSE ? "两次输入不同，请重设" :
@@ -229,7 +232,7 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     ui_pinpad_reset(&s_pinpad, lock_pin_flow_title(&s_pinflow), notice);
     if (error == ESP_ERR_INVALID_ARG && prior == PIN_FLOW_OLD && ++s_pin_failures >= 3) {
         s_pin_failures = 0; s_pin_retry_at = ctx->now_ms + 10000;
-        snprintf(s_pinpad.notice, sizeof(s_pinpad.notice), "请等待 10 秒后重试"); s_pinpad.blocked = true;
+        snprintf(s_pinpad.notice, sizeof(s_pinpad.notice), ui_tr("请等待 10 秒后重试")); s_pinpad.blocked = true;
     }
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
@@ -324,7 +327,7 @@ static void upgrade_schedule(bool downloading, uint32_t now) {
     s_update.busy = true;
     s_update.received = 0;
     snprintf(s_update.message, sizeof(s_update.message), "%s", downloading
-        ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
+        ? ui_tr("正在下载，短暂断网会自动重连") : ui_tr("正在连接并检查更新"));
     s_upgrade_offer_pending = !downloading;
     upgrade_remember(now);
 }
@@ -341,8 +344,8 @@ static app_redraw_t upgrade_start_pending(void) {
     if (s_update.state != PICO_UPDATE_FAILED) s_update.message[0] = 0;
     s_update.state = PICO_UPDATE_FAILED;
     if (!s_update.message[0]) snprintf(s_update.message, sizeof(s_update.message), "%s",
-        error == ESP_ERR_NO_MEM ? "内存不足，无法启动更新任务" :
-        downloading ? "无法开始下载，请稍后重试" : "无法检查更新，请稍后重试");
+        error == ESP_ERR_NO_MEM ? ui_tr("内存不足，无法启动更新任务") :
+        downloading ? ui_tr("无法开始下载，请稍后重试") : ui_tr("无法检查更新，请稍后重试"));
     snprintf(s_upgrade_notice, sizeof(s_upgrade_notice), "%s", s_update.message);
     return APP_REDRAW_PAGE;
 }
@@ -425,7 +428,7 @@ static int settings_main_row_height(void) {
     return 82;
 }
 #define SETTINGS_ROW_H settings_main_row_height()
-#define SETTINGS_DISPLAY_ROWS 6
+#define SETTINGS_DISPLAY_ROWS 8
 #define SETTINGS_PERSONAL_ROWS 8
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
@@ -482,8 +485,24 @@ typedef struct {
 static system_font_layout_t system_font_layout(void) {
     system_font_layout_t l = settings_stacked()
         ? (system_font_layout_t){{36,197,612,183},{36,471,612,216},413,722,785,142,2}
-        : (system_font_layout_t){{36,197,612,100},{36,379,612,154},322,560,615,99,4};
+        : (system_font_layout_t){{36,197,612,100},{36,379,612,192},322,590,649,91,4};
     return l;
+}
+static void draw_system_font_sample(uint8_t *fb, EpdRect card) {
+    const char *text = ui_tr(UI_FONT_SAMPLE_TEXT);
+    int pitch = (card.height - 16) / UI_FONT_SAMPLE_LINES;
+    EpdRect box = {card.x + 20, card.y + 8, card.width - 40, pitch};
+    for (int i = 0; i < UI_FONT_SAMPLE_LINES; ++i, box.y += pitch) {
+        const char *end = strchr(text, '\n');
+        size_t n = end ? (size_t)(end - text) : strlen(text);
+        char line[96];
+        if (n >= sizeof(line)) return;
+        memcpy(line, text, n);
+        line[n] = '\0';
+        ui_setup_text_box(fb, box, 48, line, EPD_DRAW_ALIGN_LEFT, false);
+        if (!end) break;
+        text = end + 1;
+    }
 }
 static EpdRect system_font_item_rect(int slot) {
     system_font_layout_t l = system_font_layout();
@@ -494,7 +513,7 @@ static void draw_system_font_sync(uint8_t *fb) {
     // 仅一个有界弹窗，不额外打开阅读字体。/ One bounded dialog; never load the reading face here.
     settings_card(fb,(EpdRect){48,389,588,401},28,UI_GRAY_WHITE,0x58);
     ui_text_fixed_vc(fb,342,448,32,"同步到阅读字体？",EPD_DRAW_ALIGN_CENTER,false);
-    char name[80]; snprintf(name,sizeof(name),"已选择「%s」",system_font_label(s_font_sync_path));
+    char name[80]; snprintf(name,sizeof(name),ui_tr("已选择「%s」"),system_font_label(s_font_sync_path));
     while (ui_text_fixed_width_px(27,name) > 520 && strlen(name) > 6) {
         size_t n = strlen(name) - 1;
         while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
@@ -670,7 +689,7 @@ static void reading_bg_scan(void) {
     s_wallpaper_count = s_wallpaper_page = 0;
     s_reading_bg_notice[0] = 0;
     if (!wallpaper_scan_dir("/sdcard/pictures"))
-        snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "图片列表未完整读取");
+        snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), ui_tr("图片列表未完整读取"));
     s_wallpaper_selected = 0;
     for (int i = 0; i < s_wallpaper_count; ++i)
         if (!strcmp(s_wallpapers[i].path, app_settings_book_background_path())) s_wallpaper_selected = i;
@@ -749,10 +768,10 @@ static bool time_save(void) {
     if (err == ESP_OK) err = device_power_cmd(PMU_CMD_TIME_GET, NULL, 0);
     const pmu_snapshot_t *pmu = device_power_get();
     if (err != ESP_OK || !pmu || !pmu->time_synced) {
-        snprintf(s_notice, sizeof(s_notice), "系统时间已设置，PMU 同步失败");
+        snprintf(s_notice, sizeof(s_notice), ui_tr("系统时间已设置，PMU 同步失败"));
         return false;
     }
-    snprintf(s_notice, sizeof(s_notice), "时间已保存，并同步到电源管理芯片");
+    snprintf(s_notice, sizeof(s_notice), ui_tr("时间已保存，并同步到电源管理芯片"));
     s_page = SETTINGS_TIME;
     return true;
 }
@@ -805,30 +824,30 @@ enum {
 static void time_last_sync_text(char *out, size_t cap) {
     uint32_t last = app_settings_time_sync_last();
     time_t now = time(NULL);
-    if (!last) { snprintf(out, cap, "上次对时：从未"); return; }
+    if (!last) { snprintf(out, cap, ui_tr("上次对时：从未")); return; }
     if (now < 1704067200) {
         struct tm tm;
         time_t local = (time_t)last + 8 * 3600;
         if (gmtime_r(&local, &tm))
-            snprintf(out, cap, "上次对时：%04d-%02d-%02d %02d:%02d",
+            snprintf(out, cap, ui_tr("上次对时：%04d-%02d-%02d %02d:%02d"),
                      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
         else
-            snprintf(out, cap, "上次对时：--");
+            snprintf(out, cap, ui_tr("上次对时：--"));
         return;
     }
     int64_t age = (int64_t)now - (int64_t)last;
     if (age < 0) age = 0;
-    if (age < 60) snprintf(out, cap, "上次对时：刚刚");
-    else if (age < 3600) snprintf(out, cap, "上次对时：%lld 分钟前", (long long)(age / 60));
-    else if (age < 86400) snprintf(out, cap, "上次对时：%lld 小时前", (long long)(age / 3600));
-    else snprintf(out, cap, "上次对时：%lld 天前", (long long)(age / 86400));
+    if (age < 60) snprintf(out, cap, ui_tr("上次对时：刚刚"));
+    else if (age < 3600) snprintf(out, cap, ui_tr("上次对时：%lld 分钟前"), (long long)(age / 60));
+    else if (age < 86400) snprintf(out, cap, ui_tr("上次对时：%lld 小时前"), (long long)(age / 3600));
+    else snprintf(out, cap, ui_tr("上次对时：%lld 天前"), (long long)(age / 86400));
 }
 
 // 自动对时能否生效取决于开关与已保存的网络，缺哪一样就说哪一样。
 // Auto-sync needs the switch and a saved network; name whichever one is missing.
 static void time_auto_hint(char *out, size_t cap) {
     if (!app_settings_auto_time_sync()) {
-        snprintf(out, cap, "自动对时已关闭，只能按上面的按钮手动对时。");
+        snprintf(out, cap, ui_tr("自动对时已关闭，只能按上面的按钮手动对时。"));
         return;
     }
     network_status_t network = {0};
@@ -839,10 +858,10 @@ static void time_auto_hint(char *out, size_t cap) {
     const bool wifi_configured = saved_wifi || network.wifi_enabled || network.wifi_ready;
     const bool cellular_available = network.cellular_capable && network.cellular_enabled;
     if (!wifi_configured && !cellular_available) {
-        snprintf(out, cap, "自动对时需要先启用 Wi-Fi 或 4G 网络。");
+        snprintf(out, cap, ui_tr("自动对时需要先启用 Wi-Fi 或 4G 网络。"));
         return;
     }
-    snprintf(out, cap, "自动对时每 6 小时一次。");
+    snprintf(out, cap, ui_tr("自动对时每 6 小时一次。"));
 }
 
 static void back_header(uint8_t *fb, const char *title) {
@@ -916,7 +935,7 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
         if (y + row_height <= 160 || y >= UI_NAV_TOP) continue;
         if (i) settings_divider(fb, y, 88, 544);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
-        char shown[128]; snprintf(shown,sizeof(shown),"%s",values[i]);
+        char shown[128]; snprintf(shown,sizeof(shown),"%s",ui_tr(values[i]));
         int value_width = 594 - 100 - 20 - ui_text_fixed_width_px(ui_text_effective_px(25),labels[i]);
         if (value_width > 215) value_width = 215;
         if (value_width < 0) value_width = 0;
@@ -1027,9 +1046,9 @@ static const char *settings_version_text(void) {
         if (!strncmp(desc->date, months[i], 3)) { month = i + 1; break; }
     int day = atoi(desc->date + 4), year = atoi(desc->date + 7);
     if (month && day > 0 && year > 0)
-        snprintf(text, sizeof(text), "版本 %s · 构建 %04d-%02d-%02d", desc->version, year, month, day);
+        snprintf(text, sizeof(text), ui_tr("版本 %s · 构建 %04d-%02d-%02d"), desc->version, year, month, day);
     else
-        snprintf(text, sizeof(text), "版本 %s · 构建 %s", desc->version, desc->date);
+        snprintf(text, sizeof(text), ui_tr("版本 %s · 构建 %s"), desc->version, desc->date);
     return text;
 }
 // 系统字号最大 200% 时版本行会顶到两侧白边，按可用宽度收一级字号再画。
@@ -1076,7 +1095,7 @@ static void memory_pool_card(uint8_t *fb, int y, const char *title, const mm_poo
     memory_size_text(minimum_text, sizeof(minimum_text), pool->minimum_free);
     memory_size_text(used_text, sizeof(used_text), pool->used_bytes);
     memory_size_text(total_text, sizeof(total_text), pool->total);
-    snprintf(summary, sizeof(summary), "%s · 已用 %u%%", total_text,
+    snprintf(summary, sizeof(summary), ui_tr("%s · 已用 %u%%"), total_text,
              pool->total ? (unsigned)((uint64_t)pool->used_bytes * 100u / pool->total) : 0);
     settings_card(fb, (EpdRect){36, y, 612, 136}, 22, UI_GRAY_WHITE, 0x70);
     ui_text_fixed_vc(fb, 60, y + 26, 25, title, EPD_DRAW_ALIGN_LEFT, false);
@@ -1116,17 +1135,17 @@ static void memory_render_content(uint8_t *fb) {
     ui_draw_button(fb, (EpdRect){36, 882, 612, 76}, "一键清理可重建内存",
         s_memory_snapshot.clean_state == MM_CLEAN_RUNNING || s_memory_snapshot.clean_state == MM_CLEAN_REQUESTED);
     char status[96];
-    snprintf(status, sizeof(status), "%s · 第 %u 次", memory_clean_state_text(s_memory_snapshot.clean_state),
+    snprintf(status, sizeof(status), ui_tr("%s · 第 %u 次"), memory_clean_state_text(s_memory_snapshot.clean_state),
              (unsigned)s_memory_snapshot.clean_request_id);
     ui_text_fixed_vc(fb, 342, 990, 20, status, EPD_DRAW_ALIGN_CENTER, false);
     char released[24], released_status[96];
     memory_size_text(released, sizeof(released), s_memory_report.released_internal + s_memory_report.released_psram);
-    snprintf(released_status, sizeof(released_status), "可用净增 %s（内部 %u KB · PSRAM %u KB）",
+    snprintf(released_status, sizeof(released_status), ui_tr("可用净增 %s（内部 %u KB · PSRAM %u KB）"),
              released, (unsigned)(s_memory_report.released_internal / 1024u),
              (unsigned)(s_memory_report.released_psram / 1024u));
     ui_text_fixed_vc(fb, 342, 1027, 17, released_status, EPD_DRAW_ALIGN_CENTER, false);
-    snprintf(status, sizeof(status), "%s · 分配未通过 %u 次",
-             s_memory_snapshot.pressure ? "内存紧张，自动清理已启用" : "内存正常，自动监测中",
+    snprintf(status, sizeof(status), ui_tr("%s · 分配未通过 %u 次"),
+             s_memory_snapshot.pressure ? ui_tr("内存紧张，自动清理已启用") : ui_tr("内存正常，自动监测中"),
              (unsigned)s_memory_snapshot.allocation_failures);
     ui_text_fixed_vc(fb, 342, 1070, 17, status, EPD_DRAW_ALIGN_CENTER, false);
 }
@@ -1138,7 +1157,7 @@ static void quick_settings_render(uint8_t *fb) {
     const app_quick_layout_t *layout = app_settings_quick_layout();
     back_header(fb, "快捷栏管理");
     char summary[64];
-    snprintf(summary, sizeof(summary), "已选 %u / %u · 最多两排，每排四个", layout->count, APP_QUICK_MAX_VISIBLE);
+    snprintf(summary, sizeof(summary), ui_tr("已选 %u / %u · 最多两排，每排四个"), layout->count, APP_QUICK_MAX_VISIBLE);
     ui_text_fixed(fb, 36, 214, 22, summary, EPD_DRAW_ALIGN_LEFT, false);
     ui_text_fixed(fb, 36, 252, 20, s_quick_notice[0] ? s_quick_notice : "点按名称显示或隐藏，右侧箭头调整位置", EPD_DRAW_ALIGN_LEFT, false);
     for (unsigned i = 0; i < APP_QUICK_ITEM_COUNT; ++i) {
@@ -1150,7 +1169,7 @@ static void quick_settings_render(uint8_t *fb) {
         ui_text_fixed_vc(fb, 112, cy, 26, labels[layout->order[i]], EPD_DRAW_ALIGN_LEFT, false);
         char position[24];
         if (visible) snprintf(position, sizeof(position), "%u-%u", i / 4 + 1, i % 4 + 1);
-        else snprintf(position, sizeof(position), "隐藏");
+        else snprintf(position, sizeof(position), ui_tr("隐藏"));
         ui_text_fixed_vc(fb, 426, cy, 20, position, EPD_DRAW_ALIGN_CENTER, false);
         ui_draw_icon(fb, 516, cy, 30, UI_ICON_CHEVRON_UP, visible && i > 0 ? UI_GRAY_BLACK : 0xc0);
         ui_draw_icon(fb, 596, cy, 30, UI_ICON_CHEVRON_DOWN, visible && i + 1 < layout->count ? UI_GRAY_BLACK : 0xc0);
@@ -1188,7 +1207,7 @@ static app_redraw_t quick_settings_gesture(app_ctx_t *ctx, const ui_gesture_even
             layout.order[--layout.count] = item;
         } else {
             if (layout.count == APP_QUICK_MAX_VISIBLE) {
-                snprintf(s_quick_notice, sizeof(s_quick_notice), "最多显示八个按钮，请先隐藏一个");
+                snprintf(s_quick_notice, sizeof(s_quick_notice), ui_tr("最多显示八个按钮，请先隐藏一个"));
                 return APP_REDRAW_PAGE;
             }
             memmove(&layout.order[layout.count + 1], &layout.order[layout.count], index - layout.count);
@@ -1196,7 +1215,7 @@ static app_redraw_t quick_settings_gesture(app_ctx_t *ctx, const ui_gesture_even
         }
     }
     if (!app_settings_set_quick_layout(&layout))
-        snprintf(s_quick_notice, sizeof(s_quick_notice), "保存失败，请重试");
+        snprintf(s_quick_notice, sizeof(s_quick_notice), ui_tr("保存失败，请重试"));
     return APP_REDRAW_PAGE;
 }
 
@@ -1263,7 +1282,7 @@ static app_redraw_t charge_current_touch(int x, int y) {
         if (!ui_rect_hit(charge_choice_rect(i), x, y)) continue;
         if (current == s_charge_choices[i].current) return APP_REDRAW_NONE;
         const esp_err_t err = device_power_set_charge_current(s_charge_choices[i].current);
-        snprintf(s_notice, sizeof(s_notice), "%s", err == ESP_OK ? "" : "未能切换，请重试");
+        snprintf(s_notice, sizeof(s_notice), "%s", err == ESP_OK ? "" : ui_tr("未能切换，请重试"));
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;
@@ -1278,7 +1297,7 @@ static void batt_calibration_render(uint8_t *fb) {
     ui_text_box(fb, (EpdRect){48, 482, 588, 42}, 28, status.applied ? "已应用部分校准" :
             !status.enabled ? "学习已停止" : status.sampled_bins ? "正在学习" : "等待有效样本", EPD_DRAW_ALIGN_LEFT, false);
     char coverage[96];
-    snprintf(coverage, sizeof(coverage), "已有样本 %u / %u 个区间，可信 %u 个",
+    snprintf(coverage, sizeof(coverage), ui_tr("已有样本 %u / %u 个区间，可信 %u 个"),
              (unsigned)status.sampled_bins, (unsigned)status.total_bins, (unsigned)status.trusted_bins);
     ui_text_box(fb, (EpdRect){48, 530, 588, 40}, 23, coverage, EPD_DRAW_ALIGN_LEFT, false);
     ui_text_box(fb, (EpdRect){48, 578, 588, 40}, 23, "正常使用即可，学习需要多次有效放电", EPD_DRAW_ALIGN_LEFT, false);
@@ -1301,7 +1320,7 @@ static app_redraw_t batt_calibration_touch(int x, int y) {
         const esp_err_t err = device_power_set_batt_calibration(!status.enabled);
         s_batt_calibration_confirm = false;
         snprintf(s_notice, sizeof(s_notice), "%s", err == ESP_OK ?
-                 (status.enabled ? "停止学习，已有校准继续生效" : "已开启，等待有效放电样本") : "开关保存失败，请重试");
+                 (status.enabled ? ui_tr("停止学习，已有校准继续生效") : ui_tr("已开启，等待有效放电样本")) : ui_tr("开关保存失败，请重试"));
         device_power_get_batt_calibration(&s_batt_calibration_status);
         return APP_REDRAW_PAGE;
     }
@@ -1313,7 +1332,7 @@ static app_redraw_t batt_calibration_touch(int x, int y) {
             const esp_err_t err = device_power_reset_batt_calibration();
             s_batt_calibration_confirm = false;
             snprintf(s_notice, sizeof(s_notice), "%s", err == ESP_OK ?
-                     "已恢复系统曲线，学习开关保持不变" : "重置未完整保存，请重试");
+                     ui_tr("已恢复系统曲线，学习开关保持不变") : ui_tr("重置未完整保存，请重试"));
             device_power_get_batt_calibration(&s_batt_calibration_status);
         }
         return APP_REDRAW_PAGE;
@@ -1470,9 +1489,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             row(fb, NETWORK_ROUTE_ROW_Y, "日期、天气、OTA", network_route_name(network.route));
             char detail[96];
             char signal[12];
-            if (network.cellular_signal == 99) snprintf(signal, sizeof(signal), "未知");
+            if (network.cellular_signal == 99) snprintf(signal, sizeof(signal), ui_tr("未知"));
             else snprintf(signal, sizeof(signal), "%d/31", network.cellular_signal);
-            snprintf(detail, sizeof(detail), "4G：%s · 信号 %s", settings_cellular_status(&network), signal);
+            snprintf(detail, sizeof(detail), ui_tr("4G：%s · 信号 %s"), settings_cellular_status(&network), signal);
             ui_text(fb, 48, 602, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             ui_text(fb, 48, 648, 21, s_network_notice ? s_network_notice :
                     "移动网络使用内置 SIM 卡；联网方式单独选择。", EPD_DRAW_ALIGN_LEFT, false);
@@ -1502,9 +1521,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_draw_icon(fb,619,247,28,UI_ICON_ROTATE_CW,0x38);
         section(fb,l.preview_title,"效果预览");
         settings_card(fb,l.preview,22,UI_GRAY_WHITE,0x70);
-        ui_text_vc(fb,60,l.preview.y+(settings_stacked()?68:51),29,"阅读，让时间慢下来",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_vc(fb,60,l.preview.y+(settings_stacked()?151:107),25,"Aa 123",EPD_DRAW_ALIGN_LEFT,false);
+        draw_system_font_sample(fb,l.preview);
         section(fb,l.font_title,"选择字体");
+        ui_text_fixed_vc(fb,648,l.font_title+12,22,"下载推荐字体",EPD_DRAW_ALIGN_RIGHT,false);
         const char *selected = app_settings_system_font_path();
         int count = ttf_font_count(), first = s_font_page*l.slots;
         for (int slot=0;slot<l.slots && first+slot<=count;++slot) {
@@ -1514,7 +1533,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             EpdRect box=system_font_item_rect(slot);
             settings_card(fb,box,20,active?0xe0:UI_GRAY_WHITE,0x70);
             char label[TTF_FONT_NAME_MAX];
-            snprintf(label,sizeof(label),"%s",item?system_font_label(item->path):"思源黑体（内建）");
+            snprintf(label,sizeof(label),"%s",item?system_font_label(item->path):ui_tr("思源黑体（内建）"));
             settings_fit_text(label,26,box.width-100);
             ui_text_vc(fb,60,box.y+box.height/2,26,label,EPD_DRAW_ALIGN_LEFT,false);
             if (active) epd_fill_circle(613,box.y+box.height/2,6,UI_GRAY_BLACK,fb);
@@ -1587,11 +1606,11 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         char current[128];
         const char *current_path = app_settings_book_background_path();
         const char *current_name = current_path[0] ? strrchr(current_path, '/') : NULL;
-        snprintf(current, sizeof(current), "当前：%s", current_path[0] ? (current_name ? current_name + 1 : current_path) : "白底");
+        snprintf(current, sizeof(current), ui_tr("当前：%s"), current_path[0] ? (current_name ? current_name + 1 : current_path) : ui_tr("白底"));
         fit_value(current, 360);
         ui_text_vc(fb, 48, 280, 20, current, EPD_DRAW_ALIGN_LEFT, false);
         char count_text[48];
-        snprintf(count_text, sizeof(count_text), "共 %d 张", s_wallpaper_count);
+        snprintf(count_text, sizeof(count_text), ui_tr("共 %d 张"), s_wallpaper_count);
         ui_text_vc(fb, 636, 280, 20, count_text, EPD_DRAW_ALIGN_RIGHT, false);
         // 两列卡片展示缩略图、文件名和当前状态，避免把图片选择压成单调文件名列表。
         // Two card columns show thumbnails, filenames and state instead of a flat filename list.
@@ -1608,7 +1627,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             char name[96]; snprintf(name, sizeof(name), "%s", s_wallpapers[index].name);
             fit_value(name, 126);
             ui_text_box(fb, (EpdRect){box.x + 156, box.y + 22, 128, 60}, 21, name, EPD_DRAW_ALIGN_LEFT, false);
-            char number[32]; snprintf(number, sizeof(number), "第 %d 张", index + 1);
+            char number[32]; snprintf(number, sizeof(number), ui_tr("第 %d 张"), index + 1);
             ui_text_box(fb, (EpdRect){box.x + 156, box.y + 88, 128, 38}, 18, number, EPD_DRAW_ALIGN_LEFT, false);
             if (active) {
                 ui_fill_round_rect(fb, (EpdRect){box.x + 156, box.y + 154, 128, 36}, 12, UI_GRAY_BLACK);
@@ -1622,7 +1641,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_draw_button(fb, reading_bg_restore_rect(), "恢复白底", false);
         int pages = s_wallpaper_count > 0 ? (s_wallpaper_count + READING_BG_THUMB_SLOTS - 1) / READING_BG_THUMB_SLOTS : 1;
-        char page_text[64]; snprintf(page_text, sizeof(page_text), "%d / %d 页 · 上下滑动翻页", s_wallpaper_page + 1, pages);
+        char page_text[64]; snprintf(page_text, sizeof(page_text), ui_tr("%d / %d 页 · 上下滑动翻页"), s_wallpaper_page + 1, pages);
         ui_text_box(fb, (EpdRect){300,966,348,60}, 19, page_text, EPD_DRAW_ALIGN_RIGHT, false);
         if (s_reading_bg_notice[0])
             ui_text_box(fb, (EpdRect){36,1036,612,54}, 19, s_reading_bg_notice, EPD_DRAW_ALIGN_CENTER, false);
@@ -1644,7 +1663,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             fit_value(name, 570);
             ui_text_vc(fb, 342, 859, 24, name, EPD_DRAW_ALIGN_CENTER, false);
             char position[40];
-            snprintf(position, sizeof(position), "%d / %d · 上下滑动切换", s_wallpaper_selected + 1, s_wallpaper_count);
+            snprintf(position, sizeof(position), ui_tr("%d / %d · 上下滑动切换"), s_wallpaper_selected + 1, s_wallpaper_count);
             ui_text_vc(fb, 342, 908, 20, position, EPD_DRAW_ALIGN_CENTER, false);
         }
         if (s_reading_bg_ready) {
@@ -1802,7 +1821,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             settings_card(fb, (EpdRect){36, 356, 612, 278}, 22, UI_GRAY_WHITE, 0x70);
             ui_text(fb, 60, 383, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
             char detail[96];
-            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "连接网络，检查官网发布的新版本");
+            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : ui_tr("连接网络，检查官网发布的新版本"));
             fit_value(detail, 540);
             ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_AVAILABLE)
@@ -1854,7 +1873,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_text_vc(fb,588,profile_y+53,20,"编辑",EPD_DRAW_ALIGN_RIGHT,false);
         ui_draw_icon(fb,625,profile_y+profile_h/2,26,UI_ICON_CHEVRON_RIGHT,UI_GRAY_BLACK);
     }
-    char wifi[56];snprintf(wifi,sizeof(wifi),"%s",s_main_wifi_saved?s_main_wifi:"未配置");
+    char wifi[56];snprintf(wifi,sizeof(wifi),"%s",s_main_wifi_saved?s_main_wifi:ui_tr("未配置"));
     network_status_t network;
     network_service_get_status(&network);
     const char *connection_labels[4];
@@ -1882,31 +1901,31 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
     unsigned minutes=app_settings_auto_lock_minutes();
-    if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else strcpy(idle,"关闭");
+    if(minutes)snprintf(idle,sizeof(idle),ui_tr("%u 分钟"),minutes);else strcpy(idle,ui_tr("关闭"));
     unsigned shutdown_minutes=app_settings_shutdown_minutes();
-    if(shutdown_minutes)snprintf(standby,sizeof(standby),"浅睡 %u 分钟后关机",shutdown_minutes);
-    else snprintf(standby,sizeof(standby),"%s",app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底关机");
-    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","待机方式"};
+    if(shutdown_minutes)snprintf(standby,sizeof(standby),ui_tr("浅睡 %u 分钟后关机"),shutdown_minutes);
+    else snprintf(standby,sizeof(standby),"%s",app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?ui_tr("仅浅睡"):ui_tr("彻底关机"));
+    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","待机方式","系统语言","开机引导"};
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,
-        standby};
-    const int display_icons[]={2,7,15,11,14,9};
+        standby,ui_language_name(ui_language()),"›"};
+    const int display_icons[]={2,7,15,11,14,9,2,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
-    snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
+    snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():ui_tr("未设置"));
     const char *personal_labels[]={"书架样式","壁纸","锁屏密码","状态栏签名","触摸震动","阅读背景","组件库","快捷栏管理"};
     char haptic_value[24];
-    if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),"不支持");
-    else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),"关闭");
-    else snprintf(haptic_value,sizeof(haptic_value),"开启 · %s",
-        app_settings_haptic_intensity()==APP_HAPTIC_STRONG?"强":
-        app_settings_haptic_intensity()==APP_HAPTIC_MEDIUM?"中":"弱");
+    if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),ui_tr("不支持"));
+    else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),ui_tr("关闭"));
+    else snprintf(haptic_value,sizeof(haptic_value),ui_tr("开启 · %s"),
+        app_settings_haptic_intensity()==APP_HAPTIC_STRONG?ui_tr("强"):
+        app_settings_haptic_intensity()==APP_HAPTIC_MEDIUM?ui_tr("中"):ui_tr("弱"));
     char background_value[96];
     const char *background_path=app_settings_book_background_path();
     const char *background_base=background_path[0]?strrchr(background_path,'/'):NULL;
     snprintf(background_value,sizeof(background_value),"%s",
-        background_path[0]?(background_base?background_base+1:background_path):"无");
+        background_path[0]?(background_base?background_base+1:background_path):ui_tr("无"));
     const char *personal_values[]={shelf_style_name(app_settings_shelf_style()),
         app_settings_lock_style()==APP_LOCK_STYLE_BOOK_COVER?"书籍封面":
         app_settings_lock_style()==APP_LOCK_STYLE_CLOCK?"简约时钟":app_settings_lock_style()==4?"日历":app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
@@ -1920,7 +1939,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     char batt_log_value[16];
-    snprintf(batt_log_value,sizeof(batt_log_value),"%s",app_settings_batt_log()?"开启":"关闭");
+    snprintf(batt_log_value,sizeof(batt_log_value),"%s",app_settings_batt_log()?ui_tr("开启"):ui_tr("关闭"));
     device_power_batt_calibration_status_t calibration;
     device_power_get_batt_calibration(&calibration);
     const char *power_labels[]={"自动电量校准(beta)", "日志调试", "充电档位"};
@@ -2099,10 +2118,10 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         s_panel_repair_pending = false;
         if (s_page != SETTINGS_MAIN) return APP_REDRAW_NONE;
         s_scroll_present_pending = false;
-        snprintf(s_notice, sizeof(s_notice), "屏幕修复完成；若条纹仍在可再做一次");
+        snprintf(s_notice, sizeof(s_notice), ui_tr("屏幕修复完成；若条纹仍在可再做一次"));
         render(ctx, ctx->fb);
         if (display_panel_repair(ctx->hl) != EPD_DRAW_SUCCESS) {
-            snprintf(s_notice, sizeof(s_notice), "屏幕输出未完成，请稍后重试");
+            snprintf(s_notice, sizeof(s_notice), ui_tr("屏幕输出未完成，请稍后重试"));
             return APP_REDRAW_FULL;
         }
         return APP_REDRAW_DONE;
@@ -2136,7 +2155,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         s_reading_bg_ready = s_wallpaper_selected >= 0 && s_wallpaper_selected < s_wallpaper_count &&
             ui_reader_background_prepare(s_wallpapers[s_wallpaper_selected].path);
         if (!s_reading_bg_ready)
-            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "图片无法解码或内存不足，请换一张");
+            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", ui_tr("图片无法解码或内存不足，请换一张"));
         return APP_REDRAW_PAGE;
     }
 
@@ -2221,7 +2240,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         err == ESP_ERR_INVALID_STATE ? "网络尚未连接，请稍后再试" :
         err == ESP_ERR_TIMEOUT ? "网络对时超时，请检查网络后重试" :
         "网络对时失败，请检查网络后重试";
-    snprintf(s_notice, sizeof(s_notice), "%s", notice);
+    snprintf(s_notice, sizeof(s_notice), "%s", ui_tr(notice));
     return APP_REDRAW_PAGE;
 }
 
@@ -2253,15 +2272,15 @@ static app_redraw_t profile_editor_gesture(app_ctx_t *ctx, const ui_gesture_even
     return result == UI_KEYBOARD_CHANGED ? profile_editor_paint(ctx, false) : APP_REDRAW_NONE;
 save_text:
     if (ui_keyboard_pending()) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "请先选择候选字");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("请先选择候选字"));
         return APP_REDRAW_PAGE;
     }
     if (s_editor_signature) app_settings_set_status_signature(s_editor);
     else if (s_editor[0]) app_settings_set_device_name(s_editor);
-    else { snprintf(s_editor_notice, sizeof(s_editor_notice), "设备名称不能为空"); return APP_REDRAW_PAGE; }
+    else { snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("设备名称不能为空")); return APP_REDRAW_PAGE; }
     const char *saved = s_editor_signature ? app_settings_status_signature() : app_settings_device_name();
     if (strcmp(saved, s_editor)) {
-        snprintf(s_editor_notice, sizeof(s_editor_notice), "保存失败，请检查设置存储空间");
+        snprintf(s_editor_notice, sizeof(s_editor_notice), ui_tr("保存失败，请检查设置存储空间"));
         return APP_REDRAW_PAGE;
     }
     ui_keyboard_end();
@@ -2330,7 +2349,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if (i) {
                 app_settings_set_font_path(s_font_sync_path);
                 if (strcmp(app_settings_font_path(),s_font_sync_path)) {
-                    snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
+                    snprintf(s_notice,sizeof(s_notice),ui_tr("保存失败，请重试"));return APP_REDRAW_PAGE;
                 }
             }
             s_notice[0]=0;s_font_sync_confirm=false;return APP_REDRAW_PAGE;
@@ -2349,7 +2368,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_available() &&
         (ui_rect_hit((EpdRect){36,406,612,70},ev->x0,ev->y0) ||
          (lock_pin_enabled() && ui_rect_hit((EpdRect){36,512,612,70},ev->x0,ev->y0)))) {
-        if (ctx->now_ms < s_pin_retry_at) { snprintf(s_notice, sizeof(s_notice), "请等待后重试"); return APP_REDRAW_PAGE; }
+        if (ctx->now_ms < s_pin_retry_at) { snprintf(s_notice, sizeof(s_notice), ui_tr("请等待后重试")); return APP_REDRAW_PAGE; }
         pin_setup_open(ctx, ev->y0 >= 512); return APP_REDRAW_PAGE;
     }
 
@@ -2538,7 +2557,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (s_reading_bg_confirm) {
             if (y >= 643 && y < 711 && ev->x0 >= 358 && ev->x0 < 590) {
                 if (app_settings_set_book_background_path(s_wallpapers[s_wallpaper_selected].path))
-                    snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已设为阅读背景，下次打开书籍生效");
+                    snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", ui_tr("已设为阅读背景，下次打开书籍生效"));
             }
             // 其余点按一律视为取消。
             // Any other tap cancels the pending background choice.
@@ -2555,7 +2574,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         if (y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
         if (ui_rect_hit(reading_bg_restore_rect(), ev->x0, y)) {
             if (!app_settings_set_book_background_path("")) return APP_REDRAW_NONE;
-            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", "已恢复白底");
+            snprintf(s_reading_bg_notice, sizeof(s_reading_bg_notice), "%s", ui_tr("已恢复白底"));
             return APP_REDRAW_PAGE;
         }
         for (int slot = 0; slot < READING_BG_THUMB_SLOTS; ++slot) {
@@ -2582,7 +2601,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             const uint8_t style = shelf_style_id(i);
             if (i < 2 && ui_rect_hit(shelf_style_titles_row(card), ev->x0, y)) {
                 const bool saved = app_settings_set_shelf_show_titles(style, !app_settings_shelf_show_titles(style));
-                snprintf(s_notice, sizeof(s_notice), "%s", saved ? "" : "保存失败，请重试");
+                snprintf(s_notice, sizeof(s_notice), "%s", saved ? "" : ui_tr("保存失败，请重试"));
                 return APP_REDRAW_PAGE;
             }
             app_settings_set_shelf_style(style);
@@ -2678,12 +2697,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_SYSTEM_FONT) {
         system_font_layout_t l=system_font_layout();
+        if(ev->x0>370 && y>=l.font_title-16 && y<l.font_title+44) {ctx->request_app=app_setup_start(APP_SETUP_FONT_ONLY);return APP_REDRAW_NONE;}
         if (ui_rect_hit(l.size,ev->x0,y)) {
             unsigned prior=app_settings_system_font_size();
             unsigned next=prior>=200?100:prior+10;
             app_settings_set_system_font_size(next);
             if (app_settings_system_font_size()!=next) {
-                snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
+                snprintf(s_notice,sizeof(s_notice),ui_tr("保存失败，请重试"));return APP_REDRAW_PAGE;
             }
             s_font_page=0;
             if (s_main_scroll>SETTINGS_SCROLL_MAX) s_main_scroll=SETTINGS_SCROLL_MAX;
@@ -2698,7 +2718,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             snprintf(s_font_sync_path,sizeof(s_font_sync_path),"%s",item?item->path:"");
             app_settings_set_system_font_path(s_font_sync_path);
             if (strcmp(app_settings_system_font_path(),s_font_sync_path)) {
-                snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
+                snprintf(s_notice,sizeof(s_notice),ui_tr("保存失败，请重试"));return APP_REDRAW_PAGE;
             }
             app_font_activate_system();s_notice[0]=0;
             s_font_sync_confirm=strcmp(app_settings_font_path(),s_font_sync_path)!=0;
@@ -2774,19 +2794,19 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             esp_err_t err = app_settings_backup_save();
             const char *bad = app_settings_backup_bad_bookmark();
             if (err != ESP_OK && *bad) {
-                snprintf(s_notice, sizeof(s_notice), "书签损坏：%s", bad);
+                snprintf(s_notice, sizeof(s_notice), ui_tr("书签损坏：%s"), bad);
                 return APP_REDRAW_PAGE;
             }
             snprintf(s_notice, sizeof(s_notice), "%s",
-                     err == ESP_OK ? "已保存到 TF 卡根目录" :
-                     err == ESP_ERR_INVALID_STATE ? "未识别到 TF 卡，请插卡后重试" :
-                     "保存失败，请检查 TF 卡剩余空间");
+                     err == ESP_OK ? ui_tr("已保存到 TF 卡根目录") :
+                     err == ESP_ERR_INVALID_STATE ? ui_tr("未识别到 TF 卡，请插卡后重试") :
+                     ui_tr("保存失败，请检查 TF 卡剩余空间"));
             return APP_REDRAW_PAGE;
         }
         if (y >= 681 && y < 764) {
             if (!s_config_confirm) {
                 s_config_confirm = true;
-                snprintf(s_notice, sizeof(s_notice), "恢复将覆盖设置、合并 WiFi，请再次确认");
+                snprintf(s_notice, sizeof(s_notice), ui_tr("恢复将覆盖设置、合并 WiFi，请再次确认"));
                 return APP_REDRAW_PAGE;
             }
             s_config_confirm = false;
@@ -2807,13 +2827,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if (err == ESP_OK)
                 (void)wifi_transfer_get_saved_wifi(saved_ssid, &wifi_saved);
             snprintf(s_notice, sizeof(s_notice), "%s",
-                     err == ESP_OK ? (wifi_saved ? "配置与阅读记录已恢复；WiFi 请重新连接" :
-                                                   "配置与阅读记录已恢复") :
-                     err == ESP_ERR_INVALID_STATE ? "未识别到 TF 卡，请插卡后重试" :
-                     err == ESP_ERR_NOT_FOUND ? "未找到配置备份文件" :
-                     err == ESP_ERR_INVALID_RESPONSE ? "配置文件损坏或版本不兼容" :
-                     err == ESP_ERR_INVALID_SIZE ? "WiFi 合并超过 8 组，请先遗忘部分网络" :
-                     "恢复未完成，请重试");
+                     err == ESP_OK ? (wifi_saved ? ui_tr("配置与阅读记录已恢复；WiFi 请重新连接") :
+                                                   ui_tr("配置与阅读记录已恢复")) :
+                     err == ESP_ERR_INVALID_STATE ? ui_tr("未识别到 TF 卡，请插卡后重试") :
+                     err == ESP_ERR_NOT_FOUND ? ui_tr("未找到配置备份文件") :
+                     err == ESP_ERR_INVALID_RESPONSE ? ui_tr("配置文件损坏或版本不兼容") :
+                     err == ESP_ERR_INVALID_SIZE ? ui_tr("WiFi 合并超过 8 组，请先遗忘部分网络") :
+                     ui_tr("恢复未完成，请重试"));
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
@@ -2847,6 +2867,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else if(row==3)app_settings_set_home_full_refresh(!app_settings_home_full_refresh());
         else if(row==4)s_page=SETTINGS_AUTO_LOCK;
         else if(row==5)s_page=SETTINGS_POWER_SLEEP;
+        else if(row==6)ctx->request_app=app_setup_start(APP_SETUP_LANGUAGE_ONLY);
+        else if(row==7)ctx->request_app=app_setup_start(APP_SETUP_REPLAY);
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_PERSONAL_Y && y<SETTINGS_PERSONAL_Y+SETTINGS_PERSONAL_ROWS*SETTINGS_ROW_H) {
@@ -2878,7 +2900,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             // refresh can never cover that stripe. One tap runs the blind full-screen pass, which
             // then pushes the current page -- navigation bar included -- back onto the panel.
             s_panel_repair_pending=true;
-            snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
+            snprintf(s_notice,sizeof(s_notice),ui_tr("屏幕修复中…"));
             return APP_REDRAW_PAGE;
         }
         else if(row==2) upgrade_open();

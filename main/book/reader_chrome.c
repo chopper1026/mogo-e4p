@@ -13,6 +13,7 @@
  * reading face at one size; without a loaded reading TTF they fall back to the built-in bitmap,
  * matching the body's no-card presentation.
  */
+#include "../ui/ui_locale.h"
 #include "reader_chrome.h"
 
 #include <stdio.h>
@@ -68,7 +69,7 @@ static void slot_text(const reader_chrome_data_t *d, app_reader_slot_item_t item
         snprintf(buf, cap, "%u/%u", d->page + 1, d->page_count);
         break;
     case APP_READER_SLOT_PAGE_PROGRESS:
-        snprintf(buf, cap, "%u/%u · 全书 %u%%", d->page + 1, d->page_count, d->percent);
+        snprintf(buf, cap, ui_tr("%u/%u · 全书 %u%%"), d->page + 1, d->page_count, d->percent);
         break;
     case APP_READER_SLOT_PERCENT:
         snprintf(buf, cap, "%u%%", d->percent);

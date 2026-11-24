@@ -20,6 +20,9 @@ const app_desc_t* app_at(int index);
 /// 找不到时返回 -1。/ Returns -1 when not found.
 int app_index_of(const app_desc_t* app);
 
+/// 独占引导页，不加入根导航。/ Exclusive setup page outside root navigation.
+const app_desc_t* app_setup_page(void);
+
 /// 开机默认产品页。/ Default production page at boot.
 const app_desc_t* app_home_page(void);
 

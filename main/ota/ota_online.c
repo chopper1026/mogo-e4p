@@ -7,6 +7,7 @@
  * 用户修订：分段擦除并串行化闪存与屏幕推送，启动前检查连续内存，低内存安全失败。
  * User revision: erase incrementally and serialize flash with display output; require memory headroom and fail safely on shortage.
  */
+#include "../ui/ui_locale.h"
 #include "ota_online.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
@@ -153,7 +154,7 @@ static esp_err_t flash_finish(esp_ota_handle_t handle, bool aborting) {
 static void state(pico_update_state_t value, const char *message) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_status->state = value;
-    snprintf(s_status->message, sizeof(s_status->message), "%s", message);
+    snprintf(s_status->message, sizeof(s_status->message), "%s", ui_tr(message));
     ++s_status->revision;
     xSemaphoreGive(s_mutex);
 }
