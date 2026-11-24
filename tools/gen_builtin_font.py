@@ -118,11 +118,12 @@ def subset_variable(src: Path, text: str, dest: Path) -> int:
 
 
 def subset_medium(src: Path, text: str, dest: Path) -> int:
+    import io
     from fontTools.subset import Subsetter, Options
     from fontTools.ttLib import TTFont
     from fontTools.varLib.instancer import instantiateVariableFont
 
-    vf = TTFont(src)
+    vf = TTFont(io.BytesIO(src.read_bytes()))
     if "fvar" in vf:
         inst = instantiateVariableFont(vf, {"wght": BUILTIN_WEIGHT}, inplace=False)
         vf.close()
@@ -136,17 +137,26 @@ def subset_medium(src: Path, text: str, dest: Path) -> int:
         (6, "NotoSansSC-Medium"),
     ):
         vf["name"].setName(value, name_id, 3, 1, 0x409)
+    # stb_truetype 只通过 cmap 读取轮廓与水平度量；裁掉未使用的 OpenType 布局/竖排/微调表与孤立字形。
+    # stb_truetype reads outlines and horizontal metrics via cmap only; drop unused OpenType/vertical/hinting tables and unmapped glyphs.
     options = Options()
-    options.layout_features = ["*"]
+    options.layout_features = []
+    options.drop_tables += ["GPOS", "GSUB", "BASE", "STAT", "vhea", "vmtx", "gasp", "prep", "fpgm", "cvt ", "DSIG"]
     options.notdef_outline = True
-    options.recommended_glyphs = True
+    options.recommended_glyphs = False
+    options.glyph_names = False
+    options.hinting = False
+    options.name_IDs = [1, 2, 4, 6]
+    options.name_legacy = False
     options.ignore_missing_glyphs = True
     subsetter = Subsetter(options=options)
     subsetter.populate(text=text)
     subsetter.subset(vf)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    vf.save(dest)
+    buf = io.BytesIO()
+    vf.save(buf)
     vf.close()
+    dest.write_bytes(buf.getvalue())
     return dest.stat().st_size
 
 

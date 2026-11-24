@@ -14,7 +14,11 @@ from run_reader_baseline import toolchain
 ROOT = Path(__file__).resolve().parents[1]
 
 class Date(c.Structure):
-    _fields_ = [(key,c.c_int) for key in ('year','month','day','weekday','days','first_weekday','lunar_year','lunar_month','lunar_day','year_cycle','month_cycle','day_cycle')] + [(key,c.c_char_p) for key in ('yi','ji','wealth','clash','sha','joy','fortune','auspicious','inauspicious','officer','guardian','guardian_type')]
+    _fields_ = (
+        [(key,c.c_int) for key in ('year','month','day','weekday','days','first_weekday','lunar_year','lunar_month','lunar_day','year_cycle','month_cycle','day_cycle')]
+        + [(key,c.c_char_p) for key in ('yi','ji','wealth','clash','sha','joy','fortune','auspicious','inauspicious','officer','guardian','guardian_type')]
+        + [('yi_buf',c.c_char*240),('ji_buf',c.c_char*240),('auspicious_buf',c.c_char*112),('inauspicious_buf',c.c_char*112)]
+    )
 
 def main():
     with tempfile.TemporaryDirectory(prefix='calendar-model-') as folder:

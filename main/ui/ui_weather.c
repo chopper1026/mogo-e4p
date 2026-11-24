@@ -6,6 +6,7 @@
 #include "ui_weather.h"
 #include "ui_kit.h"
 #include "esp_heap_caps.h"
+#include "zlib.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,10 +39,18 @@ static void stroke(uint8_t *f,double ax,double ay,double bx,double by,int width,
 static uint32_t background_word(const uint8_t *p) {
     return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
 }
+static voidpf weather_zalloc(voidpf opaque, uInt items, uInt bytes) {
+    (void)opaque;
+    return heap_caps_calloc(items, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
+static void weather_zfree(voidpf opaque, voidpf memory) {
+    (void)opaque;
+    heap_caps_free(memory);
+}
 static bool background_scene(const uint8_t *data,size_t size,weather_scene_t scene,
                              const uint8_t **cursor,const uint8_t **end) {
     const unsigned header_size=12+WEATHER_SCENE_COUNT*4;
-    const uint8_t header[]={ 'W','B','R','1',WEATHER_WIDTH&255,WEATHER_WIDTH>>8,
+    const uint8_t header[]={ 'W','B','Z','1',WEATHER_WIDTH&255,WEATHER_WIDTH>>8,
         WEATHER_HEIGHT&255,WEATHER_HEIGHT>>8,WEATHER_SCENE_COUNT-1,0,WEATHER_BACKGROUND_ROW_BYTES,0 };
     if(!data||size<header_size||scene<WEATHER_SCENE_SUN||scene>=WEATHER_SCENE_COUNT||
        memcmp(data,header,sizeof(header)))return false;
@@ -51,42 +60,66 @@ static bool background_scene(const uint8_t *data,size_t size,weather_scene_t sce
     *cursor=data+start;*end=data+stop;
     return true;
 }
-static bool background_row(const uint8_t **cursor,const uint8_t *end,uint8_t *row) {
-    const uint8_t *p=*cursor;
-    unsigned written=0;
-    while(written<WEATHER_BACKGROUND_ROW_BYTES){
-        if(p>=end)return false;
-        unsigned control=*p++,count=(control&127)+1;
-        if(count>WEATHER_BACKGROUND_ROW_BYTES-written)return false;
-        if(control&128){
-            if(p>=end)return false;
-            memset(row+written,*p++,count);
-        }else{
-            if((size_t)(end-p)<count)return false;
-            memcpy(row+written,p,count);p+=count;
-        }
-        written+=count;
-    }
-    *cursor=p;
+typedef struct {
+    z_stream stream;
+    bool open;
+    bool finished;
+} weather_bg_reader_t;
+static bool background_open(weather_bg_reader_t *reader,const uint8_t *cursor,const uint8_t *end) {
+    memset(reader,0,sizeof(*reader));
+    if(!cursor||!end||end<=cursor)return false;
+    reader->stream.zalloc=weather_zalloc;
+    reader->stream.zfree=weather_zfree;
+    reader->stream.next_in=(Bytef *)cursor;
+    reader->stream.avail_in=(uInt)(end-cursor);
+    if(inflateInit(&reader->stream)!=Z_OK)return false;
+    reader->open=true;
     return true;
+}
+static void background_close(weather_bg_reader_t *reader) {
+    if(reader&&reader->open){inflateEnd(&reader->stream);reader->open=false;}
+}
+static bool background_row(weather_bg_reader_t *reader,uint8_t *row) {
+    if(!reader||!reader->open||reader->finished)return false;
+    reader->stream.next_out=row;
+    reader->stream.avail_out=WEATHER_BACKGROUND_ROW_BYTES;
+    int status=inflate(&reader->stream,Z_NO_FLUSH);
+    if((status!=Z_OK&&status!=Z_STREAM_END)||reader->stream.avail_out)return false;
+    if(status==Z_STREAM_END)reader->finished=true;
+    return true;
+}
+static bool background_finish(weather_bg_reader_t *reader) {
+    if(!reader||!reader->open)return false;
+    if(!reader->finished){
+        uint8_t extra=0;
+        reader->stream.next_out=&extra;
+        reader->stream.avail_out=1;
+        if(inflate(&reader->stream,Z_FINISH)!=Z_STREAM_END)return false;
+        reader->finished=true;
+    }
+    return reader->stream.total_out==(uLong)(WEATHER_HEIGHT*WEATHER_BACKGROUND_ROW_BYTES)&&
+           reader->stream.avail_in==0;
 }
 static void draw_background(uint8_t *f,EpdRect region,weather_scene_t scene){
     const uint8_t *cursor,*end;
     if(!background_scene(weather_backgrounds_packed,(size_t)(weather_backgrounds_end-weather_backgrounds_packed),
                          scene,&cursor,&end))return;
-    // 一行解码后复用到对应的显示行，不增加堆分配或常驻缓存。
-    // Reuse each decoded row for its display rows without heap allocations or a persistent cache.
+    weather_bg_reader_t reader;
+    if(!background_open(&reader,cursor,end))return;
+    // 逐行解压并复用到对应的显示行，临时解压状态放 PSRAM、绘完即释，不增加常驻缓存。
+    // Stream one row at a time with temporary PSRAM inflate state freed on exit; no persistent cache.
     uint8_t row[WEATHER_BACKGROUND_ROW_BYTES];
     int source_y=-1;
     for(int y=0;y<region.height;++y){
         int sy=y*WEATHER_HEIGHT/region.height;
-        while(source_y<sy){if(!background_row(&cursor,end,row))return;++source_y;}
+        while(source_y<sy){if(!background_row(&reader,row)){background_close(&reader);return;}++source_y;}
         for(int x=0;x<region.width;++x){
             int sx=x*WEATHER_WIDTH/region.width;
             if(row[sx/8]&(1u<<(sx%8)))
                 epd_draw_pixel(region.x+x,region.y+y,WEATHER_BACKGROUND_INK,f);
         }
     }
+    background_close(&reader);
 }
 
 static void solar_event(uint8_t *f,int cx,int cy,bool rising){

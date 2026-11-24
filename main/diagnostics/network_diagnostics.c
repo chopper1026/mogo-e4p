@@ -32,8 +32,10 @@ static void http_peer(esp_http_client_handle_t client, char peer[48]) {
     if (fd < 0 || getpeername(fd, (struct sockaddr *)&address, &size)) return;
     if (address.ss_family == AF_INET)
         (void)inet_ntop(AF_INET, &((struct sockaddr_in *)&address)->sin_addr, peer, 48);
+#if defined(AF_INET6) && (!defined(ESP_PLATFORM) || defined(CONFIG_LWIP_IPV6))
     else if (address.ss_family == AF_INET6)
         (void)inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&address)->sin6_addr, peer, 48);
+#endif
 }
 
 static void dns_text(esp_netif_t *netif, esp_netif_dns_type_t type, char text[40]) {

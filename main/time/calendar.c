@@ -35,6 +35,21 @@ const char *calendar_term(int year,int month,int which,int *day) {
     if(day)*day=calendar_term_days[year-2000][i];
     return calendar_terms[i];
 }
+static const char *expand_tokens(const char *const *vocab,const uint16_t *offsets,
+                                 const uint8_t *tokens,unsigned index,char *dst,size_t cap) {
+    size_t used=0;
+    dst[0]=0;
+    for(unsigned at=offsets[index],end=offsets[index+1];at<end;++at){
+        const char *word=vocab[tokens[at]];
+        size_t len=strlen(word);
+        if(used&&used+1<cap)dst[used++]=' ';
+        if(used+len>=cap)break;
+        memcpy(dst+used,word,len);
+        used+=len;
+        dst[used]=0;
+    }
+    return dst;
+}
 bool calendar_date(int year,int month,int day,calendar_date_t *out) {
     if(!out)return false;
     memset(out,0,sizeof(*out));
@@ -47,12 +62,15 @@ bool calendar_date(int year,int month,int day,calendar_date_t *out) {
     int offset=serial-10957;
     unsigned a=0,b=COUNT(calendar_month_cycles);
     while(a+1<b){unsigned mid=(a+b)/2;if(calendar_month_cycles[mid].offset<=offset)a=mid;else b=mid;}
-    *out=(calendar_date_t){.year=year,.month=month,.day=day,.weekday=(serial+4)%7,.days=days_in_month(year,month),
-        .first_weekday=(civil_serial(year,month,1)+4)%7,.lunar_year=l->year,.lunar_month=l->month,
-        .lunar_day=serial-l->serial+1,.year_cycle=(l->year-4)%60,.month_cycle=calendar_month_cycles[a].cycle,
-        .day_cycle=(offset+54)%60};
+    out->year=year;out->month=month;out->day=day;out->weekday=(serial+4)%7;out->days=days_in_month(year,month);
+    out->first_weekday=(civil_serial(year,month,1)+4)%7;out->lunar_year=l->year;out->lunar_month=l->month;
+    out->lunar_day=serial-l->serial+1;out->year_cycle=(l->year-4)%60;out->month_cycle=calendar_month_cycles[a].cycle;
+    out->day_cycle=(offset+54)%60;
     unsigned pair=(unsigned)(out->month_cycle*60+out->day_cycle);
-    out->yi=calendar_yiji[calendar_yiji_pairs[pair][0]];out->ji=calendar_yiji[calendar_yiji_pairs[pair][1]];
+    out->yi=expand_tokens(calendar_yiji_vocab,calendar_yiji_offsets,calendar_yiji_tokens,
+                          calendar_yiji_pairs[pair][0],out->yi_buf,sizeof(out->yi_buf));
+    out->ji=expand_tokens(calendar_yiji_vocab,calendar_yiji_offsets,calendar_yiji_tokens,
+                          calendar_yiji_pairs[pair][1],out->ji_buf,sizeof(out->ji_buf));
     static const char *const wealth[]={"东北","东北","西南","西南","正北","正北","正东","正东","正南","正南"};
     static const char *const animals[]={"鼠","牛","虎","兔","龙","蛇","马","羊","猴","鸡","狗","猪"};
     static const char *const sha[]={"南","东","北","西"};
@@ -60,11 +78,13 @@ bool calendar_date(int year,int month,int day,calendar_date_t *out) {
     unsigned spirit=(unsigned)(out->month_cycle%12*60+out->day_cycle);
     unsigned role=(unsigned)(out->month_cycle%12*12+out->day_cycle%12);
     out->joy=calendar_joy[out->day_cycle%10];out->fortune=calendar_fortune[out->day_cycle%10];
-    out->auspicious=calendar_folk[calendar_spirit_pairs[spirit][0]];
-    out->inauspicious=calendar_folk[calendar_spirit_pairs[spirit][1]];
-    out->officer=calendar_folk[calendar_day_roles[role][0]];
-    out->guardian=calendar_folk[calendar_day_roles[role][1]];
-    out->guardian_type=calendar_folk[calendar_day_roles[role][2]];
+    out->auspicious=expand_tokens(calendar_folk_vocab,calendar_folk_offsets,calendar_folk_tokens,
+                                  calendar_spirit_pairs[spirit][0],out->auspicious_buf,sizeof(out->auspicious_buf));
+    out->inauspicious=expand_tokens(calendar_folk_vocab,calendar_folk_offsets,calendar_folk_tokens,
+                                    calendar_spirit_pairs[spirit][1],out->inauspicious_buf,sizeof(out->inauspicious_buf));
+    out->officer=calendar_folk_vocab[calendar_day_roles[role][0]];
+    out->guardian=calendar_folk_vocab[calendar_day_roles[role][1]];
+    out->guardian_type=calendar_folk_vocab[calendar_day_roles[role][2]];
     return true;
 }
 bool calendar_from_utc(int64_t ms,calendar_date_t *out) {

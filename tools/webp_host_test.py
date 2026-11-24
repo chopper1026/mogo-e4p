@@ -64,6 +64,7 @@ def main():
             extra = []
             if vendor in source.parents:
                 extra = ["-DHAVE_CONFIG_H", "-DWEBP_MAX_ALLOCABLE_MEMORY=8388608",
+                         "-DWEBP_REDUCE_CSP",
                          "-include", str(ROOT / "components/webp_decoder/webp_alloc.h")]
             elif source.name == "JPEGDEC.cpp":
                 extra = ["-fno-sanitize=alignment,shift"]

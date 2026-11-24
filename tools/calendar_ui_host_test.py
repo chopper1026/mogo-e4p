@@ -105,18 +105,22 @@ int main(int argc,char **argv){
         assert(calendar_date(y,m,1,&d));
         for(int edge=0;edge<2;++edge){if(edge)assert(calendar_date(y,m,d.days,&d));render_face(fb,&d,false);render_face(fb,&d,true);}
     }
-    for(unsigned i=0;i<sizeof(calendar_yiji)/sizeof(calendar_yiji[0]);++i){
-        assert(ui_font_has_text(calendar_yiji[i]));
-        d.yi=d.ji=calendar_yiji[i];calendar_box_count=0;check_almanac=true;
+    for(unsigned i=0;i<COUNT(calendar_yiji_offsets)-1;++i){
+        const char *text=expand_tokens(calendar_yiji_vocab,calendar_yiji_offsets,calendar_yiji_tokens,i,d.yi_buf,sizeof(d.yi_buf));
+        assert(ui_font_has_text(text));
+        d.yi=d.ji=text;calendar_box_count=0;check_almanac=true;
         almanac_activities(fb,&d);check_almanac=false;
     }
     // 全部720组神煞列表保留固定字号并限制在两行内。/ All 720 spirit pairs stay within two rows at the fixed text size.
     for(unsigned i=0;i<720;++i){
         assert(calendar_date(2026,11,10,&d));
-        d.auspicious=calendar_folk[calendar_spirit_pairs[i][0]];d.inauspicious=calendar_folk[calendar_spirit_pairs[i][1]];
+        d.auspicious=expand_tokens(calendar_folk_vocab,calendar_folk_offsets,calendar_folk_tokens,
+                                   calendar_spirit_pairs[i][0],d.auspicious_buf,sizeof(d.auspicious_buf));
+        d.inauspicious=expand_tokens(calendar_folk_vocab,calendar_folk_offsets,calendar_folk_tokens,
+                                     calendar_spirit_pairs[i][1],d.inauspicious_buf,sizeof(d.inauspicious_buf));
         render_face(fb,&d,false);
     }
-    for(unsigned i=0;i<sizeof(calendar_folk)/sizeof(calendar_folk[0]);++i)assert(ui_font_has_text(calendar_folk[i]));
+    for(unsigned i=0;i<COUNT(calendar_folk_vocab);++i)assert(ui_font_has_text(calendar_folk_vocab[i]));
     free(fb);ttf_font_unload();puts("PASS: almanac without month grid, three god directions, 720 spirit pairs, no text overlap, 72 edge dates, native glyphs/bounds, monthly grid and clock/cache behavior; ASan/UBSan");
 }
 '''

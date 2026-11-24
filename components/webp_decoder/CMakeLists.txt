@@ -11,6 +11,6 @@ idf_component_register(SRCS ${webp_sources}
     PRIV_INCLUDE_DIRS "libwebp" "include"
     PRIV_REQUIRES heap pthread)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    HAVE_CONFIG_H WEBP_MAX_ALLOCABLE_MEMORY=8388608)
+    HAVE_CONFIG_H WEBP_MAX_ALLOCABLE_MEMORY=8388608 WEBP_REDUCE_CSP)
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -include "${CMAKE_CURRENT_LIST_DIR}/webp_alloc.h")

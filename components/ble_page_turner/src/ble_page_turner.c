@@ -174,7 +174,7 @@ static char s_failure[128];
 // the start-failure text.
 static uint32_t s_retry_after_ms;
 static uint32_t s_stable_since;
-static char s_start_failure[160];
+static char s_start_failure[192];
 // 自动重连：链路曾经建立过才记这里；用户主动断开时清空，免得"关掉"之后又被自己连回来。
 // Auto-reconnect: recorded once a link has been up. Cleared on an explicit disconnect, so
 // switching it off is not immediately undone by the retry.

@@ -302,3 +302,19 @@ include("${CMAKE_CURRENT_LIST_DIR}/power/s31_sleep_compat.cmake")
 if("$ENV{KIIKO_DISABLE_HW_JPEG}" STREQUAL "1")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE BOOK_JPEG_HW_FORCE_SOFTWARE=1)
 endif()
+
+# 全局使用 -Os 控制应用分区体积；核心绘制、排版、字形光栅化与图像解码保留 -O2。
+# Global builds use -Os to preserve OTA headroom; keep -O2 on hot render, layout, font and decode paths.
+set_source_files_properties(
+    "display/display.c"
+    "display/display_normalize.c"
+    "display/display_static_black.c"
+    "ui/ui_image_dither.c"
+    "font/ttf_font.c"
+    "font/ttf_glyph_cache.c"
+    "font/ui_font.c"
+    "book/book_layout.c"
+    "image/image_decode.c"
+    "image/image_webp.c"
+    PROPERTIES COMPILE_OPTIONS "-O2"
+)

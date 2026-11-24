@@ -94,6 +94,7 @@ unit += """
 #include "weather_service.h"
 #include "ui_weather.h"
 #include "esp_heap_caps.h"
+#include "zlib.h"
 #include <math.h>
 uint8_t ui_read_pixel(const uint8_t *,int,int);
 static uint8_t ui_control_gray(uint8_t g){return g<0x80?0:g>=0xf0?255:0x90;}
@@ -189,26 +190,35 @@ static void outside(const uint8_t *f,const uint8_t *before,EpdRect region){
 static void packed_backgrounds(uint8_t *f,uint8_t *reference){
     const uint8_t *data=weather_backgrounds_packed,*cursor,*end;
     size_t size=(size_t)(weather_backgrounds_end-data);
-    assert(size<90*1024);
+    assert(size<30*1024);
     uint8_t row[77];
     for(int scene=WEATHER_SCENE_SUN;scene<WEATHER_SCENE_COUNT;++scene){
         const uint8_t *raw=weather_backgrounds_asset+(scene-WEATHER_SCENE_SUN)*77*448;
         assert(background_scene(data,size,(weather_scene_t)scene,&cursor,&end));
+        weather_bg_reader_t reader;
+        size_t before=live;
+        assert(background_open(&reader,cursor,end));
         for(unsigned y=0;y<448;++y){
-            const uint8_t *start=cursor;
-            assert(background_row(&cursor,end,row));
+            assert(background_row(&reader,row));
             assert(!memcmp(row,raw+y*77,77));
-            for(const uint8_t *truncated=start;truncated<cursor;++truncated){
-                const uint8_t *attempt=start;
-                assert(!background_row(&attempt,truncated,row));
-            }
         }
-        assert(cursor==end);
+        assert(background_finish(&reader));
+        background_close(&reader);
+        assert(live==before);
+        // 截断或损坏的 zlib 流必须拒绝且不泄漏临时缓冲。/ Truncated or corrupted zlib streams must fail cleanly without leaks.
+        for(size_t cut=0;cut<(size_t)(end-cursor);cut+=((size_t)(end-cursor)/16u)+1u){
+            weather_bg_reader_t broken;
+            bool ok=background_open(&broken,cursor,cursor+cut);
+            for(unsigned y=0;ok&&y<448;++y)ok=background_row(&broken,row);
+            if(ok)ok=background_finish(&broken);
+            background_close(&broken);
+            assert(!ok&&live==before);
+        }
         for(int rotation=0;rotation<2;++rotation)for(int slot=0;slot<3;++slot){
             display_rotation=rotation?EPD_ROT_INVERTED_PORTRAIT:EPD_ROT_PORTRAIT;
             EpdRect region={0,slot==0?168:slot==1?640:236,684,472};
             memset(f,0x99,684*1216/2);memset(reference,0x99,684*1216/2);
-            size_t before=live;
+            before=live;
             draw_background(f,region,(weather_scene_t)scene);
             assert(live==before);
             for(int y=0;y<region.height;++y)for(int x=0;x<region.width;++x){
@@ -231,8 +241,11 @@ static void packed_backgrounds(uint8_t *f,uint8_t *reference){
     assert(!background_scene(bad,size,WEATHER_SCENE_SUN,&cursor,&end));
     memcpy(bad,data,size);memset(bad+16,255,4);
     assert(!background_scene(bad,size,WEATHER_SCENE_SUN,&cursor,&end));
-    const uint8_t overflows[]={127,255,0};
-    for(unsigned i=0;i<2;++i){cursor=overflows+i;assert(!background_row(&cursor,overflows+3,row));}
+    const uint8_t garbage[]={0x78,0x9c,0xff,0xff,0x00};
+    weather_bg_reader_t invalid;
+    assert(background_open(&invalid,garbage,garbage+sizeof(garbage)));
+    assert(!background_row(&invalid,row));
+    background_close(&invalid);
     free(bad);
 }
 static void perimeter(const uint8_t *f,EpdRect region,int code){
@@ -380,7 +393,7 @@ with tempfile.TemporaryDirectory(prefix="weather-raster-") as directory:
         ROOT / "main/font/ttf_font_source.c", ROOT / "main/font/ttf_block_cache.c",
         ROOT / "main/font/ttf_glyph_cache.c", ROOT / "main/services/weather_model.c",
         ROOT / "managed_components/espressif__cjson/cJSON/cJSON.c"]
-    subprocess.run(flags + list(map(str, sources)) + ["-Wl,-dead_strip", "-lm", "-o", str(work / "test")], check=True)
+    subprocess.run(flags + list(map(str, sources)) + ["-Wl,-dead_strip", "-lz", "-lm", "-o", str(work / "test")], check=True)
     command = [str(work / "test"), str(ROOT / "main/assets/builtin.ttf")]
     if args.output_dir:
         args.output_dir = args.output_dir.resolve()

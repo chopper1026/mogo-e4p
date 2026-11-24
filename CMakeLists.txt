@@ -41,6 +41,11 @@ if(app_desc_launcher)
 endif()
 set_property(TARGET ${app_desc_lib} PROPERTY C_COMPILER_LAUNCHER "${app_desc_utc_launcher}")
 
+# 墨水屏底层像素输出保持 -O2，不修改上游 epdiy 源码。
+# Keep the panel driver hot path at -O2 without modifying upstream epdiy sources.
+idf_component_get_property(epdiy_lib epdiy COMPONENT_LIB)
+target_compile_options(${epdiy_lib} PRIVATE -O2)
+
 # panic 包装器的链接选项在 main/CMakeLists.txt 里挂到 main 组件上：写在 project() 之后
 # 用 idf_build_set_property 设全局链接选项已经太晚，链接器看不到 --wrap。
 # The panic wrapper's link option hangs off the main component in main/CMakeLists.txt: setting a

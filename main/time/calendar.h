@@ -13,6 +13,8 @@ typedef struct {
     const char *yi, *ji, *wealth, *clash, *sha;
     /// 日粒度民俗方位、神煞与建除，沿用固定源的默认流派。/ Civil-day folk directions, spirits and officer using the pinned source's default school.
     const char *joy, *fortune, *auspicious, *inauspicious, *officer, *guardian, *guardian_type;
+    /// 词表展开后的宜忌与神煞缓冲，由 yi/ji/auspicious/inauspicious 指向。/ Expanded token buffers backing yi, ji, auspicious and inauspicious.
+    char yi_buf[240], ji_buf[240], auspicious_buf[112], inauspicious_buf[112];
 } calendar_date_t;
 /// 输入北京时间的公历日期；非法日期返回false并清空输出。/ Accept a Beijing civil date; clear output and return false for invalid dates.
 bool calendar_date(int year, int month, int day, calendar_date_t *out);

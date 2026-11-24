@@ -7,46 +7,20 @@ import struct
 import zlib
 
 
-def pack_weather_row(row):
-    """Pack 1–128 literals or repeats per command, without crossing a row."""
-    packed = bytearray()
-    position = 0
-    while position < len(row):
-        count = 1
-        while position + count < len(row) and row[position + count] == row[position] and count < 128:
-            count += 1
-        if count >= 3:
-            packed.extend((0x80 | (count - 1), row[position]))
-            position += count
-            continue
-        start = position
-        position += count
-        while position < len(row) and position - start < 128:
-            count = 1
-            while position + count < len(row) and row[position + count] == row[position] and count < 128:
-                count += 1
-            if count >= 3:
-                break
-            position += min(count, 128 - (position - start))
-        packed.append(position - start - 1)
-        packed.extend(row[start:position])
-    return bytes(packed)
-
-
 def pack_weather(raw):
-    """WBR1: geometry, ten absolute scene offsets, then independently packed rows."""
+    """WBZ1: geometry, ten absolute scene offsets, then independently zlib-packed scenes."""
     width, height, scenes, stride = 612, 448, 9, 77
-    if len(raw) != scenes * height * stride:
+    scene_bytes = height * stride
+    if len(raw) != scenes * scene_bytes:
         raise ValueError("weather_backgrounds: expected nine 612 x 448 1bpp masks")
     header_size = 12 + (scenes + 1) * 4
     data, offsets = bytearray(), []
     for scene in range(scenes):
         offsets.append(header_size + len(data))
-        for y in range(height):
-            start = (scene * height + y) * stride
-            data.extend(pack_weather_row(raw[start:start + stride]))
+        start = scene * scene_bytes
+        data.extend(zlib.compress(raw[start:start + scene_bytes], level=9))
     offsets.append(header_size + len(data))
-    return struct.pack("<4s4H10I", b"WBR1", width, height, scenes, stride, *offsets) + data
+    return struct.pack("<4s4H10I", b"WBZ1", width, height, scenes, stride, *offsets) + data
 
 
 def main():
