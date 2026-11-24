@@ -93,7 +93,7 @@ static const char *name_of(const book_shelf_categories_t *c, uint32_t id) {
 }
 static bool book_matches(const book_category_ui_t *ui, int i) {
     const book_shelf_entry_t *b = &ui->books[i];
-    if (b->removed) return false;
+    if (b->removed || b->category_id==BOOK_FOLDER_EXTERNAL) return false;
     if (ui->review) return b->selected;
     return (ui->selecting_only || b->category_id != ui->destination) &&
            (ui->filter == BOOK_COLLECTION_ALL || ui->filter == b->category_id) && book_search_match(b->name, ui->query);
@@ -126,19 +126,23 @@ void book_category_ui_suspend(book_category_ui_t *ui) {
 bool book_category_ui_back(book_category_ui_t *ui) {
     if (ui->command != CATEGORY_IDLE) return false;
     if (ui->screen == CATEGORY_EDIT) { ui_keyboard_end(); ui->screen = ui->edit_parent; }
+    else if (ui->screen == CATEGORY_PREVIEW) { ui->screen=ui->preview_parent;ui->page=ui->preview_parent_page;
+        if(ui->screen==CATEGORY_EDIT)ui_keyboard_begin(&ui->input,false);
+        ui->conflict_preview=false;ui->preview=NULL; }
     else if (ui->screen == CATEGORY_BOOK_INFO) ui->screen = CATEGORY_BOOKS;
     else if (ui->screen == CATEGORY_FILTER) { ui->screen = CATEGORY_BOOKS; ui->page = ui->book_page; }
     else if (ui->screen == CATEGORY_BOOKS) {
         if (ui->review && !ui->selecting_only) { ui->review = false; ui->page = 0; }
         else return true;
-    } else if (ui->screen == CATEGORY_CONFIRM || ui->screen == CATEGORY_ORDER) ui->screen = CATEGORY_ACTIONS;
+    } else if (ui->screen == CATEGORY_ORDER) ui->screen = CATEGORY_ACTIONS;
     else if (ui->screen == CATEGORY_ACTIONS) ui->screen = CATEGORY_LIST;
     else return true;
     ui->notice[0] = 0; return false;
 }
 void book_category_ui_edit(book_category_ui_t *ui, const book_shelf_categories_t *c, bool rename) {
     ui->edit_parent = ui->screen; ui->renaming = rename;
-    copy(ui->draft, sizeof(ui->draft), rename ? name_of(c, ui->source) : "");
+    const char *original=rename?name_of(c,ui->source):"";
+    copy(ui->draft,sizeof(ui->draft),strlen(original)<sizeof(ui->draft)?original:"");
     ui_text_edit_init(&ui->input, ui->draft, sizeof(ui->draft));
     ui_keyboard_begin(&ui->input, false); ui->screen = CATEGORY_EDIT; ui->notice[0] = 0;
 }
@@ -151,7 +155,8 @@ void book_category_ui_books(book_category_ui_t *ui, uint32_t target, bool select
 static void submit(book_category_ui_t *ui) {
     char clean[BOOK_COLLECTION_NAME_BYTES];
     if (ui_keyboard_pending()) { copy(ui->notice, sizeof(ui->notice), "请先选择候选字"); return; }
-    if (!book_collection_name(ui->draft, clean)) { copy(ui->notice, sizeof(ui->notice), "名称须为1至24字，且不能重复系统分类"); return; }
+    if (!book_collection_name(ui->draft, clean) || !book_category_name_valid(clean)) { copy(ui->notice, sizeof(ui->notice), "名称须为1至24字，且不能重复系统分类"); return; }
+    copy(ui->draft,sizeof(ui->draft),clean);
     ui->command = ui->renaming ? CATEGORY_RENAME : CATEGORY_CREATE;
 }
 static void pager(uint8_t *fb, int page, int count, int y) {
@@ -206,6 +211,23 @@ static void draw_books(const book_category_ui_t *ui, const book_shelf_categories
 }
 void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_categories_t *c, uint8_t *fb) {
     ui_clear_page(fb); ui_nav_status(fb); ui_nav_back(fb, 36, 79);
+    if (ui->screen==CATEGORY_PREVIEW && ui->preview) {
+        const book_folder_plan_t *p=ui->preview;
+        const char *labels[]={"新建文件夹","沿用文件夹","移动原书","删除空文件夹","保留原位","跳过：不参与迁移","冲突：不会执行"};
+        text(fb,(EpdRect){112,79,448,65},32,ui->conflict_preview?"整理冲突":ui->migrating?"旧分类迁移预览":"删除分类预览",true);
+        char summary[110]; snprintf(summary,sizeof(summary),"移动 %u 本 · %s",(unsigned)p->moves,p->error?"预检未通过":"未写入");
+        text(fb,(EpdRect){32,166,620,64},26,summary,true);
+        if (p->count && (size_t)ui->page<p->count) {
+            const book_folder_item_t *r=&p->items[ui->page];
+            text(fb,(EpdRect){32,248,620,64},28,labels[r->action],true);
+            full_text(fb,(EpdRect){36,322,612,200},26,r->from);
+            full_text(fb,(EpdRect){36,545,612,205},26,r->to);
+        }
+        text(fb,(EpdRect){32,758,620,64},22,ui->notice,false);
+        button(fb,(EpdRect){36,850,274,82},"返回");
+        if(!p->error)button(fb,(EpdRect){338,850,310,82},ui->migrating?"确认迁移":"移回并删除");
+        pager(fb,ui->page,p->count?(int)p->count:1,982);return;
+    }
     if (ui->screen == CATEGORY_BOOKS) { draw_books(ui, c, fb); return; }
     if (ui->screen == CATEGORY_BOOK_INFO) {
         text(fb, (EpdRect){116, 79, 446, 60}, 34, "图书信息", true);
@@ -216,7 +238,7 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
         return;
     }
     const char *title = ui->screen == CATEGORY_EDIT ? (ui->renaming ? "修改分类" : "新增分类") :
-        ui->screen == CATEGORY_ACTIONS ? "分类操作" : ui->screen == CATEGORY_CONFIRM ? "删除分类" :
+        ui->screen == CATEGORY_ACTIONS ? "分类操作" :
         ui->screen == CATEGORY_ORDER ? "调整顺序" : ui->screen == CATEGORY_FILTER ? "筛选分类" :
         ui->screen == CATEGORY_SELECTED_ACTIONS ? "已选操作" : ui->picker ? "归入分类" : "管理分类";
     text(fb, (EpdRect){116, 79, 446, 60}, 34, title, true);
@@ -234,7 +256,7 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
         text(fb, (EpdRect){36, 220, 612, 56}, 28, "分类名称", false);
         ui_text_input_draw(fb, &ui->input, field(), 30, false, NULL); ui_keyboard_draw(fb, 560); return;
     }
-    if (ui->screen == CATEGORY_ACTIONS || ui->screen == CATEGORY_CONFIRM || ui->screen == CATEGORY_ORDER) {
+    if (ui->screen == CATEGORY_ACTIONS || ui->screen == CATEGORY_ORDER) {
         text(fb, (EpdRect){36, 222, 612, 76}, 34, name_of(c, ui->source), true);
         if (ui->screen == CATEGORY_ACTIONS) {
             const char *labels[] = {"添加图书", "修改名称", "调整顺序", "删除分类"};
@@ -244,11 +266,6 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
             ui_draw_icon(fb, 342, 572, 46, UI_ICON_CHEVRON_DOWN, 0);
             char position[64]; snprintf(position, sizeof(position), "%d / %d", book_shelf_categories_index(c, ui->source) - 1, book_shelf_categories_available(c) - 2);
             text(fb, (EpdRect){36, 672, 612, 72}, 28, position, true);
-        } else {
-            char count[80]; snprintf(count, sizeof(count), "其中 %d 本书将变为未分类", book_shelf_categories_count(c, book_shelf_categories_index(c, ui->source)));
-            command_text(fb, (EpdRect){36, 352, 612, 80}, 28, count, true);
-            command_text(fb, (EpdRect){36, 458, 612, 72}, 26, "原文件与阅读记录不变", true);
-            button(fb, (EpdRect){36, 650, 278, 80}, "取消"); button(fb, (EpdRect){338, 650, 310, 80}, "删除分类");
         }
         return;
     }
@@ -267,6 +284,8 @@ void book_category_ui_draw(const book_category_ui_t *ui, const book_shelf_catego
     if (!ui->picker && ui->screen == CATEGORY_LIST && book_shelf_categories_available(c) == 2)
         text(fb, (EpdRect){36, 420, 612, 100}, 28, "暂无分类", true);
     pager(fb, ui->page, pages(ui, c), 982);
+    if(ui->migration_available && !ui->picker && ui->screen==CATEGORY_LIST)
+        button(fb,(EpdRect){168,1050,348,66},"迁移旧分类");
 }
 ui_keyboard_update_t book_category_ui_input_paint(book_category_ui_t *ui, uint8_t *fb) {
     (void)ui; return ui_keyboard_update(fb, 560, field(), 30, false, NULL, true);
@@ -307,12 +326,25 @@ int book_category_ui_gesture(book_category_ui_t *ui, const book_shelf_categories
         }
         return 0;
     }
+    if (ui->screen==CATEGORY_PREVIEW) {
+        if(ev->type==UI_GESTURE_TAP && ui_rect_hit((EpdRect){36,850,274,82},ev->x0,ev->y0)){book_category_ui_back(ui);return 1;}
+        if(!ui->preview)return 0;
+        if(ev->type==UI_GESTURE_TAP && !ui->preview->error && ui_rect_hit((EpdRect){338,850,310,82},ev->x0,ev->y0)) {
+            ui->command=ui->migrating?CATEGORY_MIGRATE:CATEGORY_REMOVE;return 1;
+        }
+        int d=ev->type==UI_GESTURE_SWIPE_U?1:ev->type==UI_GESTURE_SWIPE_D?-1:0;
+        if(ev->type==UI_GESTURE_TAP && ev->y0>=982 && ev->y0<1040)d=ev->x0<180?-1:ev->x0>504?1:0;
+        if(d && ui->page+d>=0 && (size_t)(ui->page+d)<ui->preview->count){ui->page+=d;return 1;}
+        return 0;
+    }
+    if(ui->screen==CATEGORY_LIST && !ui->picker && ui->migration_available && ev->type==UI_GESTURE_TAP &&
+       ui_rect_hit((EpdRect){168,1050,348,66},ev->x0,ev->y0)){ui->command=CATEGORY_PREVIEW_MIGRATE;return 1;}
     if (ui->screen == CATEGORY_ACTIONS && ev->type == UI_GESTURE_TAP) {
         for (int i = 0; i < 4; ++i) if (ui_rect_hit((EpdRect){36,332+i*112,612,88},ev->x0,ev->y0)) {
             if (!i) { ui->destination = ui->source; ui->command = CATEGORY_ADD; }
             if (i == 1) book_category_ui_edit(ui,c,true);
             if (i == 2) ui->screen = CATEGORY_ORDER;
-            if (i == 3) ui->screen = CATEGORY_CONFIRM;
+            if (i == 3) ui->command = CATEGORY_PREVIEW_DELETE;
             return 1;
         }
     }
@@ -320,10 +352,6 @@ int book_category_ui_gesture(book_category_ui_t *ui, const book_shelf_categories
         if (ui_rect_hit((EpdRect){180,350,324,120},ev->x0,ev->y0)) ui->command = CATEGORY_UP;
         if (ui_rect_hit((EpdRect){180,510,324,120},ev->x0,ev->y0)) ui->command = CATEGORY_DOWN;
         return ui->command != CATEGORY_IDLE;
-    }
-    if (ui->screen == CATEGORY_CONFIRM && ev->type == UI_GESTURE_TAP) {
-        if (ui_rect_hit((EpdRect){36,650,278,80},ev->x0,ev->y0)) { ui->screen = CATEGORY_ACTIONS; return 1; }
-        if (ui_rect_hit((EpdRect){338,650,310,80},ev->x0,ev->y0)) { ui->command = CATEGORY_REMOVE; return 1; }
     }
     if (ui->screen == CATEGORY_BOOKS) {
         int n = book_category_ui_book_count(ui), rows = book_category_ui_rows(true);

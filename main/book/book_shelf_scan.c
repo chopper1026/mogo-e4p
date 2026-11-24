@@ -15,6 +15,9 @@
 #include "esp_heap_caps.h"
 #include "book_file_path.h"
 #include "book_metadata.h"
+#ifdef ESP_PLATFORM
+#include "board_sd.h"
+#endif
 #include "book_progress.h"
 #include "book_title.h"
 #include "boot_state.h"
@@ -107,8 +110,15 @@ void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool i
         if (len < 0 || (size_t)len >= sizeof(path)) { *skipped = true; continue; }
         struct stat st;
         if (stat(path, &st) != 0) { *unreadable = true; continue; }
+#ifdef ESP_PLATFORM
+        if (!is_flash && !strcmp(root, app_settings_books_dir())) {
+            bool hidden_entry = false;
+            if (board_sd_path_hidden(path, &hidden_entry) != ESP_OK) { *unreadable = true; continue; }
+            if (hidden_entry) continue;
+        }
+#endif
         if (S_ISDIR(st.st_mode)) {
-            if (scan->category_add && !is_flash && depth == 0 && !strcmp(root, app_settings_books_dir())) scan->category_add(path);
+            if (scan->category_add && !is_flash && depth == 0 && !strcmp(root, app_settings_books_dir()) && scan->category_add(path)<0) *skipped=true;
             if (depth == BOOK_SCAN_DEPTH_LIMIT) { *skipped = true; continue; }
             DIR *child = opendir(path);
             if (!child) { *unreadable = true; continue; }

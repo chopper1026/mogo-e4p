@@ -1688,7 +1688,7 @@ static bool shelf_category_key(const char *library, char key[12]) {
     uint32_t hash = UINT32_C(2166136261);
     for (const unsigned char *p = (const unsigned char *)library; *p; ++p)
         hash = (hash ^ *p) * UINT32_C(16777619);
-    snprintf(key, 12, "sc_%08lx", (unsigned long)hash);
+    snprintf(key, 12, "fd_%08lx", (unsigned long)hash);
     return true;
 }
 static bool shelf_category_read(const char *library, const char *key, uint32_t *category) {
@@ -2218,7 +2218,9 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // k adds v46 shutdown config; l extends v47 ticket/calendar options in the framing byte, excluding pixels.
     // m追加可迁移的偏好、天气和全量WiFi块；n在既有字段内记录书籍封面样式。
     // m appends portable preferences, weather and WiFi; n records the book-cover style in existing fields.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : 0;
+    // o 仅保存目录显示偏好；旧版逻辑归属不得写进目录偏好副本。
+    // o stores only folder preferences; never import legacy assignments into a folder snapshot.
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : 0;
 }
 
 typedef struct { char encoded[OFF_CONFIG_BYTES]; uint8_t checksum[4]; } settings_backup_off_art_t;
@@ -2412,11 +2414,8 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v40：主样式增加时钟5，沿用v39尾块布局。/ V40 accepts clock style 5 with the v39 tail layout.
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
-    // v49 保留新增书架或封面样式编号，字段布局不变。/ V49 preserves the extended shelf or cover IDs without changing the field layout.
-    const bool extended_format = s_shelf_style == APP_SHELF_STYLE_NOTEPAD ||
-                                 s_lock_style == APP_LOCK_STYLE_BOOK_COVER || s_off_art.style == APP_OFF_BOOK_COVER ||
-                                 s_lock_cover_crop || s_off_art.cover_crop;
-    memcpy(backup.magic, portable_format ? (extended_format ? "PICOSETn" : "PICOSETm") : "PICOSETl", sizeof(backup.magic));
+    // v50 仅备份目录显示偏好，不恢复书籍文件布局。/ V50 backs up folder preferences, never file placement.
+    memcpy(backup.magic, portable_format ? "PICOSETo" : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2643,7 +2642,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     }
     if (ok && portable_format) ok = book_store_prepare_data() == ESP_OK &&
         app_reading_journal_backup_write(file) == ESP_OK &&
-        book_collection_backup_write(file, card.identity) == ESP_OK;
+        book_folder_backup_write(file, card.identity) == ESP_OK;
     if (ok) ok = book_history_backup_write(file, s_backup_bad_bookmark, sizeof(s_backup_bad_bookmark)) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
     if (ok) ok = fsync(fileno(file)) == 0;
@@ -2888,7 +2887,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 48) {
         user_data_position = ftell(file);
         ok = user_data_position >= 0 && app_reading_journal_backup_read(file, false) == ESP_OK &&
-            book_collection_backup_read(file, card.identity, false) == ESP_OK;
+            (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, false) == ESP_OK;
     }
     if (version < 39) tap.mode = (profile.home_full_refresh & 32) ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
@@ -3206,14 +3205,14 @@ esp_err_t app_settings_backup_restore(void) {
             if (version >= 48) {
                 result = fseek(file, user_data_position, SEEK_SET) == 0
                     ? app_reading_journal_backup_read(file, true) : ESP_FAIL;
-                if (result == ESP_OK) result = book_collection_backup_read(file, card.identity, true);
+                if (result == ESP_OK) result = (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, true);
             }
             if (result == ESP_OK) result = fseek(file, history_position, SEEK_SET) == 0
                 ? book_history_backup_restore(file) : ESP_FAIL;
             if (fclose(file) != 0 && result == ESP_OK) result = ESP_FAIL;
         }
     }
-    if (result == ESP_OK && version >= 48) {
+    if (result == ESP_OK && version >= 50) {
         for (unsigned library = 0; library < 2; ++library) {
             if (library && (!card.identity[0] || strcmp(portable.card_identity, card.identity))) continue;
             uint32_t selected = 0;

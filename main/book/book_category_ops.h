@@ -5,13 +5,14 @@
 #include "book_store.h"
 #include <stdbool.h>
 
-#define BOOK_CATEGORY_NAME_MAX 80
+#define BOOK_CATEGORY_NAME_MAX 96
 typedef struct { unsigned moved, total; bool removed; } book_category_result_t;
 bool book_category_name_valid(const char *name);
 bool book_category_pending(const char *root);
 esp_err_t book_category_plan_move(const char *root, const char *source, const char *destination,
                                   char target[BOOK_STORE_PATH_MAX]);
 esp_err_t book_category_create(const char *root, const char *name, char out[BOOK_STORE_PATH_MAX]);
+esp_err_t book_category_check_rename(const char *root,const char *source,const char *name,book_path_state_extra_fn check);
 esp_err_t book_category_rename(const char *root, const char *source, const char *name, book_path_state_extra_fn extra);
 esp_err_t book_category_move(const char *root, const char *source, const char *destination, book_path_state_extra_fn extra);
 /// 先检查全部直接文件；有子目录或非书籍内容时拒绝，不开始转移。

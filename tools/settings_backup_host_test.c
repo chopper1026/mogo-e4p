@@ -137,6 +137,8 @@ esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool appl
     return fgetc(file) == 'C' ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
+esp_err_t book_folder_backup_write(FILE *file,const char *id){return book_collection_backup_write(file,id);}
+esp_err_t book_folder_backup_read(FILE *file,const char *id,bool apply){return book_collection_backup_read(file,id,apply);}
 static unsigned history_saves, history_restores;
 esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
     (void)bad_slot; (void)cap;
@@ -301,7 +303,7 @@ esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size) {
     return ESP_ERR_NVS_NOT_FOUND;
 }
 esp_err_t nvs_set_blob(nvs_handle_t h,const char *key,const void *data,size_t size) {
-    (void)h;assert(flash_depth && size==44 && strlen(key)==11 && !strncmp(key,"sc_",3));
+    (void)h;assert(flash_depth && size==44 && strlen(key)==11 && !strncmp(key,"fd_",3));
     if (shelf_write_fails) return ESP_FAIL;
     int slot=-1;
     for (int i=0;i<4;++i) if (!strcmp(shelf_preferences[i].key,key)) slot=i;
@@ -1891,7 +1893,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETn",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
+    assert(!memcmp(header.magic,"PICOSETo",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
     app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
     assert(app_settings_shutdown_wallpaper()->style==APP_OFF_BOOK_COVER);
     off.style=APP_OFF_SYSTEM;
@@ -1924,7 +1926,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     file=fopen(BACKUP_FILE,"rb");
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETn",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
+    assert(!memcmp(header.magic,"PICOSETo",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
     off.cover_crop=0;
     assert(app_settings_set_shutdown_wallpaper(&off));
     assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));

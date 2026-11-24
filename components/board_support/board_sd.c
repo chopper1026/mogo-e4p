@@ -233,6 +233,20 @@ static void invalidate_mount_space(void) {
 #endif
 }
 
+esp_err_t board_sd_path_hidden(const char *path, bool *hidden) {
+    if (!path || !hidden || strncmp(path, SD_MOUNT_POINT "/", sizeof(SD_MOUNT_POINT))) return ESP_ERR_INVALID_ARG;
+    if (!card) return ESP_ERR_INVALID_STATE;
+    BYTE drive = ff_diskio_get_pdrv_card(card);
+    if (drive == 0xff) return ESP_ERR_INVALID_STATE;
+    char fat_path[320];
+    int n = snprintf(fat_path, sizeof(fat_path), "%u:%s", (unsigned)drive, path + sizeof(SD_MOUNT_POINT) - 1);
+    if (n < 0 || (size_t)n >= sizeof(fat_path)) return ESP_ERR_INVALID_ARG;
+    FILINFO entry;
+    if (f_stat(fat_path, &entry) != FR_OK) return ESP_FAIL;
+    *hidden = (entry.fattrib & (AM_HID | AM_SYS)) != 0;
+    return ESP_OK;
+}
+
 static void fill_info(board_sd_info_t* info, esp_err_t mount_err) {
     memset(info, 0, sizeof(*info));
     bool present = false;

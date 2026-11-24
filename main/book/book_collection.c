@@ -407,6 +407,46 @@ esp_err_t book_collection_order(book_collection_t *s,uint32_t id,int direction){
     book_collection_category_t item=next->categories[index];next->categories[index]=next->categories[other];next->categories[other]=item;
     return commit(s,next);
 }
+const char *book_collection_record(const book_collection_t *s, size_t i, uint32_t *category) {
+    if (!s || !s->data || i >= s->data->used || !category) return NULL;
+    *category = s->data->books[i].category;
+    return s->data->books[i].path;
+}
+esp_err_t book_collection_finish_migration(book_collection_t *s) {
+    if (!s || !s->ready || s->blocked) return ESP_ERR_INVALID_STATE;
+    book_collection_data_t *empty = clone(NULL);
+    return empty ? commit(s, empty) : ESP_ERR_NO_MEM;
+}
+esp_err_t book_collection_folders(book_collection_t *s, const char *const *names, size_t count,
+                                  const char *old, const char *replacement) {
+    if (!s || !s->ready || s->blocked || !s->data || s->data->used || count > BOOK_COLLECTION_CATEGORIES)
+        return ESP_ERR_INVALID_STATE;
+    bool same = count == (size_t)s->data->count && !old;
+    for (size_t i=0; same && i<count; ++i) same = book_collection_legacy_id(s,names[i]) != 0;
+    if (same) return ESP_OK;
+    book_collection_data_t *next = clone(NULL);
+    if (!next) return ESP_ERR_NO_MEM;
+    next->next_id = s->data->next_id;
+    bool matched[BOOK_COLLECTION_CATEGORIES] = {0};
+    for (int j=0; j<s->data->count; ++j) {
+        const book_collection_category_t *prev = &s->data->categories[j];
+        const char *want = old && !strcmp(prev->legacy_name,old) ? replacement : prev->legacy_name;
+        for (size_t i=0; i<count; ++i) if (!matched[i] && !strcmp(names[i],want)) {
+            book_collection_category_t *entry = &next->categories[next->count++];
+            *entry = *prev; strcpy(entry->legacy_name,names[i]); matched[i]=true; break;
+        }
+    }
+    for (size_t i=0; i<count; ++i) if (!matched[i]) {
+        if (!names[i][0] || strlen(names[i])>=BOOK_STORE_PATH_MAX || strchr(names[i],'/') || next->next_id>=UINT32_MAX-1) {
+            release(next); return ESP_ERR_INVALID_ARG;
+        }
+        book_collection_category_t *entry = &next->categories[next->count++];
+        entry->id = next->next_id++;
+        snprintf(entry->name,sizeof(entry->name),"F%lu",(unsigned long)entry->id);
+        strcpy(entry->legacy_name,names[i]);
+    }
+    return commit(s,next);
+}
 esp_err_t book_collection_export(const book_collection_t *s,FILE *file){
     if(!s || !s->ready || !file || s->blocked)return ESP_ERR_INVALID_STATE;
     size_t size=0;uint8_t *bytes=encode(s->data,s->generation?s->generation:1,&size);if(!bytes)return ESP_ERR_NO_MEM;
@@ -437,15 +477,15 @@ static bool collection_card_id_valid(const char *id) {
     return true;
 }
 
-static esp_err_t collection_backup_open(book_collection_t *state, const char *library) {
+static esp_err_t collection_backup_open(book_collection_t *state, const char *library, bool folders) {
     char prefix[BOOK_STORE_PATH_MAX];
-    int n = snprintf(prefix, sizeof(prefix), "%s/.mogo-shelf-%s", BOOK_COLLECTION_BACKUP_ROOT, library);
+    int n = snprintf(prefix, sizeof(prefix), "%s/.mogo-%s-%s", BOOK_COLLECTION_BACKUP_ROOT, folders ? "folders" : "shelf", library);
     return n > 0 && (size_t)n < sizeof(prefix) ? book_collection_open(state, prefix) : ESP_ERR_INVALID_ARG;
 }
 
-static esp_err_t collection_backup_write_one(FILE *file, const char *library) {
+static esp_err_t collection_backup_write_one(FILE *file, const char *library, bool folders) {
     book_collection_t state = {0};
-    esp_err_t err = collection_backup_open(&state, library);
+    esp_err_t err = collection_backup_open(&state, library, folders);
     if (err == ESP_OK) {
         if (fputc(state.generation != 0, file) == EOF) err = ESP_FAIL;
         else if (state.generation) err = book_collection_export(&state, file);
@@ -454,27 +494,28 @@ static esp_err_t collection_backup_write_one(FILE *file, const char *library) {
     return err;
 }
 
-esp_err_t book_collection_backup_write(FILE *file, const char *card_id) {
+static esp_err_t backup_write(FILE *file, const char *card_id, bool folders) {
     if (!file || !collection_card_id_valid(card_id)) return ESP_ERR_INVALID_ARG;
     uint8_t header[COLLECTION_CARD_ID_BYTES + 4] = {0};
     if (card_id) memcpy(header, card_id, strlen(card_id));
     put32(header + COLLECTION_CARD_ID_BYTES, checksum(header, COLLECTION_CARD_ID_BYTES));
     if (fwrite(header, 1, sizeof(header), file) != sizeof(header)) return ESP_FAIL;
-    esp_err_t err = collection_backup_write_one(file, "builtin");
-    if (err == ESP_OK && header[0]) err = collection_backup_write_one(file, card_id);
+    esp_err_t err = collection_backup_write_one(file, "builtin", folders);
+    if (err == ESP_OK && header[0]) err = collection_backup_write_one(file, card_id, folders);
     return err;
 }
 
-static esp_err_t collection_backup_read_one(FILE *file, const char *library, bool apply) {
+static esp_err_t collection_backup_read_one(FILE *file, const char *library, bool apply, bool folders) {
     int present = fgetc(file);
     if (present == 0) return ESP_OK;
     if (present != 1) return ESP_ERR_INVALID_RESPONSE;
     book_collection_data_t *next = NULL;
     uint32_t generation = 0;
     esp_err_t err = read_image(file, &next, &generation);
+    if (err == ESP_OK && folders && next->used) err = ESP_ERR_INVALID_RESPONSE;
     if (err == ESP_OK && apply) {
         book_collection_t state = {0};
-        err = collection_backup_open(&state, library);
+        err = collection_backup_open(&state, library, folders);
         if (err == ESP_OK) {
             err = commit(&state, next);
             next = NULL;
@@ -486,15 +527,20 @@ static esp_err_t collection_backup_read_one(FILE *file, const char *library, boo
     return err;
 }
 
-esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool apply) {
+static esp_err_t backup_read(FILE *file, const char *card_id, bool apply, bool folders) {
     if (!file || !collection_card_id_valid(card_id)) return ESP_ERR_INVALID_ARG;
     uint8_t header[COLLECTION_CARD_ID_BYTES + 4];
     if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
         get32(header + COLLECTION_CARD_ID_BYTES) != checksum(header, COLLECTION_CARD_ID_BYTES) ||
         !collection_card_id_valid((const char *)header)) return ESP_ERR_INVALID_RESPONSE;
-    esp_err_t err = collection_backup_read_one(file, "builtin", apply);
+    esp_err_t err = collection_backup_read_one(file, "builtin", apply, folders);
     // 跨卡仍可恢复其他内容，但不能把归属写进另一张卡的书库。/ A different card may restore other data, never this card's assignments.
     if (err == ESP_OK && header[0])
-        err = collection_backup_read_one(file, card_id, apply && card_id && !strcmp((const char *)header, card_id));
+        err = collection_backup_read_one(file, card_id, apply && card_id && !strcmp((const char *)header, card_id), folders);
     return err;
 }
+
+esp_err_t book_collection_backup_read(FILE *f,const char *id,bool apply) { return backup_read(f,id,apply,false); }
+esp_err_t book_collection_backup_write(FILE *f,const char *id) { return backup_write(f,id,false); }
+esp_err_t book_folder_backup_read(FILE *f,const char *id,bool apply) { return backup_read(f,id,apply,true); }
+esp_err_t book_folder_backup_write(FILE *f,const char *id) { return backup_write(f,id,true); }

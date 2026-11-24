@@ -72,10 +72,10 @@ static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=
 static int ui_nav_hit(int x,int y){return y>=1135?x/171:-1;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){ctx->requested_tab=tab;}
 static book_shelf_categories_t s_shelf_categories;
-static book_shelf_categories_t s_legacy_categories;
+static book_shelf_categories_t s_scan_categories;
 static book_collection_t s_collection;
-static uint32_t s_collection_bound_generation;
-static bool s_collection_rescan;
+static bool s_folder_ready,s_restore_folder;static const char *s_folder_old,*s_folder_next;
+
 static char s_collection_library[40]="card-a";
 static char s_shelf_warning[128];
 static uint32_t saved_category=BOOK_COLLECTION_ALL;
@@ -88,7 +88,7 @@ static unsigned collection_read_retries;
 static bool rescan_complete=true;
 static bool shelf_collection_load(bool retry){if(retry)++collection_read_retries;return s_collection.ready;}
 static bool shelf_collection_sync(bool complete);
-static void scan_shelf(app_ctx_t *ctx){(void)ctx;assert(s_collection_rescan);assert(shelf_collection_sync(rescan_complete));}
+static void scan_shelf(app_ctx_t *ctx){(void)ctx;(void)shelf_collection_sync(rescan_complete);}
 static bool s_shelf_selecting;
 static struct {bool blocked;} s_category_ui;
 static void book_category_ui_edit(void *ui,const book_shelf_categories_t *c,bool rename){(void)ui;(void)c;assert(!rename);}
@@ -123,11 +123,11 @@ int main(int argc,char **argv){
  app_ctx_t ctx={.leaf=9};shelf_category_restore(&ctx);assert(ctx.leaf==0);
  fail_alloc=false;shelf_category_init();assert(book_shelf_categories_available(&s_shelf_categories)==2);
  s_shelf_cache_valid=true;shelf_category_init();assert(s_shelf_cache_valid);
- int literature=shelf_category_add("/sdcard/books/文学");int empty=shelf_category_add("/sdcard/books/空目录");assert(literature==2&&empty==3);
- assert(shelf_category_add("/sdcard/books/文学")==literature);
+ int literature=book_shelf_categories_add(&s_shelf_categories,"/sdcard/books/文学");int empty=book_shelf_categories_add(&s_shelf_categories,"/sdcard/books/空目录");assert(literature==2&&empty==3);
+ assert(book_shelf_categories_add(&s_shelf_categories,"/sdcard/books/文学")==literature);
  for(int i=0;i<24;++i){snprintf(s_shelf[i].path,288,i<18?"/sdcard/books/文学/nested/%d.epub":"/sdcard/books/%d.epub",i);snprintf(s_shelf[i].name,256,"b%02d",i);s_shelf[i].search_match=true;}
  snprintf(s_shelf[23].path,288,"/sdcard/book/legacy.epub");s_count=24;shelf_categories_recount();
- assert(book_shelf_categories_count(&s_shelf_categories,0)==24&&book_shelf_categories_count(&s_shelf_categories,1)==6);
+ assert(book_shelf_categories_count(&s_shelf_categories,0)==24&&book_shelf_categories_count(&s_shelf_categories,1)==5);
  assert(book_shelf_categories_count(&s_shelf_categories,literature)==18&&book_shelf_categories_count(&s_shelf_categories,empty)==0);
  assert(!strcmp(shelf_category_name(literature),"文学")&&!strcmp(shelf_category_name(1),"未分类"));
  assert(!strcmp(shelf_category_name(-1),"全部书籍")&&book_shelf_categories_count(&s_shelf_categories,129)==0);
@@ -144,14 +144,14 @@ int main(int argc,char **argv){
  s_scan_pending=true;ctx.leaf=0;shelf_category_remember(&ctx);s_scan_pending=false;shelf_category_restore(&ctx);assert(ctx.leaf==1);
  s_view=1;ctx.leaf=0;shelf_category_remember(&ctx);s_view=SHELF;shelf_category_restore(&ctx);assert(ctx.leaf==1);
  book_shelf_categories_select(&s_shelf_categories,empty);sort_shelf(&ctx);shelf_category_restore(&ctx);assert(!s_visible_count&&!ctx.leaf);
- book_shelf_categories_select(&s_shelf_categories,1);sort_shelf(&ctx);assert(s_visible_count==6);
+ book_shelf_categories_select(&s_shelf_categories,1);sort_shelf(&ctx);assert(s_visible_count==5);
  s_filter=2;sort_shelf(&ctx);assert(!s_visible_count);s_filter=0;
  book_shelf_categories_select(&s_shelf_categories,literature);sort_shelf(&ctx);s_shelf[0].search_match=false;sort_shelf(&ctx);assert(s_visible_count==17);
  // 消失的空目录回退全部；重新登记保留索引和两套页码。/ A missing empty folder falls back to all; re-registration retains its index and layout pages.
  book_shelf_categories_select(&s_shelf_categories,empty);book_shelf_categories_remember(&s_shelf_categories,false,4);
  book_shelf_categories_begin_scan(&s_shelf_categories);shelf_categories_recount();assert(book_shelf_categories_selected(&s_shelf_categories)==0);
  assert(!book_shelf_categories_select(&s_shelf_categories,empty));
- assert(shelf_category_add("/sdcard/books/空目录")==empty);assert(book_shelf_categories_select(&s_shelf_categories,empty));
+ assert(book_shelf_categories_add(&s_shelf_categories,"/sdcard/books/空目录")==empty);assert(book_shelf_categories_select(&s_shelf_categories,empty));
  assert(book_shelf_categories_saved_page(&s_shelf_categories,false)==4);
  // 书籍数缩减后裁剪，并将裁剪结果记住。/ Shrinking counts clamp and store the resulting page.
  assert(book_shelf_categories_restore(&s_shelf_categories,false,10,9)==1);
@@ -220,7 +220,7 @@ int main(int argc,char **argv){
  event.x0=600;event.y0=300;
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&!book_shelf_categories_menu_is_open(&s_shelf_categories));
  // 翻到第二页后点选分类；触摸上下边界和菜单末页不误选。/ Select on the second menu page; taps at padding and page limits do not change categories.
- for(int i=0;i<10;++i){char path[288];snprintf(path,sizeof(path),"/sdcard/books/menu%d",i);shelf_category_add(path);}
+ for(int i=0;i<10;++i){char path[288];snprintf(path,sizeof(path),"/sdcard/books/menu%d",i);book_shelf_categories_add(&s_shelf_categories,path);}
  event=(ui_gesture_event_t){UI_GESTURE_TAP,100,110};shelf_category_gesture(&ctx,&event);
  event=(ui_gesture_event_t){UI_GESTURE_SWIPE_U,100,300};
  assert(shelf_category_gesture(&ctx,&event)==APP_REDRAW_AREA&&book_shelf_categories_menu_page(&s_shelf_categories)==1);
@@ -244,7 +244,7 @@ int main(int argc,char **argv){
  assert(book_shelf_categories_saved_page(&s_shelf_categories,false)==3);
  book_shelf_categories_rebase(&s_shelf_categories,"/sdcard/books/小说",NULL);
  assert(book_shelf_categories_selected(&s_shelf_categories)==1);
- assert(shelf_category_add("/sdcard/books/新分类")==literature);
+ assert(book_shelf_categories_add(&s_shelf_categories,"/sdcard/books/新分类")==literature);
 
  // 根目录变化先释放旧记录，分配失败时仍按新根查询并允许再次初始化。/ Root changes release old records; allocation failure still exposes the new root and permits retry.
  books_root="/sdcard/newbooks";fail_alloc=true;shelf_category_init();assert(!s_shelf_cache_valid);
@@ -300,48 +300,23 @@ int main(int argc,char **argv){
  assert(book_collection_remove(&library,stable)==ESP_OK&&book_shelf_categories_bind(&logical,&library));
  assert(book_shelf_categories_selected(&logical)==1);
  book_shelf_categories_dispose(&logical);book_collection_close(&library);
- // 用实际页面绑定入口模拟重新开机，按稳定ID恢复；改名/排序不改变选择。
- // Simulate a fresh boot through the real page binding, restoring stable IDs across renames and reordering.
- book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
- books_root="/library";shelf_category_init();
- assert(book_collection_open(&s_collection,prefix)==ESP_OK);
- s_count=3;memcpy(s_shelf,members,sizeof(members));
- saved_category=members[2].category_id;
- assert(shelf_collection_sync(false));
- assert(book_shelf_categories_id(&s_shelf_categories,book_shelf_categories_selected(&s_shelf_categories))==saved_category);
- shelf_category_selection_save();assert(preference_saves==1);
- uint32_t remembered=saved_category;
- assert(book_collection_rename(&s_collection,remembered,"恢复后改名")==ESP_OK);
- assert(shelf_collection_sync(false));
- assert(book_shelf_categories_id(&s_shelf_categories,book_shelf_categories_selected(&s_shelf_categories))==remembered);
- book_shelf_categories_select(&s_shelf_categories,1);shelf_category_selection_save();assert(saved_category==0);
- book_shelf_categories_dispose(&s_shelf_categories);shelf_category_init();
- assert(shelf_collection_sync(false) && book_shelf_categories_selected(&s_shelf_categories)==1);
- book_shelf_categories_select(&s_shelf_categories,0);preference_failure=true;
- shelf_category_selection_save();assert(saved_category==0 && s_shelf_warning[0]);preference_failure=false;
- saved_category=1234567;
- book_shelf_categories_dispose(&s_shelf_categories);shelf_category_init();
- assert(shelf_collection_sync(false) && book_shelf_categories_selected(&s_shelf_categories)==0);
- book_shelf_categories_select(&s_shelf_categories,book_shelf_categories_index(&s_shelf_categories,remembered));
- shelf_category_selection_save();
- book_shelf_categories_dispose(&s_shelf_categories);shelf_category_init();
- book_collection_close(&s_collection);assert(book_collection_open(&s_collection,prefix)==ESP_OK);
- assert(shelf_collection_sync(false));
- assert(book_shelf_categories_id(&s_shelf_categories,book_shelf_categories_selected(&s_shelf_categories))==remembered);
- // 显式重扫实际适配器限定本次调用导入；不完整扫描保留索引，完成后补入遗漏目录。
- // The actual rescan adapter limits imports to its invocation; incomplete scans retain the index and complete ones add missing folders.
- (void)shelf_category_add("/library/后来");assert(book_shelf_categories_available(&s_legacy_categories)==3);
- snprintf(s_shelf[3].path,sizeof(s_shelf[3].path),"/library/后来/new.txt");s_shelf[3].search_match=true;s_count=4;
- assert(shelf_collection_sync(true) && !book_collection_assignment(&s_collection,s_shelf[3].path));
- uint32_t before_rescan=s_collection.generation;rescan_complete=false;
- rescan_shelf(&ctx);assert(!s_collection_rescan && collection_read_retries==1 && s_collection.generation==before_rescan);
- rescan_complete=true;rescan_shelf(&ctx);
- assert(!s_collection_rescan && collection_read_retries==2 && book_collection_assignment(&s_collection,s_shelf[3].path));
- assert(book_shelf_categories_id(&s_shelf_categories,book_shelf_categories_selected(&s_shelf_categories))==remembered);
+ // 实际扫描表决定归属，偏好只控制显示。/ Scanned folders own membership; preferences only control display.
+ book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_scan_categories);
+ books_root="/library";shelf_category_init();strcat(prefix,"-prefs");assert(book_collection_open(&s_collection,prefix)==ESP_OK);
+ assert(shelf_category_add("/library/文学")>=2);assert(shelf_category_add("/library/空")>=2);
+ assert(shelf_collection_sync(true));uint32_t stable_folder=book_collection_legacy_id(&s_collection,"文学");
+ assert(stable_folder && book_shelf_folder_id(&s_shelf_categories,"/library/文学/深/a.txt")==stable_folder);
+ assert(book_shelf_folder_id(&s_shelf_categories,"/library/a.txt")==0 && book_shelf_folder_id(&s_shelf_categories,"/flash/books/a.txt")==BOOK_FOLDER_EXTERNAL);
+ book_shelf_categories_select(&s_shelf_categories,book_shelf_categories_index(&s_shelf_categories,stable_folder));shelf_category_selection_save();assert(saved_category==stable_folder);
+ assert(book_collection_order(&s_collection,stable_folder,1)==ESP_OK);assert(shelf_collection_sync(true));assert(book_shelf_categories_index(&s_shelf_categories,stable_folder)==3);
+ book_shelf_categories_dispose(&s_scan_categories);shelf_category_init();assert(shelf_category_add("/library/经典")>=2);
+ s_folder_old="文学";s_folder_next="经典";assert(shelf_collection_sync(true));s_folder_old=s_folder_next=NULL;
+ assert(book_shelf_folder_id(&s_shelf_categories,"/library/经典/深/a.txt")==stable_folder);
+ rescan_shelf(&ctx);assert(collection_read_retries==1);rescan_complete=false;rescan_shelf(&ctx);assert(!s_folder_ready);
  book_collection_close(&s_collection);
  for(int slot=0;slot<2;++slot){char path[300];snprintf(path,sizeof(path),"%s.%d",prefix,slot);unlink(path);}
  book_shelf_categories_dispose(&s_shelf_categories);
- book_shelf_categories_dispose(&s_legacy_categories);
+ book_shelf_categories_dispose(&s_scan_categories);
  puts("PASS: real category module and page adapters; folders, pages, filters, OOM/retry/limits, menu navigation, independent contexts and teardown");
 }
 '''

@@ -133,6 +133,11 @@ int main(void) {
     assert(board_sd_start_probe() == ESP_ERR_NOT_FINISHED);
     assert(board_sd_get_info(&info) == ESP_OK);
     assert(info.present && info.mounted && mount_calls == 1);
+    bool hidden=false;
+    assert(board_sd_path_hidden("/flash/books/a.epub",&hidden)==ESP_ERR_INVALID_ARG);
+    mock_fat_attributes=AM_HID;assert(!board_sd_path_hidden("/sdcard/books/a.epub",&hidden) && hidden);
+    mock_fat_attributes=AM_SYS;assert(!board_sd_path_hidden("/sdcard/books/a.epub",&hidden) && hidden);
+    mock_fat_attributes=0;assert(!board_sd_path_hidden("/sdcard/books/a.epub",&hidden) && !hidden);
     assert(log_available);
     log_gate_blocked = true;
     assert(close_card() == ESP_ERR_TIMEOUT && unmount_calls == 0);

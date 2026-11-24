@@ -14,6 +14,7 @@ typedef struct {
     book_shelf_category_entry_t *entries; ///< 模块独占的目录表；调用方不得解引用。/ Module-owned table; callers must not dereference it.
     int count, capacity, selected, menu_page; ///< 内部状态，仅通过下列接口访问。/ Internal state, accessed only through the API below.
     bool menu_open; ///< 分类菜单状态，不持有绘制或输入对象。/ Menu state without drawing or input objects.
+    bool published; ///< 已发布的目录表不得由历史书目扩充。/ History must not extend a published folder table.
     char root[BOOK_STORE_PATH_MAX]; ///< 本次开机的根目录副本。/ Owned root path for this boot.
     const book_collection_t *collection; ///< 借用已提交分类；为空时只供旧目录迁移。/ Borrow committed categories; NULL retains legacy migration mode.
 } book_shelf_categories_t;
@@ -73,3 +74,10 @@ uint8_t book_shelf_categories_menu_page(const book_shelf_categories_t *state);
 bool book_shelf_categories_menu_move(book_shelf_categories_t *state, int direction);
 /// 选择可用分类并关闭菜单；调用方先保存旧页码，再排序和恢复新页码。/ Select an available category and close the menu; callers first remember the old page, then sort and restore the new page.
 bool book_shelf_categories_select(book_shelf_categories_t *state, int index);
+
+/// 替换本轮实际目录；偏好只排序，不生成目录。/ Publish discovered folders; preferences only order existing folders.
+bool book_shelf_categories_publish(book_shelf_categories_t *state, const book_shelf_categories_t *scan,
+                                   const book_collection_t *prefs);
+/// 按路径求显示 ID；范围外的书不进入未分类。/ Resolve a path to its display ID, excluding out-of-root books from Unclassified.
+#define BOOK_FOLDER_EXTERNAL (UINT32_MAX - 1u)
+uint32_t book_shelf_folder_id(const book_shelf_categories_t *state, const char *path);

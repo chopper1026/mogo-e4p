@@ -517,8 +517,9 @@ static void refresh_chapter_lead(void) { apply_chapter_lead(s_chapter_heading_ti
 '''
 unit += r"""
 static book_shelf_categories_t s_shelf_categories;
-static book_shelf_categories_t s_legacy_categories;
-static book_collection_t s_collection;
+static book_shelf_categories_t s_scan_categories;
+static unsigned s_collection_backup_revision;
+static bool shelf_collection_load(bool retry){(void)retry;return true;}
 static bool shelf_collection_sync(bool complete){(void)complete;return true;}
 static void scan_shelf(app_ctx_t *ctx);
 static void rescan_shelf(app_ctx_t *ctx){scan_shelf(ctx);}
@@ -1053,7 +1054,7 @@ int main(void) {
     test_double_action=APP_READER_KEY_TOUCH;test_keys[1]=APP_READER_KEY_NONE;ctx.now_ms=10000;
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);ctx.now_ms+=100;
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&touch_toggles==5);
-    free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_legacy_categories);
+    free(s_shelf);book_shelf_categories_dispose(&s_shelf_categories);book_shelf_categories_dispose(&s_scan_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
     s_view=SHELF;

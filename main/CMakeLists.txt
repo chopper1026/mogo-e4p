@@ -206,6 +206,7 @@ idf_component_register(
         "book/book_path_state.c"
         "book/book_bookmark_store.c"
         "book/book_category_ops.c"
+        "book/book_folder_plan.c"
         "apps/book_category_ui.c"
         "book/book_history_backup.c"
         "book/book_title.c"

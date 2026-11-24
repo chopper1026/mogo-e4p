@@ -167,6 +167,13 @@ esp_err_t book_bookmark_store_remove(const char *path) {
     return err == ESP_OK && old ? remove_if_present(name) : err;
 }
 
+esp_err_t book_bookmark_store_check_move(const char *old,const char *next,uint32_t size) {
+    reader_bookmarks_unbounded_t *marks=NULL;
+    esp_err_t err=book_bookmark_store_load(old,size,&marks); free(marks);
+    if (err!=ESP_OK && err!=ESP_ERR_NOT_FOUND) return err;
+    marks=NULL; err=book_bookmark_store_load(next,size,&marks); free(marks);
+    return err==ESP_ERR_NOT_FOUND ? ESP_OK : err==ESP_OK ? ESP_ERR_INVALID_STATE : err;
+}
 esp_err_t book_bookmark_store_relocate(const char *old_path, const char *new_path, uint32_t file_size) {
     if (!card_path(old_path) || !card_path(new_path) || !strcmp(old_path, new_path)) return ESP_ERR_INVALID_ARG;
     reader_bookmarks_unbounded_t *marks = NULL, *dst = NULL;

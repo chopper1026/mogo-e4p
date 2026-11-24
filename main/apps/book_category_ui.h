@@ -1,20 +1,24 @@
-/* 中文：逻辑分类与选书界面；借用书目，只发事务命令，不执行文件操作。
- * English: Logical-category and book-picking UI; borrow the catalog and emit transactions without file operations. */
+/* 中文：目录分类与选书界面；借用书目，只发事务命令，不执行文件操作。
+ * English: Folder-category and book-picking UI; borrow the catalog and emit transactions without file operations. */
 #pragma once
 #include "book_shelf_category_state.h"
+#include "book_folder_plan.h"
 #include "ui_keyboard.h"
 #include "ui_gesture.h"
 
-typedef enum { CATEGORY_LIST, CATEGORY_ACTIONS, CATEGORY_EDIT, CATEGORY_CONFIRM,
+typedef enum { CATEGORY_LIST, CATEGORY_ACTIONS, CATEGORY_EDIT,
                CATEGORY_ORDER, CATEGORY_BOOKS, CATEGORY_FILTER, CATEGORY_BOOK_INFO,
-               CATEGORY_SELECTED_ACTIONS } book_category_screen_t;
+               CATEGORY_SELECTED_ACTIONS, CATEGORY_PREVIEW } book_category_screen_t;
 typedef enum { CATEGORY_IDLE, CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_MOVE, CATEGORY_REMOVE,
                CATEGORY_RECOVER, CATEGORY_OPEN, CATEGORY_ADD, CATEGORY_UP, CATEGORY_DOWN,
-               CATEGORY_SEARCH, CATEGORY_UNCLASSIFY } book_category_command_t;
+               CATEGORY_SEARCH, CATEGORY_UNCLASSIFY, CATEGORY_PREVIEW_DELETE, CATEGORY_PREVIEW_MIGRATE, CATEGORY_MIGRATE } book_category_command_t;
 typedef void (*book_category_cover_fn)(uint8_t *fb, int row, int index, EpdRect rect);
 typedef struct {
-    book_category_screen_t screen, edit_parent;
+    book_category_screen_t screen, edit_parent, preview_parent;
+    int preview_parent_page;
     book_category_command_t command;
+    const book_folder_plan_t *preview;
+    bool migration_available, migrating, conflict_preview;
     bool picker, renaming, blocked, review, selecting_only;
     int page, book_page, count, book_info;
     uint32_t source, destination, filter;

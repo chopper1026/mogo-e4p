@@ -34,7 +34,7 @@
 
 mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，基于 MindReset 阅读固件与 Metalio 板级实现适配，并非硬件厂商的官方固件。
 
-- **书放在自己手里。** 从 TF 卡读取 EPUB、TXT、传统 MOBI，在书架直接归类，搜索、收藏，接着上次的位置读；整理分类不搬动原文件。
+- **书放在自己手里。** 从 TF 卡读取 EPUB、TXT、传统 MOBI，在书架直接归类，搜索、收藏，接着上次的位置读；分类就是 `books/` 下的一级文件夹，归类会移动原书。
 - **页面按自己的习惯来。** 字体、字号、间距、横竖排、章节题头、页眉页脚和阅读背景均可调整。
 - **阅读时转个方向。** 顶部快捷栏第二排的旋转锁定图标开启重力自动旋转，再点锁定当前方向；横屏仅支持普通翻页，切入时会提示，竖屏仍沿用所选效果。退出阅读恢复竖屏。操作与边界见[阅读方向](docs/development/guides/READER_ORIENTATION.md)。
 - **传书不必拔卡。** 通过已有 WiFi、设备热点或 USB 传文件；浏览器里就能整理目录、裁剪壁纸、修改签名。
@@ -49,7 +49,7 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 
 ### 1. 安装固件
 
-确认设备是 **Metalio E-INK4 Plus / ESP32-S31**。在电脑端 Chrome 或 Edge 中打开[网页刷机页](https://mogo.mantake.shop/flash)，连接 USB 数据线，核对所选固件的设备型号后按页面提示操作。刷写前保存可导出的配置并另行复制 TF 卡文件；手账、打卡和分类等没有现成导出入口，先核对[备份覆盖与数据风险](docs/development/guides/PERSISTENCE.md)。
+确认设备是 **Metalio E-INK4 Plus / ESP32-S31**。在电脑端 Chrome 或 Edge 中打开[网页刷机页](https://mogo.mantake.shop/flash)，连接 USB 数据线，核对所选固件的设备型号后按页面提示操作。刷写前保存可导出的配置并另行复制 TF 卡文件；配置备份不复制书籍或目录树，先核对[备份覆盖与数据风险](docs/development/guides/PERSISTENCE.md)。
 
 也可以在 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases/latest) 下载完整 USB 刷机包，按包内 `README.txt` 操作，并用 `SHA256SUMS` 核对文件。
 
@@ -91,7 +91,7 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 
 | | |
 | :-- | :-- |
-| **书籍与书架** | EPUB / TXT / 传统 MOBI、封面与列表、新建分类后直接选书、单本/批量归类、改名/排序/删除、离线搜索和收藏；原文件不变 |
+| **书籍与书架** | EPUB / TXT / 传统 MOBI、封面与列表、新建分类后直接选书、单本/批量归类、改名/排序/删除、离线搜索和收藏；移出分类将原书移回 `books/` 根目录 |
 | **正文与排版** | 自定义字体、抗锯齿、字号与间距、横竖排、四款章节题头、六槽页眉页脚与独立高度 |
 | **进度与内容** | 续读、书签、章节目录、EPUB 脚注、插图与嵌入字体 |
 | **翻页与显示** | 触摸与可配置按键、BLE 翻页器、可选晃动翻页、普通 / 水波纹效果、周期与手动全刷 |

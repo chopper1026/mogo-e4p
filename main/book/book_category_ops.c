@@ -35,6 +35,7 @@ static bool join(const char *dir, const char *name, char out[CAP]) {
 static bool below(const char *root, const char *path) {
     if (!root || !path || root[0] != '/' || strnlen(root, CAP) >= CAP || strnlen(path, CAP) >= CAP) return false;
     size_t n = strlen(root);
+    if (strpbrk(path, "\\:")) return false;
     if (!n || root[n - 1] == '/' || strncmp(root, path, n) || path[n] != '/' || !path[n + 1]) return false;
     const char *p = path + n + 1;
     while (*p) {
@@ -64,7 +65,9 @@ bool book_category_name_valid(const char *name) {
     size_t n = strnlen(name, BOOK_CATEGORY_NAME_MAX + 1);
     if (!n || n > BOOK_CATEGORY_NAME_MAX || name[0] == '.' || name[0] == ' ' ||
         name[n - 1] == '.' || name[n - 1] == ' ' || !strcmp(name, "全部书籍") || !strcmp(name, "未分类")) return false;
+    unsigned chars=0;
     for (size_t i = 0; i < n;) {
+        if (++chars>24) return false;
         unsigned char c = (unsigned char)name[i++]; unsigned more; uint32_t cp;
         if (c < 32 || c == 127 || strchr("/\\:*?\"<>|", c)) return false;
         if (c < 128) continue;
@@ -117,7 +120,9 @@ static esp_err_t walk(const char *old, const char *next, unsigned depth, unsigne
     if (S_ISREG(st.st_mode)) {
         if (!book_file(path)) return ESP_OK;
         if (st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) return ESP_ERR_INVALID_SIZE;
-        return apply ? book_path_state_relocate(old, next, (uint32_t)st.st_size, extra) : book_path_state_prepare(old, next);
+        if (apply) return book_path_state_relocate(old,next,(uint32_t)st.st_size,extra);
+        esp_err_t err=book_path_state_prepare(old,next);
+        return err==ESP_OK && extra ? extra(old,next,(uint32_t)st.st_size) : err;
     }
     if (!S_ISDIR(st.st_mode)) return ESP_ERR_NOT_SUPPORTED;
     DIR *dir = opendir(path); if (!dir) return ESP_FAIL;
@@ -172,7 +177,7 @@ static esp_err_t transact(const char *root, const char *old, const char *next, b
     if (err != ESP_OK) return err;
     err = vacant(next); if (err != ESP_OK) return err;
     unsigned nodes = 0;
-    err = walk(old, next, 0, &nodes, false, extra); if (err != ESP_OK) return err;
+    err = walk(old, next, 0, &nodes, false, NULL); if (err != ESP_OK) return err;
     struct stat st; if (stat(old, &st)) return ESP_ERR_NOT_FOUND;
     intent_t *in = buffer(sizeof(*in)); if (!in) return ESP_ERR_NO_MEM;
     memset(in, 0, sizeof(*in)); in->magic = UINT32_C(0x4d434f31); in->tree = tree;
@@ -188,6 +193,13 @@ esp_err_t book_category_create(const char *root, const char *name, char out[CAP]
     err = vacant(out); if (err != ESP_OK) return err;
     return mkdir(out, 0775) ? ESP_FAIL : ESP_OK;
 }
+esp_err_t book_category_check_rename(const char *root,const char *source,const char *name,book_path_state_extra_fn check) {
+    char next[CAP];unsigned nodes=0;
+    if (!category(root,source) || !book_category_name_valid(name) || !join(root,name,next)) return ESP_ERR_INVALID_ARG;
+    if (!strcmp(next,source)) return ESP_OK;
+    esp_err_t err=vacant(next);
+    return err==ESP_OK ? walk(source,next,0,&nodes,false,check) : err;
+}
 esp_err_t book_category_rename(const char *root, const char *source, const char *name, book_path_state_extra_fn extra) {
     char next[CAP]; struct stat st;
     if (!category(root, source) || !book_category_name_valid(name) || !join(root, name, next)) return ESP_ERR_INVALID_ARG;
@@ -201,6 +213,7 @@ static esp_err_t move_target(const char *root, const char *source, const char *d
     if (!below(root, source) || !book_file(source) || (!category(root, destination) && strcmp(root, destination))) return ESP_ERR_INVALID_ARG;
     if (inspect(source, &st) || !S_ISREG(st.st_mode)) return ESP_ERR_NOT_FOUND;
     if (inspect(destination, &st) || !S_ISDIR(st.st_mode)) return ESP_ERR_NOT_FOUND;
+    if (strcmp(root,destination) && below(destination,source)) { strcpy(next,source); return ESP_OK; }
     const char *base = strrchr(source, '/') + 1;
     if (!join(destination, base, next)) return ESP_ERR_INVALID_SIZE;
     if (!strcmp(source, next)) return ESP_OK;

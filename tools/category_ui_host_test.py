@@ -29,7 +29,20 @@ typedef book_shelf_entry_t shelf_entry_t;
 static book_category_ui_t s_category_ui;
 static book_shelf_categories_t s_shelf_categories;
 static book_collection_t s_collection;
-static uint32_t s_collection_bound_generation;
+static uint32_t s_collection_bound_generation,s_collection_backup_revision,s_store_revision;
+static book_collection_t s_legacy_collection;
+static bool s_folder_ready=true,s_shelf_cache_valid,s_save_failed,physical;
+static book_folder_plan_t s_folder_preview;
+static struct {struct {char path[288];}book;} s_reader_session;
+static const char *s_folder_old,*s_folder_next;
+static char test_root[288];
+static void retry_progress(void);
+static bool app_reading_journal_poll(void){return false;}
+static bool app_reading_journal_flush(void){return true;}
+unsigned book_store_revision(void){return s_store_revision;}
+esp_err_t book_path_state_prepare(const char *a,const char *b){(void)a;(void)b;return ESP_OK;}
+esp_err_t book_path_state_relocate(const char *a,const char *b,uint32_t z,book_path_state_extra_fn extra){return extra(a,b,z);}
+
 static bool binding_fail;
 static book_view_t s_view,s_category_parent;
 static bool s_category_bulk,s_scan_pending;
@@ -41,8 +54,8 @@ static char sd_identity[40]="card-a";
 typedef struct {bool present,mounted;char identity[40];} board_sd_info_t;
 static void board_sd_get_info(board_sd_info_t *sd){sd->present=sd_present;sd->mounted=sd_mounted;copy(sd->identity,40,sd_identity);}
 static bool usb_storage_active(void){return usb_active;}
-static bool book_category_pending(const char *root){(void)root;return pending;}
-static const char *app_settings_books_dir(void){return "/sdcard/books";}
+static bool test_pending(const char *root){(void)root;return pending;}
+static const char *app_settings_books_dir(void){return physical?test_root:"/sdcard/books";}
 static int shelf_style;
 static unsigned shelf_titles;
 static int app_settings_shelf_style(void){return shelf_style;}
@@ -86,14 +99,29 @@ static bool network_service_stop_local_wifi(void){return transfer_idle;}
 static void cancel_auto_resume(void){}
 bool book_cover_jobs_quiesce(unsigned timeout){assert(timeout==2000);return cover_idle;}
 static esp_err_t category_extra_state(const char *old,const char *next,uint32_t size){(void)old;(void)next;(void)size;return ESP_OK;}
-static esp_err_t book_category_recover(const char *root,esp_err_t (*extra)(const char *,const char *,uint32_t)){
+static esp_err_t test_recover(const char *root,esp_err_t (*extra)(const char *,const char *,uint32_t)){
     assert(!strcmp(root,"/sdcard/books")&&extra==category_extra_state);++recovery_calls;if(recovery_error==ESP_OK)pending=false;return recovery_error;
 }
 static void pending_drop_invalidated(void){++recovery_invalidations;}
-static void book_store_notify_changed(void){++recovery_invalidations;}
+void book_store_notify_changed(void){++recovery_invalidations;}
 static void book_lock_collage_invalidate(void){++recovery_invalidations;}
 static bool legacy_category_recover(void);
-static void scan_shelf(app_ctx_t *ctx){(void)ctx;assert(shelf_collection_sync(false));shelf_categories_recount();}
+static void scan_shelf(app_ctx_t *ctx){(void)ctx;
+ if(!physical){assert(shelf_collection_sync(false));shelf_categories_recount();return;}
+ book_shelf_categories_t scan={0};book_shelf_categories_init(&scan,test_root);s_count=0;
+ DIR *d=opendir(test_root);assert(d);struct dirent *e;
+ while((e=readdir(d))){if(e->d_name[0]=='.')continue;char path[288];snprintf(path,sizeof(path),"%s/%s",test_root,e->d_name);
+ struct stat st;assert(!stat(path,&st));if(S_ISREG(st.st_mode)){copy(s_shelf[s_count++].path,288,path);continue;}
+ book_shelf_categories_add(&scan,path);DIR *sub=opendir(path);assert(sub);struct dirent *f;
+ while((f=readdir(sub)))if(f->d_name[0]!='.')snprintf(s_shelf[s_count++].path,288,"%s/%s",path,f->d_name);closedir(sub);}
+ closedir(d);const char *names[20];int n=0;for(int i=2;i<scan.count;++i)names[n++]=book_shelf_categories_name(&scan,i);
+ assert(!book_collection_folders(&s_collection,names,n,s_folder_old,s_folder_next));
+ assert(book_shelf_categories_publish(&s_shelf_categories,&scan,&s_collection));book_shelf_categories_dispose(&scan);
+ for(int i=0;i<s_count;++i){s_shelf[i].selected=false;s_shelf[i].category_id=book_shelf_folder_id(&s_shelf_categories,s_shelf[i].path);}
+}
+static esp_err_t category_check_extra(const char *a,const char *b,uint32_t z){(void)a;(void)b;(void)z;return ESP_OK;}
+#define book_category_pending test_pending
+#define book_category_recover test_recover
 static void search_begin(void){s_view=SEARCH;}
 static void category_begin(app_ctx_t *,bool,bool);
 static void category_start_books(app_ctx_t *,uint32_t,bool);
@@ -127,7 +155,7 @@ static void guard_draw_result(display_state_t *hl,int error){(void)hl;if(error){
 '''
     for name in ("sort_shelf", "legacy_category_recover", "category_cover_draw", "shelf_layout", "shelf_category_remember", "shelf_category_restore", "category_reset", "category_begin",
                  "category_start_books", "category_select", "category_close", "category_back",
-                 "category_input_paint", "category_gesture", "category_storage_ready", "category_error", "category_tick"):
+                 "category_input_paint", "category_gesture", "category_storage_ready", "category_error", "category_plan", "category_refresh_catalog", "category_tick"):
         code += host.function(name, ROOT / "main/apps/app_book.c") + "\n"
     # 真实输入呈现出口须在通用阅读出口之前接住分类键盘。/ The real input-present branch must catch category keys before reader routing.
     prefix = host.function("present", ROOT / "main/apps/app_book.c").split(
@@ -206,53 +234,30 @@ static void adapter_keyboard_checks(uint8_t *fb){
 static void adapter_checks(uint8_t *fb,const char *directory){
     app_ctx_t ctx={.fb=fb,.now_ms=1000};font_scale=100;adapter_setup(directory);
     adapter_keyboard_checks(fb);book_shelf_categories_init(&s_shelf_categories,"/sdcard/books");assert(shelf_collection_sync(false));
-    // 建类后立即选书，写失败保留归属与勾选。/ Create straight into picking; failed writes retain membership and selection.
+    book_shelf_categories_dispose(&s_shelf_categories);clean_library(&s_collection);physical=true;
+    snprintf(test_root,sizeof(test_root),"%s/books",directory);assert(!mkdir(test_root,0700));char path[288],dst[288],prefix[288];
+    snprintf(prefix,sizeof(prefix),"%s/prefs",directory);assert(!book_collection_open(&s_collection,prefix));
+    snprintf(path,sizeof(path),"%s/test.epub",test_root);FILE *file=fopen(path,"wb");assert(file);fclose(file);
+    book_shelf_categories_init(&s_shelf_categories,test_root);scan_shelf(&ctx);
     s_view=SHELF;category_begin(&ctx,false,false);book_category_ui_edit(&s_category_ui,&s_shelf_categories,false);
-    copy(s_category_ui.draft,sizeof(s_category_ui.draft),"新建分类");s_category_ui.command=CATEGORY_CREATE;
-    app_touch_t held={.touched=true,.count=1};ctx.touch=&held;
-    assert(category_tick(&ctx)==APP_REDRAW_NONE&&s_category_ui.command==CATEGORY_CREATE);ctx.touch=NULL;
-    assert(category_tick(&ctx)==APP_REDRAW_PAGE&&s_category_ui.screen==CATEGORY_BOOKS);
-    uint32_t target=s_category_ui.destination;assert(book_collection_find(&s_collection,target));
-    char path_a[288],path_c[288];copy(path_a,sizeof(path_a),s_shelf[0].path);copy(path_c,sizeof(path_c),s_shelf[2].path);
-    s_shelf[0].selected=s_shelf[1].selected=true;s_shelf[0].new_book=true;s_category_ui.command=CATEGORY_MOVE;
-    char prefix[288];copy(prefix,sizeof(prefix),s_collection.prefix);copy(s_collection.prefix,sizeof(s_collection.prefix),"/missing-mogo-test/library");
-    category_tick(&ctx);assert(s_view==CATEGORIES&&selected_count()==2&&!book_collection_assignment(&s_collection,s_shelf[0].path));
-    assert(s_category_ui.notice[0]);copy(s_collection.prefix,sizeof(s_collection.prefix),prefix);s_category_ui.command=CATEGORY_MOVE;
-    category_tick(&ctx);assert(s_view==SHELF&&!selected_count()&&!s_shelf[0].new_book&&book_collection_assignment(&s_collection,s_shelf[0].path)==target);
-    assert(book_shelf_categories_id(&s_shelf_categories,book_shelf_categories_selected(&s_shelf_categories))==target);
-    // 选择后建类为单次事务；返回不丢选择。/ Creating from a selection is one transaction; Back retains that selection.
-    s_shelf_selecting=true;s_shelf[2].selected=true;category_begin(&ctx,true,true);
-    assert(category_back(&ctx)==APP_REDRAW_PAGE&&s_view==SHELF&&selected_count()==1);
-    category_begin(&ctx,true,true);book_category_ui_edit(&s_category_ui,&s_shelf_categories,false);
-    copy(s_category_ui.draft,sizeof(s_category_ui.draft),"另一个分类");s_category_ui.command=CATEGORY_CREATE;
-    uint32_t generation=s_collection.generation;category_tick(&ctx);assert(s_view==SHELF&&s_collection.generation==generation+1&&!selected_count());
-    uint32_t second=book_collection_assignment(&s_collection,path_c);assert(second&&second!=target);
-    assert(book_collection_find(&s_collection,second));
-    // 来源内移出不影响另一真实分类的选择。/ Source-scoped removal ignores selected books in a different real category.
-    for(int i=0;i<s_count;++i)s_shelf[i].selected=true;
-    category_begin(&ctx,true,true);s_category_ui.source=target;s_category_ui.command=CATEGORY_UNCLASSIFY;category_tick(&ctx);
-    assert(s_view==SHELF&&!book_collection_assignment(&s_collection,path_a)&&book_collection_assignment(&s_collection,path_c)==second);
-    category_begin(&ctx,false,false);
-    s_category_ui.source=target;s_category_ui.command=CATEGORY_REMOVE;category_tick(&ctx);
-    assert(!book_collection_find(&s_collection,target)&&!book_collection_assignment(&s_collection,path_a));
-    generation=s_collection.generation;book_collection_close(&s_collection);
-    assert(book_collection_open(&s_collection,prefix)==ESP_OK&&s_collection.generation==generation);
-    assert(!book_collection_find(&s_collection,target)&&!book_collection_assignment(&s_collection,path_a)&&book_collection_assignment(&s_collection,path_c)==second);
-    assert(shelf_collection_sync(false));shelf_categories_recount();
+    copy(s_category_ui.draft,sizeof(s_category_ui.draft),"科幻");s_category_ui.command=CATEGORY_CREATE;
+    app_touch_t held={.touched=true,.count=1};ctx.touch=&held;assert(category_tick(&ctx)==APP_REDRAW_NONE);ctx.touch=NULL;
+    assert(category_tick(&ctx)==APP_REDRAW_PAGE && s_category_ui.screen==CATEGORY_BOOKS);
+    uint32_t target=s_category_ui.destination;assert(target);s_shelf[0].selected=true;
+    snprintf(dst,sizeof(dst),"%s/科幻/test.epub",test_root);file=fopen(dst,"wb");assert(file);fclose(file);
+    s_category_ui.command=CATEGORY_MOVE;category_tick(&ctx);assert(!access(path,F_OK)&&!access(dst,F_OK)&&s_shelf[0].selected);
+    assert(s_category_ui.screen==CATEGORY_PREVIEW && s_category_ui.conflict_preview && s_folder_preview.error);
+    assert(!book_category_ui_back(&s_category_ui) && s_category_ui.screen==CATEGORY_BOOKS && s_shelf[0].selected);
+    assert(!unlink(dst));s_category_ui.command=CATEGORY_MOVE;category_tick(&ctx);assert(access(path,F_OK)&&!access(dst,F_OK)&&s_view==SHELF);
+    category_begin(&ctx,false,false);s_category_ui.source=target;s_category_ui.command=CATEGORY_PREVIEW_DELETE;category_tick(&ctx);
+    assert(s_category_ui.screen==CATEGORY_PREVIEW&&s_folder_preview.moves==1&&!access(dst,F_OK));s_category_ui.command=CATEGORY_REMOVE;category_tick(&ctx);
+    assert(!access(path,F_OK)&&access(dst,F_OK)&&!book_collection_find(&s_collection,target));
     usb_active=true;assert(!category_storage_ready());usb_active=false;
     copy(sd_identity,40,"card-b");assert(!category_storage_ready());copy(sd_identity,40,"card-a");
     sd_mounted=false;assert(!category_storage_ready());sd_mounted=true;pending=true;assert(!category_storage_ready());pending=false;
     assert(category_storage_ready());s_category_ui.command=CATEGORY_REMOVE;book_category_ui_suspend(&s_category_ui);
     assert(s_category_ui.command==CATEGORY_IDLE);
-    // 提交已成功但显示表分配失败，必须报告已保存并阻断重复提交。/ A post-commit binding failure reports the saved result and blocks duplicate submission.
-    category_reset();s_view=SHELF;category_begin(&ctx,false,false);book_category_ui_edit(&s_category_ui,&s_shelf_categories,false);
-    copy(s_category_ui.draft,sizeof(s_category_ui.draft),"已保存待重读");s_category_ui.command=CATEGORY_CREATE;
-    generation=s_collection.generation;binding_fail=true;
-    category_tick(&ctx);assert(s_collection.generation==generation+1&&s_view==CATEGORIES&&s_category_ui.blocked&&s_category_ui.screen==CATEGORY_LIST);
-    assert(strstr(s_category_ui.notice,"已保存")&&strstr(s_category_ui.notice,"重试读取"));
-    assert(book_collection_count(&s_collection)>book_shelf_categories_available(&s_shelf_categories)-2);
-    binding_fail=false;s_category_ui.command=CATEGORY_RECOVER;category_tick(&ctx);
-    assert(!s_category_ui.blocked&&s_collection.generation==generation+1&&s_collection_bound_generation==s_collection.generation);
+    physical=false;recovery_invalidations=0;
     category_reset();book_shelf_categories_dispose(&s_shelf_categories);clean_library(&s_collection);
     puts("category adapter: PASS (real storage, create/pick/assign, rollback/retry, selection/create transaction, persistent unclassify/delete, card/USB guards)");
 }
@@ -290,6 +295,10 @@ static char s_message[128],s_shelf_warning[128],s_manage_message[128],s_open_err
 static void draw_open_error(uint8_t *fb){(void)fb;assert(false);}
 static app_redraw_t open_error_gesture(const ui_gesture_event_t *ev){(void)ev;assert(false);return APP_REDRAW_NONE;}
 static bool s_save_failed,s_batch_confirm,s_file_removed,s_delete_confirm,s_clear_confirm;
+enum { APP_READER_TAP_GRID=1 };
+static int app_settings_reader_tap_mode(void){return 0;}
+static EpdRect reader_area(void){return (EpdRect){0};}
+static int book_reader_grid_tap_y_in_area(EpdRect a,EpdRect b,int y){(void)a;(void)b;return y;}
 static void retry_progress(void){}
 static bool open_book(app_ctx_t *ctx,const char *path){(void)ctx;assert(path[0]&&!in_ink_group);opened_after_refreshes=input_refreshes;++opened_books;return true;}
 static bool s_shelf_page_pending;
@@ -695,6 +704,8 @@ void lock_pin_wipe(void *p,unsigned n){memset(p,0,n);}
 #undef UI_ICON_CHEVRON_LEFT
 #undef UI_ICON_ANIMATE_CIRCLE_CHEVRON_LEFT
 #include <math.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "book_shelf_categories.h"
 #include "book_search.h"
@@ -807,8 +818,8 @@ int main(int argc,char **argv){
         book_category_ui_suspend(&u);assert(u.command==CATEGORY_IDLE);assert(!book_category_ui_back(&u)&&u.screen==CATEGORY_ACTIONS);
         assert(tap(&u,&categories,200,600)==1&&u.screen==CATEGORY_ORDER);snapshot(&u,&categories,fb,argv[1],"order");
         assert(tap(&u,&categories,342,572)==1&&u.command==CATEGORY_DOWN);u.command=CATEGORY_IDLE;assert(!book_category_ui_back(&u));
-        assert(tap(&u,&categories,200,712)==1&&u.screen==CATEGORY_CONFIRM);snapshot(&u,&categories,fb,argv[1],"delete-confirm");
-        assert(tap(&u,&categories,500,690)==1&&u.command==CATEGORY_REMOVE);u.command=CATEGORY_IDLE;
+        assert(tap(&u,&categories,200,712)==1&&u.command==CATEGORY_PREVIEW_DELETE);book_folder_plan_t preview={0};u.preview=&preview;u.screen=CATEGORY_PREVIEW;u.command=CATEGORY_IDLE;snapshot(&u,&categories,fb,argv[1],"delete-confirm");
+        assert(tap(&u,&categories,500,890)==1&&u.command==CATEGORY_REMOVE);u.command=CATEGORY_IDLE;
         book_category_ui_end(&u);book_category_ui_begin(&u,true);snapshot(&u,&categories,fb,argv[1],"target");
         assert(tap(&u,&categories,200,center)==1&&u.command==CATEGORY_MOVE&&u.destination==0);u.command=CATEGORY_IDLE;
         assert(tap(&u,&categories,620,108)==1&&u.screen==CATEGORY_EDIT);snapshot(&u,&categories,fb,argv[1],"new-category");
@@ -883,7 +894,7 @@ static inline tinfl_status tinfl_decompress(tinfl_decompressor *s,const unsigned
         for folder in (work, ROOT / "main", ROOT / "main/ui", ROOT / "main/font", ROOT / "main/apps", ROOT / "main/book", ROOT / "main/diagnostics", ROOT / "main/display", ROOT / "main/settings", ROOT / "main/app", ROOT / "main/boot", ROOT / "main/services", ROOT / "components/book_search/include"):
             flags += ["-I" + str(folder)]
         units = [work / "test.c", work / "assets.c"] + [ROOT / "main/font" / name for name in ("ttf_font.c", "ttf_font_source.c", "ttf_block_cache.c", "ttf_glyph_cache.c", "ui_font.c", "ui_hanzi.c")]
-        units += [ROOT / name for name in ("main/ui/ui_text_edit.c", "main/ui/ui_text_input.c", "main/ui/ui_keyboard.c", "main/ui/ui_ime.c", "main/ui/ui_gesture.c", "main/ui/ui_image_dither.c", "components/book_search/book_search.c", "main/book/book_shelf_category_state.c", "main/book/book_shelf_model.c", "main/book/book_collection.c", "main/book/book_shelf_covers.c", "main/book/book_cover_auto.c")]
+        units += [ROOT / name for name in ("main/ui/ui_text_edit.c", "main/ui/ui_text_input.c", "main/ui/ui_keyboard.c", "main/ui/ui_ime.c", "main/ui/ui_gesture.c", "main/ui/ui_image_dither.c", "components/book_search/book_search.c", "main/book/book_shelf_category_state.c", "main/book/book_shelf_model.c", "main/book/book_collection.c", "main/book/book_category_ops.c", "main/book/book_folder_plan.c", "main/book/book_shelf_covers.c", "main/book/book_cover_auto.c")]
         flags += ["-ffunction-sections", "-fdata-sections"]
         linker = "-Wl,-dead_strip" if platform.system() == "Darwin" else "-Wl,--gc-sections"
         subprocess.run(flags + list(map(str, units)) + [linker, "-lm", "-lz", "-o", str(work / "test")], env=env, check=True)

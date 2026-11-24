@@ -19,6 +19,8 @@ esp_err_t book_bookmark_store_load(const char *path, uint32_t file_size,
 esp_err_t book_bookmark_store_save(const reader_bookmarks_unbounded_t *marks);
 /// 删除指定书籍的 TF 卡书签文件；不存在也算成功。/ Remove a card bookmark file; absence is success.
 esp_err_t book_bookmark_store_remove(const char *path);
+/// 仅读取并验证两个书签位置，不创建目录。/ Preflight both bookmark slots without creating directories.
+esp_err_t book_bookmark_store_check_move(const char *old,const char *next,uint32_t size);
 /// 随书籍改名或移动书签文件，并更新记录中的路径。/ Relocate and rebase a card bookmark file.
 esp_err_t book_bookmark_store_relocate(const char *old_path, const char *new_path,
                                        uint32_t file_size);

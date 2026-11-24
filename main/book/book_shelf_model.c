@@ -13,8 +13,8 @@
 
 bool book_shelf_category_matches(const book_shelf_query_t *query, const char *path) {
     if (query->uncategorized) {
-        char child[BOOK_STORE_PATH_MAX];
-        return !book_shelf_child(query->root, path, child, sizeof(child));
+        size_t n = strlen(query->root);
+        return !strncmp(path,query->root,n) && path[n]=='/' && path[n+1] && path[n+1]!='.' && !strchr(path+n+1,'/');
     }
     if (!query->category_path) return true;
     size_t size = strlen(query->category_path);

@@ -14,7 +14,7 @@
 typedef struct {
     uint32_t id;
     char name[BOOK_COLLECTION_NAME_BYTES];
-    char legacy_name[BOOK_STORE_PATH_MAX]; ///< 仅作一次迁移来源，不再推导归属。/ One-time migration provenance, never a live assignment rule.
+    char legacy_name[BOOK_STORE_PATH_MAX]; ///< 旧索引的来源名；偏好快照中的实际目录名。/ Provenance in legacy snapshots; exact folder name in display preferences.
 } book_collection_category_t;
 typedef struct book_collection_data book_collection_data_t;
 typedef struct {
@@ -60,6 +60,14 @@ esp_err_t book_collection_remove(book_collection_t *state, uint32_t id);
 esp_err_t book_collection_order(book_collection_t *state, uint32_t id, int direction);
 /// 将已提交归属同步到借用书目，纯内存操作。/ Apply committed assignments to a borrowed catalog, in memory only.
 void book_collection_apply(const book_collection_t *state, book_shelf_entry_t *books, int count);
+/// 仅同步显示顺序和稳定 ID；此副本不含书目归属。/ Reconcile order and stable IDs only, without storing book assignments.
+esp_err_t book_collection_folders(book_collection_t *state, const char *const *names, size_t count,
+                                  const char *renamed_from, const char *renamed_to);
+/// 旧归属只用于显式迁移；返回路径由快照持有。/ Read legacy assignments only for explicit migration; the snapshot owns paths.
+const char *book_collection_record(const book_collection_t *state, size_t index, uint32_t *category);
+esp_err_t book_collection_finish_migration(book_collection_t *state);
+esp_err_t book_folder_backup_write(FILE *file, const char *card_id);
+esp_err_t book_folder_backup_read(FILE *file, const char *card_id, bool apply);
 /// 独立的有校验流，用于版本化备份。/ Independent checked stream for versioned backups.
 esp_err_t book_collection_export(const book_collection_t *state, FILE *file);
 esp_err_t book_collection_import(book_collection_t *state, FILE *file);

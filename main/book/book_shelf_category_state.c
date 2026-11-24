@@ -41,7 +41,7 @@ bool book_shelf_categories_init(book_shelf_categories_t *state, const char *root
     if (changed) {
         free(state->entries); state->entries = NULL;
         state->count = state->capacity = state->selected = state->menu_page = 0;
-        state->collection = NULL;
+        state->collection = NULL; state->published = false;
         copy_text(state->root, sizeof(state->root), root);
     }
     if (!state->entries) {
@@ -142,6 +142,11 @@ void book_shelf_categories_recount(book_shelf_categories_t *state, const book_sh
     for (int i = 0; i < count; ++i) {
         if (entries[i].removed) continue;
         ++state->entries[0].count;
+        if (state->published) {
+            int index = book_shelf_categories_index(state, entries[i].category_id);
+            if (index >= 1) ++state->entries[index].count;
+            continue;
+        }
         if (state->collection) {
             int index = book_shelf_categories_index(state, entries[i].category_id);
             ++state->entries[index >= 1 ? index : 1].count;
@@ -149,7 +154,8 @@ void book_shelf_categories_recount(book_shelf_categories_t *state, const book_sh
         }
         char child[BOOK_STORE_PATH_MAX], path[BOOK_STORE_PATH_MAX];
         if (!book_shelf_child(state->root, entries[i].path, child, sizeof(child))) {
-            ++state->entries[1].count; continue;
+            if (book_shelf_category_matches(&(book_shelf_query_t){.root=state->root,.uncategorized=true},entries[i].path)) ++state->entries[1].count;
+            continue;
         }
         int written = snprintf(path, sizeof(path), "%s/%s", state->root, child);
         if (written < 0 || (size_t)written >= sizeof(path)) continue;
@@ -165,8 +171,8 @@ book_shelf_query_t book_shelf_categories_query(const book_shelf_categories_t *st
         .category_path = has_selection(state) && state->selected >= 2 ? state->entries[state->selected].path : NULL,
         .uncategorized = has_selection(state) && state->selected == 1,
         .filter = filter, .recent_sort = has_selection(state) && state->entries[state->selected].sort_known ? state->entries[state->selected].recent_sort : recent_sort,
-        .logical_categories = state->collection != NULL,
-        .category_id = state->collection && state->selected >= 2 ? book_shelf_categories_id(state, state->selected) : 0,
+        .logical_categories = state->published || state->collection != NULL,
+        .category_id = (state->published || state->collection) && state->selected >= 2 ? book_shelf_categories_id(state, state->selected) : 0,
     };
 }
 void book_shelf_categories_set_sort(book_shelf_categories_t *state, bool recent_sort) {
@@ -256,5 +262,42 @@ bool book_shelf_categories_select(book_shelf_categories_t *state, int index) {
     if (!state->entries || index < 0 || index >= state->count || !state->entries[index].available) return false;
     state->selected = index;
     state->menu_open = false;
+    return true;
+}
+
+uint32_t book_shelf_folder_id(const book_shelf_categories_t *s, const char *path) {
+    size_t n = strlen(s->root);
+    if (strstr(path,"/.") || !n || strncmp(path,s->root,n) || path[n]!='/' || !path[n+1] || path[n+1]=='.') return BOOK_FOLDER_EXTERNAL;
+    if (!strchr(path+n+1,'/')) return 0;
+    for (int i=2; i<s->count; ++i) {
+        const book_shelf_category_entry_t *e=&s->entries[i]; size_t k=strlen(e->path);
+        if (e->available && k && !strncmp(path,e->path,k) && path[k]=='/') return e->id;
+    }
+    return BOOK_FOLDER_EXTERNAL;
+}
+
+bool book_shelf_categories_publish(book_shelf_categories_t *s,const book_shelf_categories_t *scan,const book_collection_t *prefs) {
+    if (!scan->entries) return false;
+    int count=scan->count;
+    book_shelf_category_entry_t *rows=heap_caps_calloc(count,sizeof(*rows),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if (!rows) return false;
+    for (int i=0;i<2;++i) { if (s->entries) rows[i]=s->entries[i]; rows[i].available=true; }
+    int used=2; bool done[BOOK_SHELF_CATEGORY_LIMIT]={0};
+    for (int p=0; p<=book_collection_count(prefs); ++p) {
+        const book_collection_category_t *pref=book_collection_at(prefs,p);
+        for (int j=2;j<count;++j) {
+            const char *name=book_shelf_categories_name(scan,j);
+            if (done[j] || !scan->entries[j].available || (pref && strcmp(pref->legacy_name,name))) continue;
+            done[j]=true;
+            book_shelf_category_entry_t *e=&rows[used++];
+            e->id=pref?pref->id:(UINT32_MAX-2u-(unsigned)j);
+            int old=book_shelf_categories_index(s,e->id);
+            if (old>=2 && (pref || !strcmp(s->entries[old].path,scan->entries[j].path))) *e=s->entries[old];
+            strcpy(e->path,scan->entries[j].path); e->available=true;
+        }
+    }
+    uint32_t selected=book_shelf_categories_id(s,s->selected);
+    free(s->entries); s->entries=rows; s->published=true; s->count=used;s->capacity=count;
+    s->selected=book_shelf_categories_index(s,selected);if(s->selected<0)s->selected=0;
     return true;
 }

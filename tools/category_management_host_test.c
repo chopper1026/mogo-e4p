@@ -7,7 +7,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "book_category_ops.h"
+#include "book_folder_plan.h"
+#include "esp_heap_caps.h"
+void *heap_caps_calloc(size_t n,size_t bytes,int caps){assert(caps==3);return calloc(n,bytes);}
+void *heap_caps_realloc(void *p,size_t bytes,int caps){assert(caps==3);return realloc(p,bytes);}
 #include "book_bookmark_format.h"
 #include "book_progress.h"
 #include "book_title.h"
@@ -104,7 +107,41 @@ static void failure_matrix(void) {
     }
     assert(injected==22);
 }
+static void folder_migration(void) {
+    char dir[]="/tmp/mogo-legacy-XXXXXX",root[288],prefix[288],src[288],dst[288],nested[288],empty[288],target[288];
+    assert(mkdtemp(dir));path(root,dir,"books");assert(!mkdir(root,0700));path(prefix,dir,"legacy");
+    path(src,root,"原目录");path(dst,root,"文学");path(nested,dst,"系列");path(empty,root,"空分类");
+    assert(!mkdir(src,0700) && !mkdir(dst,0700) && !mkdir(nested,0700));
+    book_shelf_entry_t b[6]={0};path(b[0].path,root,"A.txt");path(b[1].path,src,"a.TXT");
+    path(b[2].path,nested,"原书.txt");path(b[3].path,dir,"external.epub");path(b[4].path,root,"missing.txt");path(b[5].path,root,"a.TxT");
+    for(int i=0;i<4;++i) file(b[i].path);
+    char unassigned[288];path(unassigned,src,"未指定.txt");file(unassigned);
+    book_collection_t legacy={0};uint32_t id;unsigned changed;
+    assert(!book_collection_open(&legacy,prefix));assert(!book_collection_create(&legacy,"文学",b,6,false,&id,&changed) && changed==6);
+    assert(!book_collection_create(&legacy,"空分类",NULL,0,false,&id,&changed));
+    memset(disk,0,sizeof(disk));seed(b[0].path);
+    book_folder_plan_t plan={0},again={0};book_folder_begin(&plan,root,NULL);book_folder_migrate(&plan,&legacy);
+    assert(plan.error==ESP_ERR_INVALID_STATE && book_folder_execute(&plan,extra)==plan.error);
+    assert(exists(b[0].path) && exists(b[1].path) && !exists(empty) && !book_category_pending(root));
+    assert(!unlink(b[1].path));book_folder_begin(&plan,root,NULL);book_folder_migrate(&plan,&legacy);
+    unsigned skips=0,kept=0;for(size_t i=0;i<plan.count;++i){skips+=plan.items[i].action==FOLDER_SKIP;kept+=plan.items[i].action==FOLDER_KEEP;}
+    assert(!plan.error && skips==4 && kept==1 && plan.moves==1 && !exists(empty));
+    path(target,dst,"A.txt");file(target);book_folder_begin(&again,root,NULL);book_folder_migrate(&again,&legacy);
+    assert(!book_folder_same_plan(&plan,&again) && !exists(empty));assert(!unlink(target));
+    book_folder_begin(&again,root,NULL);book_folder_migrate(&again,&legacy);assert(book_folder_same_plan(&plan,&again));
+    extra_fail=1;assert(book_folder_execute(&again,extra)!=ESP_OK && book_category_pending(root));
+    assert(!book_category_recover(root,extra));verify(b[0].path,target);
+    book_folder_begin(&again,root,NULL);book_folder_migrate(&again,&legacy);assert(!book_folder_execute(&again,extra));
+    assert(exists(b[2].path) && exists(b[3].path) && exists(unassigned) && exists(empty));
+    assert(!book_collection_finish_migration(&legacy));book_collection_close(&legacy);
+    assert(!book_collection_open(&legacy,prefix) && !book_collection_count(&legacy));book_collection_close(&legacy);
+    char secret[288];path(secret,dst,".hidden.txt");file(secret);book_folder_begin(&plan,root,NULL);book_folder_delete(&plan,dst);
+    assert(plan.error && book_folder_execute(&plan,extra)!=ESP_OK && exists(secret) && exists(target) && exists(nested));
+    book_folder_clear(&plan);book_folder_clear(&again);remove_tree(dir);
+    puts("folder plans: zero-write collisions, stale confirmation, nested preservation, opt-in migration and interruption recovery passed");
+}
 int main(void) {
+    folder_migration();
     assert(book_category_name_valid("文学")&&book_category_name_valid("Science 2026"));
     const char *invalid[]={"",".","..",".hidden"," leading","trailing ","trailing.","a/b","a\\b","bad:name","未分类","全部书籍","\xc0\xaf"};
     for(size_t i=0;i<sizeof(invalid)/sizeof(*invalid);++i)assert(!book_category_name_valid(invalid[i]));

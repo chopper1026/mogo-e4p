@@ -25,7 +25,7 @@ typedef struct {
     bool removed;                  ///< 已删文件待清理。/ Deleted file awaiting cleanup.
     bool search_match;             ///< 已计算的搜索匹配结果。/ Precomputed search match.
     bool favorite;                 ///< 收藏标记。/ Favorite marker.
-    uint32_t category_id;          ///< 当前书库的逻辑分类，零为未分类。/ Logical category in this library; zero means uncategorized.
+    uint32_t category_id;          ///< 当前扫描从路径推导的显示 ID，零为根目录。/ Display ID derived from this scan; zero means root.
     bool new_book;                 ///< 本次完整扫描新发现。/ Newly discovered by this complete scan.
 } book_shelf_entry_t;
 

@@ -194,7 +194,9 @@ int main(void) {
     slot_path_t stale_bak; assert(record_path(BOOKMARK_ROOT,path,".bak",stale_bak));
     FILE *broken=fopen(stale_bak,"wb"); assert(broken && fputc(1,broken)!=EOF && !fclose(broken));
     assert(!book_bookmark_store_save(card) && access(stale_bak,F_OK)!=0);
+    assert(!book_bookmark_store_check_move(path,other,17));
     assert(!book_bookmark_store_relocate(path,other,17));
+    assert(book_bookmark_store_check_move(path,other,17)==ESP_ERR_INVALID_STATE);
     assert(!book_bookmark_store_save(card) && !book_bookmark_store_relocate(path,other,17));
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_NOT_FOUND);
     active=0; rewind(f); fail_promotion=".restore";

@@ -46,6 +46,8 @@ bool board_sd_is_mounted(void);
 /// 更新空间快照，不重挂载、不写卡；勿在 render 中调用。
 /// Refresh allocation statistics without remounting or writing; never call from render.
 esp_err_t board_sd_refresh_space(void);
+/// 读取已挂载 TF 的隐藏/系统属性；不挂载也不写入。/ Read FAT hidden/system attributes without mounting or writing.
+esp_err_t board_sd_path_hidden(const char *path, bool *hidden);
 /// 调用前关闭所有字体、阅读及上传句柄；这是拔卡失效后恢复挂载的唯一入口。
 /// / Close all font, reader and upload handles first; this is the only recovery entry after removal invalidation.
 esp_err_t board_sd_remount(void);

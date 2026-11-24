@@ -54,7 +54,7 @@
  * equal pairs hold), and the background derivative serves text pages only.
  * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
- * 用户2026-11-05修订：分类仅保存书架归属，不搬文件；新建后立即选书，归类勾选跨搜索/筛选保留，避免反复重选。
+ * 用户2026-11-23修订：为与电脑目录一致，分类使用 TF books 一级文件夹，归类实际移动原书；新建后立即选书，归类勾选跨搜索/筛选保留，避免反复重选。
  * 单本管理仍为书架弹窗；原文件批量管理保留其筛选、搜索及重扫清除勾选的语义。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
@@ -123,7 +123,7 @@
  * User revision: single body taps use halves or upper 1/3/lower 2/3 independently of key mappings; center double taps have no action.
  * Short key actions are configurable with two presets; middle holds are configurable and default to home. The reader has no bottom-right menu icon.
  * User-authorized management shows full details before separate clear/delete confirmations; retain failed saves for retry without pruning other books.
- * User revision2026-11-05: logical categories never move files; create then pick books, retaining classification selections across search/filters to avoid repeated selection.
+ * User revision 2026-11-23: match computer-visible TF books folders by moving the actual book; create then pick books, retaining classification selections across search/filters to avoid repeated selection.
  * Single-book actions remain a shelf dialog; existing file-batch filters, applied searches and rescans still clear selections.
  * Invalidate failed progress only for changed paths; retain deletion cleanup retries across page exits for this boot.
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
@@ -151,8 +151,8 @@
  * User revision: fast covers retain a light white lift with slightly denser blacks per the latest request and cache at most nine 1-bit thumbnails in PSRAM (about 40 KiB); unchanged progress no longer discards covers. Cache artwork only, draw favorites and UI text live, and release on book opening or media loss.
  * 用户最新修订：阅读书名与章节标题复用当前阅读字体，以原32/48px直接光栅化；首页另用其活动系统字体，不同时加载两份字库。
  * Latest user revision: book/chapter titles reuse the current reader face at the original 32/48px; Home uses its active system face, never retaining both fonts.
- * 用户2026-11-05修订：题头下拉切换独立分类，旧子目录仅首次迁移；各类别/布局记住页码，普通浏览主体不变，多选单独留出筛选与操作带。
- * User revision2026-11-05: title choices are independent categories with one-time legacy-folder migration; retain per-category/layout pages and browsing geometry, reserving separate selection/filter bands while selecting.
+ * 用户2026-11-23修订：题头下拉切换真实目录，旧逻辑分类仅经预览确认后迁移；各类别/布局记住页码，普通浏览主体不变，多选单独留出筛选与操作带。
+ * User revision 2026-11-23: title choices are real folders; legacy assignments require a confirmed migration; retain per-category/layout pages and browsing geometry, reserving separate selection/filter bands while selecting.
  * 用户2026-11-06修订：普通书架移除题头下重复数量，搜索、选择、管理、导入同排等距；分类标题与按钮命中互不重叠，保留底部分页数量。
  * User revision2026-11-06: remove the duplicate header count, evenly space search/select/manage/import in one row, isolate title hits and retain the pager count.
  * 用户2026-11-08修订：普通书架移除题头下添加图书、新增归类提示和底部归类结果栏，避免挤占书架；取消分类会话撤回，添加图书仍从管理分类进入。
@@ -375,12 +375,15 @@ static bool s_recent_sort;
 // Bounded folder records retain pages by full path for the two layouts during this boot.
 #define SHELF_CATEGORY_ROWS BOOK_SHELF_CATEGORY_MENU_ROWS
 static book_shelf_categories_t s_shelf_categories;
-static book_shelf_categories_t s_legacy_categories;
+static book_shelf_categories_t s_scan_categories;
 static book_collection_t s_collection;
-static uint32_t s_collection_bound_generation;
+static book_collection_t s_legacy_collection;
+static book_folder_plan_t s_folder_preview;
+static bool s_folder_ready, s_restore_folder;
+static const char *s_folder_old, *s_folder_next;
 static uint32_t s_collection_backup_revision;
 static char s_collection_library[40];
-static bool s_collection_rescan;
+
 static book_shelf_covers_t s_category_covers;
 static uint32_t s_category_cover_key;
 static bool s_shelf_selecting;
@@ -1608,7 +1611,7 @@ static void draw_manage(uint8_t* fb) {
         draw_control(fb, manage_rect(1, 2), "重试清理", 403);
     } else {
         char category_label[128];
-        snprintf(category_label,sizeof(category_label),"分类：%s",shelf_category_name(book_shelf_categories_index(&s_shelf_categories,book_collection_assignment(&s_collection,s_managed.path))));
+        snprintf(category_label,sizeof(category_label),"分类：%s",s_managed.category_id==BOOK_FOLDER_EXTERNAL?"不在 TF books 内":shelf_category_name(book_shelf_categories_index(&s_shelf_categories,s_managed.category_id)));
         fit_text(category_label,20,ui_content_width()-24);
         draw_control(fb, (EpdRect){UI_MARGIN, panel.y + panel.height - 258, ui_content_width(), 58}, category_label, 407);
         draw_control(fb, (EpdRect){UI_MARGIN, panel.y + panel.height - 190, ui_content_width(), 68}, "前往文件管理重命名", 404);
@@ -4702,7 +4705,9 @@ static bool open_book_impl(app_ctx_t *ctx, const char *path, uint32_t size) {
 }
 static bool open_book_attempt(app_ctx_t *ctx, const char *path, bool *retry) {
     *retry = false;
-    if (book_category_pending(app_settings_books_dir())) {
+    const char *root = app_settings_books_dir();
+    size_t root_len = strlen(root);
+    if (path && !strncmp(path, root, root_len) && path[root_len] == '/' && book_category_pending(root)) {
         copy_text(s_message,sizeof(s_message),"分类整理未完成，请在管理分类中重试恢复"); return false;
     }
     uint32_t size;
@@ -4802,12 +4807,11 @@ static bool open_requested_book(app_ctx_t* ctx) {
 }
 /* ---- 书架数据 / Shelf data ---- */
 static int shelf_category_add(const char *path) {
-    (void)book_shelf_categories_add(&s_legacy_categories,path);
-    return book_shelf_categories_add(&s_shelf_categories, path);
+    return book_shelf_categories_add(&s_scan_categories,path);
 }
 static void shelf_category_init(void) {
     if (book_shelf_categories_init(&s_shelf_categories, app_settings_books_dir())) s_shelf_cache_valid = false;
-    book_shelf_categories_init(&s_legacy_categories,app_settings_books_dir());
+    book_shelf_categories_init(&s_scan_categories,app_settings_books_dir());
 }
 static const char *shelf_category_name(int index) {
     return book_shelf_categories_name(&s_shelf_categories, index);
@@ -4824,13 +4828,13 @@ static void shelf_category_restore(app_ctx_t *ctx) {
                                              s_visible_count, shelf_rows());
 }
 static void shelf_category_selection_save(void) {
-    if (!s_collection.ready || !book_shelf_categories_logical(&s_shelf_categories)) return;
+    if (!s_folder_ready) return;
     uint32_t id = book_shelf_categories_id(&s_shelf_categories, book_shelf_categories_selected(&s_shelf_categories));
     if (!app_settings_set_shelf_category(s_collection_library, id))
         copy_text(s_shelf_warning, sizeof(s_shelf_warning), "分类选择未保存，重启后可能回到原分类");
 }
 static void shelf_categories_recount(void) {
-    book_collection_apply(&s_collection,s_shelf,s_count);
+    for(int i=0;i<s_count;++i) s_shelf[i].category_id=book_shelf_folder_id(&s_shelf_categories,s_shelf[i].path);
     book_shelf_categories_recount(&s_shelf_categories, s_shelf, s_count);
 }
 static int shelf_category_at(int ordinal) {
@@ -4966,9 +4970,6 @@ static bool legacy_category_recover(void) {
 static void scan_shelf(app_ctx_t* ctx) {
     bool recovered_legacy = legacy_category_recover();
     const uint32_t progress_revision=book_progress_revision();
-    shelf_category_init();
-    book_shelf_categories_begin_scan(&s_shelf_categories);
-    book_shelf_categories_begin_scan(&s_legacy_categories);
     s_count = 0;
     s_visible_count = 0;
     s_message[0] = 0;
@@ -4978,6 +4979,9 @@ static void scan_shelf(app_ctx_t* ctx) {
     book_store_root_t roots[BOOK_STORE_ROOT_MAX];
     int n = 0;
     esp_err_t root_err = book_store_roots(roots, &n);
+    (void)shelf_collection_load(false);
+    book_shelf_categories_dispose(&s_scan_categories);
+    shelf_category_init();
     bool truncated = false, unreadable = root_err != ESP_OK || book_store_roots_degraded(), skipped = false;
     nvs_handle_t favorites = 0;
     nvs_handle_t hidden = 0;
@@ -5027,7 +5031,7 @@ static void scan_shelf(app_ctx_t* ctx) {
     (void)shelf_backfill_read_books(&truncated);
     if (!unreadable && !truncated && !skipped) (void)book_shelf_cache_save(shelf_cache, s_shelf, s_count);
     book_shelf_cache_close(shelf_cache);
-    if (recovered_legacy) (void)shelf_collection_sync(!unreadable && !truncated && !skipped);
+    (void)shelf_collection_sync(recovered_legacy && !unreadable && !truncated && !skipped);
     shelf_categories_recount();
     sort_shelf(ctx);
     if (s_view==SHELF) shelf_category_restore(ctx);
@@ -5046,7 +5050,7 @@ static void scan_shelf(app_ctx_t* ctx) {
     else if (unreadable) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分目录或文件不可读，请检查后重扫");
     else if (skipped) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "部分文件过大或名称过长，未列入");
     else if (s_pending_invalidated) copy_text(s_shelf_warning, sizeof(s_shelf_warning), "图书已更新，旧待保存进度已作废");
-    if (!recovered_legacy) copy_text(s_shelf_warning,sizeof(s_shelf_warning),"旧分类整理未完成，请在管理分类中重试恢复");
+    if (!recovered_legacy) copy_text(s_shelf_warning,sizeof(s_shelf_warning),"分类整理未完成，请在管理分类中重试恢复");
     if (!s_count && !unreadable && !truncated) copy_text(s_message, sizeof(s_message), "暂无图书，请传入 TXT、EPUB 或 MOBI");
     copy_text(s_cache_library,sizeof(s_cache_library),cache_sd.mounted?cache_sd.identity:"builtin");
     s_cache_sd_present = cache_sd.present;
@@ -5060,9 +5064,7 @@ static void scan_shelf(app_ctx_t* ctx) {
 static void rescan_shelf(app_ctx_t *ctx) {
     shelf_category_remember(ctx);
     (void)shelf_collection_load(true);
-    s_collection_rescan = true;
     scan_shelf(ctx);
-    s_collection_rescan = false;
 }
 
 /* ---- 分类管理 / Category management ---- */
@@ -5083,56 +5085,40 @@ static esp_err_t category_extra_state(const char *old_path, const char *new_path
     return ESP_OK;
 }
 static bool shelf_collection_load(bool retry) {
-    board_sd_info_t sd = {0}; board_sd_get_info(&sd);
-    if (sd.present && (!sd.mounted || !sd.identity[0])) return false;
-    if (book_store_prepare_data() != ESP_OK) return false;
-    char prefix[BOOK_STORE_PATH_MAX];
-    snprintf(prefix,sizeof(prefix),"/flash/.mogo-shelf-%s",sd.mounted?sd.identity:"builtin");
-    uint32_t restored = book_collection_backup_revision();
-    if (!strcmp(s_collection.prefix,prefix) && !retry && s_collection_backup_revision == restored)
-        return s_collection.ready;
-    if (strcmp(s_collection.prefix,prefix)) {
-        book_shelf_categories_dispose(&s_shelf_categories);
-        book_shelf_categories_init(&s_shelf_categories,app_settings_books_dir());
-    }
-    s_collection_bound_generation=0;
-    esp_err_t err=book_collection_open(&s_collection,prefix);
-    if (err==ESP_OK) {
-        s_collection_backup_revision = restored;
-        copy_text(s_collection_library,sizeof(s_collection_library),sd.mounted?sd.identity:"builtin");
-    }
-    return err==ESP_OK;
+    board_sd_info_t sd={0};board_sd_get_info(&sd);
+    const char *id=sd.mounted?sd.identity:"builtin";
+    uint32_t revision=book_collection_backup_revision();
+    bool switched=strcmp(id,s_collection_library)!=0;
+    if(!retry && !switched && revision==s_collection_backup_revision)return s_collection.ready;
+    if(switched){book_shelf_categories_dispose(&s_shelf_categories);s_folder_ready=false;}
+    s_restore_folder=s_restore_folder || switched || revision!=s_collection_backup_revision;
+    s_collection_backup_revision=revision;
+    copy_text(s_collection_library,sizeof(s_collection_library),id);
+    book_collection_close(&s_collection);book_collection_close(&s_legacy_collection);
+    if(!sd.mounted || !id[0] || book_store_prepare_data()!=ESP_OK)return false;
+    char prefix[BOOK_STORE_PATH_MAX];snprintf(prefix,sizeof(prefix),"/flash/.mogo-shelf-%s",id);
+    if (book_collection_open(&s_legacy_collection,prefix)==ESP_OK && !book_collection_count(&s_legacy_collection))
+        book_collection_close(&s_legacy_collection);
+    snprintf(prefix,sizeof(prefix),"/flash/.mogo-folders-%s",id);
+    return book_collection_open(&s_collection,prefix)==ESP_OK;
 }
 static bool shelf_collection_sync(bool complete) {
-    if (!shelf_collection_load(false)) {
-        copy_text(s_shelf_warning,sizeof(s_shelf_warning),"分类资料暂不可用，仍可浏览全部书籍");
-        return false;
+    const char *names[BOOK_COLLECTION_CATEGORIES];size_t count=0;
+    for(int i=2,index;(index=book_shelf_categories_at(&s_scan_categories,i))>=0;++i)names[count++]=book_shelf_categories_name(&s_scan_categories,index);
+    esp_err_t err=complete ? book_collection_folders(&s_collection,names,count,s_folder_old,s_folder_next) : ESP_ERR_INVALID_STATE;
+    bool published=book_shelf_categories_publish(&s_shelf_categories,&s_scan_categories,&s_collection);
+    s_folder_ready=published && err==ESP_OK;
+    if(!s_folder_ready && strcmp(s_collection_library,"builtin"))
+        copy_text(s_shelf_warning,sizeof(s_shelf_warning),"目录未完整读取或偏好不可写，请重扫后整理");
+    if(!published) (void)book_shelf_categories_select(&s_shelf_categories,0);
+    if(s_folder_ready && s_restore_folder){
+        int index=book_shelf_categories_index(&s_shelf_categories,app_settings_shelf_category(s_collection_library));
+        (void)book_shelf_categories_select(&s_shelf_categories,index>=0?index:0);s_restore_folder=false;
     }
-    const char *folders[BOOK_COLLECTION_CATEGORIES]; size_t n=0;
-    for(int ordinal=2,index;(index=book_shelf_categories_at(&s_legacy_categories,ordinal))>=0 && n<BOOK_COLLECTION_CATEGORIES;++ordinal)
-        folders[n++]=book_shelf_categories_path(&s_legacy_categories,index);
-    esp_err_t err=(s_collection_rescan?book_collection_rescan:book_collection_sync)(
-        &s_collection,app_settings_books_dir(),folders,n,s_shelf,s_count,complete);
-    if(err!=ESP_OK) copy_text(s_shelf_warning,sizeof(s_shelf_warning),"分类保存失败，原归属已保留");
-    if(book_collection_migrated(&s_collection) &&
-       (!book_shelf_categories_logical(&s_shelf_categories) || s_collection_bound_generation!=s_collection.generation)) {
-        bool restore_selection=!book_shelf_categories_logical(&s_shelf_categories);
-        if(!book_shelf_categories_bind(&s_shelf_categories,&s_collection)) {
-            copy_text(s_shelf_warning,sizeof(s_shelf_warning),"分类已保存，内存不足，稍后重试显示");
-            (void)book_shelf_categories_select(&s_shelf_categories,0);
-            return false;
-        }
-        s_collection_bound_generation=s_collection.generation;
-        if (restore_selection) {
-            uint32_t selected=app_settings_shelf_category(s_collection_library);
-            int index=book_shelf_categories_index(&s_shelf_categories,selected);
-            (void)book_shelf_categories_select(&s_shelf_categories,index>=0?index:0);
-        }
-    }
-    if(s_collection.recovered)copy_text(s_shelf_warning,sizeof(s_shelf_warning),"分类已从备用副本恢复，请核对");
-    return err==ESP_OK && book_shelf_categories_logical(&s_shelf_categories);
+    return s_folder_ready;
 }
 static void category_reset(void) {
+    book_folder_clear(&s_folder_preview);
     book_category_ui_end(&s_category_ui);
     book_shelf_covers_cancel(&s_category_covers); book_shelf_covers_release(&s_category_covers);
     s_category_cover_key=0;
@@ -5142,9 +5128,10 @@ static void category_begin(app_ctx_t *ctx, bool picker, bool bulk) {
     s_category_parent=s_view; s_category_bulk=bulk;
     category_reset(); book_category_ui_begin(&s_category_ui,picker);
     s_category_ui.books=s_shelf; s_category_ui.count=s_count; s_category_ui.cover=category_cover_draw;
-    s_category_ui.blocked=!book_shelf_categories_logical(&s_shelf_categories) || s_collection_bound_generation!=s_collection.generation || !s_collection.ready || s_collection.blocked ||
-        book_category_pending(app_settings_books_dir());
-    if(s_category_ui.blocked)copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"分类资料不可用，原书籍不受影响");
+    s_category_ui.blocked=!s_folder_ready || book_category_pending(app_settings_books_dir());
+    s_category_ui.migration_available=book_collection_count(&s_legacy_collection)>0;
+    if(s_category_ui.blocked)copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"需挂载 TF 并完整读取 books 后才能整理");
+    else if(s_legacy_collection.blocked)copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"旧分类资料不可读，仍可整理现有目录");
     if(picker && !bulk) {
         clear_selection();
         for(int i=0;i<s_count;++i)if(!strcmp(s_shelf[i].path,s_managed.path))s_shelf[i].selected=true;
@@ -5232,25 +5219,47 @@ static app_redraw_t category_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev
 }
 static bool category_storage_ready(void) {
     board_sd_info_t sd={0}; board_sd_get_info(&sd);
-    const char *identity=sd.mounted?sd.identity:"builtin";
-    if(usb_storage_active() || strcmp(identity,s_cache_library) || (sd.present&&!sd.mounted)) {
-        copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"书库已变化，请退出并重新打开书架");return false;
-    }
-    if(!s_collection.ready || s_collection.blocked || !book_collection_migrated(&s_collection) ||
-       !book_shelf_categories_logical(&s_shelf_categories) || s_collection_bound_generation!=s_collection.generation ||
+    if(!sd.mounted || !sd.identity[0] || usb_storage_active() || strcmp(sd.identity,s_cache_library) ||
+       s_store_revision!=book_store_revision() || s_collection_backup_revision!=book_collection_backup_revision() || !s_folder_ready ||
        book_category_pending(app_settings_books_dir())) {
-        copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"分类资料不可用，请先重试读取");return false;
+        copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"书库已变化或不可写，请重新读取");return false;
     }
     return true;
 }
 static const char *category_error(esp_err_t err) {
-    if(err==ESP_ERR_INVALID_ARG)return "名称须为1至24字且不能使用保留名称";
-    if(err==ESP_ERR_INVALID_STATE)return "已有同名分类，或分类资料暂不可写";
-    if(err==ESP_ERR_INVALID_SIZE)return "分类或书目已达到保存上限";
-    if(err==ESP_ERR_NO_MEM)return "内存不足，未保存，请稍后重试";
-    return "保存失败，原归属与勾选已保留";
+    if(err==ESP_ERR_INVALID_ARG)return "文件夹名称无效，请使用 1 至 24 字";
+    if(err==ESP_ERR_INVALID_STATE)return "路径或阅读记录冲突，未覆盖";
+    if(err==ESP_ERR_NOT_FOUND)return "原书或目标目录不存在，请重扫";
+    if(err==ESP_ERR_NOT_SUPPORTED)return "含其他文件、子目录或不属于 TF books";
+    if(err==ESP_ERR_INVALID_SIZE)return "路径或项目数超过上限";
+    if(err==ESP_ERR_NO_MEM)return "内存不足，请减少本次选择";
+    return "读写失败，请检查 TF 卡";
+}
+static esp_err_t category_check_extra(const char *from,const char *to,uint32_t size) {
+    if(delete_retry_find(to) || delete_retry_find(from))return ESP_ERR_INVALID_STATE;
+    const reading_journal_model_t *model=app_reading_journal_model();
+    uint64_t dest=reading_journal_book_id(to,size);
+    for(const reading_journal_record_t *r=model->records;r;r=r->next)if(r->book==dest)return ESP_ERR_INVALID_STATE;
+    return book_bookmark_store_check_move(from,to,size);
+}
+static void category_plan(book_folder_plan_t *plan,book_category_command_t cmd,const char *source,const char *dest) {
+    const char *root=app_settings_books_dir();book_folder_begin(plan,root,category_check_extra);
+    if(cmd==CATEGORY_REMOVE || cmd==CATEGORY_PREVIEW_DELETE){book_folder_delete(plan,source);return;}
+    if(cmd==CATEGORY_MIGRATE || cmd==CATEGORY_PREVIEW_MIGRATE){book_folder_migrate(plan,&s_legacy_collection);return;}
+    if(cmd==CATEGORY_CREATE){book_folder_directory(plan,s_category_ui.draft,false);if(!s_category_ui.picker || plan->error)return;}
+    for(int i=0;i<s_count;++i)if(s_shelf[i].selected && !s_shelf[i].removed &&
+        (cmd!=CATEGORY_UNCLASSIFY || s_shelf[i].category_id==s_category_ui.source))
+        book_folder_add_move(plan,s_shelf[i].path,dest,false);
+}
+static void category_refresh_catalog(app_ctx_t *ctx) {
+    pending_drop_invalidated();book_store_notify_changed();book_lock_collage_invalidate();
+    invalidate_covers();s_category_cover_key=0;book_shelf_covers_cancel(&s_category_covers);book_shelf_covers_release(&s_category_covers);
+    scan_shelf(ctx);s_category_ui.books=s_shelf;s_category_ui.count=s_count;
 }
 static app_redraw_t category_tick(app_ctx_t *ctx) {
+    if(s_category_ui.screen!=CATEGORY_PREVIEW && s_folder_preview.items){
+        book_folder_clear(&s_folder_preview);s_category_ui.preview=NULL;
+    }
     if(s_category_ui.command==CATEGORY_IDLE) {
         if(ctx->consumed)return APP_REDRAW_NONE;
         if(s_category_ui.screen!=CATEGORY_EDIT)return category_prepare_covers(ctx)?APP_REDRAW_PAGE:APP_REDRAW_NONE;
@@ -5271,8 +5280,8 @@ static app_redraw_t category_tick(app_ctx_t *ctx) {
             scan_shelf(ctx);
             s_category_ui.books=s_shelf; s_category_ui.count=s_count;
         }
-        s_category_ui.blocked=!book_shelf_categories_logical(&s_shelf_categories) || s_collection_bound_generation!=s_collection.generation || !s_collection.ready || s_collection.blocked ||
-            book_category_pending(app_settings_books_dir());
+        s_category_ui.blocked=!s_folder_ready || book_category_pending(app_settings_books_dir());
+        s_category_ui.migration_available=book_collection_count(&s_legacy_collection)>0;
         copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),s_category_ui.blocked?"分类资料仍不可用，未覆盖原资料":"分类资料已重新读取");
         return APP_REDRAW_PAGE;
     }
@@ -5281,23 +5290,74 @@ static app_redraw_t category_tick(app_ctx_t *ctx) {
     esp_err_t err=ESP_OK; unsigned changed=0; uint32_t created=0,target=s_category_ui.destination;
     bool create_assign=command==CATEGORY_CREATE && s_category_ui.picker;
     bool adding=s_category_ui.screen==CATEGORY_BOOKS && !s_category_ui.selecting_only;
-    if(command==CATEGORY_CREATE)err=book_collection_create(&s_collection,s_category_ui.draft,
-        create_assign?s_shelf:NULL,create_assign?s_count:0,true,&created,&changed);
-    else if(command==CATEGORY_MOVE)err=book_collection_assign(&s_collection,s_shelf,s_count,true,target,&changed);
-    else if(command==CATEGORY_UNCLASSIFY)err=book_collection_unclassify(&s_collection,s_shelf,s_count,s_category_ui.source,&changed);
-    else if(command==CATEGORY_RENAME)err=book_collection_rename(&s_collection,s_category_ui.source,s_category_ui.draft);
-    else if(command==CATEGORY_REMOVE)err=book_collection_remove(&s_collection,s_category_ui.source);
-    else if(command==CATEGORY_UP || command==CATEGORY_DOWN)err=book_collection_order(&s_collection,s_category_ui.source,command==CATEGORY_UP?-1:1);
-    if(err!=ESP_OK){copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),category_error(err));return APP_REDRAW_PAGE;}
-    if(s_category_ui.screen==CATEGORY_EDIT)ui_keyboard_end();
-    book_collection_apply(&s_collection,s_shelf,s_count);
-    bool bound=shelf_collection_sync(false); shelf_categories_recount();
-    if (bound && command==CATEGORY_REMOVE) shelf_category_selection_save();
-    if(!bound){
-        s_category_ui.blocked=true;s_category_ui.screen=CATEGORY_LIST;
-        copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"已保存，内存不足，请重试读取");
-        sort_shelf(ctx);return APP_REDRAW_PAGE;
+    const char *root=app_settings_books_dir();int index=book_shelf_categories_index(&s_shelf_categories,s_category_ui.source);
+    const char *source=book_shelf_categories_path(&s_shelf_categories,index);
+    int dest_index=book_shelf_categories_index(&s_shelf_categories,target);
+    if((command==CATEGORY_MOVE && (dest_index<1 || target==BOOK_COLLECTION_ALL)) ||
+       ((command==CATEGORY_REMOVE || command==CATEGORY_PREVIEW_DELETE || command==CATEGORY_RENAME || command==CATEGORY_UNCLASSIFY) && index<2))return APP_REDRAW_PAGE;
+    const char *dest=command==CATEGORY_UNCLASSIFY?root:book_shelf_categories_path(&s_shelf_categories,dest_index);
+    char new_path[BOOK_STORE_PATH_MAX];
+    if(command==CATEGORY_CREATE){if(snprintf(new_path,sizeof(new_path),"%s/%s",root,s_category_ui.draft)>=(int)sizeof(new_path))return APP_REDRAW_PAGE;dest=new_path;}
+    bool reorder=command==CATEGORY_UP || command==CATEGORY_DOWN;
+    if(reorder){err=book_collection_order(&s_collection,s_category_ui.source,command==CATEGORY_UP?-1:1);}
+    else {
+        if(!network_service_stop_local_wifi() || !book_cover_jobs_quiesce(2000) || s_reader_session.book.path[0]){
+            copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"书籍或传输任务占用中，请稍后重试");return APP_REDRAW_PAGE;
+        }
+        bool preview=command==CATEGORY_PREVIEW_MIGRATE || command==CATEGORY_PREVIEW_DELETE;
+        bool confirm=command==CATEGORY_MIGRATE || command==CATEGORY_REMOVE;
+        if(!preview){retry_progress();(void)app_reading_journal_poll();
+            if(s_save_failed || !app_reading_journal_flush()){copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"阅读记录尚未保存，未开始整理");return APP_REDRAW_PAGE;}}
+        if(command==CATEGORY_RENAME){
+            char old_name[BOOK_STORE_PATH_MAX];copy_text(old_name,sizeof(old_name),book_shelf_categories_name(&s_shelf_categories,index));
+            err=book_category_check_rename(root,source,s_category_ui.draft,category_check_extra);
+            if(err==ESP_OK)err=book_category_rename(root,source,s_category_ui.draft,category_extra_state);
+            if(err==ESP_OK){s_folder_old=old_name;s_folder_next=s_category_ui.draft;category_refresh_catalog(ctx);s_folder_old=s_folder_next=NULL;}
+        } else {
+            book_folder_plan_t plan={0};category_plan(&plan,command,source,dest);
+            size_t new_dirs=0;for(size_t i=0;i<plan.count;++i)if(plan.items[i].action==FOLDER_CREATE)++new_dirs;
+            if(new_dirs+(size_t)book_shelf_categories_available(&s_shelf_categories)>BOOK_SHELF_CATEGORY_LIMIT)plan.error=ESP_ERR_INVALID_SIZE;
+            if(preview || (plan.error && plan.count) || (confirm && (!s_category_ui.preview || !book_folder_same_plan(&s_folder_preview,&plan)))){
+                if(s_category_ui.screen!=CATEGORY_PREVIEW){
+                    s_category_ui.preview_parent=s_category_ui.screen;
+                    s_category_ui.preview_parent_page=s_category_ui.page;
+                    if(s_category_ui.screen==CATEGORY_EDIT)ui_keyboard_end();
+                }
+                s_category_ui.conflict_preview=!preview && !confirm;
+                book_folder_clear(&s_folder_preview);s_folder_preview=plan;s_category_ui.preview=&s_folder_preview;
+                s_category_ui.migrating=command==CATEGORY_MIGRATE || command==CATEGORY_PREVIEW_MIGRATE;
+                s_category_ui.screen=CATEGORY_PREVIEW;s_category_ui.page=0;
+                for(size_t i=0;plan.error && i<plan.count;++i)if(plan.items[i].error){s_category_ui.page=(int)i;break;}
+                copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),plan.error?category_error(plan.error):preview?"可翻页核对每项路径":"内容已变化，请重新核对");return APP_REDRAW_PAGE;
+            }
+            if(plan.error){
+                copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),category_error(plan.error));
+                book_folder_clear(&plan);return APP_REDRAW_PAGE;
+            }
+            err=book_folder_execute(&plan,category_extra_state);changed=plan.completed;
+            if(err==ESP_OK && command==CATEGORY_MIGRATE)err=book_collection_finish_migration(&s_legacy_collection);
+            bool pending=book_category_pending(root);
+            if(plan.changed || pending || err==ESP_OK) {
+                if(!pending)category_refresh_catalog(ctx);
+                else { s_shelf_cache_valid=false;book_store_notify_changed();s_category_ui.blocked=true; }
+            }
+            if(err!=ESP_OK){
+                if(s_category_ui.screen==CATEGORY_EDIT)ui_keyboard_end();
+                s_category_ui.screen=CATEGORY_LIST;
+                snprintf(s_category_ui.notice,sizeof(s_category_ui.notice),"已移动 %u/%u 本，%s",changed,(unsigned)plan.moves,pending?"待恢复当前项":"已停止，请重试");
+                book_folder_clear(&plan);return APP_REDRAW_PAGE;
+            }
+            book_folder_clear(&plan);book_folder_clear(&s_folder_preview);s_category_ui.preview=NULL;
+            s_category_ui.migration_available=book_collection_count(&s_legacy_collection)>0;
+            if(command==CATEGORY_CREATE)created=book_collection_legacy_id(&s_collection,s_category_ui.draft);
+        }
     }
+    if(err!=ESP_OK){copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),category_error(err));
+        if(book_category_pending(root)){if(s_category_ui.screen==CATEGORY_EDIT)ui_keyboard_end();s_category_ui.screen=CATEGORY_LIST;s_category_ui.blocked=true;s_shelf_cache_valid=false;book_store_notify_changed();}return APP_REDRAW_PAGE;}
+    if(s_category_ui.screen==CATEGORY_EDIT)ui_keyboard_end();
+    if(reorder){(void)shelf_collection_sync(true);shelf_categories_recount();}
+    if(command==CATEGORY_REMOVE)shelf_category_selection_save();
+    if(!s_folder_ready){s_category_ui.blocked=true;s_category_ui.screen=CATEGORY_LIST;copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),"文件已整理，目录需重新读取");return APP_REDRAW_PAGE;}
     if(command==CATEGORY_CREATE && !create_assign) {
         category_start_books(ctx,created,false); return APP_REDRAW_PAGE;
     }
@@ -5314,7 +5374,7 @@ static app_redraw_t category_tick(app_ctx_t *ctx) {
     } else {
         s_category_ui.screen=(command==CATEGORY_UP || command==CATEGORY_DOWN)?CATEGORY_ORDER:CATEGORY_LIST;
         copy_text(s_category_ui.notice,sizeof(s_category_ui.notice),command==CATEGORY_RENAME?"分类名称已保存":
-            command==CATEGORY_REMOVE?"分类已删除，图书已变为未分类":"分类顺序已保存");
+            command==CATEGORY_REMOVE?"书籍已移回 books，空目录已删除":command==CATEGORY_MIGRATE?"旧分类迁移完成":"分类顺序已保存");
         book_category_ui_refresh(&s_category_ui,&s_shelf_categories,s_category_ui.source);
         sort_shelf(ctx);
     }
@@ -5349,7 +5409,7 @@ static void refresh_cached_progress(app_ctx_t* ctx) {
     // 新增条目必须重排才能重算可见列表；只刷新进度时沿用原有顺序。
     // Added entries need a re-sort to recompute the visible list; a progress refresh alone
     // keeps the current order.
-    if (added || (shelf_query().recent_sort && recent_changed)) { (void)shelf_collection_sync(added); shelf_categories_recount(); sort_shelf(ctx); }
+    if (added || (shelf_query().recent_sort && recent_changed)) { shelf_categories_recount(); sort_shelf(ctx); }
     if (s_view==SHELF) shelf_category_restore(ctx);
 }
 static void return_to_cached_shelf(app_ctx_t* ctx) {
@@ -6605,6 +6665,7 @@ static app_redraw_t manage_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         return APP_REDRAW_PAGE;
     }
     if (!s_clear_confirm && !s_file_removed && ui_rect_hit((EpdRect){UI_MARGIN, manage_panel().y + manage_panel().height - 258, ui_content_width(), 58}, x, y)) {
+        if(s_managed.category_id==BOOK_FOLDER_EXTERNAL){copy_text(s_manage_message,sizeof(s_manage_message),"仅可整理 TF books 内的书籍");return APP_REDRAW_PAGE;}
         category_begin(ctx,true,false); return APP_REDRAW_PAGE;
     }
     if (!s_clear_confirm && !s_file_removed && ui_rect_hit((EpdRect){UI_MARGIN, manage_panel().y + manage_panel().height - 190, ui_content_width(), 68}, x, y)) {
@@ -6964,7 +7025,9 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             }
             if(ui_rect_hit(book_selection_rect(BOOK_SELECTION_PAGE_ALL),x,y)){
                 if(!s_visible_count)return APP_REDRAW_NONE;
-                book_shelf_select_page(s_shelf,s_visible_count,ctx->leaf,shelf_rows());return APP_REDRAW_PAGE;
+                book_shelf_select_page(s_shelf,s_visible_count,ctx->leaf,shelf_rows());
+                for(int i=0;i<s_count;++i)if(s_shelf[i].category_id==BOOK_FOLDER_EXTERNAL)s_shelf[i].selected=false;
+                return APP_REDRAW_PAGE;
             }
         }
         if (s_view == SHELF) {
@@ -6998,7 +7061,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     for (int row = 0; row < rows; ++row) if (ui_rect_hit(row_rect(row), x, y)) {
         int i = ctx->leaf * rows + row;
         if (s_view == SHELF && i < s_visible_count) {
-            if(s_shelf_selecting){toggle_selection(i);return APP_REDRAW_PAGE;}
+            if(s_shelf_selecting){if(s_shelf[i].category_id==BOOK_FOLDER_EXTERNAL)return APP_REDRAW_NONE;toggle_selection(i);return APP_REDRAW_PAGE;}
             shelf_category_remember(ctx);
             if (s_shelf[i].removed) {
                 s_managed = s_shelf[i]; s_view = MANAGE; s_file_removed = s_delete_confirm = true; s_clear_confirm = false;
@@ -7105,7 +7168,7 @@ static void on_enter(app_ctx_t* ctx) {
                  !strcmp(s_cache_library,sd.mounted?sd.identity:"builtin") &&
                  sd.present == s_cache_sd_present && sd.mounted == s_cache_sd_mounted &&
                  s_cache_shelf_style == app_settings_shelf_style() &&
-                 s_store_revision == book_store_revision();
+                 s_store_revision == book_store_revision() && s_collection_backup_revision==book_collection_backup_revision();
     s_scan_pending = !reuse;
     if (reuse) {
         refresh_cached_progress(ctx);
