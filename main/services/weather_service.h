@@ -47,4 +47,6 @@ void app_weather_reap_cancelled(void);
 /// 取消后等待真正交还无线与HTTP，不删除仍运行的任务。/ Cancel and await actual radio/HTTP handoff; never delete a running worker.
 void app_weather_cancel_join(void);
 bool app_weather_busy(void);
+/// NVS 空间紧张时删除可重建的预报缓存，保留城市偏好与当前内存视图。/ Evict rebuildable forecast cache from NVS under space pressure while keeping preferences and in-RAM view.
+bool app_weather_evict_cache(void);
 void app_weather_clear_search(void);

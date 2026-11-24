@@ -257,6 +257,7 @@
 #include "board_hardware.h"
 #include "board_sd.h"
 #include "network_local_wifi.h"
+#include "weather_service.h"
 #include "book_search.h"
 #include "settings.h"
 #include "book/book_reader_input.h"
@@ -452,6 +453,7 @@ static int64_t s_save_retry_ms;
 static unsigned s_store_revision;
 static uint32_t s_progress_revision=UINT32_MAX;
 static bool s_shelf_cache_valid, s_cache_sd_present, s_cache_sd_mounted;
+static char s_bookmark_migrated_card[48];
 static uint8_t s_cache_shelf_style;
 static bool s_scan_pending, s_clear_confirm;
 static reader_panel_t s_reader_panel;
@@ -1991,6 +1993,78 @@ static esp_err_t bookmark_legacy_erase(void) {
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     return err;
+}
+// 仅迁移当前已挂载 TF 卡上文件存在且大小匹配的旧 NVS 书签；内置书、异卡或损坏侧车一律保留不动。
+// Migrate only legacy NVS bookmarks whose TF-card book is present with matching size; leave internal books, other cards, and corrupt sidecars untouched.
+static size_t bookmark_migrate_card_nvs(void) {
+    size_t migrated = 0;
+    for (unsigned pass = 0; pass < 16; ++pass) {
+        nvs_handle_t h;
+        if (nvs_open("rp_marks", NVS_READONLY, &h) != ESP_OK) break;
+        char erase_keys[16][16];
+        size_t erase_count = 0;
+        nvs_iterator_t it = NULL;
+        for (esp_err_t next = nvs_entry_find_in_handle(h, NVS_TYPE_ANY, &it);
+             next == ESP_OK && erase_count < 16; next = nvs_entry_next(&it)) {
+            nvs_entry_info_t info = {0};
+            if (nvs_entry_info(it, &info) != ESP_OK) continue;
+            if (info.type != NVS_TYPE_BLOB || strncmp(info.key, "m_", 2) || strlen(info.key) != 10) continue;
+            size_t size = 0;
+            if (nvs_get_blob(h, info.key, NULL, &size) != ESP_OK || size < sizeof(uint32_t) || size > 65536u) continue;
+            void *raw = malloc(size);
+            if (!raw) break;
+            if (nvs_get_blob(h, info.key, raw, &size) != ESP_OK) { free(raw); continue; }
+            const char *owner = reader_bookmarks_owner(raw, size);
+            char expected[11];
+            if (!owner || strncmp(owner, "/sdcard/", 8)) { free(raw); continue; }
+            bookmark_key(owner, expected);
+            if (strcmp(expected, info.key)) { free(raw); continue; }
+            uint32_t magic = 0, file_size = 0;
+            memcpy(&magic, raw, sizeof(magic));
+            if (magic == UINT32_C(0x52504d33)) file_size = ((const reader_bookmarks_unbounded_t *)raw)->file_size;
+            else if (magic == UINT32_C(0x52504d32)) file_size = ((const reader_bookmarks_t *)raw)->file_size;
+            else if (magic == UINT32_C(0x52504d31)) file_size = ((const legacy_reader_bookmark_t *)raw)->file_size;
+            else { free(raw); continue; }
+            struct stat st;
+            if (stat(owner, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
+                (uint64_t)st.st_size != (uint64_t)file_size) {
+                free(raw);
+                continue;
+            }
+            reader_bookmarks_unbounded_t *existing = NULL;
+            esp_err_t load_err = book_bookmark_store_load(owner, file_size, &existing);
+            free(existing);
+            bool ready_to_erase = false;
+            if (load_err == ESP_OK) {
+                ready_to_erase = true;
+            } else if (load_err == ESP_ERR_NOT_FOUND) {
+                reader_bookmarks_unbounded_t *converted = NULL;
+                const reader_bookmarks_unbounded_t *marks = NULL;
+                if (magic == UINT32_C(0x52504d33)) marks = raw;
+                else if (magic == UINT32_C(0x52504d32)) marks = converted = bookmark_from_v2(raw);
+                else marks = converted = bookmark_from_legacy(raw);
+                if (marks && (!marks->count || book_bookmark_store_save(marks) == ESP_OK))
+                    ready_to_erase = true;
+                free(converted);
+            }
+            free(raw);
+            if (ready_to_erase) copy_text(erase_keys[erase_count++], sizeof(erase_keys[0]), info.key);
+        }
+        if (it) nvs_release_iterator(it);
+        nvs_close(h);
+        if (!erase_count) break;
+        if (nvs_open("rp_marks", NVS_READWRITE, &h) != ESP_OK) break;
+        size_t erased = 0;
+        for (size_t i = 0; i < erase_count; ++i) {
+            if (nvs_erase_key(h, erase_keys[i]) == ESP_OK) ++erased;
+        }
+        esp_err_t commit_err = erased ? nvs_commit(h) : ESP_OK;
+        nvs_close(h);
+        if (commit_err != ESP_OK || !erased) break;
+        migrated += erased;
+        if (erase_count < 16) break;
+    }
+    return migrated;
 }
 static esp_err_t bookmark_load(reader_bookmarks_unbounded_t **out) {
     *out = NULL;
@@ -4772,6 +4846,16 @@ static bool open_book_attempt(app_ctx_t *ctx, const char *path, bool *retry) {
         return false;
     }
     esp_err_t checkpoint_error=pico_boot_book_begin(path);
+    if (checkpoint_error == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
+        // NVS 空间不足时先迁移当前 TF 卡的旧书签，仍不足再清可重建的天气预报缓存。
+        // Under NVS pressure, migrate legacy TF-card bookmarks first, then evict rebuildable weather cache.
+        board_sd_info_t sd = {0};
+        board_sd_get_info(&sd);
+        if (sd.present && sd.mounted && !usb_storage_active() && bookmark_migrate_card_nvs() > 0)
+            checkpoint_error = pico_boot_book_begin(path);
+        if (checkpoint_error == ESP_ERR_NVS_NOT_ENOUGH_SPACE && app_weather_evict_cache())
+            checkpoint_error = pico_boot_book_begin(path);
+    }
     if (checkpoint_error != ESP_OK) {
         ESP_LOGW("book", "open checkpoint failed: %s", esp_err_to_name(checkpoint_error));
         copy_text(s_message, sizeof(s_message), "启动记录保存失败，请重试");
@@ -7199,6 +7283,13 @@ static void on_enter(app_ctx_t* ctx) {
             s_scan_pending = false;
             return;
         }
+        if (s_open_error[0] && media_err != ESP_ERR_NOT_FINISHED) {
+            // 直开失败停在书架时立即扫描，避免错误弹窗盖在空书架上。
+            // Scan immediately when a direct open fails on the shelf so the modal does not sit over an empty shelf.
+            s_scan_pending = false;
+            scan_shelf(ctx);
+            return;
+        }
         board_sd_start_probe();
     }
 
@@ -7258,6 +7349,7 @@ static void book_on_media_lost(app_ctx_t* ctx) {
     s_view = SHELF;
     s_count = s_visible_count = 0;
     s_shelf_cache_valid = false;
+    s_bookmark_migrated_card[0] = 0;
     free(s_shelf); s_shelf = NULL; s_shelf_capacity = 0;
     invalidate_covers();
     ctx->leaf = 0;
@@ -8272,7 +8364,19 @@ static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
     return turn_page(ctx, dir);
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
-    if (s_open_error[0]) return APP_REDRAW_NONE;
+    if (s_open_error[0]) {
+        // 弹窗期间若 TF 卡刚探测就绪，仍补完书架扫描，避免背景停留在 0 本书。
+        // Finish a pending shelf scan behind the open-error modal once TF media becomes ready.
+        if (s_view == SHELF && s_scan_pending && ctx->now_ms - s_poll_ms >= 500) {
+            s_poll_ms = ctx->now_ms;
+            board_sd_info_t info = {0};
+            if (board_sd_get_info(&info) == ESP_ERR_NOT_FINISHED) return APP_REDRAW_NONE;
+            s_scan_pending = false;
+            scan_shelf(ctx);
+            return ctx->request_app ? APP_REDRAW_NONE : APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
+    }
     app_redraw_t dictionary = dictionary_tick(ctx);
     if (dictionary != APP_REDRAW_NONE) return dictionary;
     if (s_view == CATEGORIES) return category_tick(ctx);
@@ -8340,6 +8444,15 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         s_scan_pending = false;
         scan_shelf(ctx);
         if (ctx->request_app) return APP_REDRAW_NONE;
+        if (info.mounted && !usb_storage_active()) {
+            // 每张已挂载 TF 卡首次进书架时主动迁移旧 NVS 书签，提前释放 NVS 空间。
+            // Proactively migrate legacy TF-card bookmarks out of NVS once per mounted card.
+            const char *card_id = info.identity[0] ? info.identity : "mounted";
+            if (strcmp(s_bookmark_migrated_card, card_id)) {
+                copy_text(s_bookmark_migrated_card, sizeof(s_bookmark_migrated_card), card_id);
+                (void)bookmark_migrate_card_nvs();
+            }
+        }
         (void)open_requested_book(ctx);
         return APP_REDRAW_PAGE;
     }

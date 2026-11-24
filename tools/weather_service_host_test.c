@@ -111,7 +111,10 @@ void nvs_close(nvs_handle_t h){assert(h==1);}
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size){
     assert(h==1);size_t n=!strcmp(key,"prefs")?prefs_size:cache_size;
     const void *p=!strcmp(key,"prefs")?prefs_bytes:cache_bytes;
-    if(!n||*size<n)return ESP_ERR_NVS_NOT_FOUND;memcpy(out,p,n);*size=n;return ESP_OK;
+    if(!n)return ESP_ERR_NVS_NOT_FOUND;
+    if(!out){*size=n;return ESP_OK;}
+    if(*size<n)return ESP_ERR_NVS_NOT_FOUND;
+    memcpy(out,p,n);*size=n;return ESP_OK;
 }
 esp_err_t nvs_set_blob(nvs_handle_t h,const char *key,const void *v,size_t n){
     assert(h==1&&flash);++ns_writes;
@@ -666,6 +669,16 @@ int main(void) {
     app_weather_background_poll();assert(!s_pending && s_view.has_forecast && ns_writes==nvs_before+1);
     assert(weather_last_use==NETWORK_USE_WEATHER_BACKGROUND && starts==radio_starts && stops==radio_stops);
     network_state=WIFI_TRANSFER_STOPPED;
+    // NVS 紧张时仅删除可重建的天气缓存，繁忙时不竞态、无缓存时不空报成功，并保留城市偏好和内存视图。
+    // Cache eviction skips while busy, reports false when absent, and preserves prefs and in-RAM forecast.
+    assert(cache_size && prefs_size && s_view.has_forecast);
+    assert(app_weather_request(APP_WEATHER_FETCH,NULL) && app_weather_busy());
+    assert(!app_weather_evict_cache() && cache_size);
+    app_weather_cancel_join();
+    assert(app_weather_evict_cache() && !cache_size && prefs_size && s_view.has_forecast && !flash);
+    assert(!app_weather_evict_cache());
+    s_view=(app_weather_view_t){0};s_loaded=false;app_weather_init();
+    assert(s_view.has_city && !s_view.has_forecast);
     puts("PASS: quiet weather only borrows ready links, skips unset cities and disabled refresh, cancels without joining, and collects without main-loop writes");
     puts("PASS: active BLE blocks manual and automatic weather without borrowing a bearer; standalone 4G works");
     puts("PASS: weather proxy session, ten-hour boundary, shorter expiry, midnight, toggle persistence, city-ID fetch, paginated search, no device relabeling, owned cleanup, cancellation, guarded background cache writes, UI-owned preferences and resource guards");

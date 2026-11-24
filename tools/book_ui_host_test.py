@@ -404,7 +404,8 @@ static void book_layout_set_vertical(bool vertical){test_book_vertical=vertical;
 static bool app_settings_book_shake(void){return false;}
 static void board_sd_start_probe(void){}
 typedef struct {bool present,mounted;char identity[40];} board_sd_info_t;
-static int board_sd_get_info(board_sd_info_t* out){*out=(board_sd_info_t){0};return 0;}
+static int test_sd_err;
+static int board_sd_get_info(board_sd_info_t* out){*out=(board_sd_info_t){0};return test_sd_err;}
 static bool s_shelf_cache_valid,s_cache_sd_present,s_cache_sd_mounted;
 static uint8_t s_cache_shelf_style;
 static int test_open_dirs,test_nav_depth;
@@ -445,7 +446,12 @@ void book_shelf_cache_close(book_shelf_cache_t *cache){(void)cache;}
 static void free_book(void){s_text=NULL;s_path[0]=0;}
 static void refresh_cached_progress(app_ctx_t* ctx);
 static void return_to_cached_shelf(app_ctx_t* ctx){(void)ctx;}
-static bool open_book_attempt(app_ctx_t* ctx,const char* path,bool *retry){*retry=false;(void)ctx;assert(path[0]);test_open_calls++;s_view=READING;return true;}
+static bool test_open_fail;
+static bool open_book_attempt(app_ctx_t* ctx,const char* path,bool *retry){
+    *retry=false;(void)ctx;assert(path[0]);test_open_calls++;
+    if(test_open_fail){snprintf(s_message,sizeof(s_message),"启动记录保存失败，请重试");return false;}
+    s_view=READING;return true;
+}
 static char test_wrapped[512];
 #define UI_PX_CAPTION 28
 #define UI_MARGIN 40
@@ -954,6 +960,21 @@ int main(void) {
     s_requested_open_home=true;s_shelf_cache_valid=false;calls=test_open_calls;
     on_enter(&ctx);
     assert(test_open_calls==calls+1&&s_view==READING&&!s_scan_pending&&s_reader_return_home);
+    // 直开失败停留在书架时，若介质已就绪应立即扫描，不让弹窗盖在 0 本书背景上。
+    // When a direct open fails on the shelf and media is ready, populate the shelf immediately behind the modal.
+    snprintf(s_requested_open,sizeof(s_requested_open),"%s/book010.txt",test_roots[0].path);
+    s_requested_open_home=true;s_shelf_cache_valid=false;test_open_fail=true;test_sd_err=ESP_OK;
+    on_enter(&ctx);
+    assert(s_view==SHELF&&s_open_error[0]&&!s_scan_pending&&s_visible_count>0);
+    s_open_error[0]=0;
+    snprintf(s_requested_open,sizeof(s_requested_open),"%s/book010.txt",test_roots[0].path);
+    s_requested_open_home=true;s_shelf_cache_valid=false;test_sd_err=ESP_ERR_NOT_FINISHED;
+    on_enter(&ctx);
+    assert(s_view==SHELF&&s_open_error[0]&&s_scan_pending&&s_visible_count==0);
+    s_open_error[0]=0;test_open_fail=false;test_sd_err=ESP_OK;
+    snprintf(s_requested_open,sizeof(s_requested_open),"%s/book010.txt",test_roots[0].path);
+    s_requested_open_home=true;s_shelf_cache_valid=false;on_enter(&ctx);
+    assert(s_view==READING&&!s_scan_pending&&s_reader_return_home);
     test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
     ctx.acc=&ctx;s_shake_sensor_on=test_sensor_powered=test_sensor_sleep_fail=true;

@@ -98,6 +98,12 @@ static bool unpack_record(const uint8_t *data,size_t size,boot_record_t *record)
     }
     return at==size&&resume_valid(&record->resume)&&path_valid(record->opening,true)&&path_valid(record->blocked,true);
 }
+static void clear_resume_record(void) {
+    // 失效恢复项连同路径一并清零，避免旧书长路径继续膨胀 NVS 检查点。
+    // Zero inactive resume fields along with their path so stale paths never bloat the NVS checkpoint.
+    memset(&s_record.resume, 0, sizeof(s_record.resume));
+    s_record.resume_valid = 0;
+}
 static esp_err_t store(void) {
     s_record.checksum = checksum(&s_record);
     uint8_t packed[BOOT_PACKED_MAX];size_t size=pack_record(packed);
@@ -119,7 +125,19 @@ static esp_err_t store(void) {
     }
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
-    if (err != ESP_OK) ESP_LOGW("boot_state", "checkpoint: %s", esp_err_to_name(err));
+    if (err != ESP_OK) {
+        ESP_LOGW("boot_state", "checkpoint: %s", esp_err_to_name(err));
+#ifdef ESP_PLATFORM
+        if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
+            nvs_stats_t stats = {0};
+            if (nvs_get_stats(NULL, &stats) == ESP_OK) {
+                ESP_LOGW("boot_state", "nvs space used=%u free=%u total=%u ns=%u need=%u",
+                         (unsigned)stats.used_entries, (unsigned)stats.free_entries,
+                         (unsigned)stats.total_entries, (unsigned)stats.namespace_count, (unsigned)size);
+            }
+        }
+#endif
+    }
     return err;
 }
 void pico_boot_init(bool abnormal_reset) {
@@ -149,9 +167,7 @@ void pico_boot_init(bool abnormal_reset) {
     } else s_recovery = true;
     // 其他版本的缓存清单仍留在卡上，只移除不被本地阅读器支持的恢复/隔离入口。
     // Retain other editions' cache files; remove only resume/quarantine entries unsupported by the local reader.
-    if(s_record.resume.reader&&!book_file_path_supported(s_record.resume.path)){
-        memset(&s_record.resume,0,sizeof(s_record.resume));s_record.resume_valid=0;
-    }
+    if(s_record.resume.reader&&!book_file_path_supported(s_record.resume.path)) clear_resume_record();
     if(s_record.opening[0]&&!book_file_path_supported(s_record.opening))s_record.opening[0]=0;
     if(s_record.blocked[0]&&!book_file_path_supported(s_record.blocked))s_record.blocked[0]=0;
     if (s_record.starting || s_record.opening[0]) s_recovery = true;
@@ -166,7 +182,7 @@ void pico_boot_init(bool abnormal_reset) {
     }
     s_record.magic = BOOT_MAGIC;
     s_record.starting = 1;
-    s_record.resume_valid = 0;
+    clear_resume_record();
     if (store() != ESP_OK) { s_resume_pending = false; s_recovery = true; }
     ESP_LOGI("boot_state", "startup recovery=%d resume=%d", s_recovery, s_resume_pending);
 }
@@ -180,10 +196,22 @@ bool pico_boot_asset_allowed(const char *path) {
 }
 esp_err_t pico_boot_book_begin(const char *path) {
     if (!path || !path_valid(path, false)||!book_file_path_supported(path)) return ESP_ERR_INVALID_ARG;
+    const pico_resume_t previous_resume = s_record.resume;
+    const uint8_t previous_resume_valid = s_record.resume_valid;
     memset(s_record.opening, 0, sizeof(s_record.opening));
     memcpy(s_record.opening, path, strlen(path));
-    s_record.resume_valid = 0;
-    return store();
+    clear_resume_record();
+    esp_err_t err = store();
+    if (err != ESP_OK) {
+        // 写入失败回滚待开路径，避免后续锁屏保存恢复时把未打开的书误判为中断。
+        // Roll back opening on store failure so later resume saves never blame an unopened book.
+        s_record.opening[0] = 0;
+        if (previous_resume_valid) {
+            s_record.resume = previous_resume;
+            s_record.resume_valid = previous_resume_valid;
+        }
+    }
+    return err;
 }
 void pico_boot_book_end(bool success) {
     if (success && !strcmp(s_record.blocked, s_record.opening)) s_record.blocked[0] = 0;
@@ -192,13 +220,20 @@ void pico_boot_book_end(bool success) {
 }
 esp_err_t pico_boot_save_resume(const pico_resume_t *resume) {
     if (!resume_valid(resume) || (resume->reader && !book_file_path_supported(resume->path))) return ESP_ERR_INVALID_ARG;
+    const pico_resume_t previous_resume = s_record.resume;
+    const uint8_t previous_resume_valid = s_record.resume_valid;
     memset(&s_record.resume, 0, sizeof(s_record.resume));
     s_record.resume.tab = resume->tab;
     s_record.resume.reader = resume->reader;
     s_record.resume.fullscreen = resume->fullscreen;
     memcpy(s_record.resume.path, resume->path, strlen(resume->path));
     s_record.resume_valid = 1;
-    return store();
+    esp_err_t err = store();
+    if (err != ESP_OK) {
+        s_record.resume = previous_resume;
+        s_record.resume_valid = previous_resume_valid;
+    }
+    return err;
 }
 void pico_boot_hold_resume(void) {
     if (s_resume_pending) (void)pico_boot_save_resume(&s_resume);
@@ -209,8 +244,14 @@ bool pico_boot_take_resume(pico_resume_t *resume) {
     // 密码等待可能再次持久化；先消费再允许恢复，写入失败不能重试开书。
     // Authentication may have re-persisted it; consume before admission and never retry after a write failure.
     if (s_record.resume_valid) {
-        s_record.resume_valid = 0;
-        if (store() != ESP_OK) { s_resume_pending = false; return false; }
+        const pico_resume_t previous_resume = s_record.resume;
+        clear_resume_record();
+        if (store() != ESP_OK) {
+            s_record.resume = previous_resume;
+            s_record.resume_valid = 1;
+            s_resume_pending = false;
+            return false;
+        }
     }
     *resume = s_resume;
     s_resume_pending = false;
@@ -218,8 +259,8 @@ bool pico_boot_take_resume(pico_resume_t *resume) {
 }
 void pico_boot_clear_resume(void) {
     s_resume_pending = false;
-    if (!s_record.resume_valid) return;
-    s_record.resume_valid = 0;
+    if (!s_record.resume_valid && !s_record.resume.path[0] && !s_record.resume.reader) return;
+    clear_resume_record();
     (void)store();
 }
 bool pico_boot_interrupted_book(char *path, size_t capacity) {

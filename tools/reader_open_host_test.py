@@ -128,7 +128,22 @@ static void reader_prefetch_unlock(void){unlock_draw();}
 static bool book_category_pending(const char *root){(void)root;return false;}
 static const char *app_settings_books_dir(void){return "/sdcard";}
 static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);++cover_quiesces;return !cover_busy;}
-static esp_err_t pico_boot_book_begin(const char *path){assert(path);++checkpoints;return ESP_OK;}
+#ifndef ESP_ERR_NVS_NOT_ENOUGH_SPACE
+#define ESP_ERR_NVS_NOT_ENOUGH_SPACE 0x1105
+#endif
+static bool usb_active, weather_evict_result;
+static size_t bookmark_migrated;
+static unsigned bookmark_migrate_calls, weather_evict_calls;
+static esp_err_t checkpoint_errors[4];
+static unsigned checkpoint_error_count, checkpoint_attempt;
+static bool usb_storage_active(void){return usb_active;}
+static size_t bookmark_migrate_card_nvs(void){++bookmark_migrate_calls;return bookmark_migrated;}
+static bool app_weather_evict_cache(void){++weather_evict_calls;return weather_evict_result;}
+static esp_err_t pico_boot_book_begin(const char *path){
+    assert(path);++checkpoints;
+    if(checkpoint_attempt<checkpoint_error_count)return checkpoint_errors[checkpoint_attempt++];
+    return ESP_OK;
+}
 static void pico_boot_book_end(bool ok){(void)ok;}
 size_t book_open_min_psram_block(const char *path){return strstr(path,".txt")?50000:0;}
 static char s_requested_open[288];
@@ -217,6 +232,9 @@ static void reset(void){
     s_view=SHELF;s_reader_return_home=true;
     events[0]=0;
     checkpoints=cover_quiesces=cover_cancels=peak_finishes=0;
+    usb_active=weather_evict_result=false;
+    bookmark_migrated=0;bookmark_migrate_calls=weather_evict_calls=0;
+    checkpoint_error_count=checkpoint_attempt=0;
     cover_busy=draw_busy=false;
     peak_heap=after_covers=after_prefetch=after_glyphs=ample;
 }
@@ -336,7 +354,28 @@ int main(void){
     reset(); assert(open_checked(&ctx,a));
     events[0]=0; free_book(); assert(source_closes==1&&strchr(events,'C')&&strchr(strchr(events,'C'),'Y'));
     free_book(); assert(source_closes==1);
-    reset();puts("PASS: on-demand ordered reclaim, capacity/fragmentation, resource release and system-font restore, open ordering, preflight, both reservations, source failures, pending priority, size/chapter/offset recovery, font size, failed load/skip, orientation reset and 100 repeated exits");
+    // 启动记录遇 NVS 空间不足：先迁卡书签、再清天气缓存，USB 模式不写卡，非空间错误不触发回收。
+    // Under NVS pressure during boot checkpoint: migrate card bookmarks first, then evict weather cache;
+    // skip card writes while USB storage is active, and leave non-space errors alone.
+    reset(); checkpoint_errors[0]=ESP_ERR_NVS_NOT_ENOUGH_SPACE; checkpoint_error_count=1; bookmark_migrated=2;
+    assert(open_checked(&ctx,a));
+    assert(checkpoints==2&&bookmark_migrate_calls==1&&!weather_evict_calls);
+    reset(); checkpoint_errors[0]=ESP_ERR_NVS_NOT_ENOUGH_SPACE; checkpoint_error_count=1; weather_evict_result=true;
+    assert(open_checked(&ctx,a));
+    assert(checkpoints==2&&bookmark_migrate_calls==1&&weather_evict_calls==1);
+    reset(); usb_active=true; checkpoint_errors[0]=ESP_ERR_NVS_NOT_ENOUGH_SPACE; checkpoint_error_count=1;
+    bookmark_migrated=3; weather_evict_result=true;
+    assert(open_checked(&ctx,a));
+    assert(checkpoints==2&&!bookmark_migrate_calls&&weather_evict_calls==1);
+    reset(); checkpoint_errors[0]=checkpoint_errors[1]=checkpoint_errors[2]=ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    checkpoint_error_count=3; bookmark_migrated=1; weather_evict_result=true;
+    assert(!open_checked(&ctx,a));
+    assert(checkpoints==3&&bookmark_migrate_calls==1&&weather_evict_calls==1&&peak_finishes==1&&!source_opens);
+    assert(!strcmp(s_open_error,"启动记录保存失败，请重试"));
+    reset(); checkpoint_errors[0]=ESP_FAIL; checkpoint_error_count=1; bookmark_migrated=2; weather_evict_result=true;
+    assert(!open_checked(&ctx,a));
+    assert(checkpoints==1&&!bookmark_migrate_calls&&!weather_evict_calls&&peak_finishes==1&&!source_opens);
+    reset();puts("PASS: on-demand ordered reclaim, capacity/fragmentation, resource release and system-font restore, open ordering, preflight, both reservations, source failures, pending priority, size/chapter/offset recovery, font size, failed load/skip, orientation reset, NVS checkpoint reclaim and 100 repeated exits");
 }
 '''
 

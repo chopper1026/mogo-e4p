@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 修复 NVS 存储紧张时（如更换阅读背景或历史 TF 书签累积后）开书触发「启动记录保存失败，请重试」的问题：压缩启动检查点并回滚失败状态，每张 TF 卡首次进书架或在 NVS 空间不足时自动将匹配的旧卡书签迁至 TF 卡，仍紧张时按需清理可重建的天气预报缓存。/ Fix book opens failing with "启动记录保存失败，请重试" under 32 KiB NVS pressure (such as after changing a reading background or accumulating legacy card bookmarks): compact startup checkpoints and roll back failed writes, migrate size-matched legacy TF bookmarks on first shelf scan or under NVS pressure, and evict rebuildable weather cache on demand.
+- 修复从首页等入口直开图书失败时，书架错误弹窗盖在「0本书 · 01/01」空背景上的问题。/ Fix book-open errors from direct entry points displaying over an empty "0 books" shelf backdrop.
+
 ## v1.2.0 · 2026-11-24
 
 - 修复英文界面中书架、阅读工具栏和文件传输入口的同组字号不一，以及设置行、弹窗和部分锁屏文案的错位；更正分页、开关及阅读统计等英文提示。/ Keep peer labels the same size on the shelf, reader toolbar and file transfer tiles. Fix text alignment in settings, dialogs and lock screens, and correct English pagination, switch states and reading statistics.

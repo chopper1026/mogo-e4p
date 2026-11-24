@@ -157,6 +157,16 @@ void app_weather_init(void) {
 }
 const app_weather_view_t *app_weather_view(void) { return &s_view; }
 bool app_weather_busy(void) { return atomic_load(&s_busy); }
+bool app_weather_evict_cache(void) {
+    if (atomic_load(&s_busy)) return false;
+    nvs_handle_t h;
+    if (nvs_open("kiiko_weather", NVS_READONLY, &h) != ESP_OK) return false;
+    size_t size = 0;
+    const bool present = nvs_get_blob(h, "cache", NULL, &size) == ESP_OK;
+    nvs_close(h);
+    if (!present) return false;
+    return write_blob("cache", NULL, 0);
+}
 static bool cancelled(void) {
     return atomic_load(&s_cancel) || esp_timer_get_time() >= s_deadline;
 }

@@ -152,6 +152,43 @@ int main(void) {
     assert(pico_boot_book_begin("/sdcard/books/unadmitted.epub")==ESP_FAIL);
     assert(present&&durable_size==sizeof(legacy)&&erases==1);
     fail_commit=false;free_bytes=SIZE_MAX;
+    // 失效续读路径必须随消费清空，不能把开书检查点撑成两份路径；写入失败必须回滚 opening，不误报中断。
+    // Consumed resume paths must clear so book-open checkpoints never pack two paths; failed begins roll back opening instead of blaming the book on a later lock.
+    present=false;memset(&durable,0,sizeof(durable));pico_boot_init(false);pico_boot_ready();
+    char long_a[220]="/sdcard/books/", long_b[220]="/sdcard/books/";
+    memset(long_a+14,'a',190);strcpy(long_a+204,".epub");
+    memset(long_b+14,'b',190);strcpy(long_b+204,".epub");
+    pico_resume_t long_resume={.tab=1,.reader=1,.fullscreen=0};
+    strcpy(long_resume.path,long_a);
+    assert(pico_boot_save_resume(&long_resume)==ESP_OK);
+    const size_t resume_size=durable_size;
+    pico_boot_init(false);
+    assert(pico_boot_has_resume()&&durable_size==sizeof(boot_packed_header_t)+3&&!durable.resume.path[0]);
+    assert(pico_boot_take_resume(&out)&&!strcmp(out.path,long_a));
+    pico_boot_ready();
+    // 剩余空间只够单份路径时仍可开书，不会因滞留旧续读路径而误报空间不足。
+    // Opening succeeds when free space fits only one path, without stale resume path bloat.
+    free_bytes=resume_size+16;
+    assert(pico_boot_book_begin(long_b)==ESP_OK);
+    assert(durable_size==sizeof(boot_packed_header_t)+strlen(long_b)+3&&!durable.resume.path[0]);
+    pico_boot_book_end(true);
+    free_bytes=sizeof(boot_packed_header_t)+32;
+    assert(pico_boot_book_begin(long_b)==ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    assert(!s_record.opening[0]);
+    free_bytes=SIZE_MAX;
+    pico_resume_t home_resume={.tab=0,.reader=0,.fullscreen=0};
+    assert(pico_boot_save_resume(&home_resume)==ESP_OK);
+    pico_boot_init(false);
+    assert(!pico_boot_recovery()&&!pico_boot_interrupted_book(interrupted,sizeof(interrupted)));
+    assert(pico_boot_take_resume(&out)&&out.tab==0&&!out.reader);
+    pico_boot_ready();
+    // 密码等待后消费失败再清除时，NVS 中未消费的恢复项仍会被真正清掉。
+    // Clearing resume after a failed take_resume commit must still erase the persisted resume in NVS.
+    assert(pico_boot_save_resume(&long_resume)==ESP_OK);
+    pico_boot_init(false);pico_boot_ready();pico_boot_hold_resume();assert(durable.resume_valid);
+    fail_commit=true;assert(!pico_boot_take_resume(&out));
+    fail_commit=false;pico_boot_clear_resume();
+    assert(!durable.resume_valid&&!durable.resume.path[0]);
     puts("PASS: compact/legacy startup records; interrupted EPUB quarantine; unsupported cache ignored; low-space key-only reclaim; interrupted reclaim and failed commits stay safe; retry after transient NVS failure; settings/progress preserved");
     puts("PASS: one-shot reader/fullscreen resume; power-cut book quarantine; explicit retry; no false book blame; absent/corrupt NVS and commit failure; checked paths");
 }
