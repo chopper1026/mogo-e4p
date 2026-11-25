@@ -34,7 +34,7 @@ b = source.index('} reader_panel_t;', a) + len('} reader_panel_t;')
 unit += source[a:b] + '\n'
 unit += r'''
 static reader_panel_t s_reader_panel;
-static int s_reader_settings_group,s_line_spacing,s_reader_slider,s_bookmark_page;
+static int s_reader_settings_group,s_line_spacing,s_reader_slider,s_bookmark_page,s_bookmark_parent;
 static bool s_reader_tools_toggle,s_toc_jump_open,s_toc_jump_drag;
 static bool s_bookmark_edit,s_bookmark_delete_confirm,s_bookmark_delete_error;
 static bool selection_present;

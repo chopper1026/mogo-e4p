@@ -37,6 +37,8 @@
  * User addition: personal settings gain a Touch vibration entry whose page holds the switch and intensity steps; enabling or changing the step previews one pulse.
  * 用户 2026-10-25 新增、2026-11-23 重设计：个性化功能在触摸震动下方新增「阅读背景」入口；入口使用两列缩略图卡片，解码延迟到 tick。
  * User addition of 2026-10-25 and redesign of 2026-11-23: personalization gains a Reading background entry under Touch vibration; the entry uses a two-column thumbnail-card grid and defers decoding to the tick.
+ * 用户 2026-11-25 新增：触摸震动与阅读背景之间提供全局手势开关及边缘宽度，方便调节误触范围。
+ * User revision 2026-11-25: place gesture enablement and edge width between vibration and reading background to tune accidental activation.
  * 用户 2026-10-26 新增：设置列表最底部一行居中的版本号与固件构建日期，随列表滚动露出。
  * User addition of 2026-10-26: the settings list ends with a centred version and firmware build
  * date line, revealed by scrolling to the bottom.
@@ -135,7 +137,7 @@ typedef enum { SETTINGS_MAIN, SETTINGS_WIFI, SETTINGS_NETWORK, SETTINGS_TIME,
                SETTINGS_BLUETOOTH,
                SETTINGS_MEMORY,
                SETTINGS_QUICK_BAR,
-               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT } settings_page_t;
+               SETTINGS_LOCK_PIN, SETTINGS_PIN_ENTRY, SETTINGS_TEXT_EDIT, SETTINGS_GESTURES } settings_page_t;
 static settings_page_t s_page;
 static char s_quick_notice[96];
 // 快捷栏长按蓝牙或震动圆键的待定子页；on_enter 消费一次后回到主列表。
@@ -429,7 +431,7 @@ static int settings_main_row_height(void) {
 }
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_DISPLAY_ROWS 8
-#define SETTINGS_PERSONAL_ROWS 8
+#define SETTINGS_PERSONAL_ROWS 9
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
 #define SETTINGS_MAINTENANCE_ROWS 3
@@ -906,6 +908,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ZAP,               // 20 电源管理 / power management
         UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
         UI_ICON_MOGO_CELLULAR_SIGNAL, // 22 移动网络
+        UI_ICON_MAXIMIZE_2,         // 23 全面屏手势 / Full-screen gestures
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1339,6 +1342,39 @@ static app_redraw_t batt_calibration_touch(int x, int y) {
     return APP_REDRAW_NONE;
 }
 
+static EpdRect gesture_width_rect(int index) { return (EpdRect){36 + 208 * index, 470, 196, 88}; }
+static void draw_gestures(uint8_t *fb) {
+    bool enabled = app_settings_gestures();
+    back_header(fb, "全面屏手势");
+    setting_toggle(fb, 232, "全面屏手势", "从两侧边缘向内滑动返回", enabled);
+    section(fb, 418, "边缘宽度");
+    const char *const widths[] = {"窄", "标准", "宽"};
+    for (int i = 0; i < 3; ++i) {
+        EpdRect r = gesture_width_rect(i);
+        if (enabled) ui_draw_button(fb, r, widths[i], app_settings_gesture_width() == (unsigned)i);
+        else ui_text_box(fb, r, 26, widths[i], EPD_DRAW_ALIGN_CENTER, false);
+    }
+    // 按实际屏宽比例标出双侧起手区；只在设置改变时重画。/ Show both edge zones to scale, with no tracking refresh.
+    const int edge = 612 * app_settings_gesture_edge_px() / 684;
+    EpdRect strip = {36, 591, 612, 49};
+    ui_draw_control_frame(fb, strip, 0, enabled ? 0x70 : 0xc0);
+    if (enabled) {
+        ui_fill_rect_fast((EpdRect){38, 593, edge - 2, 45}, 0xb0, fb);
+        ui_fill_rect_fast((EpdRect){648 - edge, 593, edge - 2, 45}, 0xb0, fb);
+        for (int side = 0; side < 2; ++side) {
+            int sign = side ? -1 : 1, x = side ? 636 : 48, tip = x + sign * 69;
+            epd_draw_line(x, 615, tip, 615, UI_GRAY_BLACK, fb);
+            epd_draw_line(tip - sign * 10, 606, tip, 615, UI_GRAY_BLACK, fb);
+            epd_draw_line(tip - sign * 10, 624, tip, 615, UI_GRAY_BLACK, fb);
+        }
+    }
+    section(fb, 682, "手势说明");
+    const char *const tips[] = {"边缘向内滑：返回上一级", "内部横滑：切换标签或主界面"};
+    for (int i = 0; i < (int)(sizeof(tips) / sizeof(tips[0])); ++i)
+        ui_text_box(fb, (EpdRect){48, 726 + 68 * i, 588, 56}, 25, tips[i], EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 968, 588, 64}, 24, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    ui_nav_draw(fb, 3);
+}
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
@@ -1723,6 +1759,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_nav_draw(fb, 3);
         return;
     }
+    if (s_page == SETTINGS_GESTURES) { draw_gestures(fb); return; }
     if (s_page == SETTINGS_HAPTIC) {
         back_header(fb, "触摸震动");
         section(fb, 228, "单指按下时短震一次");
@@ -1908,7 +1945,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():ui_tr("未设置"));
-    const char *personal_labels[]={"书架样式","壁纸","锁屏密码","状态栏签名","触摸震动","阅读背景","组件库","快捷栏管理"};
+    const char *personal_labels[]={"书架样式","壁纸","锁屏密码","状态栏签名","触摸震动","全面屏手势","阅读背景","组件库","快捷栏管理"};
     char haptic_value[24];
     if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),ui_tr("不支持"));
     else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),ui_tr("关闭"));
@@ -1923,8 +1960,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *personal_values[]={shelf_style_name(app_settings_shelf_style()),
         app_settings_lock_style()==APP_LOCK_STYLE_BOOK_COVER?"书籍封面":
         app_settings_lock_style()==APP_LOCK_STYLE_CLOCK?"简约时钟":app_settings_lock_style()==4?"日历":app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,background_value,"","显示与排序"};
-    const int personal_icons[]={4,5,16,10,18,19,21,15};
+        lock_pin_enabled()?"已开启":"已关闭",signature,haptic_value,app_settings_gestures()?"已开启":"已关闭",background_value,"","显示与排序"};
+    const int personal_icons[]={4,5,16,10,18,23,19,21,15};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"保存与恢复","屏幕修复","系统升级"};
@@ -2623,6 +2660,20 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 
     if (s_page != SETTINGS_MAIN && y < 190) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_LOCK_PIN) return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_GESTURES) {
+        bool enabled = app_settings_gestures();
+        unsigned width = app_settings_gesture_width();
+        if (ui_rect_hit((EpdRect){36,232,612,126}, ev->x0, y)) enabled = !enabled;
+        else {
+            if (!enabled) return APP_REDRAW_NONE;
+            unsigned i = 0;
+            while (i < 3 && !ui_rect_hit(gesture_width_rect(i), ev->x0, y)) ++i;
+            if (i == 3 || i == width) return APP_REDRAW_NONE;
+            width = i;
+        }
+        snprintf(s_notice, sizeof(s_notice), "%s", app_settings_set_gestures(enabled, width) ? "" : ui_tr("保存失败，请重试"));
+        return APP_REDRAW_PAGE;
+    }
     if (s_page == SETTINGS_AUTO_LOCK) {
         const uint8_t values[] = {1, 5, 10, 0};
         for (int i = 0; i < 4; ++i) if (ui_rect_hit((EpdRect){36, 272 + i * 112, 612, 92}, ev->x0, y)) {
@@ -2875,13 +2926,14 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if(!haptics_available())return APP_REDRAW_NONE;
             s_page=SETTINGS_HAPTIC;
         }
-        else if(row==5){
+        else if(row==5){s_page=SETTINGS_GESTURES;s_notice[0]=0;}
+        else if(row==6){
             reading_bg_scan();
             s_reading_bg_confirm=s_reading_bg_ready=s_reading_bg_pending=false;
             s_page=SETTINGS_READING_BG;
         }
-        else if(row==6){app_components_open(ctx,false);return APP_REDRAW_NONE;}
-        else if(row==7){s_page=SETTINGS_QUICK_BAR;s_quick_notice[0]=0;}
+        else if(row==7){app_components_open(ctx,false);return APP_REDRAW_NONE;}
+        else if(row==8){s_page=SETTINGS_QUICK_BAR;s_quick_notice[0]=0;}
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
@@ -2916,33 +2968,33 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     return APP_REDRAW_NONE;
 }
 
-static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+static app_redraw_t settings_navigate(app_ctx_t *ctx, bool home) {
     s_batt_calibration_confirm = false;
     if (s_ble_shortcut_back && s_page == SETTINGS_MAIN) s_ble_shortcut_back = false;
     if (s_haptics_shortcut_back && s_page == SETTINGS_MAIN) s_haptics_shortcut_back = false;
     if(s_font_sync_confirm) {
         s_font_sync_confirm=false;s_notice[0]=0;
-        if(key!=1)return APP_REDRAW_PAGE;
+        if(!home)return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; return APP_REDRAW_PAGE; }
     if (s_page == SETTINGS_UPGRADE) {
         s_upgrade_job = UPGRADE_JOB_NONE;
         if (s_local_pending || s_upgrade_restart) return APP_REDRAW_NONE;
         pico_online_cancel_join(); s_upgrade_confirm = false;
-        if (s_upgrade_shortcut_back && key != 1) { ctx->request_return = true; return APP_REDRAW_NONE; }
+        if (s_upgrade_shortcut_back && !home) { ctx->request_return = true; return APP_REDRAW_NONE; }
     }
     if (s_page == SETTINGS_BLUETOOTH) {
-        if (key != 1 && settings_bluetooth_back()) return APP_REDRAW_PAGE;
+        if (!home && settings_bluetooth_back()) return APP_REDRAW_PAGE;
         settings_bluetooth_close();
-        if (key != 1 && s_ble_shortcut_back) { s_ble_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE; }
+        if (!home && s_ble_shortcut_back) { s_ble_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE; }
     }
     if (s_page==SETTINGS_LOCK_STYLE) {
-        if(key!=1 && ui_lock_style_back())return APP_REDRAW_PAGE;
+        if(!home && ui_lock_style_back())return APP_REDRAW_PAGE;
         ui_lock_style_close();s_page=SETTINGS_MAIN;
-        if(key==1){ui_nav_request(ctx,0);return APP_REDRAW_NONE;}
+        if(home){ui_nav_request(ctx,0);return APP_REDRAW_NONE;}
         settings_prepare_profile();return APP_REDRAW_PAGE;
     }
-    if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    if (home) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back) {
         s_haptics_shortcut_back = false;
         ctx->request_return = true;
@@ -2969,6 +3021,9 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (s_page != SETTINGS_MAIN) { s_page = SETTINGS_MAIN; (void)wifi_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
     ui_nav_request(ctx, 0);
     return APP_REDRAW_NONE;
+}
+static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    return settings_navigate(ctx, key == 1);
 }
 static void settings_exit(app_ctx_t *ctx) {
     s_batt_calibration_confirm = false;
@@ -3018,6 +3073,27 @@ static void settings_media_lost(app_ctx_t *ctx) {
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
 static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; ui_lock_style_media_ready(); settings_prepare_profile(); }
+static app_redraw_t settings_edge_back(app_ctx_t *ctx) {
+    if (s_page == SETTINGS_MAIN || s_boot_pending || s_local_pending || s_upgrade_restart ||
+        (s_page == SETTINGS_UPGRADE && (s_upgrade_job != UPGRADE_JOB_NONE || s_update.busy || pico_online_busy()))) return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_CONFIG && s_config_confirm) { s_config_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_UPGRADE && s_upgrade_confirm) { s_upgrade_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_BATT_CALIBRATION && s_batt_calibration_confirm) { s_batt_calibration_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_READING_BG_PREVIEW && s_reading_bg_confirm) { s_reading_bg_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_page == SETTINGS_NETWORK && s_network_shortcut_back) {
+        s_network_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE;
+    }
+    return settings_navigate(ctx, false);
+}
+static app_horizontal_zone_t settings_zone(app_ctx_t *ctx, int x, int y) {
+    (void)ctx;
+    if (s_page == SETTINGS_TEXT_EDIT) return ui_keyboard_contains(x, y, 560) ? APP_HORIZONTAL_LOCAL : APP_HORIZONTAL_BLOCK;
+    return s_page == SETTINGS_LOCK_STYLE ? ui_lock_style_zone(x, y) : APP_HORIZONTAL_DEFAULT;
+}
+static app_redraw_t settings_step_tab(app_ctx_t *ctx, int delta) {
+    (void)ctx;
+    return s_page == SETTINGS_LOCK_STYLE && ui_lock_style_step_tab(delta) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
+}
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
@@ -3075,6 +3151,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
 const app_desc_t app_device_settings = {
     .title = "设置 Settings", .detail = "显示、连接与设备", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = no_menu_handle,
+    .edge_back = settings_edge_back, .horizontal_zone = settings_zone, .step_tab = settings_step_tab,
     .main_page_visible = main_page_visible,
     .on_enter = on_enter, .on_exit = settings_exit, .on_before_lock = on_before_lock, .render = render, .on_tick = on_tick, .on_gesture = on_gesture, .on_key = on_key,
     .present = settings_present,

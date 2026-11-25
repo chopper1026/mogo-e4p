@@ -312,6 +312,27 @@ static void panel_key_cancel(panel_key_hold_t *hold) {
     hold->middle_pending = false;
 }
 
+// 单帧与积压帧按同一起点判定底栏；从内容区划入底栏不会劫持手势。
+// Admit root-bar contacts at the same origin in live and queued frames; dragging in never claims the bar.
+static bool root_bar_contact(app_ctx_t *ctx, const app_desc_t *app, ui_gesture_t *gesture,
+                             panel_key_hold_t *hold, esp_err_t err, bool owned) {
+    const app_touch_t *t = ctx->touch;
+    app_navigation_observe_contact(err, t->touched);
+    if (err != ESP_OK || !t->touched || owned) return false;
+    if (app_navigation_contact_polled()) { ctx->consumed = true; return true; }
+    if (!ctx->pressed || t->count != 1) return false;
+    app_navigation_claim_contact();
+    if (usb_storage_active() || !app_navigation_main_page_ready(ctx, app)) return false;
+    int tab = ui_nav_hit(t->x, t->y);
+    if (tab < 0) return false;
+    panel_key_cancel(hold);
+    app_input_cancel_gesture(ctx, app, gesture);
+    app_navigation_claim_bar();
+    ctx->consumed = ctx->user_activity = true;
+    if (tab != app_index_of(app) || ctx->request_app) ui_nav_request(ctx, tab);
+    return true;
+}
+
 static bool global_key_action(app_reader_key_action_t action) {
     return action == APP_READER_KEY_HOME || action == APP_READER_KEY_REFRESH ||
            action == APP_READER_KEY_FRONTLIGHT;
@@ -814,7 +835,9 @@ void app_loop_run(const app_loop_config_t* config) {
                             app_input_cancel_gesture(&ctx, current, &gesture);
                         }
                     }
-                    if (!power_dialog_open && !quick_input_owned) {
+                    bool bar_owned = root_bar_contact(&ctx, current, &gesture, &key_hold, ESP_OK,
+                        power_dialog_open || quick_input_owned || menu_open);
+                    if (!power_dialog_open && !quick_input_owned && !bar_owned) {
                         const int key = ui_key_hit_test(touch.x, touch.y);
                         if (pressed && key >= 0)
                             panel_key_press(&ctx, current, &gesture, key, &key_hold,
@@ -823,7 +846,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         panel_key_hold(&ctx, current, &gesture, &touch, menu_open, &key_hold);
                     }
                     app_input_dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK,
-                                           power_dialog_open || quick_input_owned || menu_open, present_page);
+                                           power_dialog_open || quick_input_owned || menu_open || bar_owned, present_page);
                     was_touched = touch.touched;
 #if CONFIG_TOUCH_DIAG
                     n++;
@@ -921,9 +944,6 @@ void app_loop_run(const app_loop_config_t* config) {
             // / One short pulse per single-finger press edge; replayed frames never repeat and multitouch, read errors and USB storage stay silent.
             if (err == ESP_OK && pressed && touch.count == 1 && !usb_storage_active()) haptics_pulse();
         }
-        // 触摸已由 app_input_ingest_touch_frame 去抖并更新 ctx；这里只复位上游新增的导航按压状态。
-        // Touch is debounced in app_input_ingest_touch_frame; only the upstream nav-press state resets here.
-        app_navigation_observe_contact(err, touch.touched);
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             app_weather_reap_cancelled();
@@ -1059,22 +1079,9 @@ void app_loop_run(const app_loop_config_t* config) {
         }
         // 主页面底栏在首次单指报点就确认；抬手、轻滑和停留不再重复切页。
         // Commit root navigation on the first single contact; lift, small motion and holds never repeat it.
-        bool nav_press_owned=app_navigation_contact_polled()&&touch.touched&&touch.count==1&&app_navigation_main_page_ready(&ctx,current)&&ui_nav_hit(touch.x,touch.y)>=0;
-        if(nav_press_owned)ctx.consumed=true;
-        if (err == ESP_OK && pressed && !nav_press_owned && touch.count == 1 && !power_input_owned &&
-            !quick_input_owned && !menu_open && !usb_storage_active() &&
-            app_navigation_main_page_ready(&ctx, current)) {
-            const int tab = ui_nav_hit(touch.x, touch.y);
-            if (tab >= 0) {
-                panel_key_cancel(&key_hold);
-                app_input_cancel_gesture(&ctx, current, &gesture);
-                ctx.consumed = true;
-                ctx.user_activity = true;
-                nav_press_owned = true;
-                app_navigation_claim_contact();
-                if(tab!=app_index_of(current)||ctx.request_app)ui_nav_request(&ctx,tab);
-            }
-        }
+        bool nav_press_owned = !replayed && root_bar_contact(&ctx, current, &gesture, &key_hold, err,
+            power_input_owned || quick_input_owned || menu_open);
+        if (replayed) nav_press_owned = app_navigation_contact_polled() && touch.touched;
         if (err == ESP_OK && pressed && touch.count == 1 && !nav_press_owned && !power_input_owned &&
             !quick_input_owned && !menu_open && !usb_storage_active() &&
             ui_click_feedback_press(ctx.fb, touch.x, touch.y, &click_area))
@@ -1141,8 +1148,8 @@ void app_loop_run(const app_loop_config_t* config) {
         // 单帧与回放共用采样时钟，否则迟到帧会被误判为时间倒退并取消点按。
         // Share the sample clock across live and replay frames so late samples cannot cancel a tap as a clock rollback.
         if (!replayed) ctx.now_ms = sample_ms;
-        app_input_dispatch_gesture_frame(&ctx, current, &gesture, err,
-                               power_input_owned || quick_input_owned || menu_open, present_page);
+        if (!replayed) app_input_dispatch_gesture_frame(&ctx, current, &gesture, err,
+                               power_input_owned || quick_input_owned || menu_open || nav_press_owned, present_page);
 
         ctx.now_ms = esp_timer_get_time() / 1000;
 

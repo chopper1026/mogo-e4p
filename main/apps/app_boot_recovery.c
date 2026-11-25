@@ -125,7 +125,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     (void)key; ctx->request_app = app_home_page(); return APP_REDRAW_NONE;
 }
+static app_redraw_t edge_back(app_ctx_t *ctx) {
+    if (s_confirm) { s_confirm = false; return APP_REDRAW_PAGE; }
+    ctx->request_app = app_home_page(); return APP_REDRAW_NONE;
+}
 const app_desc_t app_boot_recovery = {
+    .edge_back = edge_back,
     .title = "启动恢复", .detail = "中断图书恢复", .owns_keys = true,
     .on_enter = on_enter, .render = render, .on_gesture = on_gesture, .on_key = on_key,
 };

@@ -123,7 +123,8 @@ void haptics_set_enabled(bool on) { (void)on; }
 void haptics_set_intensity(uint8_t intensity) { (void)intensity; }
 
 esp_err_t book_store_prepare_data(void) { return ESP_OK; }
-esp_err_t app_reading_journal_backup_write(FILE *file) { return fputc('J', file) == 'J' ? ESP_OK : ESP_FAIL; }
+static long journal_offset;
+esp_err_t app_reading_journal_backup_write(FILE *file) { journal_offset = ftell(file); return fputc('J', file) == 'J' ? ESP_OK : ESP_FAIL; }
 esp_err_t app_reading_journal_backup_read(FILE *file, bool apply) {
     (void)apply;
     return fgetc(file) == 'J' ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
@@ -320,11 +321,12 @@ esp_err_t nvs_set_blob(nvs_handle_t h,const char *key,const void *data,size_t si
     memcpy(pending_shelf_data,data,size);pending_shelf_slot=slot;return ESP_OK;
 }
 
+static int durable_gestures=-1, pending_gestures=-1;
 static int durable_setup=-1, pending_setup=-1;
 esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
     if (!strcmp(ns,"pico_startup")) { assert(mode==NVS_READONLY); *h=2;return ESP_OK; }
     if (missing_profile && mode==NVS_READONLY) return ESP_ERR_NVS_NOT_FOUND;
-    pending_setup=-1;
+    pending_setup=pending_gestures=-1;
     assert(!strcmp(ns, "read_pico"));
     screen_pending = false;
     pending_tap[0] = 0;
@@ -346,6 +348,7 @@ esp_err_t backup_nvs_open(const char *ns, int mode, nvs_handle_t *h) {
 }
 void backup_nvs_close(nvs_handle_t h) { pending_shelf_slot=-1; pending_off[0]=0; pending_quick[0]=0; pending_chrome=-1; pending_tap[0]=0; pending_regions = pending_progress = pending_styles = pending_touch = pending_up = pending_ticket = pending_face = -1; pending_chrome_visible[0] = pending_chrome_visible[1] = -1; nvs_close(h); }
 esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if (!strcmp(key,NVS_KEY_GESTURES)) { if (durable_gestures<0)return ESP_ERR_NVS_NOT_FOUND; *value=durable_gestures;return ESP_OK; }
     if (!strcmp(key,"setup_state")) { if (durable_setup<0)return ESP_ERR_NVS_NOT_FOUND; *value=durable_setup;return ESP_OK; }
     if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
         if (durable_chrome < 0) return ESP_ERR_NVS_NOT_FOUND;
@@ -392,6 +395,7 @@ esp_err_t backup_nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
     return ESP_OK;
 }
 esp_err_t backup_nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if (!strcmp(key,NVS_KEY_GESTURES)) { pending_gestures=value;return ESP_OK; }
     if (!strcmp(key,"setup_state")) { pending_setup=value;return ESP_OK; }
     if (!strcmp(key, NVS_KEY_CHROME_VISIBLE)) {
         if (chrome_write_fail_bar >= 0) return ESP_FAIL;
@@ -464,6 +468,7 @@ esp_err_t backup_nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
 }
 esp_err_t backup_nvs_commit(nvs_handle_t h) {
     esp_err_t err = nvs_commit(h);
+    if (err == ESP_OK && pending_gestures>=0) durable_gestures=pending_gestures;
     if (err == ESP_OK && pending_setup>=0) { durable_setup=pending_setup;missing_profile=false; }
     if (err == ESP_OK && screen_pending) has_screen = false;
     if (err == ESP_OK && pending_shelf_slot>=0) {
@@ -1823,6 +1828,12 @@ static void test_shelf_titles(void) {
 
 static void test_portable_backup(void) {
     app_settings_init();
+    assert(app_settings_gestures() && app_settings_gesture_width()==1);
+    commit_fails=true;
+    assert(!app_settings_set_gestures(false,2) && app_settings_gestures());
+    commit_fails=false;
+    assert(!app_settings_set_gestures(false,3));
+    assert(app_settings_set_gestures(false,2));
     app_settings_set_auto_time_sync(false);
     app_settings_set_auto_ota(false);
     app_settings_set_frontlight_on(true);
@@ -1840,6 +1851,7 @@ static void test_portable_backup(void) {
     }};
     assert(app_setup_save(UI_LANG_EN, SETUP_DONE));
     assert((app_settings_backup_save)() == ESP_OK);
+    assert(app_settings_set_gestures(true,0));
     assert(app_setup_save(UI_LANG_TW, SETUP_WIFI));
     app_settings_set_auto_time_sync(true);
     app_settings_set_auto_ota(true);
@@ -1854,6 +1866,13 @@ static void test_portable_backup(void) {
     saved_profiles = (wifi_transfer_profiles_backup_t){0};
     int commits = commit_count;
     unsigned records = history_restores;
+    FILE *bad = fopen(BACKUP_FILE, "r+b");
+    assert(bad && journal_offset > 2 && fseek(bad, journal_offset - 1, SEEK_SET) == 0);
+    int inverse = fgetc(bad);
+    assert(inverse == (uint8_t)~4 && fseek(bad, -1, SEEK_CUR) == 0 && fputc(0,bad) == 0 && fclose(bad) == 0);
+    assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits && records == history_restores);
+    bad = fopen(BACKUP_FILE, "r+b");
+    assert(bad && fseek(bad, journal_offset - 1, SEEK_SET) == 0 && fputc(inverse,bad) == inverse && fclose(bad) == 0);
     wifi_capacity_full = true;
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_SIZE);
     assert(commits == commit_count && records == history_restores);
@@ -1862,6 +1881,7 @@ static void test_portable_backup(void) {
     assert(weather_view.has_city && !weather_view.auto_refresh && !strcmp(weather_view.city.id, "CITY123"));
     assert(saved_profiles.count == 2 && !strcmp(saved_profiles.items[1].ssid, "Two"));
     app_settings_init();
+    assert(!app_settings_gestures() && app_settings_gesture_width()==2);
     assert(ui_language()==UI_LANG_EN && app_setup_step()==SETUP_WIFI);
     assert(!app_settings_auto_time_sync() && !app_settings_auto_ota());
     assert(app_settings_frontlight_on() && app_settings_frontlight_brightness() == 67 &&
@@ -1873,11 +1893,13 @@ static void test_portable_backup(void) {
     commits = commit_count;
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commits == commit_count);
     assert(app_settings_backup_save() == ESP_OK);
+    assert(app_settings_set_gestures(true,0));
     app_settings_set_auto_time_sync(true);
     assert(app_settings_set_shelf_show_titles(1, false));
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_auto_time_sync() && !app_settings_shelf_show_titles(1));
-    puts("PASS: v48 portable preference and multi-network round trip, preflight, corruption and v47 preservation");
+    assert(app_settings_gestures() && app_settings_gesture_width()==0);
+    puts("PASS: v52 gestures, portable preference and multi-network round trip, preflight, corruption and v47 preservation");
 }
 
 static void test_cover_wallpaper_backup(void) {
@@ -1901,7 +1923,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     FILE *file=fopen(BACKUP_FILE,"rb");settings_backup_v1_t header;
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETp",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
+    assert(!memcmp(header.magic,"PICOSETq",8) && header.flags[BK_LOCK]==APP_LOCK_STYLE_BOOK_COVER);
     app_settings_set_lock_style(APP_LOCK_STYLE_CLOCK);
     assert(app_settings_shutdown_wallpaper()->style==APP_OFF_BOOK_COVER);
     off.style=APP_OFF_SYSTEM;
@@ -1934,7 +1956,7 @@ static void test_cover_wallpaper_backup(void) {
     assert((app_settings_backup_save)() == ESP_OK);
     file=fopen(BACKUP_FILE,"rb");
     assert(file && fread(&header,1,sizeof(header),file)==sizeof(header) && fclose(file)==0);
-    assert(!memcmp(header.magic,"PICOSETp",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
+    assert(!memcmp(header.magic,"PICOSETq",8) && header.flags[BK_LOCK]==(APP_LOCK_STYLE_CLOCK|64));
     off.cover_crop=0;
     assert(app_settings_set_shutdown_wallpaper(&off));
     assert(app_settings_select_lock(APP_LOCK_STYLE_BOOK_COVER, NULL, 0));

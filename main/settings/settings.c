@@ -286,6 +286,10 @@ static char s_device_name[64] = DEFAULT_DEVICE_NAME;
 static char s_avatar[288];
 static char s_status_signature[96];
 // 触摸震动默认开启、弱档；与原厂默认一致。/ Touch vibration defaults to on and weak, matching the vendor.
+// 低位为开关，高位为宽度档位；整体提交防止配置分裂。/ Commit enable bit and width index together.
+#define NVS_KEY_GESTURES "fs_gestures"
+#define GESTURES_DEFAULT 3u
+static uint8_t s_gestures = GESTURES_DEFAULT;
 static bool s_touch_haptics = true;
 static uint8_t s_haptic_intensity = APP_HAPTIC_WEAK;
 // 电量校准日志是调试开关，默认关闭：不建 batt.log、不写卡。
@@ -543,6 +547,7 @@ static void load_setup(void) {
 }
 
 void app_settings_init(void) {
+    s_gestures = GESTURES_DEFAULT;
     s_shelf_titles = 0;
     s_quick_layout = (app_quick_layout_t)APP_QUICK_LAYOUT_DEFAULT;
     s_network_route = NETWORK_ROUTE_AUTO;
@@ -628,6 +633,7 @@ void app_settings_init(void) {
     value_len = sizeof(s_status_signature);
     if (nvs_get_str(h, NVS_KEY_STATUS_SIGNATURE, s_status_signature, &value_len) != ESP_OK)
         s_status_signature[0] = 0;
+    if (nvs_get_u8(h, NVS_KEY_GESTURES, &raw) == ESP_OK && raw < 6) s_gestures = raw;
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_TOUCH_HAPTIC, &raw) == ESP_OK) s_touch_haptics = raw != 0;
     raw = APP_HAPTIC_WEAK;
@@ -975,7 +981,7 @@ void app_settings_set_shutdown_style(app_shutdown_style_t style) {
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }
 uint8_t app_settings_home_goal_minutes(void) { return s_home_goal_minutes; }
-static esp_err_t home_preference_save(const char *key, uint8_t value) {
+static esp_err_t preference_save_u8(const char *key, uint8_t value) {
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) return err;
@@ -984,15 +990,28 @@ static esp_err_t home_preference_save(const char *key, uint8_t value) {
     settings_write_close(h);
     return err;
 }
+bool app_settings_gestures(void) { return (s_gestures & 1) != 0; }
+unsigned app_settings_gesture_width(void) { return s_gestures >> 1; }
+int app_settings_gesture_edge_px(void) {
+    static const uint8_t widths[] = {24, 36, 52};
+    return widths[app_settings_gesture_width()];
+}
+bool app_settings_set_gestures(bool enabled, unsigned width) {
+    if (width > 2) return false;
+    uint8_t value = (uint8_t)(width * 2 + enabled);
+    if (value != s_gestures && preference_save_u8(NVS_KEY_GESTURES, value) != ESP_OK) return false;
+    s_gestures = value;
+    return true;
+}
 esp_err_t app_settings_set_home_component(app_home_component_t component) {
     if ((unsigned)component >= APP_HOME_COMPONENT_COUNT || component == 3) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = home_preference_save(NVS_KEY_HOME_COMPONENT, component);
+    esp_err_t err = preference_save_u8(NVS_KEY_HOME_COMPONENT, component);
     if (err == ESP_OK) s_home_component = component;
     return err;
 }
 esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes) {
     if (minutes < 5 || minutes > 180 || minutes % 5) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = home_preference_save(NVS_KEY_HOME_GOAL, minutes);
+    esp_err_t err = preference_save_u8(NVS_KEY_HOME_GOAL, minutes);
     if (err == ESP_OK) s_home_goal_minutes = minutes;
     return err;
 }
@@ -2261,7 +2280,7 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // m appends portable preferences, weather and WiFi; n records the book-cover style in existing fields.
     // o 仅保存目录显示偏好；旧版逻辑归属不得写进目录偏好副本。
     // o stores only folder preferences; never import legacy assignments into a folder snapshot.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : c == 'p' ? 51 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : c == 'p' ? 51 : c == 'q' ? 52 : 0;
 }
 
 typedef struct { char encoded[OFF_CONFIG_BYTES]; uint8_t checksum[4]; } settings_backup_off_art_t;
@@ -2456,7 +2475,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
     // v50 仅备份目录显示偏好，不恢复书籍文件布局。/ V50 backs up folder preferences, never file placement.
-    memcpy(backup.magic, portable_format ? "PICOSETp" : "PICOSETl", sizeof(backup.magic));
+    memcpy(backup.magic, portable_format ? "PICOSETq" : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2685,6 +2704,10 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
         uint8_t selected = ui_language();
         uint8_t lang[2] = {selected, (uint8_t)(selected ^ 0xff)};
         ok = fwrite(lang, 1, sizeof(lang), file) == sizeof(lang);
+    }
+    if (ok && portable_format) {
+        uint8_t gestures[2] = {s_gestures, (uint8_t)~s_gestures};
+        ok = fwrite(gestures, 1, sizeof(gestures), file) == sizeof(gestures);
     }
     if (ok && portable_format) ok = book_store_prepare_data() == ESP_OK &&
         app_reading_journal_backup_write(file) == ESP_OK &&
@@ -2931,6 +2954,8 @@ esp_err_t app_settings_backup_restore(void) {
         backup_portable_valid(&portable);
     uint8_t lang[2] = {0};
     if (ok && version >= 51) ok = fread(lang, 1, 2, file) == 2 && lang[0] < UI_LANG_COUNT && (lang[0] ^ lang[1]) == 255;
+    uint8_t gestures[2] = {0};
+    if (ok && version >= 52) ok = fread(gestures, 1, 2, file) == 2 && gestures[0] < 6 && (gestures[0] ^ gestures[1]) == 255;
     long user_data_position = -1;
     if (ok && version >= 48) {
         user_data_position = ftell(file);
@@ -3124,6 +3149,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_B, margins.bottom);
     BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
+    if (err == ESP_OK && version >= 52) err = nvs_set_u8(h, NVS_KEY_GESTURES, gestures[0]);
     if (err == ESP_OK && version >= 51) err = nvs_set_u8(h, "setup_state", setup_state(lang[0], s_setup));
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
@@ -3165,6 +3191,7 @@ esp_err_t app_settings_backup_restore(void) {
         s_frontlight_brightness = portable.frontlight_brightness;
         s_frontlight_cct = portable.frontlight_cct;
     }
+    if (version >= 52) s_gestures = gestures[0];
     if (version >= 51) s_language = lang[0];
     if (version >= 33) app_home_components_apply(regions.value);
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));

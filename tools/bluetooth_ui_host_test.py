@@ -33,7 +33,7 @@ def unit():
     code += mocks
     code += re.sub(r'^#include[^\n]*\n', '', (ROOT / 'main/apps/settings_bluetooth.c').read_text(), flags=re.M)
     settings = ROOT / 'main/apps/app_device_settings.c'
-    gesture, key = (host.function(name, settings) for name in ('on_gesture', 'on_key'))
+    gesture, key = (host.function(name, settings) for name in ('on_gesture', 'settings_navigate'))
     # Execute the owning page's actual routing too, preserving Back/Home/origin behavior.
     code += '''
 enum {SETTINGS_MAIN, SETTINGS_BLUETOOTH};
@@ -47,8 +47,8 @@ static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;requested_tab=tab;}
 static app_redraw_t owner_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 '''
     code += block(gesture, 'if (s_page == SETTINGS_BLUETOOTH)')
-    code += '\nreturn APP_REDRAW_NONE;}\nstatic app_redraw_t owner_key(app_ctx_t *ctx,int key){\n'
-    for marker in ('if (s_page == SETTINGS_BLUETOOTH)', 'if (key == 1)', 'if (s_page != SETTINGS_MAIN)'):
+    code += '\nreturn APP_REDRAW_NONE;}\nstatic app_redraw_t owner_key(app_ctx_t *ctx,int key){bool home=key==1;\n'
+    for marker in ('if (s_page == SETTINGS_BLUETOOTH)', 'if (home)', 'if (s_page != SETTINGS_MAIN)'):
         code += block(key, marker) + '\n'
     code += 'return APP_REDRAW_NONE;}\n'
     code += tests

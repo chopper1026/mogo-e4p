@@ -14,3 +14,5 @@ static inline void ui_text_set_system_font(bool enabled) { (void)enabled; }
 
 #define UI_SETTLE_DU_MAX 6
 #define UI_SETTLE_IDLE_MS 2000
+uint8_t ui_read_pixel(const uint8_t *fb, int x, int y);
+void epd_draw_pixel(int x, int y, uint8_t color, uint8_t *fb);

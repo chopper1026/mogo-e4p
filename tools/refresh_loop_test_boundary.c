@@ -2,6 +2,7 @@
  * English: Scheduler tests replace only catalog/settings, linking real policy/dispatch; unexpected exits fail immediately.
  */
 #include <assert.h>
+#include "display_orientation.h"
 #include "display.h"
 #include "display_refresh_policy.h"
 #include "display_normalize.h"
@@ -34,4 +35,5 @@ enum EpdDrawError update_display_mode_diff_with(EpdiyHighlevelState *h, const vo
 
 __attribute__((weak)) int epd_rotated_display_width(void) { return 684; }
 __attribute__((weak)) int epd_rotated_display_height(void) { return 1216; }
+__attribute__((weak)) display_orientation_t display_orientation_get(void) { return DISPLAY_ORIENTATION_PORTRAIT; }
 __attribute__((weak)) void display_orientation_touch(uint16_t *x, uint16_t *y) { (void)x; (void)y; }

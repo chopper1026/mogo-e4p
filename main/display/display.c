@@ -922,6 +922,10 @@ void display_present_end(bool held) {
 // Once continuous phases finish, back is the real binary frame; pending gray restoration alone does not require full GC16.
 static bool display_needs_full(void) { return s_full_refresh_requested || s_power_fault; }
 
+bool display_local_feedback_ready(void) {
+    return !display_needs_full() && !s_main_fault && !s_main_armed;
+}
+
 static void retain_failed_frame(enum EpdDrawError result) {
     s_main_fault = s_full_refresh_requested = true;
     if (result & EPD_DRAW_EMPTY_LINE_QUEUE) {

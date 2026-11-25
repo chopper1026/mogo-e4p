@@ -62,6 +62,14 @@ void app_settings_set_home_full_refresh(bool enabled);
 /// 触摸震动开关与强度（0 弱 / 1 中 / 2 强）；默认开启、弱档。
 /// / Touch vibration switch and intensity (0 weak / 1 medium / 2 strong); on and weak by default.
 bool app_settings_touch_haptics(void);
+/// 全面屏手势开关。/ Full-screen navigation enabled.
+bool app_settings_gestures(void);
+/// 边缘宽度档位 0..2：窄、标准、宽。/ Edge preset 0..2: narrow, standard, wide.
+unsigned app_settings_gesture_width(void);
+/// 单侧起手区域的像素宽度。/ Pixel width of each edge zone.
+int app_settings_gesture_edge_px(void);
+/// 提交后才修改两项生效值。/ Publish both values only after a successful commit.
+bool app_settings_set_gestures(bool enabled, unsigned width);
 void app_settings_set_touch_haptics(bool on);
 uint8_t app_settings_haptic_intensity(void);
 void app_settings_set_haptic_intensity(uint8_t intensity);

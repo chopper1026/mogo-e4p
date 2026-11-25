@@ -36,10 +36,12 @@ void app_navigation_reset_contact(void);
 /// 读错或释放时清除接触锁存，调用位置由主循环保持。
 /// Clear contact latches on read failure or release at the loop's existing ingestion point.
 void app_navigation_observe_contact(esp_err_t error, bool touched);
-/// 书架阻塞轮询是否已接管本次接触。/ Whether shelf polling already owns this contact.
+/// 底栏是否已从主循环或阻塞轮询接管接触。/ Whether the loop or shelf polling claimed this bar contact.
 bool app_navigation_contact_polled(void);
-/// 主循环已在首次单指报点时接管底栏。/ The loop claimed the root bar on initial single contact.
+/// 记录非底栏起手，阻塞轮询不能抢走同一接触。/ Keep polling from stealing a contact that started outside the bar.
 void app_navigation_claim_contact(void);
+/// 底栏接触持续到抬起。/ The bar owns its contact until lift.
+void app_navigation_claim_bar(void);
 /// 快捷层离开阅读会话前保存书名路径与正文返回标记，包括展开阅读弹层时。
 /// Capture the book path and body-return marker before leaving through the quick layer, including open reader sheets.
 void app_navigation_capture_reader_return(const app_desc_t *current);

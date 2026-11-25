@@ -6,6 +6,9 @@ const app_quick_layout_t *app_settings_quick_layout(void);
 
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool enabled);
+bool app_settings_gestures(void);
+unsigned app_settings_gesture_width(void);
+int app_settings_gesture_edge_px(void);
 bool app_settings_touch_haptics(void);
 void app_settings_set_touch_haptics(bool enabled);
 

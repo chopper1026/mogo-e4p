@@ -212,6 +212,9 @@ static void contact_latches(void) {
     assert(app_poll_main_navigation_from(&ctx,0)&&ctx.request_app==&app_book);
     ctx.request_app=NULL;app_navigation_reset_contact();raw_touch.x=0;
     assert(!app_poll_main_navigation_from(&ctx,0)&&ctx.user_activity);
+    app_navigation_reset_contact();raw_touch.x=0;raw_touch.y=400;
+    assert(!app_poll_main_navigation(&ctx));
+    raw_touch.y=1100;assert(!app_poll_main_navigation(&ctx) && !app_navigation_contact_polled());
     app_navigation_reset_contact();raw_touch.x = 20;
     assert(!app_poll_main_navigation(&ctx));
 }

@@ -282,7 +282,7 @@ static void letter_key(char letter) {
     s_notice[0] = 0; s_raw[n] = letter; s_raw[n + 1] = 0; refresh();
 }
 static ui_keyboard_result_t tap(int x, int y, int top) {
-    if (!s_edit || y < top || y >= top + 510 || x < 24 || x >= 660) return UI_KEYBOARD_NONE;
+    if (!s_edit || !ui_keyboard_contains(x, y, top)) return UI_KEYBOARD_NONE;
     if (ui_rect_hit(rect(24, 0, 144, 44, top), x, y) || ui_rect_hit(rect(176, 0, 144, 44, top), x, y)) {
         bool nine = x < 168;
         if ((nine && (s_ascii || !s_candidates)) || (nine == s_nine && !s_panel)) return UI_KEYBOARD_NONE;

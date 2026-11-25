@@ -545,14 +545,24 @@ bool ui_lock_style_tick(int64_t now_ms){
     return true;
 }
 bool ui_lock_style_back(void){if(s_preview<0)return false;s_preview=-1;s_notice[0]=0;request_images();return true;}
+static bool select_purpose(int tab) {
+    if (s_preview >= 0 || tab < 0 || tab > 1 || tab == (int)s_off_tab) return false;
+    off_cancel(); s_off_tab = tab == 1; s_pending = -1; s_notice[0] = 0;
+    if (s_off_tab && app_settings_shutdown_wallpaper()->image_id) off_request(*app_settings_shutdown_wallpaper(), false);
+    request_images(); return true;
+}
+bool ui_lock_style_step_tab(int delta) { return select_purpose((int)s_off_tab + delta); }
+app_horizontal_zone_t ui_lock_style_zone(int x, int y) {
+    if (s_preview >= 0 || y >= UI_NAV_TOUCH_TOP) return APP_HORIZONTAL_BLOCK;
+    if (images_tab()) for (int i = 0; i < 3; ++i)
+        if (image_index(page() * 3 + i) >= 0 && ui_rect_hit(image_rect(i), x, y)) return APP_HORIZONTAL_LOCAL;
+    return APP_HORIZONTAL_TABS;
+}
 bool ui_lock_style_gesture(const ui_gesture_event_t *ev){
     if(s_preview>=0){if(ev->type==UI_GESTURE_TAP&&ev->y0<190)return ui_lock_style_back();return false;}
     bool tap=ev->type==UI_GESTURE_TAP,hold=ev->type==UI_GESTURE_LONG_PRESS;
     if(tap)for(int i=0;i<2;++i)if(ui_rect_hit(purpose_rect(i),ev->x0,ev->y0)){
-        if(s_off_tab==(i==1))return false;
-        off_cancel();s_off_tab=i==1;s_pending=-1;s_notice[0]=0;
-        if(s_off_tab&&app_settings_shutdown_wallpaper()->image_id)off_request(*app_settings_shutdown_wallpaper(),false);
-        request_images();return true;
+        return select_purpose(i);
     }
     if(tap&&s_off_tab){
         for(int i=0;i<OFF_STYLE_COUNT;++i)if(ui_rect_hit(off_style_rect(i),ev->x0,ev->y0)){

@@ -39,6 +39,10 @@ typedef struct {
     int64_t last_ms; ///< 最近时刻，倒退时取消 / Last time, cancel on clock regression
     bool moved; ///< 曾超出容差 / Has exceeded movement slop
     bool long_drag; ///< 接触起点固定的长拖能力 / Long-drag option captured at press
+    uint8_t horizontal_owner; ///< 输入层在按下时锁定；识别器本身不解释 / Origin owner, opaque to the recognizer
+    uint8_t orientation; ///< 按下时的画面方向 / Orientation at press
+    bool deferred_press; ///< 侧边延迟转交按下，避免滑杆等提前生效 / Defer edge presses until local intent is clear
+    bool vertical_claim; ///< 纵向操作已领取本次接触 / A vertical interaction owns this contact
     bool long_fired; ///< 已发出长按 / Long press emitted
 } ui_gesture_t;
 

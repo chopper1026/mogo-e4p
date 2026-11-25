@@ -1598,6 +1598,15 @@ static app_redraw_t connect_saved_network(const char *ssid) {
     return APP_REDRAW_PAGE;
 }
 
+static app_redraw_t select_network_tab(bool saved) {
+    s_show_saved = saved; s_network_page = 0;
+    refresh_saved_networks();
+    return APP_REDRAW_PAGE;
+}
+static app_redraw_t select_qr_tab(bool url) {
+    if (s_qr_url == url) return APP_REDRAW_NONE;
+    s_qr_url = url; prepare_qr(); return APP_REDRAW_PAGE;
+}
 static app_redraw_t provisioning_action(int id) {
     if (s_forget_confirm) {
         if (id == 12) { s_forget_confirm = false; s_network_message[0] = 0; }
@@ -1711,10 +1720,7 @@ static app_redraw_t provisioning_action(int id) {
             snprintf(s_forget_ssid, sizeof(s_forget_ssid), "%s", s_saved_ssid);
             s_forget_confirm = true; s_network_message[0] = 0;
         }
-        else if (id == 15 || id == 16) {
-            s_show_saved = id == 16; s_network_page = 0;
-            refresh_saved_networks();
-        }
+        else if (id == 15 || id == 16) return select_network_tab(id == 16);
         return APP_REDRAW_PAGE;
     }
     size_t len = strlen(s_password);
@@ -2409,15 +2415,7 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
         if (s_usb_entry) {
             return stop_usb_for_navigation(ctx, false);
         }
-        if (origin == 0 || origin == 1) {
-            bool url = origin == 1;
-            if (s_qr_url != url) {
-                s_qr_url = url;
-                prepare_qr();
-                return APP_REDRAW_PAGE;
-            }
-            return APP_REDRAW_NONE;
-        }
+        if (origin == 0 || origin == 1) return select_qr_tab(origin == 1);
         if (origin == 2) {
             if (s_mode == WIFI_TRANSFER_MODE_AP && s_status.state == WIFI_TRANSFER_ERROR && !s_status.network_ready) {
                 start_hotspot_service();
@@ -2437,7 +2435,7 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     return APP_REDRAW_AREA;
 }
 
-static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+static app_redraw_t transfer_navigate(app_ctx_t *ctx, bool home) {
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
     if (s_view == TRANSFER_CLOUDZAO) {
         if (s_cloud_notice == CLOUD_NOTICE_FIRST_READ) return APP_REDRAW_NONE;
@@ -2445,18 +2443,18 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
             s_cloud_notice = CLOUD_NOTICE_HIDDEN;
             return APP_REDRAW_PAGE;
         }
-        if (s_cloud_history_confirm && key != UI_KEY_2) {
+        if (s_cloud_history_confirm && !home) {
             s_cloud_history_confirm = false;
             return APP_REDRAW_PAGE;
         }
         cloud_leave();
-        ui_nav_request(ctx, key == UI_KEY_2 ? 0 : 2);
+        ui_nav_request(ctx, home ? 0 : 2);
         return APP_REDRAW_NONE;
     }
 #endif
-    if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, key == UI_KEY_2);
+    if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, home);
     if (s_view == TRANSFER_HOME && !stop_upload_if_idle()) return APP_REDRAW_NONE;
-    if (key == UI_KEY_2 && !s_setup_wifi) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
+    if (home && !s_setup_wifi) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_view == TRANSFER_PASSWORD) { clear_password(); s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
     if (s_view == TRANSFER_NETWORKS) {
         if (s_forget_confirm) { s_forget_confirm = false; s_network_message[0] = 0; return APP_REDRAW_PAGE; }
@@ -2466,6 +2464,9 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 
+static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    return transfer_navigate(ctx, key == UI_KEY_2);
+}
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if (redraw != APP_REDRAW_AREA) return false;
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
@@ -2489,6 +2490,42 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     return true;
 }
 
+static app_redraw_t transfer_edge_back(app_ctx_t *ctx) {
+#ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
+    if (s_view == TRANSFER_CLOUDZAO && s_cloud_notice == CLOUD_NOTICE_HIDDEN && !s_cloud_history_confirm &&
+        (s_cloud_status.busy || s_cloud_history.busy || s_cloud_bind_status.busy || s_cloud_poll_running)) return APP_REDRAW_NONE;
+#endif
+    if (usb_storage_active() || s_usb_start_pending || s_network_connect_pending ||
+        (s_view == TRANSFER_HOME && s_status.state == WIFI_TRANSFER_UPLOADING)) return APP_REDRAW_NONE;
+    return transfer_navigate(ctx, false);
+}
+static app_horizontal_zone_t transfer_zone(app_ctx_t *ctx, int x, int y) {
+    (void)ctx; (void)x;
+    if (s_usb_entry || y >= UI_NAV_TOP) return APP_HORIZONTAL_BLOCK;
+#ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
+    if (s_view == TRANSFER_CLOUDZAO) return s_cloud_notice == CLOUD_NOTICE_HIDDEN && !s_cloud_history_confirm ?
+        APP_HORIZONTAL_TABS : APP_HORIZONTAL_BLOCK;
+#endif
+    if (s_view == TRANSFER_NETWORKS) return s_forget_confirm || s_saved_detail ? APP_HORIZONTAL_BLOCK : APP_HORIZONTAL_TABS;
+    if (s_view == TRANSFER_HOME && s_mode == WIFI_TRANSFER_MODE_AP && s_status.state != WIFI_TRANSFER_UPLOADING)
+        return APP_HORIZONTAL_TABS;
+    return APP_HORIZONTAL_DEFAULT;
+}
+static app_redraw_t transfer_step_tab(app_ctx_t *ctx, int delta) {
+    (void)ctx;
+#ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
+    if (s_view == TRANSFER_CLOUDZAO) {
+        int tab = (int)s_cloud_panel + delta;
+        if (tab < CLOUD_PANEL_TRANSFER || tab > CLOUD_PANEL_SETTINGS) return APP_REDRAW_NONE;
+        return cloud_switch_panel((cloud_panel_t)tab);
+    }
+#endif
+    if (s_view == TRANSFER_NETWORKS && !s_saved_detail && !s_forget_confirm && delta == (s_show_saved ? -1 : 1))
+        return select_network_tab(!s_show_saved);
+    if (s_view == TRANSFER_HOME && !s_usb_entry && s_mode == WIFI_TRANSFER_MODE_AP &&
+        s_status.state != WIFI_TRANSFER_UPLOADING && delta == (s_qr_url ? -1 : 1)) return select_qr_tab(!s_qr_url);
+    return APP_REDRAW_NONE;
+}
 static bool transfer_menu_handle_enabled(app_ctx_t* ctx) {
     (void)ctx;
     return false;
@@ -2501,6 +2538,8 @@ static bool transfer_modal(app_ctx_t *ctx) {
     (void)ctx;return s_setup_wifi;
 }
 const app_desc_t app_transfer = {
+    .edge_back = transfer_edge_back,
+    .horizontal_zone = transfer_zone, .step_tab = transfer_step_tab,
     .modal_input_owned=transfer_modal,
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
     .on_before_lock = cloud_before_lock,

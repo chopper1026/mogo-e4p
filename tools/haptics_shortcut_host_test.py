@@ -75,14 +75,14 @@ entry = re.sub(r"^.*s_memory_.*$|^.*s_enter_memory_from_quick.*$", "", entry, fl
 unit += "static void enter_shortcut(void){\n" + re.search(r"s_page = SETTINGS_MAIN;", entry).group(0) + "\n"
 unit += entry[entry.index("    s_ble_shortcut_back = false;"):entry.rfind("}")] + "}\n"
 gesture = function("on_gesture", SETTINGS)
-key = function("on_key", SETTINGS)
+key = function("settings_navigate", SETTINGS)
 stale = "if (s_haptics_shortcut_back && s_page == SETTINGS_MAIN)"
 unit += "static app_redraw_t tap(app_ctx_t *ctx,int x,int y){ui_gesture_event_t e={x};const ui_gesture_event_t *ev=&e;\n"
 for marker in (stale, "if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back && y < 190)", "if (s_page != SETTINGS_MAIN && y < 190)", "if (s_page == SETTINGS_HAPTIC)"):
     unit += branch(gesture, marker) + "\n"
 unit += "return APP_REDRAW_NONE;}\n"
-unit += "static app_redraw_t press(app_ctx_t *ctx,int key){\n"
-for marker in (stale, "if (key == 1)", "if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back)", "if (s_page != SETTINGS_MAIN)"):
+unit += "static app_redraw_t press(app_ctx_t *ctx,int key){bool home=key==1;\n"
+for marker in (stale, "if (home)", "if (s_page == SETTINGS_HAPTIC && s_haptics_shortcut_back)", "if (s_page != SETTINGS_MAIN)"):
     unit += branch(key, marker) + "\n"
 unit += "return APP_REDRAW_NONE;}\n"
 unit += r'''

@@ -208,8 +208,7 @@ static app_redraw_t move_image(int delta) {
     if (!load_image(next)) s_viewing = false;
     return APP_REDRAW_FULL;
 }
-static app_redraw_t on_key(app_ctx_t *ctx, int key) {
-    if (key == UI_KEY_2) { ctx->request_app = app_home_page(); return APP_REDRAW_NONE; }
+static app_redraw_t edge_back(app_ctx_t *ctx) {
     if (s_viewing) {
         s_viewing = false; free(s_gray); s_gray = NULL; return APP_REDRAW_PAGE;
     }
@@ -249,7 +248,12 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) 
     return APP_REDRAW_NONE;
 }
 static bool menu_handle_enabled(app_ctx_t *ctx) { (void)ctx; return false; }
+static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (key == UI_KEY_2) { ctx->request_app = app_home_page(); return APP_REDRAW_NONE; }
+    return edge_back(ctx);
+}
 const app_desc_t app_image = {
+    .edge_back = edge_back,
     .title = "图片对比 Images", .detail = "灰阶测试图 / TF 卡 JPG PNG", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = menu_handle_enabled,
     .on_enter = on_enter, .on_exit = image_on_exit, .on_media_lost = on_media_lost,

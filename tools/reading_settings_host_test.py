@@ -36,7 +36,7 @@ static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;++touch_toggle
 source = ROOT/'main/apps/app_book.c'
 unit+=geometry()+'\nstatic ui_reader_settings_group_t s_reader_settings_group;\n'
 unit+='static unsigned scale=100;\nstatic unsigned app_settings_system_font_size(void){return scale;}\n'
-for name in ('reader_sheet_back_rect', 'reading_settings_top', 'reading_setting_rect', 'reading_settings_action'):
+for name in ('reader_sheet_back_rect', 'reading_settings_top', 'reading_setting_rect', 'select_settings_group', 'reading_settings_action'):
     unit += function(name, source)+'\n'
 unit += r'''
 int main(void){

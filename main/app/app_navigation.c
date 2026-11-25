@@ -84,7 +84,7 @@ bool app_poll_main_navigation_from(app_ctx_t *ctx,unsigned current_tab) {
         s_nav_contact_down=s_nav_polled=false;return false;
     }
     int index=ui_nav_hit(touch.x,touch.y);
-    if(index<0)return false;
+    if(index<0){s_nav_contact_down=true;return false;}
     if(!s_nav_contact_down) {
         s_nav_contact_down=s_nav_polled=true;
         if((unsigned)index!=current_tab)ui_nav_request(ctx,index);
@@ -105,6 +105,7 @@ void app_navigation_observe_contact(esp_err_t error, bool touched) {
 bool app_navigation_contact_polled(void) { return s_nav_polled; }
 
 void app_navigation_claim_contact(void) { s_nav_contact_down = true; }
+void app_navigation_claim_bar(void) { s_nav_contact_down = s_nav_polled = true; }
 
 void app_navigation_apply_request(app_ctx_t *ctx, const app_desc_t **current,
                                    bool *menu_open, int *menu_leaf,

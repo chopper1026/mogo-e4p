@@ -16,6 +16,10 @@ void ui_lock_style_render(uint8_t *fb);
 bool ui_lock_style_tick(int64_t now_ms);
 /// 已完成批次的区域；未完成结果及不可见预读不触发刷新。/ Completed batch bounds; intermediate/invisible results never repaint.
 EpdRect ui_lock_style_dirty(void);
+/// 图片格保留分页，预览不切签。/ Thumbnail cells retain paging; previews do not switch tabs.
+app_horizontal_zone_t ui_lock_style_zone(int x, int y);
+/// 待机与关机标签共用点按行为。/ Step between standby and shutdown using the tap action.
+bool ui_lock_style_step_tab(int delta);
 bool ui_lock_style_gesture(const ui_gesture_event_t *event);
 /// 返回true表示从长按预览返回选择器，false由设置页退回上级。
 bool ui_lock_style_back(void);

@@ -74,9 +74,9 @@ static void ui_draw_button(uint8_t *fb,EpdRect rect,const char *text,bool active
     code += "static app_redraw_t tap(app_ctx_t *ctx,const ui_gesture_event_t *ev){\n"
     code += block(host.function("on_gesture", SETTINGS), "if (s_page == SETTINGS_MEMORY)")
     code += "\nreturn APP_REDRAW_NONE;}\n"
-    code += "static app_redraw_t key(app_ctx_t *ctx,int key){\n"
-    for marker in ("if (key == 1)", "if (s_page == SETTINGS_MEMORY && s_memory_shortcut_back)", "if (s_page == SETTINGS_MEMORY)"):
-        code += block(host.function("on_key", SETTINGS), marker) + "\n"
+    code += "static app_redraw_t key(app_ctx_t *ctx,int key){bool home=key==1;\n"
+    for marker in ("if (home)", "if (s_page == SETTINGS_MEMORY && s_memory_shortcut_back)", "if (s_page == SETTINGS_MEMORY)"):
+        code += block(host.function("settings_navigate", SETTINGS), marker) + "\n"
     code += "return APP_REDRAW_NONE;}\n"
     code += r'''
 static void draw(app_ctx_t *ctx){ui_clear_page(ctx->fb);ui_nav_status(ctx->fb);back_header(ctx->fb,"内存管理");memory_render_content(ctx->fb);ui_nav_draw(ctx->fb,3);}

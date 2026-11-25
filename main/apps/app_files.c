@@ -1193,9 +1193,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     return format_cancelled ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 
-static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+static app_redraw_t files_back_level(void) {
     if (s_view == FILE_VIEW_MOVE) { leave_move(false); return APP_REDRAW_PAGE; }
-    if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_view == FILE_VIEW_RENAME) { ui_keyboard_end(); s_view = FILE_VIEW_ACTIONS; return APP_REDRAW_PAGE; }
     if (s_view == FILE_VIEW_ACTIONS) {
         s_view = FILE_VIEW_LIST; s_delete_confirm = false; rescan_current(); return APP_REDRAW_PAGE;
@@ -1207,8 +1206,33 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         } else s_folder = -1;
         return APP_REDRAW_PAGE;
     }
-    ui_nav_request(ctx, 0);
     return APP_REDRAW_NONE;
+}
+static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (s_view != FILE_VIEW_MOVE && (key == 1 || (s_view == FILE_VIEW_LIST && s_folder < 0))) {
+        ui_nav_request(ctx, 0); return APP_REDRAW_NONE;
+    }
+    return files_back_level();
+}
+static app_horizontal_zone_t horizontal_zone(app_ctx_t *ctx, int x, int y) {
+    (void)ctx;
+    if (s_sd_format_confirm || s_delete_confirm) return APP_HORIZONTAL_BLOCK;
+    if (s_view == FILE_VIEW_RENAME) return ui_keyboard_contains(x, y, 560) ? APP_HORIZONTAL_LOCAL : APP_HORIZONTAL_BLOCK;
+    if (s_view == FILE_VIEW_LIST && s_folder < 0)
+        return file_row_index(x, y) >= 0 ? APP_HORIZONTAL_LOCAL : APP_HORIZONTAL_DEFAULT;
+    return APP_HORIZONTAL_DEFAULT;
+}
+static app_redraw_t files_back(app_ctx_t *ctx) {
+    (void)ctx;
+    if (s_sd_format_confirm) { s_sd_format_confirm = false; s_sd_notice[0] = 0; return APP_REDRAW_PAGE; }
+    if (s_delete_confirm) { s_delete_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_view == FILE_VIEW_LIST && s_folder < 0) return APP_REDRAW_NONE;
+    if (s_view == FILE_VIEW_MOVE && strcmp(s_dir, "/sdcard")) {
+        char *slash = strrchr(s_dir, '/');
+        if (slash) *slash = 0;
+        scan_folder(3); return APP_REDRAW_PAGE;
+    }
+    return files_back_level();
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static bool main_page_visible(app_ctx_t *ctx) {
@@ -1226,7 +1250,7 @@ static void files_exit(app_ctx_t *ctx) {
 const app_desc_t app_files = {
     .title = "文件管理 Files", .detail = "TF 卡文件与传输", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = no_menu_handle,
-    .main_page_visible = main_page_visible,
+    .horizontal_zone = horizontal_zone, .edge_back = files_back, .main_page_visible = main_page_visible,
     .on_enter = on_enter, .on_media_lost = on_media_lost, .on_media_ready = on_media_ready,
     .on_exit = files_exit, .on_before_lock=files_before_lock, .render = render, .on_tick = on_tick,
     .on_gesture = on_gesture, .on_key = on_key, .present = files_present,

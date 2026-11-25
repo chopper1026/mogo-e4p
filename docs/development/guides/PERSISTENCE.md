@@ -15,7 +15,7 @@ The device has 16 MiB of flash but each OTA slot holds 5 MiB. Internal FAT and t
 | --- | --- | --- | --- |
 | 系统语言 / UI locale | `read_pico/setup_state` | v51 保存语言；恢复旧版备份时保留本机语言 / v51 includes locale; older imports retain it | [设置](../../../main/settings/settings.c) |
 | 开机引导步骤 / First-run step | 与语言共用本机字节。步骤码不是页面顺序：原语言/字体/首页/完成码 0–3 保持不变，Wi-Fi 使用 4 / Same local byte as locale; preserve original codes 0–3, append Wi-Fi as 4 | 不导出。恢复 v51 只替换语言位；无既有设置及启动记录才自动引导 / Never exported; restore preserves destination progress. Freshness requires neither legacy profile nor startup record | [启动](../../../main/app_main.c) |
-| 系统/阅读偏好、首页布局、快捷栏 / Settings, Home, quick controls | NVS `read_pico` | TF 根目录 `Pico-settings.backup`；含已定义字段和阅读记录，不是整份 NVS / Defined fields only | [settings.c](../../../main/settings/settings.c)：当前写 v51，兼容读取旧备份 / Writes v51 and reads older formats |
+| 系统/阅读偏好、首页布局、快捷栏 / Settings, Home, quick controls | NVS `read_pico` | TF 根目录 `Pico-settings.backup`；含已定义字段和阅读记录，不是整份 NVS / Defined fields only | [settings.c](../../../main/settings/settings.c)：当前写 v52，兼容读取旧备份 / Writes v52 and reads older formats |
 | 网格书架书名 / Grid shelf captions | NVS `read_pico/shelf_titles`，深色书轨、亚克力各一位 / One bit each for rail and acrylic | v48 起随配置备份迁移 / Included from v48 | 缺失或非法值默认两项均关 / Missing or invalid values default to both off |
 | 书封显示方式、自动联网开关和前光 / Cover framing, automatic network switches and frontlight | `read_pico/lock_png_mode`、`auto_time`、`auto_ota`、`fl_*` | v48 恢复透明书封取景、自动对时和 OTA 开关、前光开关/亮度/色温；无前光的机型不应用硬件 / Restored from v48; apply light only on supported hardware | 图像仍需原路径，服务检查点不迁移 / Images need original paths; service checkpoints are not copied |
 | 书籍封面壁纸 / Book cover wallpaper | NVS `read_pico/lock_face`、`off_art` / One selection per purpose | v49 保存两页各自的书籍封面样式与取景；未记录取景时默认为完整显示 / v49 preserves both Book Cover selections and fit modes; records without fit flags default to contain | 不把封面像素写入设置备份；显示时按阅读记录读取书源 / Cover pixels are not in the settings backup; read the source when displaying the wallpaper |
@@ -42,9 +42,11 @@ The device has 16 MiB of flash but each OTA slot holds 5 MiB. Internal FAT and t
 
 便签本使用书架样式编号 6；包含该样式的 v49 备份需要支持便签本的固件，旧固件降级恢复须使用旧固件已保存的兼容备份。/ Notepad uses shelf style ID 6; a v49 backup containing it requires notepad-capable firmware. Before downgrading, retain a compatible backup made on the older firmware.
 
-v48–v51 恢复先校验数据和 WiFi 容量再写入，**不是跨卷回滚事务**。手账为快照替换。备份含明文 WiFi 密码；请妥善保管。要还原实际书架，必须另存 `books/` 目录树（含空目录）和原书。
+v48–v52 恢复先校验数据和 WiFi 容量再写入，**不是跨卷回滚事务**。手账为快照替换。备份含明文 WiFi 密码；请妥善保管。要还原实际书架，必须另存 `books/` 目录树（含空目录）和原书。
 
-v48–v51 validate data and WiFi capacity before writing; later I/O can still fail across stores. Journal snapshots replace rather than merge. Protect plaintext WiFi credentials. Back up the actual `books/` tree, including empty folders, separately.
+v48–v52 validate data and WiFi capacity before writing; later I/O can still fail across stores. Journal snapshots replace rather than merge. Protect plaintext WiFi credentials. Back up the actual `books/` tree, including empty folders, separately.
+
+全面屏手势写入 `read_pico/fs_gestures`（bit 0 开关，bits 1–2 为窄／标准／宽；合法值 0–5，缺省 3）。v52 备份携带该字节与反码，先校验后恢复；v51 及以前不改本机手势偏好。/ Full-screen gestures store enablement and edge width together. Backup v52 validates the byte and its complement before applying changes; older backups preserve the local preference.
 
 ## 操作影响 / Operation Effects
 

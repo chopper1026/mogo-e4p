@@ -6,9 +6,16 @@
  * English: Synchronous input pipeline extracted from the loop, retaining debounce, diagnostics, callbacks and cancellation boundaries.
  */
 #include "app_input.h"
+#include "app_edge_feedback.h"
 #include "touch_diag.h"
 #include "display_orientation.h"
 #include "ui_menu.h"
+#include "app_navigation.h"
+#include "settings.h"
+#include "ui_kit.h"
+#include "ui_nav.h"
+#include "app_registry.h"
+#include <stdlib.h>
 #include <string.h>
 
 #if CONFIG_TOUCH_DIAG
@@ -131,10 +138,68 @@ void app_input_ingest_touch_frame(app_ctx_t* ctx, app_touch_t* latest,
     *out_released = released;
 }
 
+/* ---- 全面屏路由 / Full-screen routing ---- */
+enum { ROUTE_PAGE, ROUTE_EDGE_LEFT, ROUTE_EDGE_RIGHT, ROUTE_TABS, ROUTE_ROOT, ROUTE_BLOCK };
+
+static unsigned horizontal_owner(app_ctx_t *ctx, const app_desc_t *app, int x, int y) {
+    if (!app_settings_gestures() || (!app->edge_back && !app->main_page_visible && !app->horizontal_zone)) return ROUTE_PAGE;
+    int width = epd_rotated_display_width(), height = epd_rotated_display_height();
+    if (x >= width || y >= height) return ROUTE_PAGE;
+    bool root = app_navigation_main_page_ready(ctx, app);
+    if (root && ui_nav_hit(x, y) >= 0) return ROUTE_PAGE;
+    int edge = app_settings_gesture_edge_px();
+    if (x < edge) return ROUTE_EDGE_LEFT;
+    if (x >= width - edge) return ROUTE_EDGE_RIGHT;
+    app_horizontal_zone_t zone = app->horizontal_zone ? app->horizontal_zone(ctx, x, y) : APP_HORIZONTAL_DEFAULT;
+    if (zone == APP_HORIZONTAL_LOCAL) return ROUTE_PAGE;
+    if (zone == APP_HORIZONTAL_BLOCK) return ROUTE_BLOCK;
+    if (zone == APP_HORIZONTAL_TABS) return ROUTE_TABS;
+    return root ? ROUTE_ROOT : ROUTE_PAGE;
+}
+
+// 延迟的按下只交给点按、长按或纵向控件。按原点重放，不使用滑动终点命中。
+// Replay a deferred press only for taps, holds or vertical controls, always at its origin.
+static void replay_press(app_ctx_t *ctx, const app_desc_t *app, const ui_gesture_event_t *ev) {
+    ui_gesture_event_t press = *ev;
+    press.type = UI_GESTURE_PRESS;
+    press.x = press.x0; press.y = press.y0; press.hold_ms = 0;
+    const app_touch_t *touch = ctx->touch;
+    const app_touch_t origin = {.touched = true, .count = 1, .x = ev->x0, .y = ev->y0,
+        .points = {{.active = true, .x = ev->x0, .y = ev->y0}}};
+    bool pressed = ctx->pressed, released = ctx->released;
+    int64_t now = ctx->now_ms;
+    ctx->touch = &origin; ctx->pressed = true; ctx->released = false;
+    ctx->now_ms -= ev->hold_ms;
+    app_redraw_t redraw = app->on_gesture(ctx, &press);
+    ctx->touch = touch; ctx->pressed = pressed; ctx->released = released; ctx->now_ms = now;
+    if (redraw != APP_REDRAW_NONE) app_present(ctx, app, redraw);
+}
+
+// 取消只清理按压反馈，不能提交抬手动作或覆盖已有导航请求。
+// Cancellation clears pressed feedback without committing a release or replacing pending navigation.
+static app_redraw_t cancel_page_press(app_ctx_t *ctx, const app_desc_t *app, ui_gesture_event_t event) {
+    const app_desc_t *requested = ctx->request_app;
+    bool menu = ctx->request_menu, back = ctx->request_return, released = ctx->released;
+    event.type = UI_GESTURE_CANCEL;
+    ctx->released = false;
+    app_redraw_t redraw = app->on_gesture(ctx, &event);
+    ctx->released = released;
+    ctx->request_app = requested; ctx->request_menu = menu; ctx->request_return = back;
+    return redraw;
+}
+
 void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
                                    ui_gesture_t* gesture, esp_err_t err,
                                    bool owned_by_other, app_input_present_t present) {
     if (owned_by_other || !current->on_gesture || err != ESP_OK) return;
+    // feed 在终态清空识别器，须先保留起手归属。/ Feed resets terminal state; retain origin ownership first.
+    unsigned owner = gesture->horizontal_owner;
+    bool deferred = gesture->deferred_press, vertical = gesture->vertical_claim;
+    if (gesture->active && gesture->orientation != (uint8_t)display_orientation_get()) {
+        app_input_cancel_gesture(ctx, current, gesture);
+        ctx->consumed = true;
+        return;
+    }
     ui_gesture_event_t event;
     if (ui_gesture_feed_options(gesture, ctx, &event,
             current->gesture_long_drag && current->gesture_long_drag(ctx))) {
@@ -159,6 +224,53 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
                     (int)event.hold_ms);
         }
 #endif
+        if (event.type == UI_GESTURE_PRESS) {
+            owner = horizontal_owner(ctx, current, event.x0, event.y0);
+            gesture->orientation = (uint8_t)display_orientation_get();
+            gesture->horizontal_owner = owner;
+            gesture->deferred_press = owner == ROUTE_EDGE_LEFT || owner == ROUTE_EDGE_RIGHT;
+            if (gesture->deferred_press) return;
+        }
+        bool horizontal = event.type == UI_GESTURE_SWIPE_L || event.type == UI_GESTURE_SWIPE_R;
+        if (owner != ROUTE_PAGE && event.type == UI_GESTURE_MOVE && !vertical) {
+            int dy = abs((int)event.y - event.y0), dx = abs((int)event.x - event.x0);
+            if (dy <= dx || dy <= UI_TOUCH_SLOP_PX) return;
+            gesture->vertical_claim = true;
+        }
+        if (horizontal && owner != ROUTE_PAGE) {
+            // 清除局部按压态；已处理的纵拖不能在抬手时变为横滑。
+            // Clear local decoration; a committed vertical drag cannot become navigation on release.
+            app_redraw_t cleanup = deferred ? APP_REDRAW_NONE : cancel_page_press(ctx, current, event);
+            int delta = event.type == UI_GESTURE_SWIPE_L ? 1 : -1;
+            app_redraw_t action = APP_REDRAW_NONE;
+            if (!vertical) {
+                if ((owner == ROUTE_EDGE_LEFT && delta < 0) || (owner == ROUTE_EDGE_RIGHT && delta > 0)) {
+                    if (current->edge_back) {
+                        bool pending = ctx->request_app || ctx->request_return || ctx->request_menu;
+                        display_orientation_t origin = display_orientation_get();
+                        action = current->edge_back(ctx);
+                        // 只有实际退层才提示；回调已换向时不能沿用旧触点。/ Acknowledge only accepted backs in the original orientation.
+                        if (!pending && origin == display_orientation_get() &&
+                            (action == APP_REDRAW_PAGE || action == APP_REDRAW_FULL || action == APP_REDRAW_AREA ||
+                             ctx->request_app || ctx->request_return || ctx->request_menu))
+                            app_edge_feedback_show(ctx, owner == ROUTE_EDGE_RIGHT, event.y0);
+                    }
+                } else if (owner == ROUTE_TABS && current->step_tab) action = current->step_tab(ctx, delta);
+                else if (owner == ROUTE_ROOT && app_navigation_main_page_ready(ctx, current))
+                    ui_nav_request(ctx, (app_index_of(current) + delta + 4) % 4);
+            }
+            ctx->consumed = true;
+            if (action != APP_REDRAW_NONE) present(ctx, current, gesture, action);
+            else if (cleanup != APP_REDRAW_NONE && !ctx->request_app && !ctx->request_return && !ctx->request_menu)
+                present(ctx, current, gesture, cleanup);
+            return;
+        }
+        if (deferred) {
+            if (event.type == UI_GESTURE_CANCEL) return;
+            gesture->deferred_press = false;
+            replay_press(ctx, current, &event);
+            if (ctx->request_app || ctx->request_menu || ctx->request_return) { ctx->consumed = true; return; }
+        }
         app_redraw_t redraw = current->on_gesture(ctx, &event);
         present(ctx, current, gesture, redraw);
         if (redraw != APP_REDRAW_NONE) ctx->consumed = true;
@@ -166,16 +278,10 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
 }
 
 void app_input_cancel_gesture(app_ctx_t* ctx, const app_desc_t* app, ui_gesture_t* gesture) {
-    if (gesture->active && app->on_gesture) {
+    if (gesture->active && !gesture->deferred_press && app->on_gesture) {
         ui_gesture_event_t event = { .type = UI_GESTURE_CANCEL,
             .x0 = gesture->x0, .y0 = gesture->y0, .x = gesture->x, .y = gesture->y };
-        const app_desc_t* requested = ctx->request_app;
-        bool menu_requested = ctx->request_menu;
-        bool return_requested = ctx->request_return;
-        app_redraw_t redraw = app->on_gesture(ctx, &event);
-        ctx->request_app = requested;
-        ctx->request_menu = menu_requested;
-        ctx->request_return = return_requested;
+        app_redraw_t redraw = cancel_page_press(ctx, app, event);
         ui_gesture_reset(gesture);
         app_present(ctx, app, redraw);
     }

@@ -648,6 +648,9 @@ static void cloud_history_clear_regression(app_ctx_t *ctx) {
     assert(!s_cloud_history_confirm && !test_history_clears);
     tap(ctx, clear);
     assert(s_cloud_history_confirm && !test_history_clears);
+    assert(transfer_zone(ctx, 342, 550) == APP_HORIZONTAL_BLOCK);
+    assert(app_transfer.edge_back(ctx) == APP_REDRAW_PAGE && !s_cloud_history_confirm && !test_history_clears);
+    tap(ctx, clear);
     assert_history_text(ctx, "仅清除当前 TF 卡的接收记录");
     tap(ctx, clear);
     assert(s_cloud_history_confirm && !test_history_clears);
@@ -878,6 +881,10 @@ static void multi_network_regression(app_ctx_t *ctx) {
     // 存满时不覆盖其他网络；改密码与遗忘仍可用。/ A full store never evicts profiles; edit and forget remain available.
     tap(ctx, network_control_rect(1));
     assert(s_view == TRANSFER_NETWORKS && strstr(s_network_message, "8") && test_save_count == saves);
+    assert(transfer_zone(ctx, 342, 550) == APP_HORIZONTAL_TABS);
+    assert(app_transfer.step_tab(ctx,-1) == APP_REDRAW_NONE && !s_show_saved);
+    assert(app_transfer.step_tab(ctx,1) == APP_REDRAW_PAGE && s_show_saved);
+    assert(app_transfer.step_tab(ctx,1) == APP_REDRAW_NONE && s_show_saved);
     tap(ctx, network_control_rect(16)); assert(s_show_saved && s_saved_count == 8);
     tap(ctx, network_control_rect(9)); assert(s_network_page == 1);
     tap(ctx, network_control_rect(9)); assert(s_network_page == 1);

@@ -15,6 +15,8 @@
  * must retain full refresh and menu exits.
  * 冻结：返回恢复最近切页来源，菜单来源保留菜单位置。
  * Frozen: Return restores the latest page origin, preserving its menu position.
+ * 冻结修订：侧滑不是历史返回键；为逐层退出，先退当前画面，纯正文回首页，四个根页不动。
+ * Frozen revision: edge swipes unwind the visible layer, not key history; the bare reader exits to Home and roots stay put.
  */
 
 #pragma once
@@ -49,6 +51,13 @@ typedef enum {
     /// / Page already presented (self-test, refresh bench, …).
     APP_REDRAW_DONE,
 } app_redraw_t;
+
+typedef enum {
+    APP_HORIZONTAL_DEFAULT, ///< 普通区域；仅根页切主界面 / Ordinary area; cycle only on roots
+    APP_HORIZONTAL_LOCAL,   ///< 当前控件独占 / Local control owns horizontal movement
+    APP_HORIZONTAL_TABS,    ///< 当前同级标签 / Visible sibling tabs
+    APP_HORIZONTAL_BLOCK,   ///< 吞掉横滑，不向外传递 / Consume without navigation
+} app_horizontal_zone_t;
 
 typedef struct app_desc_s app_desc_t;
 typedef struct ui_gesture_event_s ui_gesture_event_t;
@@ -163,6 +172,12 @@ struct app_desc_s {
     /// 可选：屏蔽屏幕触摸，底部三键继续分发；主循环在摄取每帧前查询。
     /// Optional: suppress screen touch while retaining panel keys; queried before ingesting each frame.
     bool (*screen_touch_disabled)(app_ctx_t* ctx);
+    /// 按下时纯查询局部横滑归属；不能用整页遮盖根页导航。/ Pure origin hit test; never shadow root navigation with a whole-screen control.
+    app_horizontal_zone_t (*horizontal_zone)(app_ctx_t *ctx, int x, int y);
+    /// 相邻标签（+1 下一项），到头停留。/ Adjacent tab (+1 for next); stop at endpoints.
+    app_redraw_t (*step_tab)(app_ctx_t *ctx, int delta);
+    /// 只退当前最上层；根页和不可取消状态无动作。/ Unwind one visible layer; roots and protected states do nothing.
+    app_redraw_t (*edge_back)(app_ctx_t *ctx);
     /// 设置后独占触摸派发，替代 on_touch。/ Exclusive gesture dispatch replaces on_touch.
     app_redraw_t (*on_gesture)(app_ctx_t* ctx, const ui_gesture_event_t* event);
     app_redraw_t (*on_touch)(app_ctx_t* ctx, const app_touch_t* touch);

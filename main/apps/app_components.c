@@ -287,7 +287,11 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
 }
 static display_rect_t area(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}
 static bool no_menu(app_ctx_t *ctx) {(void)ctx;return false;}
+static app_redraw_t edge_back(app_ctx_t *ctx) {
+    back(ctx); return ctx->request_return ? APP_REDRAW_NONE : APP_REDRAW_PAGE;
+}
 const app_desc_t app_components={
+    .edge_back = edge_back,
     .title="首页组件",.detail="上下区域与天气设置",.owns_keys=true,.enter_full=false,.menu_handle_enabled=no_menu,
     .on_enter=enter,.on_exit=leave,.on_before_lock=before_lock,.render=render,.present=present,
     .on_tick=tick,.on_gesture=gesture,.on_key=key,.area_hint=area,

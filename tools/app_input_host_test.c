@@ -1,7 +1,9 @@
 // 中文：验证同步输入边界、真实手势事件与取消时的导航保护。
 // English: Check synchronous input boundaries, real gesture events and navigation protection during cancellation.
 #include "app_input.h"
+#include "app_edge_feedback.h"
 #include "ui_menu.h"
+#include "display_orientation.h"
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -260,7 +262,104 @@ static void event_trace(void) {
     }
 }
 
+static bool nav_enabled, is_root;
+static int width_preset, root_index, root_target, backs, tab, local_swipes, nav_presses, nav_taps, nav_longs, nav_vertical;
+static display_orientation_t rotation;
+static app_horizontal_zone_t zone;
+bool app_settings_gestures(void) { return nav_enabled; }
+unsigned app_settings_gesture_width(void) { return width_preset; }
+int app_settings_gesture_edge_px(void) { return (int[]){24,36,52}[app_settings_gesture_width()]; }
+int app_index_of(const app_desc_t *app) { (void)app; return root_index; }
+bool app_navigation_main_page_ready(app_ctx_t *c, const app_desc_t *app) { (void)c; (void)app; return is_root; }
+int ui_nav_hit(uint16_t x, uint16_t y) { (void)x; return y >= 1096 ? 0 : -1; }
+void ui_nav_request(app_ctx_t *c, int index) { (void)c; root_target = index; }
+int epd_rotated_display_width(void) { return rotation & 1 ? 1216 : 684; }
+int epd_rotated_display_height(void) { return rotation & 1 ? 684 : 1216; }
+display_orientation_t display_orientation_get(void) { return rotation; }
+static app_horizontal_zone_t nav_zone(app_ctx_t *c, int x, int y) { (void)c; (void)x; (void)y; return zone; }
+static unsigned edge_pulses[2];
+static bool back_requests_return;
+void app_edge_feedback_show(app_ctx_t *c, bool right, int y) {
+    assert(c->released && !is_root && y == 340);
+    ++edge_pulses[right];
+}
+static app_redraw_t nav_back(app_ctx_t *c) {
+    if (is_root) return APP_REDRAW_NONE;
+    ++backs;
+    if (back_requests_return) { c->request_return = true; return APP_REDRAW_NONE; }
+    return APP_REDRAW_PAGE;
+}
+static app_redraw_t nav_step(app_ctx_t *c, int d) { (void)c; if (tab+d >= 0 && tab+d < 3) tab+=d; return APP_REDRAW_NONE; }
+static app_redraw_t nav_event(app_ctx_t *c, const ui_gesture_event_t *e) {
+    (void)c;
+    if (e->type == UI_GESTURE_SWIPE_L || e->type == UI_GESTURE_SWIPE_R) ++local_swipes;
+    if (e->type == UI_GESTURE_PRESS) {
+        assert(c->pressed && !c->released && c->touch->touched && c->touch->x == e->x0 && c->touch->y == e->y0);
+        ++nav_presses;
+    }
+    if (e->type == UI_GESTURE_TAP) ++nav_taps;
+    if (e->type == UI_GESTURE_LONG_PRESS) ++nav_longs;
+    if (e->type == UI_GESTURE_SWIPE_D) ++nav_vertical;
+    return APP_REDRAW_NONE;
+}
+static const app_desc_t nav_page = {.on_gesture=nav_event, .edge_back=nav_back, .step_tab=nav_step, .horizontal_zone=nav_zone};
+static void nav_present(app_ctx_t *c, const app_desc_t *p, ui_gesture_t *g, app_redraw_t redraw) {
+    (void)c; (void)p; (void)g; assert(redraw == APP_REDRAW_NONE || redraw == APP_REDRAW_PAGE);
+}
+static void nav_feed(int n, int x, int y, int t) {
+    ingest((app_touch_t){.touched=n!=0,.count=n,.x=x,.y=y}, t, ESP_OK);
+    app_input_dispatch_gesture_frame(&ctx,&nav_page,&gesture,ESP_OK,false,nav_present);
+    was_touched = latest.touched;
+}
+static void swipe(int start, int end) {
+    nav_feed(1,start,340,0); nav_feed(1,end,340,100); nav_feed(0,0,0,130);
+}
+static void full_screen_gestures(void) {
+    reset(); nav_enabled = true;
+    for (rotation=0; rotation<=DISPLAY_ORIENTATION_LEFT; ++rotation) {
+        int w=epd_rotated_display_width();
+        for (width_preset=0;width_preset<3;++width_preset) {
+            int edge=(int[]){24,36,52}[width_preset];
+            int old=backs, local=local_swipes;
+            unsigned n = edge_pulses[0]; assert(n == edge_pulses[1]);
+            swipe(edge-1,edge+119); assert(edge_pulses[0] == n+1 && edge_pulses[1] == n);
+            swipe(w-edge,w-edge-120); assert(edge_pulses[0] == n+1 && edge_pulses[1] == n+1);
+            swipe(edge,edge+120); swipe(w-edge-1,w-edge-121);
+            assert(backs==old+2 && local_swipes==local+2);
+        }
+    }
+    rotation=DISPLAY_ORIENTATION_PORTRAIT; width_preset=1;
+    back_requests_return = true;
+    swipe(5,180); assert(ctx.request_return); ctx.request_return = back_requests_return = false;
+    assert(edge_pulses[0] == 13 && edge_pulses[1] == 12);
+    is_root=true;
+    for (root_index=0;root_index<4;++root_index) {
+        root_target=-1; swipe(420,240); assert(root_target==(root_index+1)%4);
+        swipe(200,640); assert(root_target==(root_index+3)%4);
+        root_target=-1; swipe(5,180); assert(root_target==-1);
+    }
+    root_index=0; zone=APP_HORIZONTAL_LOCAL;
+    int old=local_swipes; swipe(340,140); assert(local_swipes==old+1 && root_target==-1);
+    zone=APP_HORIZONTAL_TABS; tab=0; swipe(350,100); swipe(350,100); swipe(350,100);
+    assert(tab==2 && root_target==-1); swipe(100,350); assert(tab==1);
+    zone=APP_HORIZONTAL_BLOCK; root_target=-1; old=local_swipes; swipe(350,100);
+    assert(tab==1 && local_swipes==old && root_target==-1);
+    zone=APP_HORIZONTAL_DEFAULT; is_root=false; old=backs;
+    int presses=nav_presses;
+    swipe(5,124); assert(backs==old && nav_presses==presses);
+    nav_feed(1,5,340,0);nav_feed(0,0,0,70); assert(nav_taps==1 && nav_presses==presses+1);
+    nav_feed(1,5,340,0);nav_feed(1,5,340,510);nav_feed(0,0,0,530);assert(nav_longs==1 && backs==old);
+    nav_feed(1,5,340,0);nav_feed(1,10,540,90);nav_feed(0,0,0,100);assert(nav_vertical==1);
+    nav_feed(1,5,340,0);nav_feed(1,8,405,40);nav_feed(1,185,400,80);nav_feed(0,0,0,120);assert(backs==old);
+    nav_feed(1,5,340,0);nav_feed(2,9,340,50);nav_feed(1,160,340,80);nav_feed(0,0,0,120);
+    nav_feed(1,5,340,0);rotation=DISPLAY_ORIENTATION_INVERTED;nav_feed(1,150,340,80);nav_feed(0,0,0,120);
+    assert(backs==old); rotation=DISPLAY_ORIENTATION_PORTRAIT;
+    nav_enabled=false; int prev=local_swipes; swipe(5,160); assert(backs==old && local_swipes==prev+1);
+    assert(edge_pulses[0] == 13 && edge_pulses[1] == 12);
+    puts("PASS full-screen gesture ownership, presets, rotation, roots, tabs, taps and cancellation");
+}
 int main(void) {
+    full_screen_gestures();
     touch_filter_cases();
     snapshots(); gestures(); ownership_and_cancel(); event_trace();
 #if CONFIG_TOUCH_DIAG

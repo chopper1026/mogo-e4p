@@ -19,6 +19,8 @@
  * Same-day user revision: use a large white/black card with separate recovery instructions; show touch feedback for two seconds and normalize once on dismissal to fix long waits and uneven ink.
  * 用户 2026-11-06 修订：正文长按仅用于临时选字查词，留白不再打开目录，避免同一手势冲突；目录保留工具栏入口。
  * User revision 2026-11-06: body holds select dictionary text; blank holds no longer open the TOC, avoiding a gesture conflict; the toolbar retains the TOC.
+ * 冻结修订：为避免边缘内滑误翻，开启全面屏手势时侧边优先退一层，纯正文保存后回首页；实体键不变。
+ * Frozen revision: with gestures enabled the edges unwind one layer instead of turning pages; bare text exits to Home. Key bindings stay unchanged.
  * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
@@ -578,6 +580,7 @@ static const char s_landscape_turn_notice[] = "横屏阅读\n仅支持普通翻�
 static char s_reader_notice[128];
 static int64_t s_reader_notice_until;
 static int s_bookmark_page;
+static reader_panel_t s_bookmark_parent;
 static bool s_bookmark_edit, s_bookmark_delete_confirm, s_bookmark_delete_error;
 static uint8_t *s_bookmark_selection_bits;
 static size_t s_bookmark_selection_bytes;
@@ -6192,13 +6195,16 @@ static app_redraw_t reader_toggle_touch(app_ctx_t *ctx) {
     return APP_REDRAW_PAGE;
 }
 
+static app_redraw_t select_settings_group(int tab) {
+    if (tab < 0 || tab >= UI_READER_SETTINGS_GROUP_COUNT || tab == (int)s_reader_settings_group) return APP_REDRAW_NONE;
+    s_reader_settings_group = (ui_reader_settings_group_t)tab;
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
 static app_redraw_t reading_settings_action(app_ctx_t *ctx, uint16_t x, uint16_t y) {
     for (int tab = 0; tab < UI_READER_SETTINGS_GROUP_COUNT; ++tab) {
         if (!ui_rect_hit(ui_reader_settings_tab_rect(app_settings_system_font_size(), tab), x, y)) continue;
-        if (s_reader_settings_group == (ui_reader_settings_group_t)tab) return APP_REDRAW_NONE;
-        s_reader_settings_group = (ui_reader_settings_group_t)tab;
-        invalidate_prep();
-        return APP_REDRAW_PAGE;
+        return select_settings_group(tab);
     }
     if (y < reading_settings_top()) {
         s_reader_panel = READER_PANEL_NONE;
@@ -6345,6 +6351,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             s_bookmark_page = 0;
             s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
             bookmark_selection_clear();
+            s_bookmark_parent = s_reader_panel;
             s_reader_panel = READER_PANEL_BOOKMARKS;
         }
         else return APP_REDRAW_NONE;
@@ -6358,6 +6365,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             s_bookmark_page = 0;
             s_bookmark_edit = s_bookmark_delete_confirm = s_bookmark_delete_error = false;
             bookmark_selection_clear();
+            s_bookmark_parent = s_reader_panel;
             s_reader_panel = READER_PANEL_BOOKMARKS;
         }
         else if (ui_rect_hit(recent, x, y)) {
@@ -8050,6 +8058,17 @@ static app_redraw_t middle_pending_tick(app_ctx_t *ctx) {
     s_middle_pending = false;
     return reader_key_action(ctx, s_middle_pending_action);
 }
+static app_redraw_t shelf_back_level(app_ctx_t *ctx) {
+    if (s_view == CATEGORIES) return category_back(ctx);
+    if (s_view == EDIT) { ui_keyboard_end(); free(s_editor_cover); s_editor_cover = NULL; s_view = MANAGE; return APP_REDRAW_PAGE; }
+    if (s_view == SEARCH) { search_finish(ctx, false); return APP_REDRAW_PAGE; }
+    if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_view == MANAGE || s_view == BULK || s_view == IMPORT) {
+        if (s_view == BULK) return bulk_finish(ctx);
+        s_view = SHELF; return APP_REDRAW_PAGE;
+    }
+    return APP_REDRAW_NONE;
+}
 static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     if (s_open_error[0]) return key == UI_KEY_1 || key == UI_KEY_2 ? dismiss_open_error() : APP_REDRAW_NONE;
     cancel_auto_resume();
@@ -8071,13 +8090,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     }
     if (s_view != READING && s_view != TOC) {
         if (key == UI_KEY_2) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
-        if (s_view == EDIT) { ui_keyboard_end(); free(s_editor_cover); s_editor_cover = NULL; s_view = MANAGE; return APP_REDRAW_PAGE; }
-        if (s_view == SEARCH) { search_finish(ctx, false); return APP_REDRAW_PAGE; }
-        if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
-        if (s_view == MANAGE || s_view == BULK || s_view == IMPORT) {
-            if (s_view == BULK) return bulk_finish(ctx);
-            s_view = SHELF; return APP_REDRAW_PAGE;
-        }
+        if (s_view != SHELF) return shelf_back_level(ctx);
         if (s_view == SHELF) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     }
     // 注释弹层和点按一致：任意键只收起弹层，不顺手翻页或换面板。
@@ -8539,11 +8552,76 @@ static bool main_page_visible(app_ctx_t* ctx) {
     return s_view == SHELF && !s_shelf_selecting && !s_clear_confirm && !s_batch_confirm && !s_open_error[0];
 }
 
+static app_horizontal_zone_t book_horizontal_zone(app_ctx_t *ctx, int x, int y) {
+    if (s_open_error[0] || s_clear_confirm || s_batch_confirm ||
+        (s_view == SHELF && book_shelf_categories_menu_is_open(&s_shelf_categories))) return APP_HORIZONTAL_BLOCK;
+    if (s_view == SHELF) {
+        int rows = shelf_rows();
+        for (int i = 0; i < rows && ctx->leaf * rows + i < s_visible_count; ++i)
+            if (ui_rect_hit(row_rect(i), x, y)) return APP_HORIZONTAL_LOCAL;
+    }
+    if (s_view == SEARCH || s_view == EDIT || (s_view == CATEGORIES && s_category_ui.screen == CATEGORY_EDIT))
+        return ui_keyboard_contains(x, y, 560) ? APP_HORIZONTAL_LOCAL : APP_HORIZONTAL_BLOCK;
+    if (s_view == READING && s_reader_panel == READER_PANEL_REFRESH_SETTINGS && y >= reading_settings_top())
+        return APP_HORIZONTAL_TABS;
+    return APP_HORIZONTAL_DEFAULT;
+}
+static app_redraw_t reader_step_tab(app_ctx_t *ctx, int delta) {
+    (void)ctx;
+    return s_reader_panel == READER_PANEL_REFRESH_SETTINGS ? select_settings_group((int)s_reader_settings_group + delta) : APP_REDRAW_NONE;
+}
+static app_redraw_t book_edge_back(app_ctx_t *ctx) {
+    cancel_auto_resume(); middle_pending_clear(); reader_indent_hold_cancel();
+    if (s_open_error[0]) return dismiss_open_error();
+    if (s_dictionary_selection.active) return dictionary_dismiss();
+    if (s_clear_confirm) { s_clear_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_view == SHELF) {
+        if (book_shelf_categories_menu_is_open(&s_shelf_categories)) book_shelf_categories_menu_close(&s_shelf_categories);
+        else if (s_shelf_selecting) { s_shelf_selecting = false; clear_selection(); }
+        else return APP_REDRAW_NONE;
+        return APP_REDRAW_PAGE;
+    }
+    if (s_view == TOC) {
+        if (s_toc_jump_open) s_toc_jump_open = s_toc_jump_drag = false;
+        else { set_reader_view(s_text ? READING : SHELF); s_reader_panel = s_text ? READER_PANEL_TOOLS : READER_PANEL_NONE; }
+        return APP_REDRAW_PAGE;
+    }
+    if (s_view != READING) return shelf_back_level(ctx);
+    s_reader_slider = -1;
+    switch (s_reader_panel) {
+        case READER_PANEL_NONE: ui_nav_request(ctx, 0); return APP_REDRAW_NONE;
+        case READER_PANEL_TOOLS: toggle_reader_tools_panel(); break;
+        case READER_PANEL_NOTE: s_reader_panel = READER_PANEL_NONE; break;
+        case READER_PANEL_KEY_PICKER: s_reader_panel = READER_PANEL_KEY_SETTINGS; break;
+        case READER_PANEL_CHROME_PICKER: s_reader_panel = READER_PANEL_CHROME_SETTINGS; break;
+        case READER_PANEL_KEY_SETTINGS: case READER_PANEL_CHROME_SETTINGS: case READER_PANEL_TURN_SETTINGS:
+            s_reader_panel = READER_PANEL_REFRESH_SETTINGS; break;
+        case READER_PANEL_TAP_GRID:
+            if (s_tap_picker) s_tap_picker = false; else s_reader_panel = READER_PANEL_TURN_SETTINGS;
+            break;
+        case READER_PANEL_WEIGHT_SETTINGS: case READER_PANEL_LAYOUT_SETTINGS: case READER_PANEL_RULE_SETTINGS:
+        case READER_PANEL_TITLE_STYLE: case READER_PANEL_FONT_PICKER: s_reader_panel = READER_PANEL_FONT_SETTINGS; break;
+        case READER_PANEL_STATS_RECENT: s_reader_panel = READER_PANEL_STATS; break;
+        case READER_PANEL_BOOKMARKS:
+            if (s_bookmark_delete_confirm) s_bookmark_delete_confirm = s_bookmark_delete_error = false;
+            else if (s_bookmark_edit) { s_bookmark_edit = false; bookmark_selection_clear(); }
+            else s_reader_panel = s_bookmark_parent;
+            break;
+        case READER_PANEL_STATS: s_reader_panel = READER_PANEL_MORE; break;
+        case READER_PANEL_FONT_SETTINGS: case READER_PANEL_REFRESH_SETTINGS: case READER_PANEL_MORE:
+            s_reader_panel = READER_PANEL_TOOLS; break;
+    }
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
+}
+
 const app_desc_t app_book = {
     .title = "图书 Books", .detail = "TF 卡 txt / epub 阅读", .enter_full = false, .owns_keys = true,
     .defer_middle_short = true,
     .menu_handle_enabled = menu_handle_enabled,
     .modal_input_owned = open_error_input_owned,
+    .edge_back = book_edge_back, .horizontal_zone = book_horizontal_zone, .step_tab = reader_step_tab,
     .main_page_visible = main_page_visible,
     .normalize_hold_gray = normalize_hold_gray,
     .rotation_available = rotation_available, .rotation_enabled = rotation_enabled,

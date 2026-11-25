@@ -3,6 +3,7 @@
  * English: Run the real loop with deterministic touch and task-delay exit.
  */
 #include "app_loop.h"
+#include "app_edge_feedback.h"
 #include "home_components.h"
 #include "platform/s31_input.h"
 #include "ui_gesture.h"
@@ -25,6 +26,9 @@ void pico_boot_clear_resume(void) {}
 #include <stdio.h>
 #include <string.h>
 
+void app_edge_feedback_show(app_ctx_t *ctx, bool right, int y) {
+    (void)ctx; (void)right; (void)y; assert(!"unexpected edge back in scheduler fixture");
+}
 void touch_sampler_test_enable(bool active);
 void touch_sampler_test_push(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count);
 
@@ -48,6 +52,9 @@ static bool bt_return_to_origin;
 static bool haptics_present, haptics_on, haptics_return_to_origin;
 static int haptics_settings_requests, haptics_settings_writes, network_settings_requests;
 bool haptics_available(void) {return haptics_present;}
+bool app_settings_gestures(void) { return true; }
+unsigned app_settings_gesture_width(void) { return 1; }
+int app_settings_gesture_edge_px(void) { return (int[]){24,36,52}[app_settings_gesture_width()]; }
 bool app_settings_touch_haptics(void) {return haptics_on;}
 void app_settings_set_touch_haptics(bool enabled) {haptics_on = enabled; ++haptics_settings_writes;}
 void app_device_settings_request_haptics(bool return_to_origin) {
@@ -1282,6 +1289,16 @@ int main(void) {
     assert(wifi_starts==1&&!wifi_stops&&!touch_calls&&quick_gl==1&&quick_draws==1);
     touch_sampler_test_enable(false);tap_during_present=false;
     puts("quick layer replay: a tap buffered during the opening refresh keeps its press edge");
+    // 积压序列与实时序列共用起手归属，末帧不能再发一次按下。/ Queued contacts use the live origin rules; never dispatch the final press twice.
+    for (int footer=0;footer<2;++footer) {
+        reset();enable_main_tabs();first.on_gesture=gesture;touch_sampler_test_enable(true);
+        touch_sampler_test_push(100,footer?200:420,footer?1140:400,1);
+        touch_sampler_test_push(180,footer?210:235,footer?1140:400,1);
+        touch_sampler_test_push(220,0,0,0);
+        add(0,0,0,0);add(0,0,0,0);run();touch_sampler_test_enable(false);
+        assert(enters==2 && nav_draws==1 && events[UI_GESTURE_SWIPE_L]==0);
+        assert(events[UI_GESTURE_PRESS]==(footer?0:1));
+    }
     // 回放帧时间戳必须按全宽毫秒写回输入时刻：32 位回绕曾在连续开机 49.7 天后把一次
     // 翻页判成空闲超时并立刻锁屏。
     // Replayed frame timestamps must feed the full-width ms value back into the input

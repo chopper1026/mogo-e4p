@@ -157,7 +157,7 @@ static void settings_prepare_profile(void){++profile_refresh;}
     settings=ROOT/'main/apps/app_device_settings.c'
     for name,args,source_name,condition in (
         ('route_gesture','app_ctx_t *ctx,const ui_gesture_event_t *ev','on_gesture','if (s_page == SETTINGS_LOCK_STYLE)'),
-        ('route_key','app_ctx_t *ctx,int key','on_key','if (s_page==SETTINGS_LOCK_STYLE)'),
+        ('route_key','app_ctx_t *ctx,bool home','settings_navigate','if (s_page==SETTINGS_LOCK_STYLE)'),
         ('route_tick','app_ctx_t *ctx','on_tick','if (s_page == SETTINGS_LOCK_STYLE'),
         ('route_before_lock','void','on_before_lock','if(s_page==SETTINGS_LOCK_STYLE)')):
         code+='\nstatic app_redraw_t '+name+'('+args+'){\n'+branch(host.function(source_name,settings),condition)+'\nreturn APP_REDRAW_NONE;\n}\n'
@@ -295,10 +295,10 @@ int main(int argc,char **argv){
  s_page=SETTINGS_LOCK_STYLE;ui_lock_style_open(fb);ev.x0=50;ev.y0=1170;
  assert(route_gesture(&ctx,&ev)==APP_REDRAW_PAGE&&!s_open&&nav==0);
  s_page=SETTINGS_LOCK_STYLE;ui_lock_style_open(fb);ui_lock_style_tick(8500);assert(hold(36,758));
- assert(route_key(&ctx,0)==APP_REDRAW_PAGE&&s_open&&s_preview==-1);
- assert(route_key(&ctx,2)==APP_REDRAW_PAGE&&!s_open&&s_page==SETTINGS_MAIN);
+ assert(route_key(&ctx,false)==APP_REDRAW_PAGE&&s_open&&s_preview==-1);
+ assert(route_key(&ctx,false)==APP_REDRAW_PAGE&&!s_open&&s_page==SETTINGS_MAIN);
  s_page=SETTINGS_LOCK_STYLE;ui_lock_style_open(fb);nav=-1;
- assert(route_key(&ctx,1)==APP_REDRAW_NONE&&!s_open&&nav==0);
+ assert(route_key(&ctx,true)==APP_REDRAW_NONE&&!s_open&&nav==0);
  s_page=SETTINGS_LOCK_STYLE;ui_lock_style_open(fb);ui_lock_style_tick(9000);images_ready=false;assert(tap(36,758)&&s_pending>=0);
  route_before_lock();assert(!s_open&&s_pending==-1&&s_page==SETTINGS_MAIN&&!ui_lock_style_tick(9500));images_ready=true;
  // 可见冷图分批完成时，也只做一次最终刷新。 / A cold visible batch settles exactly once, even when files finish in separate ticks.

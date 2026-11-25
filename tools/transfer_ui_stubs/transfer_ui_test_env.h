@@ -31,7 +31,8 @@ typedef enum {
     UI_GESTURE_CANCEL, UI_GESTURE_RELEASE,
 } ui_gesture_type_t;
 typedef struct { ui_gesture_type_t type; uint16_t x,y,x0,y0; } ui_gesture_event_t;
-typedef struct app_desc { const char *title,*detail; bool enter_full,owns_keys; bool(*menu_handle_enabled)(app_ctx_t*); bool(*modal_input_owned)(app_ctx_t*); void(*on_enter)(app_ctx_t*); void(*on_exit)(app_ctx_t*); void(*on_media_lost)(app_ctx_t*); void(*on_before_lock)(app_ctx_t*); void(*render)(app_ctx_t*,uint8_t*); EpdRect(*area_hint)(app_ctx_t*); bool(*present)(app_ctx_t*,app_redraw_t); app_redraw_t(*on_tick)(app_ctx_t*); app_redraw_t(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*); app_redraw_t(*on_key)(app_ctx_t*,int); } app_desc_t;
+typedef enum {APP_HORIZONTAL_DEFAULT, APP_HORIZONTAL_LOCAL, APP_HORIZONTAL_TABS, APP_HORIZONTAL_BLOCK} app_horizontal_zone_t;
+typedef struct app_desc { app_redraw_t(*edge_back)(app_ctx_t*),(*step_tab)(app_ctx_t*,int); app_horizontal_zone_t(*horizontal_zone)(app_ctx_t*,int,int); const char *title,*detail; bool enter_full,owns_keys; bool(*menu_handle_enabled)(app_ctx_t*); bool(*modal_input_owned)(app_ctx_t*); void(*on_enter)(app_ctx_t*); void(*on_exit)(app_ctx_t*); void(*on_media_lost)(app_ctx_t*); void(*on_before_lock)(app_ctx_t*); void(*render)(app_ctx_t*,uint8_t*); EpdRect(*area_hint)(app_ctx_t*); bool(*present)(app_ctx_t*,app_redraw_t); app_redraw_t(*on_tick)(app_ctx_t*); app_redraw_t(*on_gesture)(app_ctx_t*,const ui_gesture_event_t*); app_redraw_t(*on_key)(app_ctx_t*,int); } app_desc_t;
 enum EpdDrawMode { MODE_DU,MODE_GL16,MODE_GC16 };
 #define UI_MARGIN 40
 #define UI_CONTENT_TOP 176

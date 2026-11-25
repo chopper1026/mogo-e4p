@@ -320,24 +320,26 @@ static bool advance(setup_step_t next) {
     notice = NULL;
     return true;
 }
+static app_redraw_t setup_back(app_ctx_t *ctx) {
+    if (!has_back()) return APP_REDRAW_NONE;
+    stop(ctx);
+    if (!full_modes[mode] || step == SETUP_LANGUAGE) {
+        if (mode == APP_SETUP_REPLAY && app_setup_step() != SETUP_DONE &&
+            !app_setup_save(ui_language(), SETUP_DONE)) {
+            notice = "保存失败，请重试";
+            return APP_REDRAW_PAGE;
+        }
+        ctx->request_app = app_at(3);
+        return APP_REDRAW_NONE;
+    }
+    int index = page_index();
+    if (index > 0) advance(pages[index - 1]);
+    return APP_REDRAW_PAGE;
+}
 static app_redraw_t tap(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
     int x = ev->x0, y = ev->y0;
-    if (has_back() && ui_rect_hit(back_rect, x, y)) {
-        stop(ctx);
-        if (!full_modes[mode] || step == SETUP_LANGUAGE) {
-            if (mode == APP_SETUP_REPLAY && app_setup_step() != SETUP_DONE &&
-                !app_setup_save(ui_language(), SETUP_DONE)) {
-                notice = "保存失败，请重试";
-                return APP_REDRAW_PAGE;
-            }
-            ctx->request_app = app_at(3);
-            return APP_REDRAW_NONE;
-        }
-        int index = page_index();
-        if (index > 0) advance(pages[index - 1]);
-        return APP_REDRAW_PAGE;
-    }
+    if (ui_rect_hit(back_rect, x, y)) return setup_back(ctx);
     if (step == SETUP_LANGUAGE) {
         for (int i = 0; i < UI_LANG_COUNT; ++i) {
             if (!ui_rect_hit(language_row(i), x, y) || (int)preview == i) continue;
@@ -460,5 +462,5 @@ const app_desc_t app_setup = { .title = "开机引导",
                                .on_media_lost = media_lost,
                                .area_hint = area_hint,
                                .render = render,
-                               .on_gesture = tap,
+                               .edge_back = setup_back, .on_gesture = tap,
                                .on_tick = tick };

@@ -31,7 +31,7 @@ def fn(name):
 start=s.index('static app_redraw_t on_gesture(')
 modal=block(s.index('    if (s_page==SETTINGS_SYSTEM_FONT && s_font_sync_confirm)',start))
 choose=block(s.index('    if (s_page == SETTINGS_SYSTEM_FONT) {',start))
-main=s[s.index('    if (y<160 || y>=UI_NAV_TOP || ev->x0<36',start):s.index('\nstatic app_redraw_t on_key(',start)].rstrip()
+main=s[s.index('    if (y<160 || y>=UI_NAV_TOP || ev->x0<36',start):s.index('\nstatic app_redraw_t settings_navigate(',start)].rstrip()
 assert main.endswith('}')
 main=main[:-1]
 enum=s[s.index('typedef enum { SETTINGS_MAIN'):s.index('} settings_page_t;')+len('} settings_page_t;')]
@@ -126,11 +126,11 @@ int main(void){
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
    assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+8*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y,SETTINGS_POWER_Y};
-   const int counts[]={3,8,8,3,3};
+   const int counts[]={3,8,9,3,3};
    assert(SETTINGS_DISPLAY_ROWS==8&&SETTINGS_POWER_ROWS==3);
-   const int destinations[][8]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
+   const int destinations[][9]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP,-6,-7},
-     {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,SETTINGS_HAPTIC,SETTINGS_READING_BG,-5,SETTINGS_QUICK_BAR},
+     {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,SETTINGS_HAPTIC,SETTINGS_GESTURES,SETTINGS_READING_BG,-5,SETTINGS_QUICK_BAR},
      {SETTINGS_CONFIG,-4,SETTINGS_UPGRADE},{SETTINGS_BATT_CALIBRATION,SETTINGS_POWER_LOG,SETTINGS_CHARGE_CURRENT}};
    for(int group=0;group<5;++group)for(int i=0;i<counts[group];++i){
      s_page=SETTINGS_MAIN;s_panel_repair_pending=false;s_quick_notice[0]='x';int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
@@ -181,7 +181,7 @@ int main(void){
    assert(!strcmp(system_path,fonts[index-1].path));s_font_sync_confirm=false;
   }
  }
- puts("PASS: 11 scales, all 23 destinations including charge profiles, reachable final row and footer, 513-font pagination/selection, modal isolation, opt-in sync and failed-save retry");
+ puts("PASS: 11 scales, all grouped destinations including charge profiles, reachable final row and footer, 513-font pagination/selection, modal isolation, opt-in sync and failed-save retry");
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

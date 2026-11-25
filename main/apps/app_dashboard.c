@@ -755,12 +755,22 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
 }
 
 static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
+static app_horizontal_zone_t horizontal_zone(app_ctx_t *ctx, int x, int y) {
+    (void)ctx;
+    for (unsigned slot = 0; slot < APP_HOME_SLOT_COUNT; ++slot) {
+        if (app_home_component_at(slot) != APP_HOME_WIDGET_MINI_LIBRARY) continue;
+        home_library_view_t view = home_library_view();
+        ui_mini_action_t hit = ui_mini_library_hit(home_region(slot), &view, x, y).action;
+        if (hit == UI_MINI_SELECT || hit == UI_MINI_OPEN) return APP_HORIZONTAL_LOCAL;
+    }
+    return APP_HORIZONTAL_DEFAULT;
+}
 static bool main_page_visible(app_ctx_t *ctx) {(void)ctx;return true;}
 static display_rect_t area_hint(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}
 static void home_before_lock(app_ctx_t *ctx){(void)ctx;mini_cancel();home_library_pause();app_weather_cancel();(void)app_reading_journal_flush();}
 static void home_exit(app_ctx_t *ctx){home_before_lock(ctx);home_library_leave();ui_weather_release();book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;}
 const app_desc_t app_dashboard={
     .title="首页 Home",.detail="继续阅读",.enter_full=false,.owns_keys=true,.menu_handle_enabled=no_menu_handle,
-    .main_page_visible=main_page_visible,.on_enter=on_enter,.on_exit=home_exit,.on_before_lock=home_before_lock,.on_media_lost=on_media_lost,.on_media_ready=on_media_ready,
+    .horizontal_zone=horizontal_zone,.main_page_visible=main_page_visible,.on_enter=on_enter,.on_exit=home_exit,.on_before_lock=home_before_lock,.on_media_lost=on_media_lost,.on_media_ready=on_media_ready,
     .render=render,.present=present,.on_tick=on_tick,.on_gesture=on_gesture,.area_hint=area_hint,
 };

@@ -12,6 +12,10 @@ void ui_keyboard_begin(ui_text_edit_t *edit, bool ascii_only);
 void ui_keyboard_end(void);
 /// 固定 636×510 键盘，纯绘制，使用系统字体。/ Paint a fixed 636x510 keyboard using system typography only.
 void ui_keyboard_draw(uint8_t *fb, int top);
+/// 键盘独占的候选翻页区域。/ Candidate paging belongs to the visible keyboard footprint.
+static inline bool ui_keyboard_contains(int x, int y, int top) {
+    return x >= 24 && x < 660 && y >= top && y < top + 510;
+}
 /// 松手触发按键；时间参数保留兼容，不再使用英文九宫格连续点按。
 /// Activate on release; keep the time argument for compatibility without English T9 multi-tap.
 ui_keyboard_result_t ui_keyboard_tap(int x, int y, int top, int64_t now_ms);

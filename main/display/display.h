@@ -56,6 +56,8 @@ void display_present_end(bool held);
 /// 解锁或阅读返回时，下一张完成绘制的画面使用完整48相GC16整屏全像素清理；成功才消费请求。
 /// Clean the next completed unlock/reader-return frame with complete 48-phase full-pixel GC16; consume only on success.
 void display_request_full_refresh(void);
+/// 显示会话内查询：可选局部动效不可占用待处理的全刷、恢复或主页面切换。/ Within a display session, optional local motion must yield to full refresh, recovery and main transitions.
+bool display_local_feedback_ready(void);
 /// 启动：在供电守卫内建立白底并提交已绘好的开机画面。
 /// Boot: establish a white baseline under the power guard and present the prepared splash.
 enum EpdDrawError update_display_boot_frame(EpdiyHighlevelState* hl);

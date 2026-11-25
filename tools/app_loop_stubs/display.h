@@ -10,3 +10,6 @@ enum EpdDrawError update_display_click_feedback(EpdiyHighlevelState* hl,EpdRect 
 
 
 enum EpdDrawError update_display_white_restore(EpdiyHighlevelState *hl, EpdRect area);
+bool display_local_feedback_ready(void);
+bool display_present_begin(void);
+void display_present_end(bool held);
