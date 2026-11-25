@@ -11,7 +11,7 @@ static setup_step_t saved_step;
 static app_home_widget_t actual[2];
 static int writes, downloads;
 static font_job_state_t job;
-static bool wifi_success;
+static bool wifi_success, save_failed;
 static const app_desc_t home, transfer, settings_page;
 static const app_desc_t* setup_settings_page(int index) { assert(index == 3); return &settings_page; }
 #define app_at setup_settings_page
@@ -29,6 +29,7 @@ setup_step_t app_setup_step(void) {
     return saved_step;
 }
 bool app_setup_save(ui_language_t l, setup_step_t s) {
+    if (save_failed) return false;
     saved = l;
     saved_step = s;
     return true;
@@ -154,7 +155,11 @@ int main(void) {
         app_setup.render(&c, NULL);
         assert(!strcmp(heading, "Wi-Fi") && !strcmp(counter, "02 / 04"));
         int start = downloads;
-        hit(&c, 64, 64);
+        save_failed = true;
+        app_back_result_t back = app_setup.edge_back(&c);
+        assert(!back.accepted && back.redraw == APP_REDRAW_PAGE && step == SETUP_WIFI && notice && !c.request_app);
+        save_failed = false; back = app_setup.edge_back(&c);
+        assert(back.accepted && back.redraw == APP_REDRAW_PAGE && !notice);
         assert(saved_step == SETUP_LANGUAGE);
         hit(&c, 55, 1040);
         assert(saved_step == SETUP_WIFI);
@@ -249,6 +254,11 @@ int main(void) {
         assert((int)preview == l);
         app_setup.on_enter(&c);
         assert(slots[0] == actual[0] && slots[1] == actual[1]);
+        c.request_app = NULL; saved_step = SETUP_WIFI; save_failed = true;
+        back = app_setup.edge_back(&c);
+        assert(!back.accepted && back.redraw == APP_REDRAW_PAGE && notice && !c.request_app);
+        save_failed = false; back = app_setup.edge_back(&c);
+        assert(back.accepted && back.redraw == APP_REDRAW_NONE && c.request_app == &settings_page);
         app_setup_start(APP_SETUP_FONT_ONLY);
         app_setup.on_enter(&c);
         hit(&c, 342, 1064);

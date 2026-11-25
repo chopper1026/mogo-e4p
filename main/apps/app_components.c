@@ -287,8 +287,10 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
 }
 static display_rect_t area(app_ctx_t *ctx) {(void)ctx;return display_rect_from_epd(s_area);}
 static bool no_menu(app_ctx_t *ctx) {(void)ctx;return false;}
-static app_redraw_t edge_back(app_ctx_t *ctx) {
-    back(ctx); return ctx->request_return ? APP_REDRAW_NONE : APP_REDRAW_PAGE;
+static app_back_result_t edge_back(app_ctx_t *ctx) {
+    if (s_city && keyboard_hide()) return (app_back_result_t){APP_REDRAW_PAGE, true};
+    back(ctx);
+    return (app_back_result_t){ctx->request_return ? APP_REDRAW_NONE : APP_REDRAW_PAGE, true};
 }
 const app_desc_t app_components={
     .edge_back = edge_back,

@@ -8570,27 +8570,28 @@ static app_redraw_t reader_step_tab(app_ctx_t *ctx, int delta) {
     (void)ctx;
     return s_reader_panel == READER_PANEL_REFRESH_SETTINGS ? select_settings_group((int)s_reader_settings_group + delta) : APP_REDRAW_NONE;
 }
-static app_redraw_t book_edge_back(app_ctx_t *ctx) {
+static app_back_result_t book_edge_back(app_ctx_t *ctx) {
     cancel_auto_resume(); middle_pending_clear(); reader_indent_hold_cancel();
-    if (s_open_error[0]) return dismiss_open_error();
-    if (s_dictionary_selection.active) return dictionary_dismiss();
-    if (s_clear_confirm) { s_clear_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_batch_confirm) { s_batch_confirm = false; return APP_REDRAW_PAGE; }
+    if (s_open_error[0]) return (app_back_result_t){dismiss_open_error(), true};
+    if (s_dictionary_selection.active) return (app_back_result_t){dictionary_dismiss(), true};
+    if (s_clear_confirm) { s_clear_confirm = false; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
+    if (s_batch_confirm) { s_batch_confirm = false; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
     if (s_view == SHELF) {
         if (book_shelf_categories_menu_is_open(&s_shelf_categories)) book_shelf_categories_menu_close(&s_shelf_categories);
         else if (s_shelf_selecting) { s_shelf_selecting = false; clear_selection(); }
-        else return APP_REDRAW_NONE;
-        return APP_REDRAW_PAGE;
+        else return (app_back_result_t){APP_REDRAW_NONE, false};
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
     }
     if (s_view == TOC) {
         if (s_toc_jump_open) s_toc_jump_open = s_toc_jump_drag = false;
         else { set_reader_view(s_text ? READING : SHELF); s_reader_panel = s_text ? READER_PANEL_TOOLS : READER_PANEL_NONE; }
-        return APP_REDRAW_PAGE;
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
     }
-    if (s_view != READING) return shelf_back_level(ctx);
+    if (s_view == CATEGORIES && s_category_ui.command != CATEGORY_IDLE) return (app_back_result_t){APP_REDRAW_NONE, false};
+    if (s_view != READING) return (app_back_result_t){shelf_back_level(ctx), true};
     s_reader_slider = -1;
     switch (s_reader_panel) {
-        case READER_PANEL_NONE: ui_nav_request(ctx, 0); return APP_REDRAW_NONE;
+        case READER_PANEL_NONE: ui_nav_request(ctx, 0); return (app_back_result_t){APP_REDRAW_NONE, true};
         case READER_PANEL_TOOLS: toggle_reader_tools_panel(); break;
         case READER_PANEL_NOTE: s_reader_panel = READER_PANEL_NONE; break;
         case READER_PANEL_KEY_PICKER: s_reader_panel = READER_PANEL_KEY_SETTINGS; break;
@@ -8613,7 +8614,7 @@ static app_redraw_t book_edge_back(app_ctx_t *ctx) {
             s_reader_panel = READER_PANEL_TOOLS; break;
     }
     invalidate_prep();
-    return APP_REDRAW_PAGE;
+    return (app_back_result_t){APP_REDRAW_PAGE, true};
 }
 
 const app_desc_t app_book = {
@@ -8629,7 +8630,7 @@ const app_desc_t app_book = {
     .render = render, .present = present, .on_enter = on_enter, .on_exit = book_on_exit,
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
-    .gesture_long_drag = dictionary_long_drag,
+    .on_deferred_press = cancel_auto_resume, .gesture_long_drag = dictionary_long_drag,
     .share_top_edge_tap = share_top_edge_tap,
     .screen_touch_disabled = screen_touch_disabled,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,

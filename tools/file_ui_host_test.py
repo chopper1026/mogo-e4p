@@ -100,7 +100,9 @@ static void app_transfer_request_usb_start(void){route=2;}
 static void app_transfer_request_cloudzao(void){route=3;}
 #endif
 static void ui_nav_request(app_ctx_t *ctx,int tab){(void)ctx;nav=tab;}
-static void scan_folder(int folder){++scans;s_folder=folder;s_page=0;}
+static int scanned_folder; static char scanned_path[288];
+static void scan_folder(int folder){++scans;scanned_folder=folder;copy_utf8(scanned_path,sizeof(scanned_path),folder_root(folder));s_page=0;}
+static void ui_keyboard_end(void){}
 static void open_selected(app_ctx_t *ctx){(void)ctx;++opened;}
 static void leave_move(bool moved){assert(!moved);++cancels;}
 static app_redraw_t move_selected(void){++moves;return APP_REDRAW_PAGE;}
@@ -115,7 +117,8 @@ static const char *esp_err_to_name(esp_err_t err){(void)err;return "ERROR";}
 #define ESP_ERR_NOT_FINISHED 7
 #endif
 '''
-    code += host.function("on_gesture", FILES) + "\n"
+    for name in ("rescan_current", "leave_folder", "on_gesture", "files_back_level", "files_back"):
+        code += host.function(name, FILES) + "\n"
     code += (ROOT / "tools/file_ui_host_test.c").read_text()
     return code
 

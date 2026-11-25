@@ -320,26 +320,26 @@ static bool advance(setup_step_t next) {
     notice = NULL;
     return true;
 }
-static app_redraw_t setup_back(app_ctx_t *ctx) {
-    if (!has_back()) return APP_REDRAW_NONE;
+static app_back_result_t setup_back(app_ctx_t *ctx) {
+    if (!has_back()) return (app_back_result_t){APP_REDRAW_NONE, false};
     stop(ctx);
     if (!full_modes[mode] || step == SETUP_LANGUAGE) {
         if (mode == APP_SETUP_REPLAY && app_setup_step() != SETUP_DONE &&
             !app_setup_save(ui_language(), SETUP_DONE)) {
             notice = "保存失败，请重试";
-            return APP_REDRAW_PAGE;
+            return (app_back_result_t){APP_REDRAW_PAGE, false};
         }
         ctx->request_app = app_at(3);
-        return APP_REDRAW_NONE;
+        return (app_back_result_t){APP_REDRAW_NONE, true};
     }
     int index = page_index();
-    if (index > 0) advance(pages[index - 1]);
-    return APP_REDRAW_PAGE;
+    bool accepted = index > 0 && advance(pages[index - 1]);
+    return (app_back_result_t){APP_REDRAW_PAGE, accepted};
 }
 static app_redraw_t tap(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     if (ev->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
     int x = ev->x0, y = ev->y0;
-    if (ui_rect_hit(back_rect, x, y)) return setup_back(ctx);
+    if (ui_rect_hit(back_rect, x, y)) return setup_back(ctx).redraw;
     if (step == SETUP_LANGUAGE) {
         for (int i = 0; i < UI_LANG_COUNT; ++i) {
             if (!ui_rect_hit(language_row(i), x, y) || (int)preview == i) continue;

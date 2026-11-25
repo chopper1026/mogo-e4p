@@ -1048,6 +1048,17 @@ static app_redraw_t rename_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev)
     return result == UI_KEYBOARD_CHANGED ? rename_paint(ctx, false) : APP_REDRAW_NONE;
 }
 
+static void leave_folder(void) {
+    if (s_folder == 3 && strcmp(s_dir, "/sdcard")) {
+        char *slash = strrchr(s_dir, '/');
+        if (slash) *slash = 0;
+    } else {
+        copy_utf8(s_dir, sizeof(s_dir), "/sdcard");
+    }
+    if (!strcmp(s_dir, "/sdcard")) s_folder = -1;
+    scan_folder(3);
+}
+
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     app_redraw_t pager;
     if(file_pager_event(ctx,ev,&pager))return pager;
@@ -1090,10 +1101,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (!long_press && tab >= 0) { ui_nav_request(ctx, tab); return APP_REDRAW_NONE; }
     if (s_folder >= 0) {
         if (!long_press && ev->y0 < 185) {
-            if (s_folder == 3 && strcmp(s_dir, "/sdcard")) {
-                char *slash = strrchr(s_dir, '/'); if (slash) *slash = 0;
-                scan_folder(3);
-            } else s_folder = -1;
+            leave_folder();
             return APP_REDRAW_PAGE;
         }
         int index = file_row_index(ev->x0, ev->y0);
@@ -1200,10 +1208,7 @@ static app_redraw_t files_back_level(void) {
         s_view = FILE_VIEW_LIST; s_delete_confirm = false; rescan_current(); return APP_REDRAW_PAGE;
     }
     if (s_folder >= 0) {
-        if (s_folder == 3 && strcmp(s_dir, "/sdcard")) {
-            char *slash = strrchr(s_dir, '/'); if (slash) *slash = 0;
-            scan_folder(3);
-        } else s_folder = -1;
+        leave_folder();
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;
@@ -1222,17 +1227,17 @@ static app_horizontal_zone_t horizontal_zone(app_ctx_t *ctx, int x, int y) {
         return file_row_index(x, y) >= 0 ? APP_HORIZONTAL_LOCAL : APP_HORIZONTAL_DEFAULT;
     return APP_HORIZONTAL_DEFAULT;
 }
-static app_redraw_t files_back(app_ctx_t *ctx) {
+static app_back_result_t files_back(app_ctx_t *ctx) {
     (void)ctx;
-    if (s_sd_format_confirm) { s_sd_format_confirm = false; s_sd_notice[0] = 0; return APP_REDRAW_PAGE; }
-    if (s_delete_confirm) { s_delete_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_view == FILE_VIEW_LIST && s_folder < 0) return APP_REDRAW_NONE;
+    if (s_sd_format_confirm) { s_sd_format_confirm = false; s_sd_notice[0] = 0; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
+    if (s_delete_confirm) { s_delete_confirm = false; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
+    if (s_view == FILE_VIEW_LIST && s_folder < 0) return (app_back_result_t){APP_REDRAW_NONE, false};
     if (s_view == FILE_VIEW_MOVE && strcmp(s_dir, "/sdcard")) {
         char *slash = strrchr(s_dir, '/');
         if (slash) *slash = 0;
-        scan_folder(3); return APP_REDRAW_PAGE;
+        scan_folder(3); return (app_back_result_t){APP_REDRAW_PAGE, true};
     }
-    return files_back_level();
+    return (app_back_result_t){files_back_level(), true};
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static bool main_page_visible(app_ctx_t *ctx) {

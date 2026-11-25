@@ -208,12 +208,12 @@ static app_redraw_t move_image(int delta) {
     if (!load_image(next)) s_viewing = false;
     return APP_REDRAW_FULL;
 }
-static app_redraw_t edge_back(app_ctx_t *ctx) {
+static app_back_result_t edge_back(app_ctx_t *ctx) {
     if (s_viewing) {
-        s_viewing = false; free(s_gray); s_gray = NULL; return APP_REDRAW_PAGE;
+        s_viewing = false; free(s_gray); s_gray = NULL; return (app_back_result_t){APP_REDRAW_PAGE, true};
     }
     ctx->request_return = true;
-    return APP_REDRAW_NONE;
+    return (app_back_result_t){APP_REDRAW_NONE, true};
 }
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) {
     (void)ctx;
@@ -250,7 +250,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) 
 static bool menu_handle_enabled(app_ctx_t *ctx) { (void)ctx; return false; }
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (key == UI_KEY_2) { ctx->request_app = app_home_page(); return APP_REDRAW_NONE; }
-    return edge_back(ctx);
+    return edge_back(ctx).redraw;
 }
 const app_desc_t app_image = {
     .edge_back = edge_back,

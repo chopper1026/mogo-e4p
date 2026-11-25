@@ -51,7 +51,7 @@ static void checked_home_text(uint8_t *fb,int x,int y,int px,const char *text,co
 }
 #define ui_text_fixed_context_aa_vc checked_home_text
 '''
-    names = ('home_region', 'continue_card_pressed', 'fit', 'label', 'label_on',
+    names = ('home_region', 'reading_cover_rect', 'continue_card_pressed', 'fit', 'label', 'label_on',
              'home_frame', 'featured', 'draw_cover', 'title_lines', 'render_reading')
     for name in names:
         code += host.function(name, source) + '\n'

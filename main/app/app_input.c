@@ -229,8 +229,12 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
             gesture->orientation = (uint8_t)display_orientation_get();
             gesture->horizontal_owner = owner;
             gesture->deferred_press = owner == ROUTE_EDGE_LEFT || owner == ROUTE_EDGE_RIGHT;
-            if (gesture->deferred_press) return;
+            if (gesture->deferred_press) {
+                if (current->on_deferred_press) current->on_deferred_press();
+                return;
+            }
         }
+        if (event.type == UI_GESTURE_LONG_PRESS) gesture->horizontal_owner = ROUTE_PAGE;
         bool horizontal = event.type == UI_GESTURE_SWIPE_L || event.type == UI_GESTURE_SWIPE_R;
         if (owner != ROUTE_PAGE && event.type == UI_GESTURE_MOVE && !vertical) {
             int dy = abs((int)event.y - event.y0), dx = abs((int)event.x - event.x0);
@@ -248,11 +252,10 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
                     if (current->edge_back) {
                         bool pending = ctx->request_app || ctx->request_return || ctx->request_menu;
                         display_orientation_t origin = display_orientation_get();
-                        action = current->edge_back(ctx);
+                        app_back_result_t back = current->edge_back(ctx);
+                        action = back.redraw;
                         // 只有实际退层才提示；回调已换向时不能沿用旧触点。/ Acknowledge only accepted backs in the original orientation.
-                        if (!pending && origin == display_orientation_get() &&
-                            (action == APP_REDRAW_PAGE || action == APP_REDRAW_FULL || action == APP_REDRAW_AREA ||
-                             ctx->request_app || ctx->request_return || ctx->request_menu))
+                        if (back.accepted && !pending && origin == display_orientation_get())
                             app_edge_feedback_show(ctx, owner == ROUTE_EDGE_RIGHT, event.y0);
                     }
                 } else if (owner == ROUTE_TABS && current->step_tab) action = current->step_tab(ctx, delta);

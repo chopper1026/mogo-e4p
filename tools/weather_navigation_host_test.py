@@ -23,6 +23,7 @@ typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {bool touched;int count,x,y;} touch_t;
 typedef struct {uint8_t *fb;int64_t now_ms;bool request_return,consumed,released;touch_t *touch;const int *request_app;void *hl;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE} app_redraw_t;
+typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
 enum EpdFontFlags {EPD_DRAW_ALIGN_LEFT,EPD_DRAW_ALIGN_CENTER,EPD_DRAW_ALIGN_RIGHT};
 enum {UI_GESTURE_PRESS,UI_GESTURE_TAP,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0;} ui_gesture_event_t;
@@ -138,12 +139,18 @@ for name, path in (("valid_region", ROOT / "main/ui/ui_weather.c"), ("refresh_bu
                    ("component_row", PAGE), ("city_begin", PAGE), ("app_components_open", PAGE), ("app_components_open_home", PAGE), ("enter", PAGE),
                    ("system_nav", PAGE), ("component_option", PAGE), ("city_result_row", PAGE), ("city_page_button", PAGE),
                    ("render", PAGE), ("keyboard_paint", PAGE), ("present", PAGE),
-                   ("keyboard_hide", PAGE), ("submit", PAGE), ("back", PAGE),
+                   ("keyboard_hide", PAGE), ("submit", PAGE), ("back", PAGE), ("edge_back", PAGE),
                    ("gesture", PAGE), ("tick", PAGE), ("key", PAGE)):
     unit += "\n" + function(name, path)
 unit += r'''
 int main(void){
     app_ctx_t ctx={0};
+    s_city=s_weather_settings=s_keyboard_visible=true; strcpy(s_query,"杭州"); view.result_count=1;
+    app_back_result_t back= edge_back(&ctx);
+    assert(back.accepted && back.redraw==APP_REDRAW_PAGE && s_city && !s_keyboard_visible);
+    assert(!strcmp(s_query,"杭州") && view.result_count==1 && !ctx.request_return && !ends);
+    back=edge_back(&ctx); assert(back.accepted && !s_city && s_weather_settings && !view.result_count);
+    s_weather_settings=false; ends=cancels=0;
     next_update.settle=true;
     assert(keyboard_paint(&ctx,false)==APP_REDRAW_AREA&&present(&ctx,APP_REDRAW_AREA));
     assert(refresh_intent==DISPLAY_REFRESH_SETTLE&&refreshes==1&&!s_settle);

@@ -278,16 +278,20 @@ int epd_rotated_display_height(void) { return rotation & 1 ? 684 : 1216; }
 display_orientation_t display_orientation_get(void) { return rotation; }
 static app_horizontal_zone_t nav_zone(app_ctx_t *c, int x, int y) { (void)c; (void)x; (void)y; return zone; }
 static unsigned edge_pulses[2];
-static bool back_requests_return;
+static bool back_requests_return, back_save_failed, resume_pending;
+static int nav_moves, nav_releases, nav_redraws;
+static void cancel_resume(void) { resume_pending = false; }
+static bool allow_drag(app_ctx_t *c) { (void)c; return true; }
 void app_edge_feedback_show(app_ctx_t *c, bool right, int y) {
     assert(c->released && !is_root && y == 340);
     ++edge_pulses[right];
 }
-static app_redraw_t nav_back(app_ctx_t *c) {
-    if (is_root) return APP_REDRAW_NONE;
+static app_back_result_t nav_back(app_ctx_t *c) {
+    if (is_root) return (app_back_result_t){APP_REDRAW_NONE, false};
+    if (back_save_failed) return (app_back_result_t){APP_REDRAW_PAGE, false};
     ++backs;
-    if (back_requests_return) { c->request_return = true; return APP_REDRAW_NONE; }
-    return APP_REDRAW_PAGE;
+    if (back_requests_return) { c->request_return = true; return (app_back_result_t){APP_REDRAW_NONE, true}; }
+    return (app_back_result_t){APP_REDRAW_PAGE, true};
 }
 static app_redraw_t nav_step(app_ctx_t *c, int d) { (void)c; if (tab+d >= 0 && tab+d < 3) tab+=d; return APP_REDRAW_NONE; }
 static app_redraw_t nav_event(app_ctx_t *c, const ui_gesture_event_t *e) {
@@ -297,14 +301,17 @@ static app_redraw_t nav_event(app_ctx_t *c, const ui_gesture_event_t *e) {
         assert(c->pressed && !c->released && c->touch->touched && c->touch->x == e->x0 && c->touch->y == e->y0);
         ++nav_presses;
     }
+    if (e->type == UI_GESTURE_MOVE) ++nav_moves;
+    if (e->type == UI_GESTURE_RELEASE) ++nav_releases;
     if (e->type == UI_GESTURE_TAP) ++nav_taps;
     if (e->type == UI_GESTURE_LONG_PRESS) ++nav_longs;
     if (e->type == UI_GESTURE_SWIPE_D) ++nav_vertical;
     return APP_REDRAW_NONE;
 }
-static const app_desc_t nav_page = {.on_gesture=nav_event, .edge_back=nav_back, .step_tab=nav_step, .horizontal_zone=nav_zone};
+static const app_desc_t nav_page = {.on_gesture=nav_event, .on_deferred_press=cancel_resume, .gesture_long_drag=allow_drag, .edge_back=nav_back, .step_tab=nav_step, .horizontal_zone=nav_zone};
 static void nav_present(app_ctx_t *c, const app_desc_t *p, ui_gesture_t *g, app_redraw_t redraw) {
     (void)c; (void)p; (void)g; assert(redraw == APP_REDRAW_NONE || redraw == APP_REDRAW_PAGE);
+    if (redraw == APP_REDRAW_PAGE) ++nav_redraws;
 }
 static void nav_feed(int n, int x, int y, int t) {
     ingest((app_touch_t){.touched=n!=0,.count=n,.x=x,.y=y}, t, ESP_OK);
@@ -348,7 +355,14 @@ static void full_screen_gestures(void) {
     int presses=nav_presses;
     swipe(5,124); assert(backs==old && nav_presses==presses);
     nav_feed(1,5,340,0);nav_feed(0,0,0,70); assert(nav_taps==1 && nav_presses==presses+1);
-    nav_feed(1,5,340,0);nav_feed(1,5,340,510);nav_feed(0,0,0,530);assert(nav_longs==1 && backs==old);
+    resume_pending = true; presses=nav_presses;
+    nav_feed(1,5,340,0); assert(!resume_pending && nav_presses==presses);
+    nav_feed(1,5,340,510); assert(nav_longs==1 && nav_presses==presses+1);
+    int moves=nav_moves, releases=nav_releases;
+    nav_feed(1,180,340,720);nav_feed(1,250,340,900);nav_feed(0,0,0,1000);
+    assert(nav_moves==moves+2 && nav_releases==releases+1 && backs==old);
+    int redraws=nav_redraws; back_save_failed=true; swipe(5,180); back_save_failed=false;
+    assert(nav_redraws==redraws+1 && backs==old);
     nav_feed(1,5,340,0);nav_feed(1,10,540,90);nav_feed(0,0,0,100);assert(nav_vertical==1);
     nav_feed(1,5,340,0);nav_feed(1,8,405,40);nav_feed(1,185,400,80);nav_feed(0,0,0,120);assert(backs==old);
     nav_feed(1,5,340,0);nav_feed(2,9,340,50);nav_feed(1,160,340,80);nav_feed(0,0,0,120);

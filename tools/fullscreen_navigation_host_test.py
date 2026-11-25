@@ -12,9 +12,12 @@ unit = '''
 #include <stdio.h>
 typedef struct { int target; } app_ctx_t;
 typedef enum { APP_REDRAW_NONE, APP_REDRAW_PAGE } app_redraw_t;
+typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
 '''
 unit += enum_block(BOOK, 'SHELF', 'book_view_t') + enum_block(BOOK, 'READER_PANEL_NONE', 'reader_panel_t')
 unit += '''
+enum { CATEGORY_IDLE };
+static struct {int command;} s_category_ui;
 static book_view_t s_view;
 static reader_panel_t s_reader_panel, s_bookmark_parent;
 static int s_reader_slider;
@@ -35,27 +38,32 @@ static app_redraw_t shelf_back_level(app_ctx_t *ctx){(void)ctx;assert(false);ret
 for name in ('toggle_reader_tools_panel', 'book_edge_back'):
     unit += function(name, BOOK) + '\n'
 unit += '''
+static app_redraw_t expect_back(app_ctx_t *ctx, bool accepted) {
+    app_back_result_t back = book_edge_back(ctx); assert(back.accepted == accepted); return back.redraw;
+}
 int main(void) {
     app_ctx_t ctx={.target=-1}; s_view=READING; s_reader_panel=READER_PANEL_KEY_PICKER;
     reader_panel_t chain[]={READER_PANEL_KEY_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TOOLS,READER_PANEL_NONE};
     for(unsigned i=0;i<sizeof(chain)/sizeof(*chain);++i){
-        assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && s_reader_panel==chain[i] && ctx.target==-1);
+        assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_reader_panel==chain[i] && ctx.target==-1);
     }
-    assert(s_reader_tools_toggle && book_edge_back(&ctx)==APP_REDRAW_NONE && ctx.target==0);
+    assert(s_reader_tools_toggle && expect_back(&ctx,true)==APP_REDRAW_NONE && ctx.target==0);
     ctx.target=-1;s_reader_panel=READER_PANEL_TAP_GRID;s_tap_picker=true;
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_tap_picker && s_reader_panel==READER_PANEL_TAP_GRID);
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TURN_SETTINGS);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_tap_picker && s_reader_panel==READER_PANEL_TAP_GRID);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TURN_SETTINGS);
     s_reader_panel=READER_PANEL_BOOKMARKS;s_bookmark_parent=READER_PANEL_STATS;s_bookmark_edit=s_bookmark_delete_confirm=true;
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_bookmark_delete_confirm && s_bookmark_edit);
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_bookmark_edit && s_reader_panel==READER_PANEL_BOOKMARKS);
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_STATS);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_bookmark_delete_confirm && s_bookmark_edit);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_bookmark_edit && s_reader_panel==READER_PANEL_BOOKMARKS);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_STATS);
     s_view=TOC;s_toc_jump_open=s_toc_jump_drag=s_text=true;
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_toc_jump_open && !s_toc_jump_drag && s_view==TOC);
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && s_view==READING && s_reader_panel==READER_PANEL_TOOLS);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_toc_jump_open && !s_toc_jump_drag && s_view==TOC);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_view==READING && s_reader_panel==READER_PANEL_TOOLS);
     s_view=SHELF;s_shelf_categories=s_shelf_selecting=true;
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_shelf_categories && s_shelf_selecting);
-    assert(book_edge_back(&ctx)==APP_REDRAW_PAGE && !s_shelf_selecting);
-    assert(book_edge_back(&ctx)==APP_REDRAW_NONE && ctx.target==-1);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_shelf_categories && s_shelf_selecting);
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_shelf_selecting);
+    assert(expect_back(&ctx,false)==APP_REDRAW_NONE && ctx.target==-1);
+    s_view=CATEGORIES; s_category_ui.command=1;
+    assert(expect_back(&ctx,false)==APP_REDRAW_NONE && ctx.target==-1);
     puts("PASS: one-layer reader back, nested pickers, bookmark origin, TOC, shelf root and body-to-home");
 }
 '''

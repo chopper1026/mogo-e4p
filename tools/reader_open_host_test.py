@@ -266,7 +266,7 @@ int main(void){
     reset();
     peak_busy=true;
     assert(app_book_request_resume(a) && !open_requested_book(&ctx));
-    cancel_auto_resume();
+    shelf_deferred_press();
     peak_busy=false;
     ctx.now_ms += 500;
     assert(!open_requested_book(&ctx) && !source_opens && !*events);
@@ -402,6 +402,11 @@ def main():
             body = body.replace('pending_reserve(', 'pending_reserve_actual(', 1)
             body = '#define malloc test_malloc\n' + body + '#undef malloc\n'
         code += body
+    # 走书架实际登记的回调，而不是直接调用取消函数。/ Exercise the registered shelf callback rather than calling the helper directly.
+    descriptor = source.split('const app_desc_t app_book = {', 1)[1]
+    deferred_press = re.search(r'\.on_deferred_press\s*=\s*(\w+)', descriptor)
+    assert deferred_press, 'Missing early cancellation for shelf edge contact'
+    code += f'static void (*const shelf_deferred_press)(void) = {deferred_press[1]};\n'
     code += CASES
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory)

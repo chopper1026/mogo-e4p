@@ -125,6 +125,7 @@ static char s_avatar_path[288];
 static EpdRect s_pressed;
 static bool s_press_pending;
 static EpdRect continue_card_rect(unsigned slot) { return home_region(slot); }
+static EpdRect reading_cover_rect(unsigned slot) { return (EpdRect){36,home_region(slot).y+84,178,242}; }
 static EpdRect continue_card_hit_rect(unsigned slot) { return (EpdRect){24,home_region(slot).y+72,636,364}; }
 static bool continue_card_pressed(unsigned slot) { return s_press_pending && s_pressed.y == home_region(slot).y; }
 static EpdRect control_feedback_area(EpdRect control) {
@@ -464,7 +465,7 @@ static void render_reading(uint8_t *fb,unsigned slot) {
     ui_fill_rect_fast((EpdRect){122,top+64,526,2},UI_GRAY_BLACK,fb);
     for(int i=0;i<3;++i)ui_fill_rect_fast((EpdRect){608+i*12,top+22+i*4,5,24-i*4},UI_GRAY_BLACK,fb);
     if(b->path[0]) {
-        draw_cover(fb,b,(EpdRect){36,top+84,178,242},continue_card_pressed(slot));
+        draw_cover(fb,b,reading_cover_rect(slot),continue_card_pressed(slot));
         int rows=title_lines(fb,top,b->title,UI_GRAY_WHITE);
         if(b->author[0]) {
             char author[128];snprintf(author,sizeof(author),"%s",b->author);fit(author,25,400);
@@ -758,7 +759,10 @@ static bool no_menu_handle(app_ctx_t *ctx) {(void)ctx;return false;}
 static app_horizontal_zone_t horizontal_zone(app_ctx_t *ctx, int x, int y) {
     (void)ctx;
     for (unsigned slot = 0; slot < APP_HOME_SLOT_COUNT; ++slot) {
-        if (app_home_component_at(slot) != APP_HOME_WIDGET_MINI_LIBRARY) continue;
+        app_home_widget_t widget = app_home_component_at(slot);
+        if (widget == APP_HOME_WIDGET_READING && featured()->path[0] && hit(reading_cover_rect(slot), x, y))
+            return APP_HORIZONTAL_LOCAL;
+        if (widget != APP_HOME_WIDGET_MINI_LIBRARY) continue;
         home_library_view_t view = home_library_view();
         ui_mini_action_t hit = ui_mini_library_hit(home_region(slot), &view, x, y).action;
         if (hit == UI_MINI_SELECT || hit == UI_MINI_OPEN) return APP_HORIZONTAL_LOCAL;

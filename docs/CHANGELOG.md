@@ -5,7 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
-- 新增可关闭的全面屏手势：双侧边缘内滑逐层返回，松手时边缘浮现一道浅弧，内侧显示朝向屏幕中央的折角（左 `>`、右 `<`）；页面内横滑切换标签或四个主界面；边缘宽度可调。/ Add configurable inward edge swipes with a shallow edge curve and an inward-pointing chevron, and interior swipes for sibling tabs or main pages.
+- 新增可关闭的全面屏手势：双侧边缘内滑逐层返回，仅在成功返回时边缘浮现一道浅弧，内侧显示朝向屏幕中央的折角（左 `>`、右 `<`）；页面内横滑切换标签或四个主界面；边缘宽度可调。/ Add configurable inward edge swipes with a successful Back indicated by a shallow edge curve and an inward-pointing chevron, and interior swipes for sibling tabs or main pages.
 
 - 修复 NVS 存储紧张时（如更换阅读背景或历史 TF 书签累积后）开书触发「启动记录保存失败，请重试」的问题：压缩启动检查点并回滚失败状态，每张 TF 卡首次进书架或在 NVS 空间不足时自动将匹配的旧卡书签迁至 TF 卡，仍紧张时按需清理可重建的天气预报缓存。/ Fix book opens failing with "启动记录保存失败，请重试" under 32 KiB NVS pressure (such as after changing a reading background or accumulating legacy card bookmarks): compact startup checkpoints and roll back failed writes, migrate size-matched legacy TF bookmarks on first shelf scan or under NVS pressure, and evict rebuildable weather cache on demand.
 - 修复从首页等入口直开图书失败时，书架错误弹窗盖在「0本书 · 01/01」空背景上的问题。/ Fix book-open errors from direct entry points displaying over an empty "0 books" shelf backdrop.

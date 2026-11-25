@@ -3073,17 +3073,30 @@ static void settings_media_lost(app_ctx_t *ctx) {
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
 static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; ui_lock_style_media_ready(); settings_prepare_profile(); }
-static app_redraw_t settings_edge_back(app_ctx_t *ctx) {
+static app_back_result_t settings_edge_back(app_ctx_t *ctx) {
     if (s_page == SETTINGS_MAIN || s_boot_pending || s_local_pending || s_upgrade_restart ||
-        (s_page == SETTINGS_UPGRADE && (s_upgrade_job != UPGRADE_JOB_NONE || s_update.busy || pico_online_busy()))) return APP_REDRAW_NONE;
-    if (s_page == SETTINGS_CONFIG && s_config_confirm) { s_config_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_UPGRADE && s_upgrade_confirm) { s_upgrade_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_BATT_CALIBRATION && s_batt_calibration_confirm) { s_batt_calibration_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_READING_BG_PREVIEW && s_reading_bg_confirm) { s_reading_bg_confirm = false; return APP_REDRAW_PAGE; }
-    if (s_page == SETTINGS_NETWORK && s_network_shortcut_back) {
-        s_network_shortcut_back = false; ctx->request_return = true; return APP_REDRAW_NONE;
+        (s_page == SETTINGS_UPGRADE && (s_upgrade_job != UPGRADE_JOB_NONE || s_update.busy || pico_online_busy())))
+        return (app_back_result_t){APP_REDRAW_NONE, false};
+    if (s_page == SETTINGS_CONFIG && s_config_confirm) {
+        s_config_confirm = false; s_notice[0] = 0;
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
     }
-    return settings_navigate(ctx, false);
+    if (s_page == SETTINGS_UPGRADE && s_upgrade_confirm) {
+        s_upgrade_confirm = false;
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
+    }
+    if (s_page == SETTINGS_BATT_CALIBRATION && s_batt_calibration_confirm) {
+        s_batt_calibration_confirm = false;
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
+    }
+    if (s_page == SETTINGS_READING_BG_PREVIEW && s_reading_bg_confirm) {
+        s_reading_bg_confirm = false;
+        return (app_back_result_t){APP_REDRAW_PAGE, true};
+    }
+    if (s_page == SETTINGS_NETWORK && s_network_shortcut_back) {
+        s_network_shortcut_back = false; ctx->request_return = true; return (app_back_result_t){APP_REDRAW_NONE, true};
+    }
+    return (app_back_result_t){settings_navigate(ctx, false), true};
 }
 static app_horizontal_zone_t settings_zone(app_ctx_t *ctx, int x, int y) {
     (void)ctx;

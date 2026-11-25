@@ -52,6 +52,12 @@ typedef enum {
     APP_REDRAW_DONE,
 } app_redraw_t;
 
+/// 退层是否成功与如何显示结果无关。/ Navigation acceptance is independent of repainting.
+typedef struct {
+    app_redraw_t redraw; ///< 页面或错误提示所需刷新 / Refresh required by the page or error notice
+    bool accepted;       ///< 已退一层或已请求离页 / Unwound one layer or requested departure
+} app_back_result_t;
+
 typedef enum {
     APP_HORIZONTAL_DEFAULT, ///< 普通区域；仅根页切主界面 / Ordinary area; cycle only on roots
     APP_HORIZONTAL_LOCAL,   ///< 当前控件独占 / Local control owns horizontal movement
@@ -177,7 +183,9 @@ struct app_desc_s {
     /// 相邻标签（+1 下一项），到头停留。/ Adjacent tab (+1 for next); stop at endpoints.
     app_redraw_t (*step_tab)(app_ctx_t *ctx, int delta);
     /// 只退当前最上层；根页和不可取消状态无动作。/ Unwind one visible layer; roots and protected states do nothing.
-    app_redraw_t (*edge_back)(app_ctx_t *ctx);
+    app_back_result_t (*edge_back)(app_ctx_t *ctx);
+    /// 边缘按下待判定时仅取消自动操作，不触发页面控件。/ Cancel automatic actions on deferred press without activating controls.
+    void (*on_deferred_press)(void);
     /// 设置后独占触摸派发，替代 on_touch。/ Exclusive gesture dispatch replaces on_touch.
     app_redraw_t (*on_gesture)(app_ctx_t* ctx, const ui_gesture_event_t* event);
     app_redraw_t (*on_touch)(app_ctx_t* ctx, const app_touch_t* touch);

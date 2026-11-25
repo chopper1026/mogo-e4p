@@ -63,6 +63,7 @@ static char s_avatar_path[288],s_excerpt[128];
 static uint8_t s_avatar[3600];
 static EpdRect s_pressed,s_area,last_area;
 static int64_t s_clock_minute=-2,minute;
+typedef enum {APP_HORIZONTAL_DEFAULT,APP_HORIZONTAL_LOCAL} app_horizontal_zone_t;
 #define HOME_BACKGROUND_QUIET_MS 1500
 static int64_t s_background_after_ms;
 static int64_t esp_timer_get_time(void){return 0;}
@@ -209,9 +210,9 @@ unit += "\n" + function("ui_control_gray", ROOT / "main/ui/ui_kit.h")
 unit += "\n" + function("ui_contrast_gray", ROOT / "main/ui/ui_kit.c")
 unit += "\n" + function("ui_inset_rect", ROOT / "main/ui/ui_kit.c")
 unit += doubles() + ui_doubles()
-for name in ("home_cover_generation_begin", "mini_frame", "mini_cancel", "home_region", "continue_card_rect", "continue_card_hit_rect", "continue_card_pressed",
+for name in ("home_cover_generation_begin", "mini_frame", "mini_cancel", "home_region", "reading_cover_rect", "continue_card_rect", "continue_card_hit_rect", "continue_card_pressed",
              "control_feedback_area", "home_frame", "draw_cover", "render_reading", "render_widget", "redraw_widgets", "mini_select", "mini_presented", "render_root", "render", "present", "on_tick",
-             "hit", "control", "on_gesture", "main_page_visible"):
+             "hit", "control", "horizontal_zone", "on_gesture", "main_page_visible"):
     unit += "\n" + function(name, HOME)
 unit += r'''
 static uint8_t before[sizeof(framebuffer)];
@@ -378,6 +379,10 @@ int main(void){
             for(unsigned slot=0;slot<2;++slot){
                 EpdRect r=home_region(slot);assert(r.x==0&&r.y==(slot?640:168)&&r.width==684&&r.height==472);
                 if(slots[slot]==APP_HOME_WIDGET_EMPTY)empty_slot(slot);
+                if(slots[slot]==APP_HOME_WIDGET_READING){
+                    assert(horizontal_zone(&ctx,120,r.y+150)==(has_book?APP_HORIZONTAL_LOCAL:APP_HORIZONTAL_DEFAULT));
+                    assert(horizontal_zone(&ctx,220,r.y+150)==APP_HORIZONTAL_DEFAULT);
+                }
                 if(slots[slot]==APP_HOME_WIDGET_READING&&has_book){
                     assert(framebuffer[(r.y+84)*684+36]==0);
                     assert(framebuffer[(r.y+80)*684+36]==255);

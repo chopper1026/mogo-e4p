@@ -43,6 +43,9 @@ The Bluetooth helper owns subviews, visible peer snapshots and layout; Device Se
 横滑只按旋转后的**起点**分配一次。系统弹层、禁触和底栏先处理；左右边缘归 `edge_back`；其余由 `horizontal_zone` 标明局部控件、标签或阻断区。`step_tab` 到边界即停，不能接着切主界面；普通区域仅四个可见根页循环，其余交还页面。返回不模拟按键，也不改变阅读按键的来源返回策略。单次抬手只执行一个动作，不逐帧跟手刷屏。返回确认后仅在起滑侧和高度用两帧局刷画出白底墨线的浅弧，弧内折角指向屏幕中央（左 `>`、右 `<`）。图形大小独立于设置中的触摸边缘宽度；恢复底图后沿既有路径切页；无上一级、被拦截或待全刷时不画。关闭全面屏手势后保留页面原有手势。
 Horizontal ownership is latched at the rotated origin. System overlays, touch lock and the root bar take priority. Inward edge swipes invoke `edge_back`; local controls, clamped sibling tabs (`step_tab`) and blocked regions are declared by `horizontal_zone`. Only ordinary space on visible roots cycles through the four main pages; other subviews retain their gestures. Back is independent of key bindings. One release performs one action, without tracking scans. A committed Back draws a shallow, ink-outlined curve in two frames at the origin edge with an inward-pointing chevron, then restores its underlay before navigation. The cue size is independent of the configured touch edge width. Blocked backs, roots and pending full refreshes skip the cue. Disabling the feature restores page-local behavior.
 
+边缘按下尚未判定时，`on_deferred_press` 仅取消待执行的自动操作（如书架续读），不触发按压控件。识别到长按后，后续拖动和结束事件归页面。`edge_back` 分别报告是否退层和所需刷新，失败提示可重绘而不显示返回箭头。
+While an edge press is deferred, `on_deferred_press` only cancels pending automatic actions such as shelf resume. Once a hold is recognized, the page owns subsequent drag and terminal events. `edge_back` reports acceptance separately from redraw so a failure notice can repaint without a Back cue.
+
 ## 存储与外部边界 / Storage And External Boundaries
 
 | 数据 / Data | 所有者与兼容要求 / Ownership And Compatibility |

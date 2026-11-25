@@ -649,7 +649,7 @@ static void cloud_history_clear_regression(app_ctx_t *ctx) {
     tap(ctx, clear);
     assert(s_cloud_history_confirm && !test_history_clears);
     assert(transfer_zone(ctx, 342, 550) == APP_HORIZONTAL_BLOCK);
-    assert(app_transfer.edge_back(ctx) == APP_REDRAW_PAGE && !s_cloud_history_confirm && !test_history_clears);
+    assert(app_transfer.edge_back(ctx).redraw == APP_REDRAW_PAGE && !s_cloud_history_confirm && !test_history_clears);
     tap(ctx, clear);
     assert_history_text(ctx, "仅清除当前 TF 卡的接收记录");
     tap(ctx, clear);
@@ -899,12 +899,17 @@ static void multi_network_regression(app_ctx_t *ctx) {
     assert(!strcmp(s_saved_ssid, "中文家庭网络") && saved_network_index("saved-6") < 0);
     tap(ctx, network_control_rect(0)); assert(s_saved_detail && !strcmp(s_selected.ssid, "saved-7"));
     tap(ctx, network_control_rect(14)); assert(s_view == TRANSFER_PASSWORD && !s_password[0]);
-    tap(ctx, password_control_rect(44)); assert(s_view == TRANSFER_NETWORKS && s_show_saved);
-    tap(ctx, network_control_rect(0));
+    strcpy(s_password, "discarded"); s_password_visible = true;
+    app_back_result_t back = app_transfer.edge_back(ctx);
+    assert(back.accepted && back.redraw == APP_REDRAW_PAGE && s_view == TRANSFER_NETWORKS && s_saved_detail);
+    assert(!strcmp(s_selected.ssid, "saved-7") && s_network_page == 1 && !s_password[0] && !s_password_visible);
+    tap(ctx, network_control_rect(14)); tap(ctx, password_control_rect(44));
+    assert(s_view == TRANSFER_NETWORKS && s_show_saved && s_saved_detail);
     assert(on_key(ctx, UI_KEY_1) == APP_REDRAW_PAGE && !s_saved_detail && !ctx->request_return);
     tap(ctx, network_control_rect(15)); assert(!s_show_saved && !s_network_page);
     tap(ctx, network_control_rect(1)); assert(s_view == TRANSFER_PASSWORD);
-    clear_password();
+    back = app_transfer.edge_back(ctx);
+    assert(back.accepted && s_view == TRANSFER_NETWORKS && !s_saved_detail && !s_show_saved);
     test_multi_profiles = false; s_wifi_settings_only = false;
     s_view = TRANSFER_NETWORKS;
 }

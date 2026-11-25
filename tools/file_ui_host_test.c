@@ -101,6 +101,15 @@ static void interaction(app_ctx_t *ctx) {
     gesture(ctx,UI_GESTURE_LONG_PRESS,100,988);assert(s_view==FILE_VIEW_ACTIONS && !strcmp(s_selected.name,s_files[8].name));
     s_view=FILE_VIEW_LIST;gesture(ctx,UI_GESTURE_SWIPE_L,300,800);assert(s_page==1);
     gesture(ctx,UI_GESTURE_TAP,100,215);assert(!strcmp(s_selected.name,s_files[9].name));
+    for(int shortcut=0; shortcut<3; ++shortcut) {
+        fixture(false);s_folder=shortcut;scan_folder(shortcut);s_page=1;
+        app_back_result_t back=files_back(ctx);
+        assert(back.accepted && back.redraw==APP_REDRAW_PAGE && s_folder==-1 && !s_page);
+        assert(scanned_folder==3 && !strcmp(scanned_path,"/sdcard") && !files_back(ctx).accepted);
+    }
+    s_folder=3;strcpy(s_dir,"/sdcard/books/shelf");gesture(ctx,UI_GESTURE_TAP,100,100);
+    assert(s_folder==3 && !strcmp(scanned_path,"/sdcard/books"));
+    gesture(ctx,UI_GESTURE_TAP,100,100);assert(s_folder==-1 && !strcmp(scanned_path,"/sdcard"));
     fixture(false);s_folder=3;s_view=FILE_VIEW_MOVE;
     for(int i=0;i<s_count;++i)s_files[i].is_dir=true;
     assert(visible_rows()==7 && file_pager_pages()==2 && file_row_index(100,829)==6 && file_row_index(100,830)<0);

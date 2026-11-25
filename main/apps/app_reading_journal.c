@@ -75,8 +75,8 @@ static app_redraw_t key(app_ctx_t *ctx,int value) {
 }
 static app_redraw_t held_key(app_ctx_t *ctx,int value) {(void)ctx;return value==UI_KEY_2?APP_REDRAW_FULL:APP_REDRAW_NONE;}
 static bool no_handle(app_ctx_t *ctx) {(void)ctx;return false;}
-static app_redraw_t edge_back(app_ctx_t *ctx) {
-    ctx->request_return = true; return APP_REDRAW_NONE;
+static app_back_result_t edge_back(app_ctx_t *ctx) {
+    ctx->request_return = true; return (app_back_result_t){APP_REDRAW_NONE, true};
 }
 const app_desc_t app_reading_journal={
     .edge_back = edge_back,

@@ -251,6 +251,13 @@ static void clear_password(void) {
     ui_keyboard_end();
 }
 
+static app_redraw_t cancel_password_edit(void) {
+    clear_password();
+    s_network_message[0] = 0;
+    s_view = TRANSFER_NETWORKS;
+    return APP_REDRAW_PAGE;
+}
+
 static EpdRect network_control_rect(int id) {
     if (id >= 0 && id < NETWORK_ROWS) return (EpdRect){36, 442 + id * 88, 612, 88};
     if (id == 6) return (EpdRect){501, 222, 123, 56};
@@ -1640,7 +1647,6 @@ static app_redraw_t provisioning_action(int id) {
                 s_network_connect_pending = s_scan_pending = false;
                 clear_password(); s_network_message[0] = 0;
                 s_selected.requires_password = true;
-                s_saved_detail = false;
                 ui_keyboard_begin(&s_password_input, true);
                 s_view = TRANSFER_PASSWORD;
             } else if (id == 11) {
@@ -1724,7 +1730,7 @@ static app_redraw_t provisioning_action(int id) {
         return APP_REDRAW_PAGE;
     }
     size_t len = strlen(s_password);
-    if (id == 44) { clear_password(); s_network_message[0] = 0; s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
+    if (id == 44) return cancel_password_edit();
     else if (id == 45) s_password_visible = !s_password_visible;
     else if (id == 46) {
         if (s_selected.requires_password && len < 8) {
@@ -2366,19 +2372,19 @@ static int hit_control(uint16_t x, uint16_t y) {
     return ui_rect_hit(control_rect(2), x, y) ? 2 : -1;
 }
 
-static app_redraw_t stop_usb_for_navigation(app_ctx_t *ctx, bool home) {
+static app_back_result_t stop_usb_for_navigation(app_ctx_t *ctx, bool home) {
     s_usb_start_pending = false;
     if (usb_storage_active()) {
         esp_err_t err = usb_storage_stop();
         if (err != ESP_OK) {
             snprintf(s_usb_message, sizeof(s_usb_message), ui_tr("USB 写入未完成：%s，请在电脑弹出后重试"), esp_err_to_name(err));
-            return APP_REDRAW_PAGE;
+            return (app_back_result_t){APP_REDRAW_PAGE, false};
         }
         s_any_changed = true;
     }
     if (home) ui_nav_request(ctx, 0);
     else ctx->request_return = true;
-    return APP_REDRAW_NONE;
+    return (app_back_result_t){APP_REDRAW_NONE, true};
 }
 
 static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
@@ -2396,8 +2402,8 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
         }
     }
     if (ev->type == UI_GESTURE_TAP && ev->y0 < 160 && ev->x0 < 120) {
-        if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, false);
-        if (s_view == TRANSFER_PASSWORD) { clear_password(); s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
+        if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, false).redraw;
+        if (s_view == TRANSFER_PASSWORD) return cancel_password_edit();
         if (s_view == TRANSFER_NETWORKS) {
             if (s_forget_confirm) { s_forget_confirm = false; s_network_message[0] = 0; return APP_REDRAW_PAGE; }
             if (s_saved_detail) { s_saved_detail = false; s_network_message[0] = 0; return APP_REDRAW_PAGE; }
@@ -2413,7 +2419,7 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     if (ev->type == UI_GESTURE_TAP && old >= 0 && old == origin &&
         hit_control(ev->x, ev->y) == origin) {
         if (s_usb_entry) {
-            return stop_usb_for_navigation(ctx, false);
+            return stop_usb_for_navigation(ctx, false).redraw;
         }
         if (origin == 0 || origin == 1) return select_qr_tab(origin == 1);
         if (origin == 2) {
@@ -2435,37 +2441,37 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     return APP_REDRAW_AREA;
 }
 
-static app_redraw_t transfer_navigate(app_ctx_t *ctx, bool home) {
+static app_back_result_t transfer_navigate(app_ctx_t *ctx, bool home) {
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
     if (s_view == TRANSFER_CLOUDZAO) {
-        if (s_cloud_notice == CLOUD_NOTICE_FIRST_READ) return APP_REDRAW_NONE;
+        if (s_cloud_notice == CLOUD_NOTICE_FIRST_READ) return (app_back_result_t){APP_REDRAW_NONE, false};
         if (s_cloud_notice == CLOUD_NOTICE_REVIEW) {
             s_cloud_notice = CLOUD_NOTICE_HIDDEN;
-            return APP_REDRAW_PAGE;
+            return (app_back_result_t){APP_REDRAW_PAGE, true};
         }
         if (s_cloud_history_confirm && !home) {
             s_cloud_history_confirm = false;
-            return APP_REDRAW_PAGE;
+            return (app_back_result_t){APP_REDRAW_PAGE, true};
         }
         cloud_leave();
         ui_nav_request(ctx, home ? 0 : 2);
-        return APP_REDRAW_NONE;
+        return (app_back_result_t){APP_REDRAW_NONE, true};
     }
 #endif
     if (s_usb_entry || usb_storage_active()) return stop_usb_for_navigation(ctx, home);
-    if (s_view == TRANSFER_HOME && !stop_upload_if_idle()) return APP_REDRAW_NONE;
-    if (home && !s_setup_wifi) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
-    if (s_view == TRANSFER_PASSWORD) { clear_password(); s_view = TRANSFER_NETWORKS; return APP_REDRAW_PAGE; }
+    if (s_view == TRANSFER_HOME && !stop_upload_if_idle()) return (app_back_result_t){APP_REDRAW_NONE, false};
+    if (home && !s_setup_wifi) { ui_nav_request(ctx, 0); return (app_back_result_t){APP_REDRAW_NONE, true}; }
+    if (s_view == TRANSFER_PASSWORD) return (app_back_result_t){cancel_password_edit(), true};
     if (s_view == TRANSFER_NETWORKS) {
-        if (s_forget_confirm) { s_forget_confirm = false; s_network_message[0] = 0; return APP_REDRAW_PAGE; }
-        if (s_saved_detail) { s_saved_detail = false; s_network_message[0] = 0; return APP_REDRAW_PAGE; }
+        if (s_forget_confirm) { s_forget_confirm = false; s_network_message[0] = 0; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
+        if (s_saved_detail) { s_saved_detail = false; s_network_message[0] = 0; return (app_back_result_t){APP_REDRAW_PAGE, true}; }
     }
     ctx->request_return = true;
-    return APP_REDRAW_NONE;
+    return (app_back_result_t){APP_REDRAW_NONE, true};
 }
 
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
-    return transfer_navigate(ctx, key == UI_KEY_2);
+    return transfer_navigate(ctx, key == UI_KEY_2).redraw;
 }
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if (redraw != APP_REDRAW_AREA) return false;
@@ -2490,13 +2496,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     return true;
 }
 
-static app_redraw_t transfer_edge_back(app_ctx_t *ctx) {
+static app_back_result_t transfer_edge_back(app_ctx_t *ctx) {
 #ifdef CONFIG_MOGO_CLOUDZAO_TRANSFER
     if (s_view == TRANSFER_CLOUDZAO && s_cloud_notice == CLOUD_NOTICE_HIDDEN && !s_cloud_history_confirm &&
-        (s_cloud_status.busy || s_cloud_history.busy || s_cloud_bind_status.busy || s_cloud_poll_running)) return APP_REDRAW_NONE;
+        (s_cloud_status.busy || s_cloud_history.busy || s_cloud_bind_status.busy || s_cloud_poll_running)) return (app_back_result_t){APP_REDRAW_NONE, false};
 #endif
     if (usb_storage_active() || s_usb_start_pending || s_network_connect_pending ||
-        (s_view == TRANSFER_HOME && s_status.state == WIFI_TRANSFER_UPLOADING)) return APP_REDRAW_NONE;
+        (s_view == TRANSFER_HOME && s_status.state == WIFI_TRANSFER_UPLOADING)) return (app_back_result_t){APP_REDRAW_NONE, false};
     return transfer_navigate(ctx, false);
 }
 static app_horizontal_zone_t transfer_zone(app_ctx_t *ctx, int x, int y) {
