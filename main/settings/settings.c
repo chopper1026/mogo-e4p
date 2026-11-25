@@ -748,10 +748,11 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
         uint8_t value;
-        // 短按仍不接受「不操作」；前光及触摸开关是有效动作，单独放行。
-        // Short presses still reject "no action"; frontlight and touch toggles are valid exceptions.
+        // 短按仍不接受「不操作」；前光、触摸和逐层返回使用较新的编号。
+        // Short presses still reject "no action"; frontlight, touch and one-level Back use newer IDs.
         if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK &&
-            (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT || value == APP_READER_KEY_TOUCH))
+            (value < APP_READER_KEY_NONE || value == APP_READER_KEY_FRONTLIGHT || value == APP_READER_KEY_TOUCH ||
+             value == APP_READER_KEY_BACK))
             s_reader_keys[i] = reader_action_migrate(value);
     }
     uint8_t hold_action = APP_READER_KEY_HOME;

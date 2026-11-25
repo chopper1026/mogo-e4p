@@ -85,6 +85,8 @@ typedef struct app_desc {int unused;} app_desc_t;
 typedef struct {bool touched;} test_touch_t;
 typedef struct {int leaf;bool request_menu,consumed;int64_t now_ms;uint8_t *fb;const app_desc_t *request_app;test_touch_t *touch;void *acc;} app_ctx_t;
 typedef enum {APP_REDRAW_PAGE,APP_REDRAW_AREA,APP_REDRAW_NONE,APP_REDRAW_FULL} app_redraw_t;
+typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
+static app_back_result_t book_edge_back(app_ctx_t *ctx){(void)ctx;return (app_back_result_t){APP_REDRAW_PAGE,true};}
 typedef struct {ui_gesture_type_t type;int x0,y0;} ui_gesture_event_t;
 static struct {bool active;} s_dictionary_selection;
 static void dictionary_cancel(void){s_dictionary_selection.active=false;}

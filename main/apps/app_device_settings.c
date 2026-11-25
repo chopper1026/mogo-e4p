@@ -908,7 +908,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_ZAP,               // 20 电源管理 / power management
         UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
         UI_ICON_MOGO_CELLULAR_SIGNAL, // 22 移动网络
-        UI_ICON_MAXIMIZE_2,         // 23 全面屏手势 / Full-screen gestures
+        UI_ICON_MAXIMIZE_2,         // 23 手势操作 / Gesture controls
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -1345,8 +1345,8 @@ static app_redraw_t batt_calibration_touch(int x, int y) {
 static EpdRect gesture_width_rect(int index) { return (EpdRect){36 + 208 * index, 470, 196, 88}; }
 static void draw_gestures(uint8_t *fb) {
     bool enabled = app_settings_gestures();
-    back_header(fb, "全面屏手势");
-    setting_toggle(fb, 232, "全面屏手势", "从两侧边缘向内滑动返回", enabled);
+    back_header(fb, "手势操作");
+    setting_toggle(fb, 232, "手势操作", "从两侧边缘向内滑动返回", enabled);
     section(fb, 418, "边缘宽度");
     const char *const widths[] = {"窄", "标准", "宽"};
     for (int i = 0; i < 3; ++i) {
@@ -1945,7 +1945,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():ui_tr("未设置"));
-    const char *personal_labels[]={"书架样式","壁纸","锁屏密码","状态栏签名","触摸震动","全面屏手势","阅读背景","组件库","快捷栏管理"};
+    const char *personal_labels[]={"书架样式","壁纸","锁屏密码","状态栏签名","触摸震动","手势操作","阅读背景","组件库","快捷栏管理"};
     char haptic_value[24];
     if(!haptics_available())snprintf(haptic_value,sizeof(haptic_value),ui_tr("不支持"));
     else if(!app_settings_touch_haptics())snprintf(haptic_value,sizeof(haptic_value),ui_tr("关闭"));

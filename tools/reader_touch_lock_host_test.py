@@ -22,6 +22,8 @@ unit = r'''
 typedef struct { bool touched; } app_touch_t;
 typedef struct {int64_t now_ms; bool user_activity,request_return;app_touch_t *touch;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
+typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
+static app_back_result_t book_edge_back(app_ctx_t *ctx){(void)ctx;return (app_back_result_t){APP_REDRAW_PAGE,true};}
 enum {SHELF,READING,TOC,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_NOTE};
 #define ESP_OK 0
 #define READER_MIDDLE_DOUBLE_MS 340
@@ -73,6 +75,8 @@ for name in ('reader_notice_tick','reader_toggle_touch','screen_touch_disabled',
 unit += r'''
 int main(void){
  app_touch_t contact={0};app_ctx_t ctx={.now_ms=1000,.touch=&contact};
+ s_view=READING;s_reader_panel=READER_PANEL_TOOLS;up_action=APP_READER_KEY_BACK;
+ assert(app_book_up_key_action(&ctx)==APP_REDRAW_PAGE);up_action=APP_READER_KEY_TOUCH;s_reader_panel=READER_PANEL_NONE;
  assert(!screen_touch_disabled(&ctx));
  reader_toggle_touch(&ctx);assert(!disabled&&strstr(s_reader_notice,"按键控制")&&strstr(s_reader_notice,"触摸开关")&&s_reader_notice_until==3000);
  ctx.now_ms=2999;assert(reader_notice_tick(&ctx)==APP_REDRAW_NONE&&s_reader_notice[0]);

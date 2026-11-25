@@ -19,8 +19,8 @@
  * Same-day user revision: use a large white/black card with separate recovery instructions; show touch feedback for two seconds and normalize once on dismissal to fix long waits and uneven ink.
  * 用户 2026-11-06 修订：正文长按仅用于临时选字查词，留白不再打开目录，避免同一手势冲突；目录保留工具栏入口。
  * User revision 2026-11-06: body holds select dictionary text; blank holds no longer open the TOC, avoiding a gesture conflict; the toolbar retains the TOC.
- * 冻结修订：为避免边缘内滑误翻，开启全面屏手势时侧边优先退一层，纯正文保存后回首页；实体键不变。
- * Frozen revision: with gestures enabled the edges unwind one layer instead of turning pages; bare text exits to Home. Key bindings stay unchanged.
+ * 冻结修订：为避免边缘内滑误翻，开启手势操作时侧边优先退一层，纯正文保存后回首页；为支持无触摸操作，可把同一退层动作绑定到按键，不改默认映射。
+ * Frozen revision: with gestures enabled the edges unwind one layer instead of turning pages; bare text exits to Home. The same one-level Back is bindable for touch-free operation; defaults stay unchanged.
  * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
@@ -633,6 +633,7 @@ static uint8_t s_tap_draft[APP_READER_TAP_CELLS];
 static int s_tap_selected = -1;
 static bool s_tap_picker;
 static char s_tap_error[64];
+static app_back_result_t book_edge_back(app_ctx_t *ctx);
 static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action);
 static const app_reader_key_action_t s_tap_order[UI_READER_TAP_ACTION_COUNT] = {
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
@@ -2633,6 +2634,7 @@ static const char *reader_key_label(app_reader_key_action_t action) {
         [APP_READER_KEY_NEXT] = "下一页",
         [APP_READER_KEY_TOOLS] = "阅读工具栏",
         [APP_READER_KEY_LEGACY_FULLSCREEN] = "阅读工具栏",
+        [APP_READER_KEY_BACK] = "返回",
         [APP_READER_KEY_HOME] = "返回主页",
         [APP_READER_KEY_REFRESH] = "手动全刷",
         [APP_READER_KEY_NONE] = "不操作",
@@ -2743,15 +2745,15 @@ static void draw_key_settings(uint8_t *fb) {
 // stored values keep the enum's own numbering.
 static const app_reader_key_action_t s_reader_key_order[] = {
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS,
-    APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
+    APP_READER_KEY_BACK, APP_READER_KEY_HOME, APP_READER_KEY_REFRESH,
     APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_TOUCH, APP_READER_KEY_NONE,
 };
 #define READER_KEY_ACTION_ROWS ((int)(sizeof(s_reader_key_order) / sizeof(s_reader_key_order[0])))
 #define KEY_ACTION_TOP 390
 #define KEY_ACTION_PITCH 86
 #define KEY_ACTION_HEIGHT 78
-// 八个动作共用绘制和命中矩形，提示与返回键仍有独立空间。
-// Eight actions share paint/hit rectangles, leaving separate hint and Back space.
+// 九个动作共用绘制和命中矩形，提示与返回键仍有独立空间。
+// Nine actions share paint/hit rectangles, leaving separate hint and Back space.
 static EpdRect reader_key_action_card(int index) {
     return (EpdRect){36, KEY_ACTION_TOP + index * KEY_ACTION_PITCH, 612, KEY_ACTION_HEIGHT};
 }
@@ -8008,6 +8010,7 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:
             s_stats_activity_ms = ctx->now_ms;
             return turn_page(ctx, action == APP_READER_KEY_PREV ? -1 : 1);
+        case APP_READER_KEY_BACK: return book_edge_back(ctx).redraw;
         case APP_READER_KEY_HOME: return reader_return(ctx);
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
         case APP_READER_KEY_FRONTLIGHT: {
@@ -8265,7 +8268,7 @@ bool app_book_reader_keys_active(void) { return s_view == READING; }
 app_redraw_t app_book_up_key_action(app_ctx_t *ctx) {
     const app_reader_key_action_t action = app_settings_reader_up_action();
     const bool sheet_action = action == APP_READER_KEY_TOUCH || app_settings_reader_touch_disabled() ||
-        action == APP_READER_KEY_HOME || action == APP_READER_KEY_REFRESH || action == APP_READER_KEY_FRONTLIGHT;
+        action == APP_READER_KEY_BACK || action == APP_READER_KEY_HOME || action == APP_READER_KEY_REFRESH || action == APP_READER_KEY_FRONTLIGHT;
     if (!app_book_reader_keys_active() ||
         (!sheet_action && !app_book_reader_body_visible() && !s_dictionary_selection.active))
         return APP_REDRAW_NONE;

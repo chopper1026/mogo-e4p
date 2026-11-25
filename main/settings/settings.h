@@ -62,7 +62,7 @@ void app_settings_set_home_full_refresh(bool enabled);
 /// 触摸震动开关与强度（0 弱 / 1 中 / 2 强）；默认开启、弱档。
 /// / Touch vibration switch and intensity (0 weak / 1 medium / 2 strong); on and weak by default.
 bool app_settings_touch_haptics(void);
-/// 全面屏手势开关。/ Full-screen navigation enabled.
+/// 手势操作开关。/ Gesture controls enabled.
 bool app_settings_gestures(void);
 /// 边缘宽度档位 0..2：窄、标准、宽。/ Edge preset 0..2: narrow, standard, wide.
 unsigned app_settings_gesture_width(void);
@@ -323,6 +323,7 @@ typedef enum {
     APP_READER_KEY_LEGACY_BACK,
     APP_READER_KEY_FRONTLIGHT, ///< 开关前光 / Toggle the frontlight
     APP_READER_KEY_TOUCH, ///< 开关阅读触摸 / Toggle reader screen touch
+    APP_READER_KEY_BACK, ///< 返回当前画面的上一级 / Unwind one visible layer
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
 
@@ -351,8 +352,8 @@ bool app_settings_set_reader_hold_action(app_reader_key_action_t action);
 /// 中键双击，默认不操作；绑定后单击需等双击窗口结束才生效。/ Middle double press defaults to no action; once bound, a single click waits for the double-press window.
 app_reader_key_action_t app_settings_reader_double_action(void);
 bool app_settings_set_reader_double_action(app_reader_key_action_t action);
-/// 上键（AI键）单击默认不操作；所有按键映射中的返回主页、手动全刷和前光开关在普通页面全局生效。
-/// The AI key defaults to no action; mapped Home, full refresh and frontlight actions are global on ordinary pages.
+/// 上键（AI键）单击默认不操作；所有按键映射中的返回、返回主页、手动全刷和前光开关在普通页面全局生效。
+/// The AI key defaults to no action; mapped Back, Home, full refresh and frontlight actions are global on ordinary pages.
 app_reader_key_action_t app_settings_reader_up_action(void);
 bool app_settings_set_reader_up_action(app_reader_key_action_t action);
 /// 一次提交整套推荐设置，1为翻页，2为首页/工具栏/工具栏。/ Commit preset 1 (page turns) or 2 (Home/tools/tools) together.

@@ -46,7 +46,9 @@ v48–v52 恢复先校验数据和 WiFi 容量再写入，**不是跨卷回滚�
 
 v48–v52 validate data and WiFi capacity before writing; later I/O can still fail across stores. Journal snapshots replace rather than merge. Protect plaintext WiFi credentials. Back up the actual `books/` tree, including empty folders, separately.
 
-全面屏手势写入 `read_pico/fs_gestures`（bit 0 开关，bits 1–2 为窄／标准／宽；合法值 0–5，缺省 3）。v52 备份携带该字节与反码，先校验后恢复；v51 及以前不改本机手势偏好。/ Full-screen gestures store enablement and edge width together. Backup v52 validates the byte and its complement before applying changes; older backups preserve the local preference.
+手势操作写入 `read_pico/fs_gestures`（bit 0 开关，bits 1–2 为窄／标准／宽；合法值 0–5，缺省 3）。v52 备份携带该字节与反码，先校验后恢复；v51 及以前不改本机手势偏好。/ Gesture controls store enablement and edge width together. Backup v52 validates the byte and its complement before applying changes; older backups preserve the local preference.
+
+按键「返回」使用新动作编号 10；旧试验编号 7 仍保留不用。包含新绑定的配置备份须由支持该动作的固件恢复。/ One-level Back uses new action ID 10; retired ID 7 remains reserved. Backups containing this binding require compatible firmware.
 
 ## 操作影响 / Operation Effects
 

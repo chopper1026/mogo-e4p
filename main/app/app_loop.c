@@ -10,10 +10,10 @@
  * the menu handle, on_exit/on_enter, present, lock, delayed SD font load.
  * Page state and refresh cadence stay in main/apps/; gesture recognition is shared.
  *
- * 冻结（用户2026-11-20修订）：返回主页、手动全刷和前光开关在普通页面优先于同一按键手势的原生动作。
+ * 冻结（用户2026-11-25修订）：为支持不靠触摸逐层退出，返回、返回主页、手动全刷和前光开关在普通页面优先于同一按键手势的原生动作。
  * 其余绑定不影响页外操作：主页面左右键循环、中键长按全刷，书架中键短按切换分页；系统覆盖层和独占流程保留输入所有权。
  * 中键长按不再补发短按；全局双击绑定时等待第二次抬手。阅读保留自己的返回来源；菜单把手按下即触发。
- * Frozen (user revision 2026-11-20): mapped Home, full refresh and frontlight take priority over the same native gesture on ordinary pages.
+ * Frozen (user revision 2026-11-25): to allow one-layer navigation without touch, mapped Back, Home, full refresh and frontlight take priority over the same native gesture on ordinary pages.
  * Other bindings retain the native side-key tabs, middle-hold refresh and shelf middle-tap paging; overlays and exclusive flows retain ownership.
  * Holds suppress taps, active global double clicks wait for a second release, the reader retains its return target, and the menu handle fires on contact.
  * 用户修订：四个主页面底栏作为统一导航路由在按下时报点即响应，模态和阅读手势保持原归属。
@@ -334,7 +334,7 @@ static bool root_bar_contact(app_ctx_t *ctx, const app_desc_t *app, ui_gesture_t
 }
 
 static bool global_key_action(app_reader_key_action_t action) {
-    return action == APP_READER_KEY_HOME || action == APP_READER_KEY_REFRESH ||
+    return action == APP_READER_KEY_BACK || action == APP_READER_KEY_HOME || action == APP_READER_KEY_REFRESH ||
            action == APP_READER_KEY_FRONTLIGHT;
 }
 
@@ -349,6 +349,8 @@ static app_redraw_t dispatch_global_key(app_ctx_t *ctx, const app_desc_t *curren
                                        app_reader_key_action_t action) {
     ctx->user_activity = true;
     switch (action) {
+        case APP_READER_KEY_BACK:
+            return current->edge_back ? current->edge_back(ctx).redraw : APP_REDRAW_NONE;
         case APP_READER_KEY_HOME:
             if (current == &app_device_settings && app_device_settings_navigation_busy()) return APP_REDRAW_NONE;
             // 传书页的中键回首页会先让传输会话安全退出。

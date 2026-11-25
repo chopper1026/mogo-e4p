@@ -76,7 +76,7 @@ bool app_settings_reader_power_turn(void);
 typedef enum {
     APP_READER_KEY_PREV, APP_READER_KEY_NEXT, APP_READER_KEY_TOOLS, APP_READER_KEY_LEGACY_FULLSCREEN,
     APP_READER_KEY_HOME, APP_READER_KEY_REFRESH, APP_READER_KEY_NONE, APP_READER_KEY_LEGACY_BACK,
-    APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_TOUCH, APP_READER_KEY_COUNT,
+    APP_READER_KEY_FRONTLIGHT, APP_READER_KEY_TOUCH, APP_READER_KEY_BACK, APP_READER_KEY_COUNT,
 } app_reader_key_action_t;
 app_reader_key_action_t app_settings_reader_key_action(unsigned key);
 app_reader_key_action_t app_settings_reader_hold_action(void);

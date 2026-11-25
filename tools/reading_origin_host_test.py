@@ -20,6 +20,8 @@ unit=r'''
 typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {int now_ms,leaf;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
+typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
+static app_back_result_t book_edge_back(app_ctx_t *ctx){(void)ctx;return (app_back_result_t){APP_REDRAW_PAGE,true};}
 enum {HOME_ROOT,HOME_COMPONENT,HOME_GOAL,HOME_TIME,READING,SHELF};
 enum {UI_GESTURE_PRESS,UI_GESTURE_MOVE,UI_GESTURE_TAP,UI_GESTURE_LONG_PRESS,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U,UI_GESTURE_CANCEL};
 typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
@@ -134,6 +136,7 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
  }
  assert(layouts==13&&reading_slots==6);
  assert(!strcmp(reader_key_label(APP_READER_KEY_HOME),"返回主页"));
+ assert(!strcmp(reader_key_label(APP_READER_KEY_BACK),"返回") && reader_key_action(&ctx,APP_READER_KEY_BACK)==APP_REDRAW_PAGE);
  assert(!strcmp(reader_key_label(APP_READER_KEY_FRONTLIGHT),"前光开关"));
  // 前光开关只驱动灯，不重画正文；再按一次关灯。
  // The frontlight toggle only drives the light and requests no redraw; a second press turns it off.

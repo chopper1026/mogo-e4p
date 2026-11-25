@@ -29,6 +29,11 @@ void pico_boot_clear_resume(void) {}
 void app_edge_feedback_show(app_ctx_t *ctx, bool right, int y) {
     (void)ctx; (void)right; (void)y; assert(!"unexpected edge back in scheduler fixture");
 }
+static int back_calls;
+static app_back_result_t test_back(app_ctx_t *ctx) {
+    assert(ctx->user_activity); ++back_calls;
+    return (app_back_result_t){APP_REDRAW_NONE, back_calls==1};
+}
 void touch_sampler_test_enable(bool active);
 void touch_sampler_test_push(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count);
 
@@ -52,7 +57,8 @@ static bool bt_return_to_origin;
 static bool haptics_present, haptics_on, haptics_return_to_origin;
 static int haptics_settings_requests, haptics_settings_writes, network_settings_requests;
 bool haptics_available(void) {return haptics_present;}
-bool app_settings_gestures(void) { return true; }
+static bool gestures_enabled=true;
+bool app_settings_gestures(void) { return gestures_enabled; }
 unsigned app_settings_gesture_width(void) { return 1; }
 int app_settings_gesture_edge_px(void) { return (int[]){24,36,52}[app_settings_gesture_width()]; }
 bool app_settings_touch_haptics(void) {return haptics_on;}
@@ -1459,6 +1465,10 @@ int main(void) {
     add(0,0,0,0);add(80,1500,1,0);add(0,0,0,0);add(240,1500,1,0);
     add(0,0,0,0);add(400,1500,1,0);add(0,0,0,0);run();
     assert(enters==1&&fulls==1&&!fl_applies&&keys[UI_KEY_1]==1&&keys[UI_KEY_2]==1&&keys[UI_KEY_3]==1);
+    reset();first.owns_keys=true;first.edge_back=test_back;time_step=100000;gestures_enabled=false;
+    key_actions[UI_KEY_1]=APP_READER_KEY_BACK;up_key_action=APP_READER_KEY_BACK;up_key_steps[5]=true;
+    add(0,0,0,0);add(80,1500,1,0);for(int i=0;i<6;++i)add(0,0,0,0);
+    run();assert(back_calls==2&&!keys[UI_KEY_1]&&enters==1);
     puts("PASS: global key mappings on ordinary pages, double-click suppression, native fallback, and reader/PMU ownership");
     puts("app_loop: 50 scheduler scenarios passed, including automatic lock, save callback, input reset and busy guards");
     return 0;

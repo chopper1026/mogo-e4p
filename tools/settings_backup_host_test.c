@@ -3113,6 +3113,15 @@ int main(void) {
     test_home_regions_backup();
     test_device_name_branding();
     test_reader_touch_lock();
+    assert(app_settings_set_reader_touch_disabled(false));
+    for (unsigned i=0;i<6;++i) assert(set_touch_binding(i, APP_READER_KEY_BACK));
+    assert(app_settings_backup_save()==ESP_OK);
+    for (unsigned i=0;i<6;++i) assert(set_touch_binding(i, APP_READER_KEY_TOOLS));
+    assert(app_settings_backup_restore()==ESP_OK);
+    memset(s_reader_keys,0,sizeof(s_reader_keys));app_settings_init();
+    for (unsigned i=0;i<3;++i) assert(app_settings_reader_key_action(i)==APP_READER_KEY_BACK);
+    assert(app_settings_reader_hold_action()==APP_READER_KEY_BACK && app_settings_reader_double_action()==APP_READER_KEY_BACK &&
+        app_settings_reader_up_action()==APP_READER_KEY_BACK && !app_settings_reader_tap_action_valid(APP_READER_KEY_BACK));
     test_inline_lock_selection();
     test_ticket_background();
     test_calendar_style();

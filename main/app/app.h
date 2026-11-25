@@ -15,8 +15,8 @@
  * must retain full refresh and menu exits.
  * 冻结：返回恢复最近切页来源，菜单来源保留菜单位置。
  * Frozen: Return restores the latest page origin, preserving its menu position.
- * 冻结修订：侧滑不是历史返回键；为逐层退出，先退当前画面，纯正文回首页，四个根页不动。
- * Frozen revision: edge swipes unwind the visible layer, not key history; the bare reader exits to Home and roots stay put.
+ * 冻结修订：侧滑与可选「返回」键共用退层语义，不是历史返回；为逐层退出，先退当前画面，纯正文回首页，四个根页不动。
+ * Frozen revision: edge swipes and mapped Back unwind the visible layer, not key history; the bare reader exits to Home and roots stay put.
  */
 
 #pragma once
