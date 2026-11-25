@@ -61,6 +61,8 @@
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
  * 用户2026-11-22修订：在封面和列表样式之外增加便签本，白底每页十本，不加载封面，作者列统一左对齐；不改变收录与移出规则。
+ * 冻结修订：连续逐行局刷会削弱静止书名的墨色。便签本首屏仍不等冷书，逐本核对后只合并刷新当前页的作者列。
+ * Frozen revision: repeated row scans fade resting titles. Keep first paint independent of cold books; resolve one at a time and reveal only the current author column in one update.
  * 底栏保留首页/书架/文件/设置，设置直接进入设置页；用户2026-11-05确认多选时以宽松批量操作栏替换导航，取消后恢复，解决误触与拥挤。
  * 用户修订：长按图书可用本机拼音输入编辑书名；阅读时长与翻页真实记录，供票根锁屏使用。
  * 用户最新修订：书名编辑可点选插入位置并用左右键微调，支持在文字中间插入和删除。
@@ -600,6 +602,8 @@ static bool s_water_turn_pending;
 static e0470_turn_dir_t s_water_turn_dir;
 static int s_pressed_control = -1;
 static bool s_shelf_feedback_pending;
+static unsigned s_notepad_author_rows; // 仅本次同步推屏借用行号。/ Row mask for the immediate synchronous present only.
+static int64_t s_notepad_author_retry_ms;
 static bool s_cover_batch_present_pending;
 static bool s_shelf_page_pending;
 static unsigned s_reader_key_pick;
@@ -1168,10 +1172,15 @@ static void draw_list_title(uint8_t *fb, const char *name, int top) {
         ui_text_fixed_vc(fb, 244, top + line*35, px, lines[line], EPD_DRAW_ALIGN_LEFT, false);
     }
 }
+static void draw_notepad_row(uint8_t *fb, int row, const shelf_entry_t *item, bool fast) {
+    const char *author = item->author_checked && !item->author_pending ? (item->author[0] ? item->author : ui_tr("未知")) : "…";
+    ui_notepad_line(fb, row, s_shelf_selecting, item->selected, s_shelf_selecting && s_pressed_control == row,
+                    fast, item->name, author, item->has_progress ? item->pct : 0);
+}
 static void draw_list_row(uint8_t *fb, int row, const shelf_entry_t *item) {
     EpdRect card = row_rect(row);
     draw_list_title(fb, item->name, card.y + 42);
-    char author[128]; copy_text(author, sizeof(author), item->author[0] ? item->author : "作者未知");
+    char author[128]; copy_text(author, sizeof(author), item->author[0] ? item->author : "未知");
     int author_px = ttf_em_height_px(21), progress_px = ttf_em_height_px(19);
     fit_text(author, author_px, 378);
     int author_y = ui_text_fixed_width_px(ttf_em_height_px(27), item->name) > 378 ? 106 : 83;
@@ -4005,9 +4014,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
         if (i >= s_visible_count) break;
         if (notepad) {
             const shelf_entry_t *item = &s_shelf[i];
-            ui_notepad_line(fb, row, s_shelf_selecting, item->selected, s_shelf_selecting && s_pressed_control == row,
-                            notepad_fast, item->name, item->author[0] ? item->author : "作者未知",
-                            item->has_progress ? item->pct : 0);
+            draw_notepad_row(fb, row, item, notepad_fast);
             continue;
         }
         EpdRect r = row_rect(row);
@@ -4129,6 +4136,20 @@ static void reader_memory_snapshot(const char *event) {
 }
 #endif
 
+static bool notepad_author_present(app_ctx_t *ctx, app_redraw_t redraw) {
+    const unsigned rows = s_notepad_author_rows;
+    s_notepad_author_rows = 0;
+    if (!rows || redraw != APP_REDRAW_AREA || ctx->request_app || s_view != SHELF) return false;
+    const enum EpdDrawError err = display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, s_area, DISPLAY_REFRESH_DEFAULT);
+    guard_draw_result(ctx->hl, err);
+    if (err == EPD_DRAW_SUCCESS) {
+        const int first = ctx->leaf * UI_NOTEPAD_ROWS;
+        for (int r = 0; r < UI_NOTEPAD_ROWS; ++r)
+            if (rows & (1u << r)) s_shelf[first + r].author_pending = false;
+    } else s_notepad_author_retry_ms = ctx->now_ms + 1000;
+    return true;
+}
+
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     if (redraw != APP_REDRAW_NONE && redraw != APP_REDRAW_DONE && reader_orientation_sync())
         redraw = APP_REDRAW_FULL;
@@ -4136,6 +4157,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // The toggle flag applies to this present only; consume it even on an early return.
     const bool tools_toggle = s_reader_tools_toggle;
     s_reader_tools_toggle = false;
+    if (notepad_author_present(ctx, redraw)) return true;
     bool tools_band = false;
     if (s_dictionary_feedback_pending && redraw == APP_REDRAW_AREA) {
         s_dictionary_feedback_pending = false;
@@ -7479,9 +7501,7 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
             if (!s_shelf_selecting) return APP_REDRAW_NONE;
             const shelf_entry_t *item = &s_shelf[i];
             const bool fast = app_settings_main_fast_refresh();
-            ui_notepad_line(ctx->fb, row, s_shelf_selecting, item->selected, s_pressed_control == row,
-                            fast, item->name, item->author[0] ? item->author : "作者未知",
-                            item->has_progress ? item->pct : 0);
+            draw_notepad_row(ctx->fb, row, item, fast);
             s_area = target;
             s_mode = fast ? MODE_DU : MODE_GL16;
             s_shelf_feedback_pending = true;
@@ -8379,6 +8399,39 @@ static app_redraw_t reader_shake_tick(app_ctx_t* ctx) {
     s_stats_activity_ms = ctx->now_ms;
     return turn_page(ctx, dir);
 }
+// 读取状态跟书走，不在 tick 之间保存行号；翻页或重排时重新取可见条目。
+// Stage results on books, not row numbers between ticks: paging or sorting changes the visible slice.
+static app_redraw_t notepad_author_tick(app_ctx_t *ctx) {
+    if (s_scan_pending || s_pressed_control >= 0 || book_shelf_categories_menu_is_open(&s_shelf_categories) ||
+        ctx->now_ms < s_notepad_author_retry_ms) return APP_REDRAW_NONE;
+    const int first = ctx->leaf * UI_NOTEPAD_ROWS;
+    unsigned rows = 0;
+    bool probed = false;
+    for (int r = 0; r < UI_NOTEPAD_ROWS && first + r < s_visible_count; ++r) {
+        shelf_entry_t *item = &s_shelf[first + r];
+        if (!item->author_checked) {
+            if (probed || usb_storage_active()) return APP_REDRAW_NONE;
+            if (item->removed) item->author_checked = true;
+            else book_shelf_resolve_author(item, false);
+            item->author_pending = true;
+            probed = true;
+        }
+        if (item->author_pending) rows |= 1u << r;
+    }
+    if (!rows || usb_storage_active()) return APP_REDRAW_NONE;
+    lock_draw();
+    EpdRect area = {0};
+    for (int r = 0; r < UI_NOTEPAD_ROWS; ++r) {
+        if (!(rows & (1u << r))) continue;
+        const char *author = s_shelf[first + r].author;
+        area = ui_rect_union(area, ui_notepad_paint_author(ctx->fb, r, s_shelf_selecting,
+                                                         author[0] ? author : ui_tr("未知")));
+    }
+    unlock_draw();
+    s_area = area;
+    s_notepad_author_rows = rows;
+    return APP_REDRAW_AREA;
+}
 static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (s_open_error[0]) {
         // 弹窗期间若 TF 卡刚探测就绪，仍补完书架扫描，避免背景停留在 0 本书。
@@ -8473,6 +8526,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         return APP_REDRAW_PAGE;
     }
     if ((s_view == SHELF || s_view == MANAGE) && !(ctx->touch && ctx->touch->touched)) {
+        if (s_view == SHELF && app_settings_shelf_style() == APP_SHELF_STYLE_NOTEPAD)
+            return notepad_author_tick(ctx);
         (void)prepare_cover_batch(ctx, false);
         // 整页准备好再合并推屏；占位页或失败输出不能消费已加载封面的待刷标记。
         // Reveal only a complete cover group; placeholders and failed output cannot consume pending artwork.

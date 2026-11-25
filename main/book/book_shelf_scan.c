@@ -72,6 +72,56 @@ bool book_shelf_catalog_reserve(const book_shelf_catalog_t *catalog) {
     return true;
 }
 
+// 只有完整匹配的占位词不算署名；不能把包含“未知”的笔名误删。/ Match whole placeholders, not substrings of pen names.
+static void clean_author(char *author) {
+    size_t start = strspn(author, " \t\r\n");
+    if (start) memmove(author, author + start, strlen(author + start) + 1);
+    size_t n = strlen(author);
+    while (n && strchr(" \t\r\n", author[n - 1])) author[--n] = 0;
+    if (!strcmp(author, "未知") || !strcmp(author, "作者未知") || !strcmp(author, "未知作者") ||
+        !strcasecmp(author, "unknown") || !strcasecmp(author, "author unknown")) author[0] = 0;
+}
+
+// 只接受书名后明确标注的“作者：姓名”，不从分隔符或普通书名推断。/ Accept explicit trailing bylines, never guess from separators or ordinary titles.
+static const char *title_byline(const char *title) {
+    const size_t bracket = strlen("》");
+    for (const char *p = title; (p = strstr(p, "作者")); p += strlen("作者")) {
+        bool after_title = (size_t)(p - title) >= bracket && !memcmp(p - bracket, "》", bracket);
+        if (p != title && !after_title && p[-1] != ' ' && p[-1] != '\t') continue;
+        const char *colon = p + strlen("作者");
+        if (*colon == ':') return colon + 1;
+        if (!strncmp(colon, "：", strlen("："))) return colon + strlen("：");
+    }
+    return "";
+}
+
+void book_shelf_resolve_author(book_shelf_entry_t *item, bool cache_only) {
+    if (item->author_checked) return;
+    clean_author(item->author);
+    if (item->author[0]) { item->author_checked = true; return; }
+    char title[sizeof(item->name)] = {0}, author[160] = {0};
+    if (book_metadata_supported(item->path)) {
+        if (!pico_boot_asset_allowed(item->path)) { item->author_checked = !cache_only; return; }
+        esp_err_t err = cache_only ? book_metadata_cached(item->path, title, sizeof(title), author, sizeof(author))
+                                   : book_metadata_read(item->path, title, sizeof(title), author, sizeof(author));
+        if (err != ESP_OK) {
+            if (cache_only) return;
+            title[0] = author[0] = 0;
+        }
+    }
+    clean_author(author);
+    if (!author[0]) {
+        copy_text(author, sizeof(author), title_byline(title));
+        clean_author(author);
+    }
+    if (!author[0] && book_title_from_path(item->path, title, sizeof(title))) {
+        copy_text(author, sizeof(author), title_byline(title));
+        clean_author(author);
+    }
+    copy_text(item->author, sizeof(item->author), author);
+    item->author_checked = true;
+}
+
 // 显式目录栈放在PSRAM，保持原深度上限和逐项导航轮询。
 // Keep explicit directory frames in PSRAM with the original depth limit and per-entry navigation polling.
 #define BOOK_SCAN_DEPTH_LIMIT 12
@@ -143,14 +193,8 @@ void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool i
             item->author, sizeof(item->author));
         if (!cached && !book_title_from_path(item->path, item->name, sizeof(item->name)))
             clean_filename(item->name, sizeof(item->name), ent->d_name);
-        if (scan->metadata && book_metadata_supported(item->path) && (!cached || !item->author[0])) {
-            char title[sizeof(item->name)] = {0};
-            char author[sizeof(item->author)] = {0};
-            // 首屏只读已有元数据缓存，不逐本解析正文。
-            // First paint reads cached metadata only, without scanning every book.
-            if (book_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
-                copy_text(item->author, sizeof(item->author), author);
-        }
+        // 首屏只读缓存，冷书留到可见行空闲时核对。/ Keep first paint cache-only; resolve cold visible rows on idle.
+        if (scan->metadata) book_shelf_resolve_author(item, true);
         item->search_match = book_search_match(item->name, scan->query);
         item->size = st.st_size;
         item->is_flash = is_flash;
@@ -198,16 +242,10 @@ static bool shelf_backfill_visit(const char *path, const book_progress_t *progre
     if (!book_title_from_path(item->path, item->name, sizeof(item->name)))
         clean_filename(item->name, sizeof(item->name), base);
     if (!item->name[0]) return true;
-    bool cached = scan->cache && book_shelf_cache_lookup(scan->cache, item->path,
+    if (scan->cache) (void)book_shelf_cache_lookup(scan->cache, item->path,
         (uint32_t)st.st_size, (int64_t)st.st_mtime, item->name, sizeof(item->name),
         item->author, sizeof(item->author));
-    if (scan->metadata && book_metadata_supported(item->path) && pico_boot_asset_allowed(item->path) &&
-        (!cached || !item->author[0])) {
-        char title[sizeof(item->name)] = {0};
-        char author[sizeof(item->author)] = {0};
-        if (book_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
-            copy_text(item->author, sizeof(item->author), author);
-    }
+    if (scan->metadata) book_shelf_resolve_author(item, true);
     item->size = (uint32_t)st.st_size;
     item->is_flash = !strncmp(path, "/flash/", 7);
     item->has_progress = true;

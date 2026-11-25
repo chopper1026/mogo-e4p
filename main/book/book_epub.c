@@ -40,7 +40,7 @@
 // The index payload changed with the title/anchor pooling: fixed fields in an old cache cannot be
 // turned back into pointers, so every older cache has to lapse.
 #define EPUB_CACHE_VERSION 14u
-#define EPUB_META_CACHE_VERSION 1u
+#define EPUB_META_CACHE_VERSION 2u
 #define EPUB_CSS_MAX (256u * 1024u)
 #define EPUB_CSS_FILE_MAX (128u * 1024u)
 #define EPUB_FACE_MAX 8
@@ -2198,20 +2198,18 @@ esp_err_t book_epub_metadata(const char *path, char *title, size_t title_cap, ch
     if (err == ESP_OK) err = load_entry(book, zip_find(book->zip, scratch->opf), &text, &len);
     if (err == ESP_OK) {
         token_t t; xml_reader(&scratch->xml, text, len);
-        size_t title_depth = 0, creator_depth = 0;
+        // 只读元数据中的对应元素；空 creator 后的出版者或简介不是作者。/ Only consume the matching metadata element, never a sibling after an empty creator.
         while (xml_next(&scratch->xml, &t)) {
-            if (t.kind == XML_OPEN && !title[0] && local_name(t.name, "title")) title_depth = t.depth;
-            else if (t.kind == XML_OPEN && !author[0] && local_name(t.name, "creator")) creator_depth = t.depth;
-            else if (t.kind == XML_TEXT && title_depth && t.depth == title_depth) {
+            if (t.kind != XML_TEXT || t.depth < 3 || !local_name(scratch->xml.stack[1], "metadata")) continue;
+            span_t field = scratch->xml.stack[t.depth - 1];
+            if (!title[0] && local_name(field, "title")) {
                 if (!decode(t.text, title, title_cap, true, t.cdata)) title[0] = 0;
-                title_depth = 0;
-            } else if (t.kind == XML_TEXT && creator_depth && t.depth == creator_depth) {
+            } else if (!author[0] && local_name(field, "creator")) {
                 if (!decode(t.text, author, author_cap, true, t.cdata)) author[0] = 0;
-                creator_depth = 0;
             }
             if (title[0] && author[0]) break;
         }
-        if (!title[0]) err = ESP_ERR_NOT_FOUND;
+        if (!title[0] && !author[0]) err = ESP_ERR_NOT_FOUND;
         else if (cacheable) {
             epub_meta_cache_payload_t *payload = &scratch->payload;
             snprintf(payload->title, sizeof(payload->title), "%s", title);

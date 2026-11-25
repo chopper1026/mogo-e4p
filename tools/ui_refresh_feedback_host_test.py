@@ -81,9 +81,11 @@ static bool app_settings_main_fast_refresh(void){return test_fast;}
 #define APP_SHELF_STYLE_NOTEPAD 6
 #define UI_NOTEPAD_ROWS 10
 static int shelf_rows(void){return test_style==APP_SHELF_STYLE_NOTEPAD?UI_NOTEPAD_ROWS:test_style==5?4:9;}
-typedef struct {char name[20],author[20];bool selected,has_progress;unsigned pct;} shelf_entry_t;
+typedef struct {char name[20],author[20];bool selected,has_progress,author_checked,author_pending;unsigned pct;} shelf_entry_t;
 static shelf_entry_t s_shelf[10];
 static int s_visible_count;
+static unsigned s_notepad_author_rows;
+static int64_t s_notepad_author_retry_ms;
 static unsigned test_notepad_draws;
 static void ui_notepad_line(uint8_t *fb,int r,bool selecting,bool selected,bool pressed,bool fast,const char *title,const char *author,unsigned pct){
     (void)fb;(void)selecting;(void)selected;(void)pressed;(void)fast;(void)title;
@@ -211,6 +213,7 @@ shelf += f'\n#include "{root / "main/book/reader_turn.c"}"\n'
 shelf += function("main/apps/app_book.c", "reader_turn_save") + "\n"
 shelf += function("main/apps/app_book.c", "reader_turn_load") + "\n"
 shelf += function("main/apps/app_book.c", "shelf_header_action_rect") + "\n"
+shelf += function("main/apps/app_book.c", "draw_notepad_row") + "\n"
 shelf += function("main/apps/app_book.c", "paint_control") + "\n"
 shelf += function("main/apps/app_book.c", "press_control") + "\n"
 # 页面状态机使用真实呈现和策略，只替换物理显示边界。/ Keep real presenter/policy and replace physical display only.
@@ -249,7 +252,7 @@ for rel in ('main/display/display_refresh_policy.c','main/display/display_refres
     shelf+=re.sub(r'^#include[^\n]*','',(root/rel).read_text(),flags=re.M)+'\n'
 shelf+='static bool reader_text_body(void){return book_layout_page_image_count(s_page)==0;}\nstatic void book_layout_adopt_page(unsigned page){(void)page;}\n'
 shelf+='#define READER_PANEL_TOOLS 99\n'
-for name in ("reader_status_prepare", "present", "paint_reading", "reader_turn_chrome", "turn_page"):
+for name in ("reader_status_prepare", "notepad_author_present", "present", "paint_reading", "reader_turn_chrome", "turn_page"):
     shelf += function("main/apps/app_book.c", name) + "\n"
 shelf += r'''
 int main(void){
@@ -311,7 +314,7 @@ int main(void){
  }
  assert(test_body_draws==body_before&&test_prepares==prepares_before&&test_list_draws==160);
  test_style=APP_SHELF_STYLE_NOTEPAD;s_visible_count=10;
- s_shelf[9]=(shelf_entry_t){.author="Test",.has_progress=true,.pct=100};
+ s_shelf[9]=(shelf_entry_t){.author="Test",.author_checked=true,.has_progress=true,.pct=100};
  EpdRect note=row_rect(9);
  for(int fast=0;fast<2;++fast){
    test_fast=fast;s_shelf_selecting=false;

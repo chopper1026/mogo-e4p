@@ -287,7 +287,6 @@
 {"传输状态","傳輸狀態","Transfer status"},
 {"低电通知","低電通知","Low battery alert"},
 {"作者","作者","Author"},
-{"作者未知","作者未知","Author unknown"},
 {"你的书架，自动拼贴","你的書架，自動拼貼","Your bookshelve. Auto-collage."},
 {"使用阅读背景","使用閱讀背景","Use background"},
 {"使用阅读背景？","使用閱讀背景？","Use reading background?"},

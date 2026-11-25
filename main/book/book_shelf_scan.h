@@ -23,7 +23,7 @@ typedef struct {
     nvs_handle_t progress; ///< 已尝试打开的只读进度句柄，扫描借用 / Borrowed read-only progress handle for this scan
     bool progress_checked; ///< 已完成一次进度命名空间打开尝试 / Progress namespace open was attempted once
     struct book_shelf_cache *cache; ///< 稳定条目缓存；按路径、大小和修改时间校验 / Static-entry cache, validated by path, size and mtime
-    bool metadata; ///< 列表/首页需要时才读取作者元数据 / Read author metadata only for list/Home views
+    bool metadata; ///< 需要显示作者时才读缓存 / Consult metadata caches only for views displaying authors
 } book_shelf_scan_t;
 
 typedef struct book_shelf_cache book_shelf_cache_t;
@@ -48,6 +48,9 @@ struct book_shelf_retry;
 bool book_shelf_hidden_read(nvs_handle_t handle, const char *path);
 /// 保留原PSRAM增长策略；失败保持数组和容量不变。/ Keep the original PSRAM growth policy; failure preserves array and capacity.
 bool book_shelf_catalog_reserve(const book_shelf_catalog_t *catalog);
+/// 核对缓存作者或明确署名；非缓存模式允许读取一本书的头部，不读正文。
+/// Resolve a cached creator or explicit byline; non-cache mode may read one book header, never body text.
+void book_shelf_resolve_author(book_shelf_entry_t *item, bool cache_only);
 /// 使用有界PSRAM目录栈；停止或失败前关闭本次打开的所有目录。
 /// Use a bounded PSRAM directory stack; close all directories opened by this call on stop or failure.
 void book_shelf_scan_dir(const book_shelf_scan_t *scan, const char *root, bool is_flash,

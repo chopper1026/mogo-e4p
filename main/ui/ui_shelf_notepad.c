@@ -85,6 +85,24 @@ static void cell_text(uint8_t *fb, int x, int cy, int size, int width, const cha
     ui_text_fixed_ink_vc(fb, x, cy, size, text, EPD_DRAW_ALIGN_LEFT, ink);
 }
 
+static int meta_px(bool header) {
+    const int size = ui_text_effective_px(header ? 21 : 22);
+    return size > 30 ? 30 : size;
+}
+
+static void author_text(uint8_t *fb, int cy, int size, const char *author) {
+    cell_text(fb, AUTHOR_X, cy, size, AUTHOR_END - AUTHOR_X, author, 0x40);
+}
+
+EpdRect ui_notepad_paint_author(uint8_t *fb, int row, bool selecting, const char *author) {
+    const EpdRect r = ui_notepad_row(row, selecting);
+    // 两侧留出字形侧承；只擦作者格，保留底部虚线和相邻两列。/ Allow for glyph overhang; leave the dashed rule and adjacent columns intact.
+    const EpdRect cell = {AUTHOR_X - 4, r.y + 1, AUTHOR_END - AUTHOR_X + 8, r.height - 2};
+    ui_fill_rect_fast(cell, UI_GRAY_WHITE, fb);
+    author_text(fb, r.y + r.height / 2, meta_px(false), author);
+    return cell;
+}
+
 void ui_notepad_line(uint8_t *fb, int row, bool selecting, bool selected, bool pressed, bool fast,
                      const char *title, const char *author, unsigned progress) {
     const bool header = row < 0;
@@ -107,13 +125,12 @@ void ui_notepad_line(uint8_t *fb, int row, bool selecting, bool selected, bool p
         }
     }
     int title_size = ui_text_effective_px(header ? 21 : 28);
-    int meta_size = ui_text_effective_px(header ? 21 : 22);
+    const int meta_size = meta_px(header);
     if (title_size > (header ? 29 : 37)) title_size = header ? 29 : 37;
-    if (meta_size > 30) meta_size = 30;
     const int title_x = selecting ? 94 : TITLE_X;
     const uint8_t ink = header ? 0x40 : UI_GRAY_BLACK;
     cell_text(fb, title_x, cy, title_size, AUTHOR_X - title_x - TITLE_GAP, title, ink);
-    cell_text(fb, AUTHOR_X, cy, meta_size, AUTHOR_END - AUTHOR_X, author, 0x40);
+    author_text(fb, cy, meta_size, author);
     char pct[8];
     snprintf(pct, sizeof(pct), "%u%%", progress > 100 ? 100 : progress);
     const char *progress_text = header ? "进度" : pct;

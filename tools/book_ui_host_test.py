@@ -202,8 +202,9 @@ static bool book_progress_load(const char* p,uint32_t n,book_progress_t* out){
 static bool book_progress_load_handle(uintptr_t h,const char* p,uint32_t n,book_progress_t* out){assert(h==1);return book_progress_load(p,n,out);}
 static bool book_progress_last_path(char* out,size_t cap){if(!test_recent_path[0])return false;snprintf(out,cap,"%s",test_recent_path);return true;}
 static bool book_metadata_supported(const char *path){const char *ext=strrchr(path,'.');return ext&&(!strcasecmp(ext,".epub")||!strcasecmp(ext,".mobi"));}
-static int book_metadata_read(const char* path,char* title,size_t tcap,char* author,size_t acap){(void)path;snprintf(title,tcap,"原书名");snprintf(author,acap,"作者");return ESP_OK;}
-static int book_metadata_cached(const char* path,char* title,size_t tcap,char* author,size_t acap){return book_metadata_read(path,title,tcap,author,acap);}
+static unsigned author_reads;
+static int book_metadata_read(const char* path,char* title,size_t tcap,char* author,size_t acap){++author_reads;snprintf(title,tcap,"%s",strstr(path,"placeholder")?"《示例》作者：书名署名":"原书名");snprintf(author,acap,"%s",strstr(path,"placeholder")?" 未知 ":"作者");return ESP_OK;}
+static int book_metadata_cached(const char* path,char* title,size_t tcap,char* author,size_t acap){if(strstr(path,"cold"))return ESP_FAIL;return book_metadata_read(path,title,tcap,author,acap);}
 static bool book_title_get(const char* path,char* out,size_t cap){(void)path;(void)out;(void)cap;return false;}
 static void book_title_clean_import(char* title){(void)title;}
 static bool book_title_from_path(const char* path,char* out,size_t cap){const char* name=strrchr(path,'/');name=name?name+1:path;size_t n=strlen(name);const char* dot=strrchr(name,'.');if(dot)n=(size_t)(dot-name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;return n>0;}
@@ -563,7 +564,7 @@ import re
 unit += re.search(r"#define BOOK_SCAN_DEPTH_LIMIT [^\n]+\ntypedef struct \{[^{}]+\} shelf_scan_frame_t;", scan_source.read_text()).group(0) + "\n"
 unit += "#define copy_text shelf_service_copy_text\n#define clean_filename shelf_service_clean_filename\n"
 unit += re.search(r"typedef struct \{[^{}]+\} shelf_backfill_t;", scan_source.read_text()).group(0) + "\n"
-for name in ("book_shelf_hidden_read", "copy_text", "clean_filename", "book_shelf_catalog_reserve", "book_shelf_scan_dir", "shelf_backfill_visit",
+for name in ("book_shelf_hidden_read", "copy_text", "clean_filename", "clean_author", "title_byline", "book_shelf_resolve_author", "book_shelf_catalog_reserve", "book_shelf_scan_dir", "shelf_backfill_visit",
              "book_shelf_scan_backfill", "book_shelf_scan_retries"):
     unit += function(name, scan_source) + "\n"
 unit += "#undef copy_text\n#undef clean_filename\n"
@@ -577,6 +578,15 @@ static int compare_books(const shelf_entry_t *a, const shelf_entry_t *b) {
     return book_shelf_compare(&query, a, b);
 }
 int main(void) {
+    for(unsigned placeholder=0;placeholder<2;++placeholder){
+        book_shelf_entry_t entry={0};strcpy(entry.path,placeholder?"/cold-placeholder.epub":"/cold.mobi");
+        strcpy(entry.author,"作者未知");unsigned before=author_reads;
+        book_shelf_resolve_author(&entry,true);assert(!entry.author_checked&&!entry.author[0]&&author_reads==before);
+        book_shelf_resolve_author(&entry,false);assert(entry.author_checked&&!strcmp(entry.author,placeholder?"书名署名":"作者"));
+        book_shelf_resolve_author(&entry,false);assert(author_reads==before+1);
+    }
+    book_shelf_entry_t txt={.path="/普通 - 书名.txt"};book_shelf_resolve_author(&txt,true);assert(txt.author_checked&&!txt.author[0]);
+    txt=(book_shelf_entry_t){.path="/《书》 作者: 未知子.txt"};book_shelf_resolve_author(&txt,true);assert(!strcmp(txt.author,"未知子"));
     test_shelf_services();
     for(int i=0;i<3;++i){
         EpdRect r=bulk_nav_rect(i);

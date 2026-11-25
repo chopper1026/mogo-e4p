@@ -130,6 +130,13 @@ enum { MODE_DU=1, MODE_GL16=5 };
 enum { DISPLAY_REFRESH_DEFAULT, DISPLAY_REFRESH_FEEDBACK, DISPLAY_REFRESH_DETAIL, DISPLAY_REFRESH_SETTLE };
 static EpdRect s_area;
 static int s_mode,s_du_count;
+static unsigned s_notepad_author_rows;
+static int64_t s_notepad_author_retry_ms;
+static unsigned author_probes;
+static void book_shelf_resolve_author(shelf_entry_t *entry,bool cache_only){
+    assert(!cache_only&&!entry->author_checked);++author_probes;entry->author_checked=true;
+    if(entry->pct)strcpy(entry->author,"署名");else entry->author[0]=0;
+}
 static bool s_input_settle,s_reader_tools_toggle,s_shelf_key_paint_pending;
 // 分类和书架保持竖屏，宿主夹具不触发阅读方向切换。/ Category and shelf fixtures stay portrait without reader rotation.
 static bool reader_orientation_sync(void){return false;}
@@ -141,7 +148,7 @@ static bool s_shelf_key_mode;
 static int s_shelf_key_pressed;
 static unsigned input_refreshes,ink_errors,opened_after_refreshes;
 enum EpdDrawError {EPD_DRAW_SUCCESS,TEST_DRAW_ERROR};
-static bool fail_ink,in_ink_group;
+static bool fail_ink,in_ink_group,fail_authors;
 static bool display_present_begin(void){assert(!in_ink_group);in_ink_group=true;return true;}
 static void display_present_end(bool held){assert(held&&in_ink_group);in_ink_group=false;}
 static int input_intent;
@@ -149,15 +156,16 @@ static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;
 static enum EpdDrawError display_refresh_area(display_state_t *hl,int intent,EpdRect area,unsigned flags){
     (void)hl;assert(flags==DISPLAY_REFRESH_DEFAULT);assert(area.width&&area.height);
     if(hl)assert(in_ink_group&&intent==DISPLAY_REFRESH_FEEDBACK);
-    ++input_refreshes;input_intent=intent;return fail_ink?TEST_DRAW_ERROR:EPD_DRAW_SUCCESS;
+    ++input_refreshes;input_intent=intent;return fail_ink||fail_authors?TEST_DRAW_ERROR:EPD_DRAW_SUCCESS;
 }
-static void guard_draw_result(display_state_t *hl,int error){(void)hl;if(error){assert(fail_ink);++ink_errors;}}
+static void guard_draw_result(display_state_t *hl,int error){(void)hl;if(error){assert(fail_ink||fail_authors);if(fail_ink)++ink_errors;}}
 '''
     for name in ("sort_shelf", "legacy_category_recover", "category_cover_draw", "shelf_layout", "shelf_category_remember", "shelf_category_restore", "category_reset", "category_begin",
                  "category_start_books", "category_select", "category_close", "category_back",
                  "category_input_paint", "category_gesture", "category_storage_ready", "category_error", "category_plan", "category_refresh_catalog", "category_tick"):
         code += host.function(name, ROOT / "main/apps/app_book.c") + "\n"
     # 真实输入呈现出口须在通用阅读出口之前接住分类键盘。/ The real input-present branch must catch category keys before reader routing.
+    code += host.function("notepad_author_present", BOOK) + "\n"
     prefix = host.function("present", ROOT / "main/apps/app_book.c").split(
         "    if (redraw == APP_REDRAW_NONE", 1)[0]
     code += prefix.replace("static bool present(", "static bool input_present(", 1) + "return false; }\n"
@@ -282,6 +290,7 @@ static bool shelf_fast;
 static bool app_settings_main_fast_refresh(void){return shelf_fast;}
 static void display_main_transition_gray_bands(const EpdRect *r,int n){assert(n==1&&r->y==(s_shelf_selecting?272:192));}
 static void unlock_draw(void){}
+static void lock_draw(void){}
 static void render(app_ctx_t *,uint8_t *);
 static bool fast_cover_matches(int row,EpdRect r){(void)row;(void)r;return false;}
 static void draw_shelf_guard(uint8_t *fb,EpdRect r,int row){(void)row;ui_draw_acrylic_guard(fb,r);}
@@ -313,7 +322,7 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
     code += host.function("book_cover_crop", ROOT / "main/image/image_decode.c") + "\n"
     code += host.function("icon", NAV) + host.function("ui_nav_draw", NAV) + host.function("ui_nav_hit", NAV)
     for name in ("fit_text", "fit_fixed_text", "shelf_label", "row_rect", "shelf_cover_image", "shelf_cover_frame_ready", "draw_favorite_icon",
-                 "draw_shelf_favorite_icon", "cover_favorite_needs_white_edge", "draw_shelf_cover", "draw_list_title", "draw_list_row",
+                 "draw_shelf_favorite_icon", "cover_favorite_needs_white_edge", "draw_shelf_cover", "draw_list_title", "draw_notepad_row", "draw_list_row",
                  "draw_shelf_furniture", "draw_shelf_titles", "shelf_header_action_rect", "shelf_category_title_rect", "shelf_manage_rect", "shelf_import_rect", "draw_shelf_header_button", "draw_shelf_pager", "shelf_page_arrow_rect",
                  "shelf_category_box", "draw_category_menu", "shelf_category_gesture", "toggle_selection", "main_page_visible"):
         code += host.function(name, BOOK) + "\n"
@@ -322,6 +331,7 @@ static app_redraw_t shelf_turn_page(app_ctx_t *ctx,int delta){
     tail = host.function("render", BOOK)
     tail = tail[tail.index("    ui_clear_page(fb);\n    // 留白保持纯白"):]
     code += "static void render(app_ctx_t *ctx,uint8_t *fb){\n" + tail + "\n"
+    code += host.function("notepad_author_tick", BOOK) + "\n"
     code += host.function("play_notepad_title_ink", BOOK) + "\n"
     action = host.function("action_at", BOOK)
     action = action[action.index("    if (s_view == SHELF) {\n        if(s_shelf_selecting"):]
@@ -428,6 +438,58 @@ static void notepad_paging_checks(app_ctx_t *ctx){
     assert(shelf_press_pager(ctx,UI_PAGER_FIRST)==APP_REDRAW_AREA&&ctx->leaf==0);
     notepad_paper_checks(first,false);
     free(first);s_count=count;s_visible_count=visible;
+}
+static void notepad_author_batch_checks(app_ctx_t *ctx){
+    const size_t bytes=684*1216/2;
+    uint8_t *placeholder=malloc(bytes),*batch=malloc(bytes);assert(placeholder&&batch);
+    shelf_entry_t original[20];memcpy(original,s_shelf,sizeof(original));
+    const int count=s_count,visible=s_visible_count;
+    s_count=s_visible_count=20;ctx->leaf=0;s_pressed_control=-1;
+    for(int r=0;r<10;r++){
+        s_shelf[r+10]=s_shelf[r];s_shelf[r].author_checked=false;s_shelf[r].author[0]=0;
+    }
+    s_shelf[4].pct=0;
+    render(ctx,ctx->fb);memcpy(placeholder,ctx->fb,bytes);
+    unsigned pushes=input_refreshes;
+    usb_active=true;assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&!author_probes);usb_active=false;
+    for(unsigned n=1;n<=3;++n)assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&author_probes==n);
+    render(ctx,ctx->fb);assert(!memcmp(placeholder,ctx->fb,bytes));
+    // 翻到已缓存页不能提交旧页；返回后复用已读书目。/ A warm page must not publish the old batch; returning reuses completed probes.
+    assert(shelf_press_pager(ctx,UI_PAGER_NEXT)==APP_REDRAW_AREA&&ctx->leaf==1);
+    render(ctx,ctx->fb);assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&author_probes==3&&!s_notepad_author_rows);
+    assert(shelf_press_pager(ctx,UI_PAGER_PREVIOUS)==APP_REDRAW_AREA&&ctx->leaf==0);
+    render(ctx,ctx->fb);assert(!memcmp(placeholder,ctx->fb,bytes));
+    for(unsigned n=4;n<10;++n)assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&author_probes==n);
+    assert(!memcmp(placeholder,ctx->fb,bytes)&&input_refreshes==pushes);
+    assert(notepad_author_tick(ctx)==APP_REDRAW_AREA&&author_probes==10);
+    EpdRect area=s_area;
+    assert(area.x>372&&area.x<=390&&area.x+area.width>=543&&area.x+area.width<=551);
+    assert(input_present(ctx,APP_REDRAW_AREA)&&input_intent==DISPLAY_REFRESH_DETAIL&&input_refreshes==pushes+1);
+    assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&author_probes==10);
+    memcpy(batch,ctx->fb,bytes);render(ctx,ctx->fb);assert(!memcmp(batch,ctx->fb,bytes));
+    for(int r=0;r<10;++r){
+        EpdRect line=ui_notepad_row(r,false);unsigned changes=0;
+        for(int y=line.y;y<line.y+line.height;y++)for(int x=0;x<684;x++){
+            if(ui_read_pixel(placeholder,x,y)==ui_read_pixel(batch,x,y))continue;
+            assert(ui_rect_hit(area,x,y)&&y<line.y+line.height-1);++changes;
+        }
+        assert(changes&&!s_shelf[r].author_pending);
+    }
+    // 末页混合命中与缺失，多选布局和推屏失败重试。/ Mixed short last page, selection geometry and retry after failed output.
+    ctx->leaf=1;s_visible_count=13;s_shelf_selecting=true;s_shelf[11].author_checked=false;
+    render(ctx,ctx->fb);memcpy(placeholder,ctx->fb,bytes);
+    assert(book_shelf_categories_menu_open(&s_shelf_categories));
+    assert(notepad_author_tick(ctx)==APP_REDRAW_NONE&&author_probes==10);
+    book_shelf_categories_menu_close(&s_shelf_categories);
+    assert(notepad_author_tick(ctx)==APP_REDRAW_AREA&&author_probes==11);
+    EpdRect line=ui_notepad_row(1,true);assert(s_area.y>=line.y&&s_area.y+s_area.height<=line.y+line.height);
+    fail_authors=true;assert(input_present(ctx,APP_REDRAW_AREA));fail_authors=false;
+    assert(s_shelf[11].author_pending&&notepad_author_tick(ctx)==APP_REDRAW_NONE);
+    ctx->now_ms+=1000;assert(notepad_author_tick(ctx)==APP_REDRAW_AREA&&author_probes==11);
+    assert(input_present(ctx,APP_REDRAW_AREA)&&!s_shelf[11].author_pending);
+    memcpy(batch,ctx->fb,bytes);render(ctx,ctx->fb);assert(!memcmp(batch,ctx->fb,bytes)&&memcmp(batch,placeholder,bytes));
+    free(placeholder);free(batch);memcpy(s_shelf,original,sizeof(original));
+    s_count=count;s_visible_count=visible;s_shelf_selecting=false;ctx->leaf=0;
 }
 static void notepad_ink_pixels(app_ctx_t *ctx,const char *output){
     const size_t bytes=684*1216/2;
@@ -557,7 +619,7 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
     s_count=18;
     const char *titles[]={"山海经","朝花夕拾","人间词话","小王子","论语","围城","边城","诗经","红楼梦"};
     for(int i=0;i<s_count;++i){memset(&s_shelf[i],0,sizeof(s_shelf[i]));snprintf(s_shelf[i].path,288,"/sdcard/books/book%d.txt",i);
-        copy(s_shelf[i].name,256,titles[i%9]);copy(s_shelf[i].author,128,"作者未知");s_shelf[i].search_match=true;s_shelf[i].favorite=i==1;}
+        copy(s_shelf[i].name,256,titles[i%9]);s_shelf[i].search_match=true;s_shelf[i].favorite=i==1;}
     assert(book_collection_sync(&s_collection,"/sdcard/books",NULL,0,s_shelf,s_count,true)==ESP_OK);
     uint32_t target=book_collection_at(&s_collection,0)->id;unsigned changed=0;
     for(int i=0;i<12;++i)s_shelf[i].selected=true;
@@ -572,7 +634,7 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
         "刘震云","加西亚·马尔克斯","丹尼尔·凯斯","伊塔洛·卡尔维诺","毛姆"};
     const unsigned notepad_progress[]={28,68,42,100,15,83,36,54,19,46};
     for(int i=0;i<10;++i){
-        copy(s_shelf[i].name,256,notepad_titles[i]);copy(s_shelf[i].author,128,notepad_authors[i]);
+        copy(s_shelf[i].name,256,notepad_titles[i]);copy(s_shelf[i].author,128,notepad_authors[i]);s_shelf[i].author_checked=true;
         s_shelf[i].has_progress=true;s_shelf[i].pct=notepad_progress[i];
     }
     for(unsigned scale=100;scale<=200;scale+=100){
@@ -627,6 +689,7 @@ static void shelf_checks(uint8_t *fb,const char *directory,const char *output){
         assert(s_shelf_selecting==(action==1));s_shelf_selecting=false;s_view=SHELF;
     }
     notepad_paging_checks(&ctx);
+    notepad_author_batch_checks(&ctx);
     notepad_ink_pixels(&ctx,output);
     notepad_ink_gestures(&ctx);
     shelf_fast=true;font_scale=100;shelf_snapshot(&ctx,output,"shelf-notepad-fast");

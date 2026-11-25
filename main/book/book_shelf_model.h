@@ -26,6 +26,8 @@ typedef struct {
     bool search_match;             ///< 已计算的搜索匹配结果。/ Precomputed search match.
     bool favorite;                 ///< 收藏标记。/ Favorite marker.
     uint32_t category_id;          ///< 当前扫描从路径推导的显示 ID，零为根目录。/ Display ID derived from this scan; zero means root.
+    bool author_checked;           ///< 本次扫描已核对作者，不持久化占位文案。/ Author resolved this scan; never persist placeholders.
+    bool author_pending;           ///< 已查得、待便签本合并显示；不持久化。/ Resolved but not yet revealed in a notepad batch; RAM only.
     bool new_book;                 ///< 本次完整扫描新发现。/ Newly discovered by this complete scan.
 } book_shelf_entry_t;
 

@@ -30,6 +30,7 @@ unit = r'''
 #define NVS_READONLY 0
 #define SHELF_HIDDEN_NS "rp_shelf_hide"
 #define ESP_OK 0
+typedef int esp_err_t;
 #define ESP_FAIL (-1)
 typedef int nvs_handle_t;
 typedef struct {int leaf;} app_ctx_t;
@@ -86,7 +87,7 @@ static void sort_shelf(app_ctx_t *ctx){(void)ctx;++sorts;s_visible_count=s_count
 '''
 for name in ('app_book_request_open','app_book_request_open_from_home','app_book_request_resume'):
     unit += function(name, reader) + '\n'
-for name in ('shelf_backfill_visit', 'book_shelf_scan_backfill'):
+for name in ('clean_author','title_byline','book_shelf_resolve_author','shelf_backfill_visit', 'book_shelf_scan_backfill'):
     unit += function(name, ROOT / 'main/book/book_shelf_scan.c') + '\n'
 for name in ('shelf_backfill_read_books', 'refresh_cached_progress'):
     unit += function(name, reader) + '\n'

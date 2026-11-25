@@ -21,6 +21,13 @@ int main(int argc, char **argv) {
     assert(argc > 1);
     for (int a = 1; a < argc; ++a) {
         book_epub_t *book = NULL;
+        if (strstr(argv[a], "/good_author_")) {
+            char title[256], author[160];
+            assert(book_epub_metadata(argv[a], title,sizeof(title),author,sizeof(author))==ESP_OK);
+            bool empty = strstr(argv[a], "_empty") != NULL;
+            assert(!strcmp(author,empty ? "" : "Writer") && !strcmp(title,empty ? "Book" : ""));
+            continue;
+        }
         if (strstr(argv[a], "/bad_")) {
             assert(book_epub_open(argv[a], &book) != ESP_OK && !book);
             printf("epub rejection passed: %s\n", argv[a]); continue;

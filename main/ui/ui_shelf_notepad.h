@@ -11,6 +11,8 @@ void ui_notepad_paper(uint8_t *fb, bool selecting, bool fast);
 /// 绘制书籍行及局部按压反馈；row=-1 绘制表头。 / Paint a book row and its press feedback; row=-1 paints the heading.
 void ui_notepad_line(uint8_t *fb, int row, bool selecting, bool selected, bool pressed, bool fast,
                      const char *title, const char *author, unsigned progress);
+/// 在未按压的书籍行替换作者占位，返回仅覆盖作者格的局刷区域。/ Replace a resting row's author placeholder and return its author-only dirty bounds.
+EpdRect ui_notepad_paint_author(uint8_t *fb, int row, bool selecting, const char *author);
 /// 从已绘制的普通行读取实际书名字迹，含省略号，不含相邻列。 / Measure the title ink in the painted normal row, including its ellipsis but not neighbouring columns.
 EpdRect ui_notepad_title_ink(const uint8_t *fb, int row);
 /// 追加一段笔迹，返回该段的局部脏区；按顺序从零调用。 / Add one stroke segment and return its dirty rectangle; call in order from zero.
