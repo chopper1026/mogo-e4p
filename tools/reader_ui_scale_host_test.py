@@ -47,7 +47,7 @@ static int ttf_text_width_px(int px,const char *text);
 static bool scaling=true,s_system_ttf;
 static unsigned glyphs;
 static EpdRect last_box;
-static int s_reader_slider=-1,s_reader_preview_px=32,s_px=32;
+static int s_px=32;
 static unsigned app_settings_system_font_size(void){return scale;}
 static bool app_settings_reader_touch_disabled(void){return false;}
 static int ui_text_effective_px(int px){return scaling?(px+2)*scale/100:px+2;}
@@ -76,6 +76,7 @@ static void epd_fill_rect(EpdRect r,int color,uint8_t *fb){(void)r;(void)color;(
 static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}static void epd_fill_circle(int x,int y,int radius,int color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
 static void epd_draw_circle(int x,int y,int radius,int color,uint8_t *fb){epd_fill_circle(x,y,radius,color,fb);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)radius;(void)color;assert(r.x>=0&&r.x+r.width<=684&&r.y>=0);}
+static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,int color){ui_fill_round_rect(fb,r,radius,color);}
 static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,int color){ui_fill_round_rect(fb,r,radius,color);}
 static void ui_draw_icon(uint8_t *fb,int x,int y,int px,int icon,int color){(void)fb;(void)x;(void)y;(void)px;(void)icon;(void)color;}
 static void ui_hairline(uint8_t *fb,int y,int x,int w,uint8_t color){(void)fb;(void)y;(void)x;(void)w;(void)color;}
@@ -106,6 +107,9 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
  assert(box.x>=0&&box.y>=0&&box.x+box.width<=684&&box.y+box.height<=1216);
  assert(box.width>0&&box.height>0);last_box=box;actual_text_box(fb,box,px,text,align,inv);
 }
+static void ui_text_box_bw(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inv){
+ ui_text_box(fb,box,px,text,align,inv);
+}
 '''
 unit+=function('draw_reading_font_name',book).replace('static void draw_reading_font_name(', 'static void actual_reading_font_name(')+'\n'
 unit+=r'''
@@ -118,7 +122,7 @@ unit+=declarations()+'\n'+implementation()+'\nstatic ui_reader_settings_group_t 
 unit+='static void draw_sheet_back(uint8_t *fb,int top){(void)fb;(void)top;}\n'
 unit+=function('draw_sheet',book)+'\n'
 for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slider_rect',
-             'draw_pill_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
+             'draw_pill_slider','draw_reader_size_slider','draw_font_pair','reading_setting_rect','reading_settings_top',
              'draw_reading_switch'):
     unit+=function(name,book)+'\n'
 for name in ['s_font_card','s_weight_card','s_title_style_card','s_layout_card','s_bookfont_card','s_rule_card','s_antialias_card']:

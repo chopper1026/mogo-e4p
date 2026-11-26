@@ -113,6 +113,7 @@ static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 '''
 unit+='static bool s_shelf_key_paint_pending;\n'
 unit+='static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\n'
+unit+='static bool reader_slider_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\n'
 unit+=function('present',root/'main/apps/app_book.c')
 unit+=r'''
 static void reset(void){

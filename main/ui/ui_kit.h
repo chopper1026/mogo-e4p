@@ -123,6 +123,9 @@ int ui_text_fit_px(int px, int width_limit, int height_limit, const char *text);
 /// Scale one line to the UI preference, fitting native glyphs within a control without loading another face.
 void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
                  enum EpdFontFlags align, bool inverted);
+/// 同 ui_text_box 的字号、对齐和字库选择，仅绘制黑白像素。/ Match ui_text_box sizing, alignment and face selection, using binary pixels.
+void ui_text_box_bw(uint8_t *fb, EpdRect box, int px, const char *text,
+                    enum EpdFontFlags align, bool inverted);
 /// 过长的文件名等数值按完整 UTF-8 字符加省略号，保留可读字号。
 /// Ellipsize long filenames and other values at UTF-8 boundaries to retain a readable size.
 void ui_text_value_box(uint8_t *fb, EpdRect box, int px, const char *text,

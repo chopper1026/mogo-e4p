@@ -53,6 +53,7 @@ static void reader_excerpt_reposition(void){s_excerpt_forward=false;}
 static bool s_shelf_key_paint_pending;
 static app_redraw_t shelf_key_paint(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_NONE;}
 static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
+static bool reader_slider_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
 enum {UI_PAGER_FIRST,UI_PAGER_PREVIOUS,UI_PAGER_NEXT,UI_PAGER_LAST};
 static EpdRect ui_pager_rect(int i){return (EpdRect){36+i*80,1000,64,64};}
 #define UI_LOCK_WIDTH 684

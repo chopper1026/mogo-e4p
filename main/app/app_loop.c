@@ -808,6 +808,9 @@ void app_loop_run(const app_loop_config_t* config) {
                     }
                     app_input_ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
+                    // 缺帧后的抬手不能提交连续调节。/ A lift after a sample gap must not commit a continuous adjustment.
+                    if (f.interrupted && gesture.captured_drag)
+                        app_input_cancel_gesture(&ctx, current, &gesture);
                     // 快捷层与电源弹窗都按帧回放：只在排空后喂最后一帧会丢掉按下沿，
                     // 快速点按需要再点一次才生效。弹窗动作留到本 tick 的弹窗分支执行。
                     // Replay the quick layer and the power dialog frame by frame: feeding
@@ -920,6 +923,8 @@ void app_loop_run(const app_loop_config_t* config) {
             }
             app_input_ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
                                frame_ms, &last_input_ms, &pressed, &released);
+            if (sample_interrupted && gesture.captured_drag)
+                app_input_cancel_gesture(&ctx, current, &gesture);
             // 单指按下沿给一记短震；回放帧不重复，多点、读错与读卡模式不震。
             // / One short pulse per single-finger press edge; replayed frames never repeat and multitouch, read errors and USB storage stay silent.
             if (err == ESP_OK && pressed && touch.count == 1 && !usb_storage_active()) haptics_pulse();

@@ -153,6 +153,7 @@ static bool display_present_begin(void){assert(!in_ink_group);in_ink_group=true;
 static void display_present_end(bool held){assert(held&&in_ink_group);in_ink_group=false;}
 static int input_intent;
 static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
+static bool reader_slider_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
 static enum EpdDrawError display_refresh_area(display_state_t *hl,int intent,EpdRect area,unsigned flags){
     (void)hl;assert(flags==DISPLAY_REFRESH_DEFAULT);assert(area.width&&area.height);
     if(hl)assert(in_ink_group&&intent==DISPLAY_REFRESH_FEEDBACK);
@@ -349,6 +350,11 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw){assert(false);return inp
 #define READER_WIDTH 684
 static bool s_toolbar;
 static int s_reader_panel;
+static int s_reader_slider=-1;
+static int64_t s_stats_activity_ms,s_shake_touch_ms;
+static app_redraw_t reader_slider_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,bool *handled){
+    (void)ctx;(void)ev;*handled=false;return APP_REDRAW_NONE;
+}
 static EpdRect body_rect(void){assert(false);return (EpdRect){0};}
 static int book_reader_tap_x(EpdRect r,int w,int x,int y){(void)r;(void)w;(void)x;(void)y;assert(false);return -1;}
 static bool app_settings_reader_vertical_turn(void){assert(false);return false;}

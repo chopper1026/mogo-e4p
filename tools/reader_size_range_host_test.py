@@ -27,7 +27,6 @@ unit=r'''
 typedef struct {int x,y,width,height;}EpdRect;
 static int s_px=48,s_margin[4]={24,24,0,0},s_line_spacing=130;
 static int s_reader_slider,s_reader_preview_px,s_reader_preview_margin[4],s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
-static bool s_reader_slider_endpoint;
 static EpdRect reader_slider_rect(int slider){(void)slider;return (EpdRect){36,700,612,76};}
 static int app_settings_book_tracking(void){return 15;}
 static int app_settings_book_line_spacing(void){return s_line_spacing;}

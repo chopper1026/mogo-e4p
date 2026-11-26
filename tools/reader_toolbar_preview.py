@@ -52,7 +52,7 @@ uint8_t ui_read_pixel(const uint8_t *fb,int x,int y);
                  'ui_fill_round_rect_raw', 'ui_fill_round_rect', 'ui_inset_rect', 'ui_draw_control_frame',
                  'ui_draw_separator', 'ui_hairline', 'icon_row_decode', 'icon_nibble', 'ui_draw_icon', 'ui_read_pixel',
                  'ui_text_effective_px', 'ui_text_fixed_context_width_px', 'ui_text_fixed_width_px',
-                 'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_fit_px'):
+                 'ui_text_fixed_context_vc', 'ui_text_fixed_vc', 'ui_text_fit_px', 'ui_text_box_bw'):
         code += host.function(name, KIT) + '\n'
     code += host.function('ui_text_box', KIT).replace('void ui_text_box(', 'static void actual_text_box(') + '\n'
     code += r'''
@@ -66,7 +66,7 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
  actual_text_box(fb,box,px,text,align,inverted);
 }
 static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
-static int s_px=36,s_reader_preview_px=36,s_reader_slider=-1;
+static int s_px=36,s_reader_slider=-1;
 static ui_reader_settings_group_t s_reader_settings_group;
 static int app_settings_book_weight_fine(void){return 0;}
 static int app_settings_book_title_style(void){return 3;}
@@ -116,7 +116,7 @@ static bool bookmark_is_current(void){return false;}
         code += re.search(r'^#define ' + name + r' .*', BOOK.read_text(), re.M)[0] + '\n'
     for name in ('reader_tools_area', 'tool_rect', 'reader_more_rect', 'reader_ui_extra', 'reader_font_top',
                  'reader_font_card', 'reader_slider_rect', 'reader_panel_text_vc', 'reader_panel_text', 'draw_sheet', 'reader_sheet_back_rect', 'draw_sheet_back',
-                 'draw_pill_slider', 'draw_reading_font_name', 'draw_font_pair', 'reader_weight_value',
+                 'draw_pill_slider', 'draw_reader_size_slider', 'draw_reading_font_name', 'draw_font_pair', 'reader_weight_value',
                  'draw_reading_switch', 'draw_font_settings', 'rule_style_rect', 'draw_rule_settings', 'draw_reader_more', 'reading_setting_rect',
                  'reading_settings_top', 'draw_reading_settings', 'draw_reader_tool_icon', 'draw_reader_toolbar'):
         code += host.function(name, BOOK) + '\n'
@@ -211,6 +211,17 @@ int main(int argc,char **argv){
   draw_reader_panel(fb);
   char path[1024];snprintf(path,sizeof(path),"%s/%s-%u.raw",argv[1],names[frame],font_scale);save(path,fb);
  }
+ // 内置与自选系统字体的滑杆都只能输出黑白，才能复用完整 DU 差分。/ Both UI faces must draw binary rails for complete DU differences.
+ for(font_scale=100;font_scale<=200;font_scale+=50)for(int custom=0;custom<2;++custom){
+  memset(fb,255,684*1216/2);s_system_ttf=custom!=0;ui_text_set_system_scale(true);
+  EpdRect rail=reader_slider_rect(0);draw_reader_size_slider(fb,36);
+  unsigned black=0;
+  for(int y=rail.y;y<rail.y+rail.height;++y)for(int x=rail.x;x<rail.x+rail.width;++x){
+   unsigned pixel=ui_read_pixel(fb,x,y);assert(pixel==0||pixel==15);black+=pixel==0;
+  }
+  assert(black>200);
+ }
+ s_system_ttf=false;ui_text_set_system_scale(false);
  for(font_scale=100;font_scale<=200;font_scale+=50)for(guide_style=0;guide_style<4;++guide_style)for(unsigned follow=0;follow<2;++follow){
   guide_follow=follow;s_reader_panel=READER_PANEL_RULE_SETTINGS;
   background(fb);draw_reader_panel(fb);

@@ -61,6 +61,11 @@ Release permits at most one optional white pulse. Detect old horizontal rules an
 
 ## 阅读状态与输出顺序 / Reader status and output order
 
+### 排版滑杆 / Typography sliders
+
+排版滑杆静止和拖动都使用黑白控件。回放先收集最新档位，主循环最多每 60 ms 通过 `CAPSULE` 对发生变化的滑杆推一次局部差分，不重画正文或追加清屏。正常松手用最后一个有效触点提交并重排；接触中断或重排失败时，只局部恢复仍可见且实际预览过的轨道。
+Typography sliders stay binary at rest and in motion. The loop coalesces replayed samples and presents a changed rail with a local `CAPSULE` differential at least 60 ms apart, with no body redraw or extra wipe. Normal lift commits and reflows from the last valid touch position. Interruption or failed reflow restores only a still-visible rail that displayed an uncommitted value.
+
 解锁恢复与退出阅读到主页面（包括同页返回书架）统一使用完整48相 `E0470_FULL_WAVEFORM`、GC16及整屏全像素输出，包含固定底栏和未变化像素。定时关机后启动恢复的首张目标页也使用这一策略。阅读返回按状态转场识别，与触发该动作的按键绑定无关。`display_request_full_refresh()` 只在目标输出成功后消费请求，失败重试保留48相；输出后恢复默认波形。锁屏出图成功时保留真实前后帧，不增加预清白；供电或输出故障仍按真实白底重建。日常阅读翻页、主页切页及未请求转场的手动全刷保持既有策略。软件验证不代表实屏残影改善。
 Unlocks and reader-to-main returns (including an in-app shelf return) use complete 48-phase `E0470_FULL_WAVEFORM`, GC16 and whole-screen full-pixel coverage, including fixed navigation and unchanged pixels. The first resumed frame after timed power-off uses the same policy. Reader returns are identified by the view transition, independently of the key binding that triggers the action. `display_request_full_refresh()` is consumed only on successful target output; retries retain 48 phases and output restores the default waveform. Successful lock output retains real frame references without an extra pre-clear; power/output faults retain physical-white reconstruction. Ordinary reader turns, main transitions and manual full refreshes without a transition request retain their policies. Software validation does not establish optical improvement.
 

@@ -274,7 +274,6 @@ static uint8_t s_middle_pending_action;
 static int64_t s_middle_pending_ms;
 static void middle_pending_clear(void) { s_middle_pending = false; }
 static int s_reader_slider=-1;
-static bool s_reader_slider_endpoint;
 static bool s_reader_tools_toggle;
 static int s_reader_preview_px,s_reader_preview_margin[MARGIN_COUNT],s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
 static bool s_requested_manage;
@@ -676,13 +675,11 @@ int main(void) {
     assert(apply_reader_layout(&margin_ctx,48,wide_margin,130,50)==APP_REDRAW_NONE);
     s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=24;
     memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
-    s_reader_slider_endpoint=false;
-    reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin[MARGIN_LEFT]==18);
+    reader_slider_begin(1,40);assert(s_reader_preview_margin[MARGIN_LEFT]==18);
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin[MARGIN_LEFT]==18&&test_saved_margin[MARGIN_LEFT]==18);
     s_margin[MARGIN_LEFT]=s_margin[MARGIN_RIGHT]=24;
     memcpy(test_saved_margin,s_margin,sizeof(test_saved_margin));
-    s_reader_slider_endpoint=true;
-    reader_slider_begin(1,183);assert(!s_reader_slider_endpoint);
+    reader_slider_begin(1,183);
     reader_slider_move(100);
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin[MARGIN_LEFT]==0&&test_saved_margin[MARGIN_LEFT]==0);
     // 左边距归零时右边距仍保留，正文栏不再对称收窄。

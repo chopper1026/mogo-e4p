@@ -19,6 +19,7 @@ unit = r'''
 #define ESP_OK 0
 enum {READING,SHELF,CATEGORIES,SEARCH,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_SETTINGS};
 typedef struct {int64_t now_ms;} app_ctx_t;
+static int s_reader_slider;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
 static const char *s_text="text";

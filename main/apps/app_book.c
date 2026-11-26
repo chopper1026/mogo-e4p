@@ -19,8 +19,8 @@
  * Same-day user revision: use a large white/black card with separate recovery instructions; show touch feedback for two seconds and normalize once on dismissal to fix long waits and uneven ink.
  * 用户 2026-11-06 修订：正文长按仅用于临时选字查词，留白不再打开目录，避免同一手势冲突；目录保留工具栏入口。
  * User revision 2026-11-06: body holds select dictionary text; blank holds no longer open the TOC, avoiding a gesture conflict; the toolbar retains the TOC.
- * 冻结修订：为避免边缘内滑误翻，开启手势操作时侧边优先退一层，纯正文保存后回首页；为支持无触摸操作，可把同一退层动作绑定到按键，不改默认映射。
- * Frozen revision: with gestures enabled the edges unwind one layer instead of turning pages; bare text exits to Home. The same one-level Back is bindable for touch-free operation; defaults stay unchanged.
+ * 冻结修订：排版滑杆起手优先于侧滑返回，避免边缘重叠处无法拖动；其他侧边内滑仍退一层，纯正文保存后回首页。同一退层动作可绑按键，不改默认映射。
+ * Frozen revision: typography rails capture starts before edge Back so their overlapping ends stay draggable. Other edge swipes still unwind one layer; bare text exits to Home. Back bindings and defaults are unchanged.
  * 冻结：Phase4b统一手势入口并接管三键为上页/工具条/下页；工具栏开关只对底部带做 GL16 差分。屏幕翻页在抬起提交，不画按下态。
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
@@ -145,8 +145,10 @@
  * User revision: EPUB chapter leads use navigation titles; body headings are folded only when matching, preventing front matter from being mislabeled.
  * User revision: the reader bar is rounded without protruding ticks; continue reading displays the latest cover.
  * User revision: the shelf retains its title layout, reads a complete cached page before painting, and reveals cold artwork only after the page is prepared.
- * User revision: size and spacing reflow saves final progress only; size uses the existing idle grayscale settle.
- * User revision: reader sliders drag and reflow on release; font selection pages vertically; statistics entries show real details and recent-30-day data.
+ * 用户修订：字号和间距只在重排成功后保存最终进度。/ User revision: size and spacing reflow save final progress only on success.
+ * 冻结：排版滑杆只局部预览最新档位，正常松手才重排；区别短拖和真实取消，避免反弹和积压闪动。
+ * Frozen: typography rails preview only the latest value locally and reflow on normal release; distinguish short drags from cancellations to prevent snapback and queued flashes.
+ * User revision: font selection pages vertically; statistics entries show real details and recent-30-day data.
  * User revision: pure-text turns use softened gray-edge differential GL16; images, mixed pages and water turns retain their policies, while periodic cleanup uses whole-screen GC16.
  * User revision: a standalone module owns full-page TOC rendering and hit testing; normalized single-line titles cannot leak into another row.
  * User revision: cover lift and cancellation drive changed pixels in grayscale, without forced cleanup during a tap.
@@ -573,7 +575,9 @@ static uint32_t s_stats_pending_ms, s_stats_pending_turns;
 static uint32_t s_session_read_ms, s_session_turns;
 static int s_font_page;
 static int s_reader_slider = -1;
-static bool s_reader_slider_endpoint;
+static bool s_reader_slider_dragged, s_reader_slider_feedback_pending;
+static int s_reader_slider_origin_x, s_reader_slider_shown;
+static int64_t s_reader_slider_next_preview_ms;
 static int s_reader_preview_px, s_reader_preview_margin[MARGIN_COUNT], s_reader_preview_line, s_reader_preview_para;
 static int s_reader_preview_tracking;
 static uint32_t s_recent_days[30];
@@ -2296,28 +2300,64 @@ static void draw_sheet_back(uint8_t* fb, int top) {
 
 static void draw_pill_slider(uint8_t* fb, EpdRect r, const char* left, const char* right,
                              const char* value, int index, int count, int left_px, int right_px) {
-    ui_fill_round_rect(fb, r, r.height / 2, 0xb8);
-    ui_draw_control_frame(fb, r, r.height / 2, 0x50);
+    // 静止和拖动都只生成黑白像素，避免切换波形时重刷滑杆。/ Use binary pixels at rest and in motion to avoid a waveform settle.
+    ui_draw_control_frame(fb, r, r.height / 2, UI_GRAY_BLACK);
     int cy = r.y + r.height / 2;
-    ui_text_box(fb,(EpdRect){r.x+12,cy-26,40,52},left_px,left,EPD_DRAW_ALIGN_CENTER,false);
-    ui_text_box(fb,(EpdRect){r.x+r.width-52,cy-26,40,52},right_px,right,EPD_DRAW_ALIGN_CENTER,false);
+    ui_text_box_bw(fb,(EpdRect){r.x+12,cy-26,40,52},left_px,left,EPD_DRAW_ALIGN_CENTER,false);
+    ui_text_box_bw(fb,(EpdRect){r.x+r.width-52,cy-26,40,52},right_px,right,EPD_DRAW_ALIGN_CENTER,false);
     int span = r.width - 128;
     int cx = r.x + 64 + (count > 1 ? span * index / (count - 1) : 0);
     EpdRect track = {r.x + 59, cy - 3, r.width - 118, 6};
-    ui_fill_round_rect(fb, track, 3, 0x78);
+    ui_draw_round_rect(fb, track, 3, UI_GRAY_BLACK);
     track.width = cx - track.x;
-    if (track.width > 0) ui_fill_round_rect(fb, track, 3, 0x40);
+    if (track.width > 0) ui_fill_round_rect(fb, track, 3, UI_GRAY_BLACK);
     epd_fill_circle(cx, cy, 37, UI_GRAY_WHITE, fb);
     epd_draw_circle(cx, cy, 37, UI_GRAY_BLACK, fb);
-    ui_text_box(fb,(EpdRect){cx-31,cy-28,62,56},22,value,EPD_DRAW_ALIGN_CENTER,false);
+    ui_text_box_bw(fb,(EpdRect){cx-31,cy-28,62,56},22,value,EPD_DRAW_ALIGN_CENTER,false);
 }
 
 static EpdRect reader_slider_refresh_rect(int slider) {
     EpdRect r = reader_slider_rect(slider);
-    // The knob extends four pixels outside the pill. Include that margin so
-    // moving it restores the old white footprint and the rail beneath it.
+    // 留边覆盖笔画及差分边缘，移走旋钮后恢复白底与轨道。/ Pad for strokes and dirty edges; restore the old knob footprint and track.
     r.x -= 8; r.y -= 8; r.width += 16; r.height += 16;
     return r;
+}
+
+static int reader_slider_value(int slider, bool preview) {
+    if (slider == 0) return preview ? s_reader_preview_px : s_px;
+    if (slider <= 4) return preview ? s_reader_preview_margin[slider - 1] : s_margin[slider - 1];
+    if (slider == 5) return preview ? s_reader_preview_line : app_settings_book_line_spacing();
+    if (slider == 6) return preview ? s_reader_preview_para : app_settings_book_paragraph_spacing();
+    return preview ? s_reader_preview_tracking : app_settings_book_tracking();
+}
+
+static void draw_reader_size_slider(uint8_t *fb, int px) {
+    char label[16];
+    snprintf(label, sizeof(label), "%d", px);
+    draw_pill_slider(fb, reader_slider_rect(0), "A", "A", label,
+                     px - BOOK_PX_MIN, BOOK_PX_MAX - BOOK_PX_MIN + 1, 20, 31);
+}
+
+static void draw_reader_slider(uint8_t *fb, int slider, bool preview) {
+    const int value = reader_slider_value(slider, preview);
+    const EpdRect rect = reader_slider_rect(slider);
+    char label[24];
+    if (slider == 0) {
+        draw_reader_size_slider(fb, value);
+    } else if (slider <= 4) {
+        static const char *const names[MARGIN_COUNT] = {"左", "右", "上", "下"};
+        snprintf(label, sizeof(label), "%s%d", names[slider - 1], value);
+        draw_pill_slider(fb, rect, "小", "大", label, reader_margin_level(value), BOOK_MARGIN_CHOICES, 21, 21);
+    } else if (slider == 5) {
+        const int index = value < 110 ? 0 : value > 150 ? 40 : value - 110;
+        draw_pill_slider(fb, rect, "紧", "松", "行距", index, 41, 21, 21);
+    } else if (slider == 6) {
+        snprintf(label, sizeof(label), ui_tr("段%d%%"), value);
+        draw_pill_slider(fb, rect, "紧", "松", label, app_settings_book_paragraph_level((uint8_t)value), APP_BOOK_PARAGRAPH_COUNT, 21, 21);
+    } else {
+        snprintf(label, sizeof(label), ui_tr("字距%+d"), value + APP_BOOK_TRACK_MIN);
+        draw_pill_slider(fb, rect, "紧", "松", label, value, APP_BOOK_TRACK_COUNT, 21, 21);
+    }
 }
 
 static const char* font_friendly_name(const ttf_font_item_t* item) {
@@ -2403,10 +2443,7 @@ static void draw_font_settings(uint8_t* fb) {
     bool prior_aa=ttf_get_antialias();ttf_set_antialias(true);
     draw_sheet(fb, reader_font_top(), "字体与排版");
     draw_sheet_back(fb, reader_font_top());
-    int shown_px = s_reader_slider >= 0 ? s_reader_preview_px : s_px;
-    char value[16]; snprintf(value, sizeof(value), "%d", shown_px);
-    draw_pill_slider(fb, reader_slider_rect(0), "A", "A", value,
-                     shown_px - BOOK_PX_MIN, BOOK_PX_MAX - BOOK_PX_MIN + 1, 20, 31);
+    draw_reader_size_slider(fb, s_px);
     draw_font_pair(fb, s_font_card, "阅读字体", ttf_font_display_name());
     char weight_value[20];reader_weight_value(weight_value,sizeof(weight_value),app_settings_book_weight_fine());
     draw_font_pair(fb, s_weight_card, "字重", weight_value);
@@ -2556,34 +2593,18 @@ static bool reader_indent_present(app_ctx_t *ctx,app_redraw_t redraw) {
     guard_draw_result(ctx->hl,display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK, s_area, DISPLAY_REFRESH_DEFAULT));
     return true;
 }
+static bool reader_slider_present(app_ctx_t *ctx, app_redraw_t redraw) {
+    const bool pending = s_reader_slider_feedback_pending;
+    s_reader_slider_feedback_pending = false;
+    if (!pending || redraw != APP_REDRAW_AREA) return false;
+    guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_CAPSULE, s_area, DISPLAY_REFRESH_DEFAULT));
+    return true;
+}
 static void draw_layout_settings(uint8_t* fb) {
     const int top = READER_LAYOUT_SHEET_TOP;
     draw_sheet(fb, top, "排版设置");
     draw_sheet_back(fb, top);
-    int shown_margin[MARGIN_COUNT];
-    for (int i = 0; i < MARGIN_COUNT; ++i)
-        shown_margin[i] = s_reader_slider >= 0 ? s_reader_preview_margin[i] : s_margin[i];
-    int shown_line = s_reader_slider >= 0 ? s_reader_preview_line : app_settings_book_line_spacing();
-    int shown_para = s_reader_slider >= 0 ? s_reader_preview_para : app_settings_book_paragraph_spacing();
-    int shown_tracking = s_reader_slider >= 0 ? s_reader_preview_tracking : app_settings_book_tracking();
-    // 四向边距排成 2×2：旋钮直接显示方向和像素，省掉每行外部标签。
-    // The four margins form a 2x2 block: each knob carries its direction and pixel inset, so the
-    // rows need no external labels.
-    static const char* const margin_names[MARGIN_COUNT] = {"左", "右", "上", "下"};
-    for (int i = 0; i < MARGIN_COUNT; ++i) {
-        char text[16];
-        snprintf(text, sizeof(text), "%s%d", margin_names[i], shown_margin[i]);
-        draw_pill_slider(fb, reader_slider_rect(1 + i), "小", "大", text,
-                         reader_margin_level(shown_margin[i]), BOOK_MARGIN_CHOICES, 21, 21);
-    }
-    int line_i = shown_line - 110;
-    if (line_i < 0) line_i = 0;
-    if (line_i > 40) line_i = 40;
-    draw_pill_slider(fb, reader_slider_rect(5), "紧", "松", "行距", line_i, 41, 21, 21);
-    char para_name[16]; snprintf(para_name, sizeof(para_name), ui_tr("段%d%%"), shown_para);
-    draw_pill_slider(fb, reader_slider_rect(6), "紧", "松", para_name, app_settings_book_paragraph_level((uint8_t)shown_para), APP_BOOK_PARAGRAPH_COUNT, 21, 21);
-    char track_name[24]; snprintf(track_name, sizeof(track_name), ui_tr("字距%+d"), shown_tracking + APP_BOOK_TRACK_MIN);
-    draw_pill_slider(fb, reader_slider_rect(7), "紧", "松", track_name, shown_tracking, APP_BOOK_TRACK_COUNT, 21, 21);
+    for (int i = 1; i < 8; ++i) draw_reader_slider(fb, i, false);
     EpdRect indent_row=indent_choice_rect(0);
     ui_text_box(fb,(EpdRect){42,indent_row.y,154,indent_row.height},24,"首行缩进",EPD_DRAW_ALIGN_LEFT,false);
     static const char* indent_names[] = {"无", "1字", "2字", "3字"};
@@ -4157,6 +4178,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     // The toggle flag applies to this present only; consume it even on an early return.
     const bool tools_toggle = s_reader_tools_toggle;
     s_reader_tools_toggle = false;
+    if (reader_slider_present(ctx, redraw)) return true;
     if (notepad_author_present(ctx, redraw)) return true;
     bool tools_band = false;
     if (s_dictionary_feedback_pending && redraw == APP_REDRAW_AREA) {
@@ -6122,11 +6144,18 @@ static EpdRect reader_slider_rect(int slider) {
     return (EpdRect){36, 828, 612, 76};
 }
 
-static int reader_slider_at(uint16_t x, uint16_t y) {
+static int reader_slider_at(int x, int y) {
+    if (s_view != READING || !s_text || s_open_error[0] || s_clear_confirm || s_dictionary_selection.active ||
+        (s_reader_panel != READER_PANEL_FONT_SETTINGS && s_reader_panel != READER_PANEL_LAYOUT_SETTINGS)) return -1;
     int first = s_reader_panel == READER_PANEL_FONT_SETTINGS ? 0 : 1;
     int end = s_reader_panel == READER_PANEL_FONT_SETTINGS ? 1 : 8;
     for (int i = first; i < end; ++i) if (ui_rect_hit(reader_slider_rect(i), x, y)) return i;
     return -1;
+}
+
+static bool reader_slider_capture(const app_ctx_t *ctx, int x, int y) {
+    (void)ctx;
+    return reader_slider_at(x, y) >= 0;
 }
 
 static void reader_slider_map(int slider, int x) {
@@ -6147,7 +6176,6 @@ static void reader_slider_begin(int slider, int x) {
     s_reader_preview_para = app_settings_book_paragraph_spacing();
     s_reader_preview_tracking = app_settings_book_tracking();
     EpdRect rect = reader_slider_rect(slider);
-    s_reader_slider_endpoint = x < rect.x + 64 || x >= rect.x + rect.width - 64;
     if (slider >= 1 && slider <= 4) {
         int *value = &s_reader_preview_margin[slider - 1];
         *value = reader_margin_input(rect, x, *value);
@@ -6177,7 +6205,6 @@ static void reader_slider_begin(int slider, int x) {
 static void reader_slider_move(int x) {
     int slider = s_reader_slider;
     if (slider < 0) return;
-    s_reader_slider_endpoint = false;
     reader_slider_map(slider, x);
 }
 
@@ -6190,6 +6217,87 @@ static app_redraw_t reader_slider_commit(app_ctx_t* ctx) {
     s_reader_slider = -1;
     if (slider == 7) return apply_reader_typography(ctx, tracking);
     return apply_reader_layout(ctx, px, s_reader_preview_margin, line, (uint8_t)para);
+}
+
+enum { READER_SLIDER_SLOP_PX = 4, READER_SLIDER_PREVIEW_MS = 60 };
+
+static bool reader_slider_visible(const app_ctx_t *ctx, int slider) {
+    return !ctx->request_app && !ctx->request_menu && !ctx->request_return && s_view == READING && s_text &&
+        !s_open_error[0] && !s_clear_confirm && !s_dictionary_selection.active &&
+        display_orientation_get() == DISPLAY_ORIENTATION_PORTRAIT &&
+        s_reader_panel == (slider == 0 ? READER_PANEL_FONT_SETTINGS : READER_PANEL_LAYOUT_SETTINGS);
+}
+
+static app_redraw_t reader_slider_feedback(app_ctx_t *ctx, int slider, bool preview) {
+    if (!reader_slider_visible(ctx, slider)) return APP_REDRAW_NONE;
+    const EpdRect area = reader_slider_refresh_rect(slider);
+    // 提示卡盖住轨道时不覆盖它；正常整页绘制仍按原层叠顺序。/ Do not paint over a notice; full renders keep their existing layer order.
+    if (s_reader_notice[0]) {
+        const EpdRect notice = ui_reader_notice_area(s_reader_notice, app_settings_system_font_size());
+        if (notice.x < area.x + area.width && area.x < notice.x + notice.width &&
+            notice.y < area.y + area.height && area.y < notice.y + notice.height) return APP_REDRAW_NONE;
+    }
+    lock_draw();
+    ui_text_set_system_scale(true);
+    ui_fill_rect_fast(area, UI_GRAY_WHITE, ctx->fb);
+    draw_reader_slider(ctx->fb, slider, preview);
+    ui_text_set_system_scale(false);
+    unlock_draw();
+    s_area = area;
+    s_reader_slider_feedback_pending = true;
+    return APP_REDRAW_AREA;
+}
+
+static app_redraw_t reader_slider_tick(app_ctx_t *ctx) {
+    const int slider = s_reader_slider;
+    if (slider < 0 || !s_reader_slider_dragged || ctx->now_ms < s_reader_slider_next_preview_ms ||
+        !ctx->touch || !ctx->touch->touched || ctx->touch->count != 1) return APP_REDRAW_NONE;
+    const int value = reader_slider_value(slider, true);
+    if (value == s_reader_slider_shown) return APP_REDRAW_NONE;
+    const app_redraw_t redraw = reader_slider_feedback(ctx, slider, true);
+    if (redraw == APP_REDRAW_AREA) {
+        s_reader_slider_shown = value;
+        s_reader_slider_next_preview_ms = ctx->now_ms + READER_SLIDER_PREVIEW_MS;
+    }
+    return redraw;
+}
+
+static app_redraw_t reader_slider_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev, bool *handled) {
+    *handled = false;
+    if (ev->type == UI_GESTURE_PRESS) {
+        const int slider = reader_slider_at(ev->x0, ev->y0);
+        if (slider < 0) return APP_REDRAW_NONE;
+        reader_slider_begin(slider, ev->x0);
+        s_reader_slider_origin_x = ev->x0;
+        s_reader_slider_dragged = false;
+        s_reader_slider_shown = reader_slider_value(slider, false);
+        s_reader_slider_next_preview_ms = 0;
+        *handled = true;
+        return APP_REDRAW_NONE;
+    }
+    const int slider = s_reader_slider;
+    if (slider < 0) return APP_REDRAW_NONE;
+    *handled = true;
+    if (!reader_slider_visible(ctx, slider)) {
+        s_reader_slider = -1;
+        return APP_REDRAW_NONE;
+    }
+    if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_RELEASE) {
+        if (abs((int)ev->x - s_reader_slider_origin_x) >= READER_SLIDER_SLOP_PX) s_reader_slider_dragged = true;
+        if (s_reader_slider_dragged) reader_slider_move(ev->x);
+        if (ev->type == UI_GESTURE_MOVE) return APP_REDRAW_NONE;
+        middle_pending_clear();
+        if (reader_slider_value(slider, true) != reader_slider_value(slider, false)) {
+            const app_redraw_t redraw = reader_slider_commit(ctx);
+            if (redraw != APP_REDRAW_NONE) return redraw;
+        }
+    } else if (ev->type != UI_GESTURE_CANCEL) {
+        return APP_REDRAW_NONE;
+    }
+    s_reader_slider = -1;
+    // 中断或重排失败只撤销已经上屏的预览。/ Undo only an already painted preview on cancellation or failed reflow.
+    return s_reader_slider_shown == reader_slider_value(slider, false) ? APP_REDRAW_NONE
+        : reader_slider_feedback(ctx, slider, false);
 }
 
 static app_redraw_t reader_notice_tick(app_ctx_t *ctx) {
@@ -7783,6 +7891,16 @@ static app_redraw_t dictionary_tick(app_ctx_t *ctx) {
 }
 
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    if (s_reader_slider >= 0 || ev->type == UI_GESTURE_PRESS) {
+        bool handled;
+        const app_redraw_t redraw = reader_slider_gesture(ctx, ev, &handled);
+        if (handled) {
+            if (ev->type == UI_GESTURE_PRESS) cancel_auto_resume();
+            else s_stats_activity_ms = ctx->now_ms;
+            s_shake_touch_ms = ctx->now_ms;
+            return redraw;
+        }
+    }
     if (s_open_error[0]) return open_error_gesture(ev);
     if (ev->type == UI_GESTURE_PRESS || ev->type == UI_GESTURE_TAP) cancel_auto_resume();
     bool dictionary_handled = false;
@@ -7927,38 +8045,6 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     // 触摸全程压制晃动翻页，抬手后留一个短窗口吸收点按与翻页回弹。
     // Suppress shake turns throughout touch; keep a short post-release window to absorb taps and turn rebounds.
     if (s_view == READING) s_shake_touch_ms = ctx->now_ms;
-    if (s_view == READING &&
-        (s_reader_panel == READER_PANEL_FONT_SETTINGS || s_reader_panel == READER_PANEL_LAYOUT_SETTINGS)) {
-        if (ev->type == UI_GESTURE_PRESS) {
-            int slider = reader_slider_at(ev->x0, ev->y0);
-            if (slider >= 0) {
-                reader_slider_begin(slider, ev->x0);
-                render(ctx, ctx->fb);
-                s_area = reader_slider_refresh_rect(slider);
-                s_mode = MODE_GL16;
-                return APP_REDRAW_AREA;
-            }
-        } else if (s_reader_slider >= 0) {
-            if (ev->type == UI_GESTURE_MOVE) {
-                int slider = s_reader_slider;
-                reader_slider_move(ev->x);
-                render(ctx, ctx->fb);
-                s_area = reader_slider_refresh_rect(slider);
-                s_mode = MODE_GL16;
-                return APP_REDRAW_AREA;
-            }
-            if (ev->type == UI_GESTURE_TAP || ev->type == UI_GESTURE_SWIPE_L ||
-                ev->type == UI_GESTURE_SWIPE_R || ev->type == UI_GESTURE_SWIPE_U ||
-                ev->type == UI_GESTURE_SWIPE_D || ev->type == UI_GESTURE_LONG_PRESS) {
-                if (!s_reader_slider_endpoint) reader_slider_move(ev->x);
-                return reader_slider_commit(ctx);
-            }
-            if (ev->type == UI_GESTURE_CANCEL) {
-                s_reader_slider = -1;
-                return APP_REDRAW_PAGE;
-            }
-        }
-    }
     if (s_view == READING && s_reader_panel == READER_PANEL_FONT_PICKER &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int count = ttf_font_count();
@@ -8433,6 +8519,8 @@ static app_redraw_t notepad_author_tick(app_ctx_t *ctx) {
     return APP_REDRAW_AREA;
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    // 回放结束后才画一次最新档位；按住期间不插入后台整页重画。/ Paint only the latest post-replay value; defer incidental page redraws while held.
+    if (s_reader_slider >= 0) return reader_slider_tick(ctx);
     // 书架空闲时小批搬迁，无需插卡；遇卷满/损坏退避，不阻塞启动或在 render 中写入。
     // Drain small batches while the shelf is idle, even without a card; back off on failure and never migrate in render.
     static int64_t migrate_after;
@@ -8585,6 +8673,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 }
 static void before_lock(app_ctx_t* ctx) {
     dictionary_cancel();
+    s_reader_slider = -1;
     // 锁屏期间不补发按键动作，唤醒后从干净状态开始。
     // Never replay a key action across lock; resume from a clean state.
     middle_pending_clear();
@@ -8698,6 +8787,7 @@ const app_desc_t app_book = {
     .on_media_lost = book_on_media_lost, .on_media_ready = book_on_media_ready,
     .on_before_lock = before_lock, .on_main_key = shelf_main_key,
     .on_deferred_press = cancel_auto_resume, .gesture_long_drag = dictionary_long_drag,
+    .gesture_capture_drag = reader_slider_capture,
     .share_top_edge_tap = share_top_edge_tap,
     .screen_touch_disabled = screen_touch_disabled,
     .on_gesture = gesture_event, .on_key = on_key, .on_key_long = on_key_long,

@@ -201,8 +201,13 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
         return;
     }
     ui_gesture_event_t event;
-    if (ui_gesture_feed_options(gesture, ctx, &event,
-            current->gesture_long_drag && current->gesture_long_drag(ctx))) {
+    const bool new_press = !gesture->active && ctx->pressed && !ctx->consumed &&
+        !ctx->released && ctx->touch && ctx->touch->touched && ctx->touch->count == 1;
+    const bool capture = new_press && current->gesture_capture_drag &&
+        current->gesture_capture_drag(ctx, ctx->touch->x, ctx->touch->y);
+    const bool captured = capture || gesture->captured_drag;
+    if (ui_gesture_feed_drag(gesture, ctx, &event,
+            new_press && !capture && current->gesture_long_drag && current->gesture_long_drag(ctx), capture)) {
 #if CONFIG_TOUCH_DIAG
         // MOVE 逐帧太多不记；按下与终态全记。MOVE frames are too noisy; log press + terminal.
         if (event.type != UI_GESTURE_MOVE) {
@@ -225,7 +230,7 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
         }
 #endif
         if (event.type == UI_GESTURE_PRESS) {
-            owner = horizontal_owner(ctx, current, event.x0, event.y0);
+            owner = gesture->captured_drag ? ROUTE_PAGE : horizontal_owner(ctx, current, event.x0, event.y0);
             gesture->orientation = (uint8_t)display_orientation_get();
             gesture->horizontal_owner = owner;
             gesture->deferred_press = owner == ROUTE_EDGE_LEFT || owner == ROUTE_EDGE_RIGHT;
@@ -276,7 +281,7 @@ void app_input_dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
         }
         app_redraw_t redraw = current->on_gesture(ctx, &event);
         present(ctx, current, gesture, redraw);
-        if (redraw != APP_REDRAW_NONE) ctx->consumed = true;
+        if (redraw != APP_REDRAW_NONE || captured) ctx->consumed = true;
     }
 }
 

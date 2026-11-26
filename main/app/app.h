@@ -172,6 +172,8 @@ struct app_desc_s {
     bool (*present)(app_ctx_t* ctx, app_redraw_t redraw);
     /// 可选：启用本次接触的长按拖动释放事件。/ Enable long-drag release events for a new contact.
     bool (*gesture_long_drag)(app_ctx_t* ctx);
+    /// 可选纯查询：按单指起点捕获连续横拖，优先于侧滑返回。/ Capture a continuous drag at a single-finger origin before edge Back.
+    bool (*gesture_capture_drag)(const app_ctx_t* ctx, int x, int y);
     /// 可选纯查询：顶部快捷栏尚未展开时，允许页内手势识别短点按；下拉仍由快捷栏接管。
     /// Optional pure query: share a short top-edge tap with the page gesture recognizer, never a pull-down.
     bool (*share_top_edge_tap)(const app_ctx_t* ctx);

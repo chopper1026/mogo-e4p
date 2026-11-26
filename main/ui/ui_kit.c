@@ -404,6 +404,26 @@ void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,
     ui_text_fixed_vc(fb,x,box.y+box.height/2,px,text,align,inverted);
 }
 
+void ui_text_box_bw(uint8_t *fb, EpdRect box, int px, const char *text,
+                    enum EpdFontFlags align, bool inverted) {
+    text = ui_tr(text);
+    if (!fb || !text || !*text) return;
+    px = ui_text_fit_px(ui_text_effective_px(px), box.width, box.height, text);
+    if (px <= 0) return;
+    const int x = box.x + (align == EPD_DRAW_ALIGN_CENTER ? box.width / 2 : align == EPD_DRAW_ALIGN_RIGHT ? box.width : 0);
+    const int cy = box.y + box.height / 2;
+    const uint8_t fg = inverted ? UI_INK_WHITE : UI_INK_BLACK;
+    const uint8_t bg = inverted ? UI_INK_BLACK : UI_INK_WHITE;
+    int above = 0, below = 0;
+    if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text)) {
+        ui_font_measure_line_px(px, text, &above, &below);
+        ui_font_draw_text_px(fb, x, cy + (above - below) / 2, px, text, align, fg, bg, true);
+    } else {
+        ttf_measure_line_px(px, text, &above, &below);
+        ttf_draw_text_px_bw(fb, x, cy + (above - below) / 2, px, text, align, fg, bg);
+    }
+}
+
 void ui_text_value_box(uint8_t *fb, EpdRect box, int px, const char *text,
                        enum EpdFontFlags align, bool inverted) {
     text = ui_tr(text);

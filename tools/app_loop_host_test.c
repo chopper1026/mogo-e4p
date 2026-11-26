@@ -586,6 +586,29 @@ static app_redraw_t single_key_release_tick(app_ctx_t *ctx) {
     if(step==0)touch_sampler_test_push(250,0,0,0);
     return APP_REDRAW_NONE;
 }
+static bool capture_test_rail(const app_ctx_t *ctx, int x, int y) {
+    (void)ctx;
+    return y==420 && x>=36 && x<648;
+}
+static app_redraw_t interrupted_rail_tick(app_ctx_t *ctx) {
+    (void)ctx;
+    if(step==0)touch_sampler_test_push_frame(40,0,0,0,true);
+    return APP_REDRAW_NONE;
+}
+static void test_interrupted_rail(void) {
+    // 单帧与积压回放的缺帧都必须取消，不能把残留抬手提交为选值。
+    // Interruptions cancel both single frames and backlog replay; a stale lift never commits a value.
+    for(int path=0;path<3;++path){
+        reset();first.on_gesture=gesture;first.gesture_capture_drag=capture_test_rail;
+        touch_sampler_test_enable(true);
+        touch_sampler_test_push(20,40,420,1);touch_sampler_test_push(30,120,420,1);
+        if(path==0)first.on_tick=interrupted_rail_tick;
+        else touch_sampler_test_push_frame(40,0,0,0,path==1);
+        add(0,0,0,0);add(0,0,0,0);run();touch_sampler_test_enable(false);
+        assert(events[UI_GESTURE_PRESS]==1&&events[UI_GESTURE_MOVE]==1);
+        assert(events[UI_GESTURE_CANCEL]==(path!=2)&&events[UI_GESTURE_RELEASE]==(path==2));
+    }
+}
 static void test_panel_key_replay(void) {
     // 同一队列内的按下、保持和抬起都要路由一次，且不能漏给页面手势。
     // Route buffered presses, holds and releases once, without leaking them to page gestures.
@@ -872,6 +895,7 @@ int main(void) {
 
     test_auto_lock_network_sessions();
     test_panel_key_replay();
+    test_interrupted_rail();
     test_reader_top_edge();
     test_screen_touch_lock();
     // 自动提示沿真实导航保留正文恢复点；手势和已有导航请求优先。

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  * 中文：单指手势状态机，页面负责解释事件与绘制。
  * English: Single-finger gesture state machine; pages interpret and draw events.
- * 冻结：翻页不画按下态；引用 ui_kit.h 阈值；短拖取消以免误翻。
- * Frozen: No pressed decoration for page turns; use ui_kit.h thresholds; short drags cancel to avoid accidental turns.
+ * 冻结：翻页不画按下态；引用 ui_kit.h 阈值；普通短拖取消以免误翻。显式捕获的连续控件正常抬手不取消。
+ * Frozen: No press decoration for turns; use ui_kit.h thresholds and cancel ordinary short drags to avoid mis-turns. An explicitly captured continuous control receives normal release.
  */
 #include "ui_gesture.h"
 #include "ui_kit.h"
@@ -22,7 +22,8 @@ static bool emit(const ui_gesture_t *g, ui_gesture_type_t type, int64_t now, ui_
     return true;
 }
 
-bool ui_gesture_feed_options(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out, bool long_drag) {
+bool ui_gesture_feed_drag(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out,
+                          bool long_drag, bool captured_drag) {
     if (!g || !ctx || !out) return false;
     const app_touch_t *touch = ctx->touch;
     bool invalid = ctx->consumed || !touch || ctx->now_ms < 0;
@@ -37,11 +38,21 @@ bool ui_gesture_feed_options(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_e
     if (!g->active) {
         if (!ctx->pressed || ctx->released || !touch->touched) return false;
         *g = (ui_gesture_t){ .active = true, .x0 = touch->x, .y0 = touch->y,
-            .x = touch->x, .y = touch->y, .t0_ms = ctx->now_ms, .last_ms = ctx->now_ms, .long_drag = long_drag };
+            .x = touch->x, .y = touch->y, .t0_ms = ctx->now_ms, .last_ms = ctx->now_ms,
+            .long_drag = long_drag, .captured_drag = captured_drag };
         return emit(g, UI_GESTURE_PRESS, ctx->now_ms, out);
     }
     g->last_ms = ctx->now_ms;
+    const bool x_changed = g->x != touch->x;
     g->x = touch->x; g->y = touch->y;
+    if (g->captured_drag) {
+        if (ctx->released || !touch->touched) {
+            bool result = emit(g, ctx->released ? UI_GESTURE_RELEASE : UI_GESTURE_CANCEL, ctx->now_ms, out);
+            ui_gesture_reset(g);
+            return result;
+        }
+        return x_changed && emit(g, UI_GESTURE_MOVE, ctx->now_ms, out);
+    }
     int32_t dx = (int32_t)g->x - g->x0, dy = (int32_t)g->y - g->y0;
     int32_t ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
     // 容差使用二维距离，移回起点也不恢复轻点资格。/ Slop uses two-dimensional distance; returning to the origin never restores tap eligibility.
@@ -64,6 +75,10 @@ bool ui_gesture_feed_options(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_e
     }
     if (g->moved && (!g->long_fired || g->long_drag)) return emit(g, UI_GESTURE_MOVE, ctx->now_ms, out);
     return false;
+}
+
+bool ui_gesture_feed_options(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out, bool long_drag) {
+    return ui_gesture_feed_drag(g, ctx, out, long_drag, false);
 }
 
 bool ui_gesture_feed(ui_gesture_t *g, const app_ctx_t *ctx, ui_gesture_event_t *out) {

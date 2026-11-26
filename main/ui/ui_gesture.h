@@ -5,8 +5,8 @@
  * 中文：由主循环喂入触摸快照的纯状态识别器，不解释页面动作。
  * English: Pure state recognizer fed by loop touch snapshots; no page actions.
  *
- * 冻结：翻页不做按下反馈；阈值来自 ui_kit.h；短拖取消以免误翻。
- * Frozen: No press decoration for page turns; thresholds live in ui_kit.h; short drags cancel to avoid accidental turns.
+ * 冻结：翻页无按下反馈，阈值来自 ui_kit.h；短拖取消仅用于普通手势，显式捕获的连续控件需要区分抬手与取消。
+ * Frozen: Turns have no press feedback and use ui_kit.h thresholds; short-drag cancellation is for ordinary gestures, not explicitly captured continuous controls.
  */
 #pragma once
 #include "app.h"
@@ -21,7 +21,7 @@ typedef enum {
     UI_GESTURE_SWIPE_U, ///< 上滑 / Swipe up
     UI_GESTURE_SWIPE_D, ///< 下滑 / Swipe down
     UI_GESTURE_CANCEL, ///< 取消 / Cancel
-    UI_GESTURE_RELEASE, ///< 长拖正常释放，仅显式启用 / Normal long-drag release, opt-in only
+    UI_GESTURE_RELEASE, ///< 显式启用的长拖或连续控件正常释放 / Normal release of an opt-in long drag or continuous control
 } ui_gesture_type_t;
 
 typedef struct ui_gesture_event_s {
@@ -39,6 +39,7 @@ typedef struct {
     int64_t last_ms; ///< 最近时刻，倒退时取消 / Last time, cancel on clock regression
     bool moved; ///< 曾超出容差 / Has exceeded movement slop
     bool long_drag; ///< 接触起点固定的长拖能力 / Long-drag option captured at press
+    bool captured_drag; ///< 本次接触归连续横向控件 / Contact belongs to a continuous horizontal control
     uint8_t horizontal_owner; ///< 输入层在按下时锁定；识别器本身不解释 / Origin owner, opaque to the recognizer
     uint8_t orientation; ///< 按下时的画面方向 / Orientation at press
     bool deferred_press; ///< 侧边延迟转交按下，避免滑杆等提前生效 / Defer edge presses until local intent is clear
@@ -55,3 +56,8 @@ bool ui_gesture_feed(ui_gesture_t *gesture, const app_ctx_t *ctx, ui_gesture_eve
 /// 长拖能力只在按下时采样，默认接口保持原行为。/ Capture long-drag capability at press; the default API stays unchanged.
 bool ui_gesture_feed_options(ui_gesture_t *gesture, const app_ctx_t *ctx,
                              ui_gesture_event_t *out, bool long_drag);
+
+/// 在按下时锁定连续控件归属；横坐标变化发 MOVE，正常抬手总发 RELEASE。
+/// Latch a continuous control at press; emit MOVE for changed x and RELEASE for any normal lift.
+bool ui_gesture_feed_drag(ui_gesture_t *gesture, const app_ctx_t *ctx,
+                          ui_gesture_event_t *out, bool long_drag, bool captured_drag);

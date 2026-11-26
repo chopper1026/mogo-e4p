@@ -5,6 +5,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复阅读排版滑杆短拖回弹和反复闪动：拖动只刷新当前滑杆，松手才应用最终值；保留点按和两端微调。/ Fix typography sliders snapping back or flashing during short drags. Only the active slider updates while dragging; the final value applies on release. Taps and endpoint nudges still work.
 - 设置主列表改为随手指位移滚动，松手即停；保留原分隔线，松手后只对旧横线已变白的位置定点补白。/ The Settings list now follows the drag and stops on release. Dividers retain their appearance; old rule positions that are now white can receive a targeted cleanup.
 
 ## v1.2.1 · 2026-11-26

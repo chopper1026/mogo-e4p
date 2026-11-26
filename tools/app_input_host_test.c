@@ -282,6 +282,10 @@ static bool back_requests_return, back_save_failed, resume_pending;
 static int nav_moves, nav_releases, nav_redraws;
 static void cancel_resume(void) { resume_pending = false; }
 static bool allow_drag(app_ctx_t *c) { (void)c; return true; }
+static bool capture_rail(const app_ctx_t *c, int x, int y) {
+    (void)c;
+    return y == 420 && x >= 36 && x < 648;
+}
 void app_edge_feedback_show(app_ctx_t *c, bool right, int y) {
     assert(c->released && !is_root && y == 340);
     ++edge_pulses[right];
@@ -308,7 +312,8 @@ static app_redraw_t nav_event(app_ctx_t *c, const ui_gesture_event_t *e) {
     if (e->type == UI_GESTURE_SWIPE_D) ++nav_vertical;
     return APP_REDRAW_NONE;
 }
-static const app_desc_t nav_page = {.on_gesture=nav_event, .on_deferred_press=cancel_resume, .gesture_long_drag=allow_drag, .edge_back=nav_back, .step_tab=nav_step, .horizontal_zone=nav_zone};
+static const app_desc_t nav_page = {.on_gesture=nav_event, .on_deferred_press=cancel_resume, .gesture_long_drag=allow_drag,
+    .gesture_capture_drag=capture_rail, .edge_back=nav_back, .step_tab=nav_step, .horizontal_zone=nav_zone};
 static void nav_present(app_ctx_t *c, const app_desc_t *p, ui_gesture_t *g, app_redraw_t redraw) {
     (void)c; (void)p; (void)g; assert(redraw == APP_REDRAW_NONE || redraw == APP_REDRAW_PAGE);
     if (redraw == APP_REDRAW_PAGE) ++nav_redraws;
@@ -372,8 +377,27 @@ static void full_screen_gestures(void) {
     assert(edge_pulses[0] == 13 && edge_pulses[1] == 12);
     puts("PASS full-screen gesture ownership, presets, rotation, roots, tabs, taps and cancellation");
 }
+static void captured_drag(void) {
+    reset(); nav_enabled = true; width_preset = 2;
+    int old_backs = backs, presses = nav_presses, releases = nav_releases;
+    int old_longs = nav_longs, old_moves = nav_moves;
+    nav_feed(1,40,420,10);
+    assert(gesture.captured_drag && !gesture.deferred_press && nav_presses == presses+1);
+    nav_feed(1,40,420,520);
+    nav_feed(1,44,440,530);
+    nav_feed(1,240,340,540); nav_feed(0,0,0,550);
+    assert(nav_releases == releases+1 && nav_moves == old_moves+2 && backs == old_backs && nav_longs == old_longs);
+    assert(ctx.consumed && !gesture.active && latest.x == 240 && latest.y == 340);
+    nav_feed(1,644,420,600); nav_feed(1,200,340,620); nav_feed(0,0,0,630);
+    assert(nav_releases == releases+2 && backs == old_backs);
+    swipe(40,200); assert(backs == old_backs+1 && nav_releases == releases+2);
+    nav_feed(1,40,420,710); nav_feed(2,80,420,720); nav_feed(1,90,420,730); nav_feed(0,0,0,740);
+    assert(!gesture.active && nav_releases == releases+2);
+    puts("PASS captured rail owns both overlapping edges and only releases a normal single-finger contact");
+}
 int main(void) {
     full_screen_gestures();
+    captured_drag();
     touch_filter_cases();
     snapshots(); gestures(); ownership_and_cancel(); event_trace();
 #if CONFIG_TOUCH_DIAG
