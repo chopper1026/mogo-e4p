@@ -27,8 +27,9 @@ static unsigned app_settings_gesture_width(void){return preset;}
         code += function(name, PAGE) + '\n'
     code += enum_block(PAGE, 'SETTINGS_MAIN', 'settings_page_t')
     code += '''static settings_page_t s_page;
-static bool s_config_confirm,s_boot_pending,s_local_pending,s_upgrade_restart,s_upgrade_confirm;
+static bool s_config_confirm,s_config_restore_pending,s_boot_pending,s_local_pending,s_upgrade_restart,s_upgrade_confirm;
 static bool s_batt_calibration_confirm,s_reading_bg_confirm,s_network_shortcut_back;
+static int64_t s_config_ignore_through_ms;
 static struct {bool busy;} s_update;
 static int s_upgrade_job; enum {UPGRADE_JOB_NONE};
 static bool pico_online_busy(void){return false;}
@@ -36,10 +37,18 @@ static app_redraw_t settings_navigate(app_ctx_t *ctx,bool home){
     (void)ctx; assert(!home && !s_config_confirm); s_page=SETTINGS_MAIN; return APP_REDRAW_PAGE;
 }
 '''
-    code += function('settings_edge_back', PAGE) + '\n'
+    for name in ('config_inputs_blocked', 'settings_edge_back'):
+        code += function(name, PAGE) + '\n'
     code += '''int main(int argc,char **argv){
     assert(argc==2 && ttf_font_open_builtin()==ESP_OK);
     app_ctx_t ctx={0}; s_page=SETTINGS_CONFIG;s_config_confirm=true;strcpy(s_notice,"restore?");
+    s_config_restore_pending=true;
+    assert(!settings_edge_back(&ctx).accepted && s_page==SETTINGS_CONFIG);
+    s_config_restore_pending=false;
+    s_config_ignore_through_ms=10;
+    ctx.now_ms=10;
+    assert(!settings_edge_back(&ctx).accepted && s_config_confirm);
+    ctx.now_ms=11;
     app_back_result_t back=settings_edge_back(&ctx);
     assert(back.accepted && back.redraw==APP_REDRAW_PAGE && !s_config_confirm && !s_notice[0] && s_page==SETTINGS_CONFIG);
     assert(settings_edge_back(&ctx).accepted && s_page==SETTINGS_MAIN && !settings_edge_back(&ctx).accepted);

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 从 TF 卡确认恢复后，立即显示「正在恢复，请稍候…」；等待时的重复点按不会再触发恢复。/ Show a restoring message immediately after confirming a TF restore, and ignore taps made while waiting.
+
 - 修复机内配置空间紧张时 TF 备份可保存却无法完整恢复的问题。恢复前先试算设置与阅读记录能否一起装下；容量不足不覆盖原资料，并与内部文件存储故障分别提示。/ Fix incomplete TF restores under NVS pressure. Check that settings and reading history fit together before replacing live data, and distinguish insufficient capacity from an unavailable internal volume.
 
 - 新增可关闭的手势操作：双侧边缘内滑逐层返回，仅在成功返回时边缘浮现一道浅弧，内侧显示朝向屏幕中央的折角（左 `>`、右 `<`）；页面内横滑切换标签或四个主界面；边缘宽度可调。/ Add configurable inward edge swipes with a successful Back indicated by a shallow edge curve and an inward-pointing chevron, and interior swipes for sibling tabs or main pages.

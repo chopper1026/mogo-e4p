@@ -246,6 +246,21 @@ static bool s_sync_pending, s_sync_waiting;
 static bool s_font_sync_confirm;
 static char s_font_sync_path[TTF_FONT_PATH_MAX];
 static bool s_config_confirm;
+static bool s_config_restore_pending;
+static int64_t s_config_ignore_through_ms;
+static const EpdRect s_config_save_button = {36, 561, 612, 83};
+static const EpdRect s_config_restore_button = {36, 681, 612, 83};
+static const EpdRect s_config_restore_feedback = {36, 561, 612, 298};
+
+static bool config_inputs_blocked(int64_t started_ms) {
+    return s_page == SETTINGS_CONFIG && (s_config_restore_pending ||
+        (s_config_ignore_through_ms && started_ms <= s_config_ignore_through_ms));
+}
+
+static bool settings_modal_input_owned(app_ctx_t *ctx) {
+    (void)ctx;
+    return s_page == SETTINGS_CONFIG && s_config_restore_pending;
+}
 static bool s_batt_calibration_confirm;
 static device_power_batt_calibration_status_t s_batt_calibration_status;
 static int64_t s_batt_calibration_next_ms;
@@ -1376,6 +1391,17 @@ static void draw_gestures(uint8_t *fb) {
     if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 968, 588, 64}, 24, s_notice, EPD_DRAW_ALIGN_LEFT, false);
     ui_nav_draw(fb, 3);
 }
+static void config_render_controls(uint8_t *fb) {
+    if (s_config_restore_pending) {
+        ui_text_box(fb, s_config_restore_button, 26, "正在恢复，请稍候…", EPD_DRAW_ALIGN_CENTER, false);
+        return;
+    }
+    ui_draw_button(fb, s_config_save_button, "保存当前配置到 TF 卡", false);
+    ui_draw_button(fb, s_config_restore_button,
+                   s_config_confirm ? "再次点按，确认恢复配置" : "从 TF 卡恢复配置", false);
+    if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 819, 588, 40}, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+}
+
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
@@ -1875,10 +1901,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         ui_text(fb, 60, 326, 26, "TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
         ui_text_box(fb, (EpdRect){60, 377, 564, 40}, 23, "配置备份文件", EPD_DRAW_ALIGN_LEFT, false);
         ui_text_box(fb, (EpdRect){60, 435, 564, 40}, 19, "文字排版、设备资料、阅读记录与书签", EPD_DRAW_ALIGN_LEFT, false);
-        ui_draw_button(fb, (EpdRect){36, 561, 612, 83}, "保存当前配置到 TF 卡", false);
-        ui_draw_button(fb, (EpdRect){36, 681, 612, 83},
-                       s_config_confirm ? "再次点按，确认恢复配置" : "从 TF 卡恢复配置", false);
-        if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 819, 588, 40}, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        config_render_controls(fb);
         ui_text_box(fb, (EpdRect){48, 899, 588, 40}, 19, "包含阅读记录、用户偏好和全部已存 WiFi。", EPD_DRAW_ALIGN_LEFT, false);
         ui_text_box(fb, (EpdRect){48, 939, 588, 40}, 19, "书籍、字体和图片仍需留在 TF 卡。", EPD_DRAW_ALIGN_LEFT, false);
         ui_text_box(fb, (EpdRect){48, 979, 588, 40}, 19, "备份含明文 WiFi 密码，请妥善保管。", EPD_DRAW_ALIGN_LEFT, false);
@@ -2044,7 +2067,8 @@ static void on_enter(app_ctx_t *ctx) {
 
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
-    s_config_confirm = false;
+    s_config_confirm = s_config_restore_pending = false;
+    s_config_ignore_through_ms = 0;
     s_batt_calibration_confirm = false;
     s_batt_calibration_next_ms = 0;
     s_panel_repair_pending = false;
@@ -2106,7 +2130,44 @@ static void on_enter(app_ctx_t *ctx) {
 }
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
+static app_redraw_t config_restore_tick(app_ctx_t *ctx) {
+    esp_err_t err = app_settings_backup_restore();
+    if (err == ESP_OK) {
+        ttf_font_scan();
+        app_font_activate_system();
+        ui_text_set_system_scale(true);
+        if (frontlight_ready())
+            (void)frontlight_apply(app_settings_frontlight_on(), app_settings_frontlight_brightness(),
+                                   app_settings_frontlight_cct());
+        // 阅读记录恢复后令首页和书架重新取进度、时长与排序。
+        // Rebuild home and shelf caches after restoring reading records.
+        book_store_notify_changed();
+    }
+    char saved_ssid[33] = {0};
+    bool wifi_saved = false;
+    if (err == ESP_OK)
+        (void)wifi_transfer_get_saved_wifi(saved_ssid, &wifi_saved);
+    snprintf(s_notice, sizeof(s_notice), "%s",
+             err == ESP_OK ? (wifi_saved ? ui_tr("配置与阅读记录已恢复；WiFi 请重新连接") :
+                                           ui_tr("配置与阅读记录已恢复")) :
+             err == APP_RESTORE_NO_CARD ? ui_tr("未识别到 TF 卡，请插卡后重试") :
+             err == APP_RESTORE_INTERNAL_VOLUME ? ui_tr("机内文件存储不可用，无法恢复") :
+             err == ESP_ERR_NVS_NOT_ENOUGH_SPACE ? ui_tr("机内配置空间不足，无法恢复") :
+             err == ESP_ERR_NOT_FOUND ? ui_tr("未找到配置备份文件") :
+             err == ESP_ERR_INVALID_RESPONSE ? ui_tr("配置文件损坏或版本不兼容") :
+             err == ESP_ERR_INVALID_SIZE ? ui_tr("WiFi 合并超过 8 组，请先遗忘部分网络") :
+             ui_tr("恢复未完成，请重试"));
+    s_config_restore_pending = false;
+    extern const app_desc_t app_device_settings;
+    app_present(ctx, &app_device_settings, APP_REDRAW_PAGE);
+    // 屏幕显示结果之前按下的触点可能还在回放队列；按起手时间过滤，而不是额外禁用新触点。
+    // Contacts pressed before the result appeared can still be queued; filter by press time without delaying new input.
+    s_config_ignore_through_ms = esp_timer_get_time() / 1000;
+    return APP_REDRAW_DONE;
+}
+
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    if (s_page == SETTINGS_CONFIG && s_config_restore_pending) return config_restore_tick(ctx);
     if (s_page == SETTINGS_BATT_CALIBRATION && ctx->now_ms >= s_batt_calibration_next_ms) {
         device_power_batt_calibration_status_t next;
         device_power_get_batt_calibration(&next);
@@ -2357,6 +2418,7 @@ static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, in
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    if (config_inputs_blocked(ctx->now_ms - ev->hold_ms)) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_QUICK_BAR) return quick_settings_gesture(ctx, ev);
     if (s_page == SETTINGS_LOCK_STYLE) {
         if (ev->type==UI_GESTURE_TAP) {
@@ -2835,7 +2897,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_CONFIG) {
-        if (y >= 561 && y < 644) {
+        if (ui_rect_hit(s_config_save_button, ev->x0, y)) {
             s_config_confirm = false;
             esp_err_t err = app_settings_backup_save();
             const char *bad = app_settings_backup_bad_bookmark();
@@ -2849,40 +2911,21 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                      ui_tr("保存失败，请检查 TF 卡剩余空间"));
             return APP_REDRAW_PAGE;
         }
-        if (y >= 681 && y < 764) {
+        if (ui_rect_hit(s_config_restore_button, ev->x0, y)) {
             if (!s_config_confirm) {
                 s_config_confirm = true;
                 snprintf(s_notice, sizeof(s_notice), ui_tr("恢复将覆盖设置、合并 WiFi，请再次确认"));
                 return APP_REDRAW_PAGE;
             }
             s_config_confirm = false;
-            esp_err_t err = app_settings_backup_restore();
-            if (err == ESP_OK) {
-                ttf_font_scan();
-                app_font_activate_system();
-                ui_text_set_system_scale(true);
-                if (frontlight_ready())
-                    (void)frontlight_apply(app_settings_frontlight_on(), app_settings_frontlight_brightness(),
-                                           app_settings_frontlight_cct());
-                // 阅读记录恢复后令首页和书架重新取进度、时长与排序。
-                // Rebuild home and shelf caches after restoring reading records.
-                book_store_notify_changed();
-            }
-            char saved_ssid[33] = {0};
-            bool wifi_saved = false;
-            if (err == ESP_OK)
-                (void)wifi_transfer_get_saved_wifi(saved_ssid, &wifi_saved);
-            snprintf(s_notice, sizeof(s_notice), "%s",
-                     err == ESP_OK ? (wifi_saved ? ui_tr("配置与阅读记录已恢复；WiFi 请重新连接") :
-                                                   ui_tr("配置与阅读记录已恢复")) :
-                     err == APP_RESTORE_NO_CARD ? ui_tr("未识别到 TF 卡，请插卡后重试") :
-                     err == APP_RESTORE_INTERNAL_VOLUME ? ui_tr("机内文件存储不可用，无法恢复") :
-                     err == ESP_ERR_NVS_NOT_ENOUGH_SPACE ? ui_tr("机内配置空间不足，无法恢复") :
-                     err == ESP_ERR_NOT_FOUND ? ui_tr("未找到配置备份文件") :
-                     err == ESP_ERR_INVALID_RESPONSE ? ui_tr("配置文件损坏或版本不兼容") :
-                     err == ESP_ERR_INVALID_SIZE ? ui_tr("WiFi 合并超过 8 组，请先遗忘部分网络") :
-                     ui_tr("恢复未完成，请重试"));
-            return APP_REDRAW_PAGE;
+            s_config_restore_pending = true;
+            s_notice[0] = 0;
+            ui_fill_rect_fast(s_config_restore_feedback, UI_GRAY_WHITE, ctx->fb);
+            config_render_controls(ctx->fb);
+            enum EpdDrawError result = display_refresh_area(ctx->hl, DISPLAY_REFRESH_FEEDBACK,
+                s_config_restore_feedback, DISPLAY_REFRESH_DEFAULT);
+            guard_draw_result(ctx->hl, result);
+            return result == EPD_DRAW_SUCCESS ? APP_REDRAW_DONE : APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;
     }
@@ -3026,9 +3069,11 @@ static app_redraw_t settings_navigate(app_ctx_t *ctx, bool home) {
     return APP_REDRAW_NONE;
 }
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if (config_inputs_blocked(ctx->now_ms)) return APP_REDRAW_NONE;
     return settings_navigate(ctx, key == 1);
 }
 static void settings_exit(app_ctx_t *ctx) {
+    s_config_restore_pending = false;
     s_batt_calibration_confirm = false;
     ui_lock_style_close();
 
@@ -3044,6 +3089,9 @@ static void settings_exit(app_ctx_t *ctx) {
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); settings_bluetooth_close();
 }
 static void on_before_lock(app_ctx_t *ctx) {
+    // 锁屏先于 tick 时取消尚未开始的恢复，不在解锁后补做。
+    // If locking wins before the tick, cancel the unstarted restore rather than run it on unlock.
+    s_config_restore_pending = false;
     s_batt_calibration_confirm = false;
     if(s_page==SETTINGS_LOCK_STYLE){ui_lock_style_close();s_page=SETTINGS_MAIN;}
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
@@ -3077,7 +3125,8 @@ static void settings_media_lost(app_ctx_t *ctx) {
 }
 static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; ui_lock_style_media_ready(); settings_prepare_profile(); }
 static app_back_result_t settings_edge_back(app_ctx_t *ctx) {
-    if (s_page == SETTINGS_MAIN || s_boot_pending || s_local_pending || s_upgrade_restart ||
+    if (s_page == SETTINGS_MAIN || config_inputs_blocked(ctx->now_ms) ||
+        s_boot_pending || s_local_pending || s_upgrade_restart ||
         (s_page == SETTINGS_UPGRADE && (s_upgrade_job != UPGRADE_JOB_NONE || s_update.busy || pico_online_busy())))
         return (app_back_result_t){APP_REDRAW_NONE, false};
     if (s_page == SETTINGS_CONFIG && s_config_confirm) {
@@ -3166,7 +3215,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
 
 const app_desc_t app_device_settings = {
     .title = "设置 Settings", .detail = "显示、连接与设备", .enter_full = false,
-    .owns_keys = true, .menu_handle_enabled = no_menu_handle,
+    .owns_keys = true, .menu_handle_enabled = no_menu_handle, .modal_input_owned = settings_modal_input_owned,
     .edge_back = settings_edge_back, .horizontal_zone = settings_zone, .step_tab = settings_step_tab,
     .main_page_visible = main_page_visible,
     .on_enter = on_enter, .on_exit = settings_exit, .on_before_lock = on_before_lock, .render = render, .on_tick = on_tick, .on_gesture = on_gesture, .on_key = on_key,

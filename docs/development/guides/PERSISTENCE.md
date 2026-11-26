@@ -38,6 +38,8 @@ The device has 16 MiB of flash but each OTA slot holds 5 MiB. Internal FAT and t
 | 面板 VCOM 标定 / Panel VCOM calibration | S31 的 ESP NVS `panel/vcom`；启动加载，仅出厂标定流程可保存，产品页不可修改 / Loaded at boot; factory-only writes | 不在设置备份内；擦除 NVS 会丢失标定，须重新出厂标定 / Excluded from settings backup; NVS erase requires factory calibration again | [电源后端](../../../components/device_power/device_power_metalio.c)、[出厂流程](../../../main/factory/vcom_setup.c)、[组件契约](../../../components/device_power/README.md)、[硬约束](../../../AGENTS.md) |
 | 触控固件 / Touch firmware | 独立触控芯片 / Separate touch controller | 不在 ESP 设置备份；ESP 固件回退不回退触控固件 / Independent of ESP backup/rollback | [驱动契约](../../../components/cst836u/README.md) |
 
+再次确认后，设置页先局部显示「正在恢复，请稍候…」，随后才读卡和写入。完成后显示成功或具体错误；结果上屏前开始的点击不会被回放为新的恢复请求。/ On the second tap, Settings presents a local busy message before reading or writing. It then reports success or a specific error, without replaying taps started before the result as new restore requests.
+
 恢复先在当前 NVS 的 RAM 副本上按实际页布局试写设置、历史、分类选择、WiFi 和天气。常规顺序写不下时，跳过尚不存在且等同开机默认值的偏好，并先替换备份覆盖的历史；仍写不下则在更改原资料前提示「机内配置空间不足」。仅有需要恢复的手账或匹配书库的分类快照时才要求内部 FAT 可挂载，不格式化。TF 备份格式和分区不变。容量预检不等于跨介质事务：恢复中仍不可拔卡或断电。
 [RAM 预检适配层](../../../components/restore_nvs/restore_nvs.cpp)只读取实际分区；升级固定的 ESP-IDF v6.1 时须复核其页分配接口。
 Restore rehearses all NVS writes on an in-memory copy using the actual page allocator. Under pressure it omits absent boot defaults and may replace the covered history first; a capacity rejection leaves live data untouched. Internal FAT is required only for applicable journal or folder snapshots and is never formatted by restore. The backup format and partition layout are unchanged. This is not a cross-media transaction: do not remove the card or cut power during restore.

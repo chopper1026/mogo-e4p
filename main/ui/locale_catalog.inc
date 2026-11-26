@@ -1064,6 +1064,7 @@
 {"正在回收可重建缓存","正在回收可重建快取","Recoverable Cache"},
 {"正在学习","正在學習","Learning"},
 {"正在尝试挂载…","正在嘗試掛載…","Trying to mount..."},
+{"正在恢复，请稍候…","正在恢復，請稍候…","Restoring. Please wait…"},
 {"正在扫描 2.4 GHz WiFi","正在掃描 2.4 GHz WiFi","Scanning 2.4 GHz WiFi"},
 {"正在接收","正在接收","Receiving"},
 {"正在搜索…","正在搜尋…","Searching..."},
