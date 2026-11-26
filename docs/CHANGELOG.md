@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+## v1.2.1 · 2026-11-26
+
 - 电源菜单改用黑白按钮：点按「关机」并松手即可确认，不再拖动滑轨；「重启」和「取消」仍可直接点按。/ The power menu replaces the slider with black-and-white buttons. Tap and release Power off to confirm; Restart and Cancel remain one tap away.
 
 - 「升级和恢复」移除「屏幕修复」，保留「保存与恢复」「系统升级」。/ Remove Screen Repair from Upgrade and Recovery; keep Backup and Restore and System Update.
