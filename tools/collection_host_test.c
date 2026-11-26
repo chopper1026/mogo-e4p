@@ -79,18 +79,18 @@ static void test_collection_backup(const char *directory) {
     assert(book_collection_rename(&current, id, "Changed") == ESP_OK);
     uint32_t rev = book_collection_backup_revision();
     rewind(file);
-    assert(book_collection_backup_read(file, card, false) == ESP_OK && book_collection_backup_revision() == rev);
+    assert(book_collection_backup_read(file, card, false,NULL) == ESP_OK && book_collection_backup_revision() == rev);
     rewind(file);
-    assert(book_collection_backup_read(file, other, true) == ESP_OK && book_collection_backup_revision() == rev + 1);
+    assert(book_collection_backup_read(file, other, true,NULL) == ESP_OK && book_collection_backup_revision() == rev + 1);
     assert(collection_backup_open(&different, other, false) == ESP_OK);
     assert(!strcmp(book_collection_at(&different, 0)->name, "Other card"));
     rewind(file);
-    assert(book_collection_backup_read(file, card, true) == ESP_OK && book_collection_backup_revision() == rev + 3);
+    assert(book_collection_backup_read(file, card, true,NULL) == ESP_OK && book_collection_backup_revision() == rev + 3);
     assert(collection_backup_open(&current, card, false) == ESP_OK);
     assert(!strcmp(book_collection_at(&current, 0)->name, "Card"));
     assert(book_collection_assignment(&current, entry.path) == id);
     rewind(file); assert(fputc('x', file) == 'x'); rewind(file);
-    assert(book_collection_backup_read(file, card, true) == ESP_ERR_INVALID_RESPONSE &&
+    assert(book_collection_backup_read(file, card, true,NULL) == ESP_ERR_INVALID_RESPONSE &&
            book_collection_backup_revision() == rev + 3);
     assert(fclose(file) == 0);
     assert(collection_backup_open(&current, card, true) == ESP_OK);
@@ -99,9 +99,12 @@ static void test_collection_backup(const char *directory) {
     id=book_collection_legacy_id(&current,names[1]);assert(!book_collection_order(&current,id,-1));
     file=tmpfile();assert(file && !book_folder_backup_write(file,card));
     assert(!book_collection_order(&current,id,1));rev=book_collection_backup_revision();
-    rewind(file);assert(!book_folder_backup_read(file,other,true) && book_collection_backup_revision()==rev);
-    rewind(file);assert(!book_folder_backup_read(file,card,false) && book_collection_backup_revision()==rev);
-    rewind(file);assert(!book_folder_backup_read(file,card,true) && book_collection_backup_revision()==rev+1);
+    bool needs = false;
+    rewind(file);assert(!book_folder_backup_read(file,other,false,&needs) && !needs);
+    rewind(file);assert(!book_folder_backup_read(file,card,false,&needs) && needs);
+    rewind(file);assert(!book_folder_backup_read(file,other,true,NULL) && book_collection_backup_revision()==rev);
+    rewind(file);assert(!book_folder_backup_read(file,card,false,NULL) && book_collection_backup_revision()==rev);
+    rewind(file);assert(!book_folder_backup_read(file,card,true,NULL) && book_collection_backup_revision()==rev+1);
     assert(!collection_backup_open(&current,card,true) && book_collection_at(&current,0)->id==id);
     assert(!book_collection_record(&current,0,&id));assert(!fclose(file));
     for(int i=0;i<2;++i){char path[320];snprintf(path,sizeof(path),"%s/.mogo-folders-%s.%d",directory,card,i);assert(!unlink(path));}

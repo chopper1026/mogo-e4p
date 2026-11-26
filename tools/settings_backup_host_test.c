@@ -53,15 +53,17 @@ void epd_flash_end(void) { assert(flash_depth); --flash_depth; }
 #undef nvs_commit
 
 static app_weather_view_t weather_view;
+static bool weather_no_space;
 void app_weather_init(void) {}
 const app_weather_view_t *app_weather_view(void) { return &weather_view; }
 
 bool weather_location_valid(const weather_location_t *city) { return city && city->id[0]; }
-bool app_weather_restore_preferences(bool auto_refresh, bool has_city, const weather_location_t *city) {
+esp_err_t app_weather_restore_preferences(bool auto_refresh, bool has_city, const weather_location_t *city, struct restore_nvs *image) {
+    if (image) return weather_no_space ? ESP_ERR_NVS_NOT_ENOUGH_SPACE : ESP_OK;
     weather_view.has_city = has_city;
     weather_view.city = has_city ? *city : (weather_location_t){0};
     weather_view.auto_refresh = auto_refresh;
-    return true;
+    return ESP_OK;
 }
 
 static wifi_transfer_wifi_backup_t saved_wifi = {
@@ -102,11 +104,11 @@ bool wifi_transfer_profiles_backup_valid(const wifi_transfer_profiles_backup_t *
     }
     return true;
 }
-esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, bool apply) {
+esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, struct restore_nvs *image) {
     if (!wifi_transfer_profiles_backup_valid(backup)) return ESP_ERR_INVALID_ARG;
     if (!backup->count) return ESP_OK;
     if (wifi_capacity_full) return ESP_ERR_INVALID_SIZE;
-    if (apply) {
+    if (!image) {
         saved_profiles = *backup;
         return wifi_transfer_import_wifi_backup(&backup->items[0]);
     }
@@ -122,24 +124,41 @@ esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backu
 void haptics_set_enabled(bool on) { (void)on; }
 void haptics_set_intensity(uint8_t intensity) { (void)intensity; }
 
-esp_err_t book_store_prepare_data(void) { return ESP_OK; }
+static bool mount_failure, empty_volume_payload;
+esp_err_t book_store_prepare_data(void) { return mount_failure ? ESP_FAIL : ESP_OK; }
 static long journal_offset;
 esp_err_t app_reading_journal_backup_write(FILE *file) { journal_offset = ftell(file); return fputc('J', file) == 'J' ? ESP_OK : ESP_FAIL; }
-esp_err_t app_reading_journal_backup_read(FILE *file, bool apply) {
+esp_err_t app_reading_journal_backup_read(FILE *file, bool apply, bool *needs_volume) {
     (void)apply;
+    if (needs_volume && !empty_volume_payload) *needs_volume = true;
     return fgetc(file) == 'J' ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 esp_err_t book_collection_backup_write(FILE *file, const char *card_id) {
     (void)card_id;
     return fputc('C', file) == 'C' ? ESP_OK : ESP_FAIL;
 }
-esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool apply) {
-    (void)card_id; (void)apply;
+esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool apply, bool *needs_volume) {
+    (void)card_id; (void)apply; (void)needs_volume;
     return fgetc(file) == 'C' ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
 esp_err_t book_folder_backup_write(FILE *file,const char *id){return book_collection_backup_write(file,id);}
-esp_err_t book_folder_backup_read(FILE *file,const char *id,bool apply){return book_collection_backup_read(file,id,apply);}
+esp_err_t book_folder_backup_read(FILE *file,const char *id,bool apply, bool *needs_volume){return book_collection_backup_read(file,id,apply,needs_volume);}
+// 在容量边界注入失败，真实 IDF 分配器另由设备构建使用。/ Inject capacity boundaries; the device build uses the actual IDF allocator.
+struct restore_nvs { bool reclaimed; };
+static bool pressure, history_too_large;
+static const char *existing_compact_key;
+esp_err_t nvs_find_key(nvs_handle_t h, const char *key, nvs_type_t *type) {
+    (void)h;
+    if (existing_compact_key && !strcmp(existing_compact_key, key)) { *type = NVS_TYPE_U8; return ESP_OK; }
+    return ESP_ERR_NVS_NOT_FOUND;
+}
+esp_err_t restore_nvs_clone(restore_nvs_t **out) { *out = calloc(1, sizeof(**out)); return *out ? ESP_OK : ESP_ERR_NO_MEM; }
+void restore_nvs_free(restore_nvs_t *image) { free(image); }
+esp_err_t restore_nvs_write(restore_nvs_t *image, const char *ns, const char *key, nvs_type_t type, const void *data, size_t len) {
+    (void)key; (void)ns; (void)data; (void)len; (void)type;
+    return (pressure && !image->reclaimed) ? ESP_ERR_NVS_NOT_ENOUGH_SPACE : ESP_OK;
+}
 static unsigned history_saves, history_restores;
 esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
     (void)bad_slot; (void)cap;
@@ -150,8 +169,10 @@ bool book_history_backup_validate(FILE *file) {
     char marker[8];
     return fread(marker, 1, 8, file) == 8 && !memcmp(marker, "RPHIST1", 8) && fgetc(file) == EOF;
 }
-esp_err_t book_history_backup_restore(FILE *file) {
-    ++history_restores;
+esp_err_t book_history_backup_restore(FILE *file, struct restore_nvs *image) {
+    if (!image) ++history_restores;
+    if (image && history_too_large) return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    if (image) image->reclaimed = true;
     return book_history_backup_validate(file) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
@@ -306,6 +327,7 @@ esp_err_t nvs_get_used_entry_count(nvs_handle_t h,size_t *n) { assert(h==1); *n=
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size) {
     if(h==2){assert(!strcmp(key,"state") && !out);*size=8;return legacy_boot?ESP_OK:ESP_ERR_NVS_NOT_FOUND;}
     for (int i=0;i<4;++i) if (!strcmp(shelf_preferences[i].key,key)) {
+        if (!out) { *size = shelf_preferences[i].size; return ESP_OK; }
         if (*size<shelf_preferences[i].size) return ESP_FAIL;
         memcpy(out,shelf_preferences[i].data,shelf_preferences[i].size);*size=shelf_preferences[i].size;return ESP_OK;
     }
@@ -1873,11 +1895,26 @@ static void test_portable_backup(void) {
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits && records == history_restores);
     bad = fopen(BACKUP_FILE, "r+b");
     assert(bad && fseek(bad, journal_offset - 1, SEEK_SET) == 0 && fputc(inverse,bad) == inverse && fclose(bad) == 0);
+    mount_failure = true;
+    assert(app_settings_backup_restore() == APP_RESTORE_INTERNAL_VOLUME && commits == commit_count && records == history_restores);
+    mount_failure = false;
+    history_too_large = true;
+    assert(app_settings_backup_restore() == ESP_ERR_NVS_NOT_ENOUGH_SPACE && commits == commit_count && records == history_restores);
+    history_too_large = false;
+    weather_no_space = true;
+    assert(app_settings_backup_restore() == ESP_ERR_NVS_NOT_ENOUGH_SPACE && commits == commit_count && records == history_restores);
+    assert(!saved_profiles.count && !weather_view.has_city && !flash_depth);
+    weather_no_space = false;
     wifi_capacity_full = true;
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_SIZE);
     assert(commits == commit_count && records == history_restores);
     wifi_capacity_full = false;
+    pressure = true;
+    assert(app_settings_backup_restore() == ESP_OK && records + 1 == history_restores);
+    pressure = false;
+    mount_failure = empty_volume_payload = true;
     assert(app_settings_backup_restore() == ESP_OK);
+    mount_failure = empty_volume_payload = false;
     assert(weather_view.has_city && !weather_view.auto_refresh && !strcmp(weather_view.city.id, "CITY123"));
     assert(saved_profiles.count == 2 && !strcmp(saved_profiles.items[1].ssid, "Two"));
     app_settings_init();
@@ -1984,6 +2021,21 @@ static void test_setup_resume(void) {
     }
     durable_setup=0x96;load_setup();assert(ui_language()==UI_LANG_CN && app_setup_step()==SETUP_DONE);
     assert(app_setup_save(UI_LANG_CN,SETUP_DONE));commit_count=0;
+}
+static void test_compact_settings(void) {
+    // 已有键即使要恢复默认值也得覆盖；非默认值和依赖旧键的设置必须保留。/ Keep stored overrides, non-default values, and legacy-dependent settings.
+    existing_compact_key = NVS_KEY_FRONTLIGHT_BRI;
+    restore_settings_t plan = {0};
+    assert(!restore_add(&plan, NVS_KEY_VOLUME_TURN, NULL, 0));
+    assert(!restore_add(&plan, NVS_KEY_FRONTLIGHT_BRI, NULL, 40));
+    assert(!restore_add(&plan, NVS_KEY_BOOK_PX, NULL, 60));
+    assert(!restore_add(&plan, NVS_KEY_BOOK_MARGIN_R, NULL, 24));
+    assert(!restore_add(&plan, NVS_KEY_FONT, "", 0));
+    assert(!restore_compact(&plan) && plan.count == 3);
+    assert(!strcmp(plan.items[0].key, NVS_KEY_FRONTLIGHT_BRI) && plan.items[0].u8 == 40);
+    assert(!strcmp(plan.items[1].key, NVS_KEY_BOOK_PX) && plan.items[1].u8 == 60);
+    assert(!strcmp(plan.items[2].key, NVS_KEY_BOOK_MARGIN_R));
+    free(plan.items); existing_compact_key = NULL;
 }
 int main(void) {
     test_setup_resume();
@@ -3137,5 +3189,6 @@ int main(void) {
     test_shelf_titles();
     test_portable_backup();
     test_cover_wallpaper_backup();
+    test_compact_settings();
     return 0;
 }

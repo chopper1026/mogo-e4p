@@ -37,6 +37,7 @@ set(main_requires
     spi_flash
     heap
     nvs_flash
+    restore_nvs
     esp_hw_support
     esp_rom
     esp_driver_gpio

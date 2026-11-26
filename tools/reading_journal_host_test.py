@@ -225,15 +225,18 @@ static void backup_cases(void) {
     FILE *file=tmpfile(); assert(file && app_reading_journal_backup_write(file)==ESP_OK);
     app_reading_journal_record("/sdcard/books/new.epub","New",200,0,600,2);
     assert(s_model.count==2);
-    rewind(file); assert(app_reading_journal_backup_read(file,false)==ESP_OK && s_model.count==2);
+    bool needs = false;
+    rewind(file); assert(app_reading_journal_backup_read(file,false,&needs)==ESP_OK && needs && s_model.count==2);
+    FILE *empty = tmpfile(); assert(empty && fputc(0,empty)==0); rewind(empty); needs=false;
+    assert(app_reading_journal_backup_read(empty,false,&needs)==ESP_OK && !needs); fclose(empty);
     guard_ok=false; rewind(file);
-    assert(app_reading_journal_backup_read(file,true)==ESP_FAIL && s_model.count==2);
+    assert(app_reading_journal_backup_read(file,true,NULL)==ESP_FAIL && s_model.count==2);
     guard_ok=true; rewind(file);
-    assert(app_reading_journal_backup_read(file,true)==ESP_OK && s_model.count==1 && s_model.scene==scene);
+    assert(app_reading_journal_backup_read(file,true,NULL)==ESP_OK && s_model.count==1 && s_model.scene==scene);
     simulate_restart(); app_reading_journal_poll();
     assert(s_model.count==1 && s_model.scene==scene && s_model.records->milliseconds==1200);
     assert(fseek(file,5,SEEK_SET)==0 && fputc(0,file)==0); rewind(file);
-    assert(app_reading_journal_backup_read(file,true)==ESP_ERR_INVALID_RESPONSE && s_model.count==1);
+    assert(app_reading_journal_backup_read(file,true,NULL)==ESP_ERR_INVALID_RESPONSE && s_model.count==1);
     assert(fclose(file)==0); simulate_restart(); remove_slots();
     puts("PASS: journal backup round trip and reboot, validate-only, corrupt snapshot and failed write preservation");
 }

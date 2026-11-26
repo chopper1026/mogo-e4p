@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix="weather-host-") as directory:
     work = Path(directory)
     env, compiler = toolchain(work)
     flags = ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g", "-fsanitize=address,undefined"]
-    includes = ["-Imain/services", "-Itools", "-Imanaged_components/espressif__cjson/cJSON"]
+    includes = ["-Icomponents/restore_nvs/include", "-Imain/services", "-Itools", "-Imanaged_components/espressif__cjson/cJSON"]
     cjson = work / "cjson.o"
     subprocess.run(compiler + flags + includes + ["-Wno-deprecated-declarations", "-c",
         "managed_components/espressif__cjson/cJSON/cJSON.c", "-o", str(cjson)], cwd=ROOT, env=env, check=True)

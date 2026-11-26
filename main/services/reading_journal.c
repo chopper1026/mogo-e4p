@@ -158,7 +158,7 @@ esp_err_t app_reading_journal_backup_write(FILE *file) {
     return ok ? ESP_OK : ESP_FAIL;
 }
 
-esp_err_t app_reading_journal_backup_read(FILE *file, bool apply) {
+esp_err_t app_reading_journal_backup_read(FILE *file, bool apply, bool *needs_volume) {
     int present = fgetc(file);
     if (present == 0) return ESP_OK;
     uint8_t header[8];
@@ -174,6 +174,7 @@ esp_err_t app_reading_journal_backup_read(FILE *file, bool apply) {
         reading_journal_decode(&restored, NULL, bytes, length);
     free(bytes);
     if (!valid) return ESP_ERR_INVALID_RESPONSE;
+    if (needs_volume) *needs_volume = true;
     esp_err_t err = ESP_OK;
     if (apply) {
         // 先持久化新快照，失败保留现有手账与插画。/ Commit a new slot before replacing the live journal and its scene.

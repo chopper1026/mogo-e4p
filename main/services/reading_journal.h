@@ -19,7 +19,8 @@ void app_reading_journal_record(const char *path, const char *title, uint32_t fi
 bool app_reading_journal_flush(void);
 /// 流式读写当前手账；apply 为假时只校验。/ Stream the current journal; read only validates when apply is false.
 esp_err_t app_reading_journal_backup_write(FILE *file);
-esp_err_t app_reading_journal_backup_read(FILE *file, bool apply);
+/// 可选累积标志仅对将要恢复的非空快照置真。/ Set the optional cumulative flag only for a nonempty snapshot applicable to this device.
+esp_err_t app_reading_journal_backup_read(FILE *file, bool apply, bool *needs_volume);
 /// 分类改名/移书时保持当月书籍身份；失败由卡上路径日志重试。/ Retain monthly book identity during category moves; retry failures through the card's path journal.
 bool app_reading_journal_relocate(const char *old_path, const char *new_path, uint32_t file_size);
 bool app_reading_journal_next_scene(void);

@@ -6,6 +6,7 @@
  */
 #include "../ui/ui_locale.h"
 #include "weather_service.h"
+#include "weather_restore.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -105,11 +106,11 @@ static int64_t clock_now(const weather_clock_t *clock) {
 }
 int64_t app_weather_now(void) { return clock_now(&s_clock); }
 
-static bool persist_blob(const char *key, const void *value, size_t size, bool cancellable) {
-    if (!epd_flash_begin()) return false;
+static esp_err_t persist_blob(const char *key, const void *value, size_t size, bool cancellable) {
+    if (!epd_flash_begin()) return ESP_ERR_INVALID_STATE;
     // 取得面板安全锁后再检查取消，避免旧城市请求晚于新设置写入。
     // Recheck cancellation under the panel guard so an old city's request cannot write after new preferences.
-    if (cancellable && atomic_load(&s_cancel)) { epd_flash_end(); return false; }
+    if (cancellable && atomic_load(&s_cancel)) { epd_flash_end(); return ESP_ERR_INVALID_STATE; }
     nvs_handle_t h;
     esp_err_t err = nvs_open("kiiko_weather", NVS_READWRITE, &h);
     if (err == ESP_OK) {
@@ -119,14 +120,18 @@ static bool persist_blob(const char *key, const void *value, size_t size, bool c
         nvs_close(h);
     }
     epd_flash_end();
-    return err == ESP_OK;
+    return err;
 }
 static bool write_blob(const char *key, const void *value, size_t size) {
-    return persist_blob(key, value, size, false);
+    return persist_blob(key, value, size, false) == ESP_OK;
 }
-static bool save_preferences(bool enabled, bool auto_refresh, bool has_city, const weather_location_t *city) {
+static weather_preferences_t make_preferences(bool enabled, bool auto_refresh, bool has_city, const weather_location_t *city) {
     weather_preferences_t p = {.schema = 3, .enabled = enabled, .has_city = has_city, .auto_refresh = auto_refresh};
     if (has_city) p.city = *city;
+    return p;
+}
+static bool save_preferences(bool enabled, bool auto_refresh, bool has_city, const weather_location_t *city) {
+    weather_preferences_t p = make_preferences(enabled, auto_refresh, has_city, city);
     return write_blob("prefs", &p, sizeof(p));
 }
 void app_weather_init(void) {
@@ -537,11 +542,26 @@ bool app_weather_select(const weather_location_t *city) {
     (void)write_blob("cache", NULL, 0);
     s_next_attempt = 0; ++s_view.revision; return true;
 }
-bool app_weather_restore_preferences(bool auto_refresh, bool has_city, const weather_location_t *city) {
-    if (has_city && !weather_location_valid(city)) return false;
+esp_err_t app_weather_restore_preferences(bool auto_refresh, bool has_city, const weather_location_t *city, struct restore_nvs *image) {
+    if (has_city && !weather_location_valid(city)) return ESP_ERR_INVALID_ARG;
     app_weather_init();
+    weather_preferences_t p = make_preferences(s_view.enabled, auto_refresh, has_city, city);
+    // 新设备没有 prefs 时已是这个默认值，不为恢复空天气数据消耗 NVS。/ An absent prefs key already supplies these defaults on a fresh device.
+    bool skip = false;
+    if (!p.enabled && !has_city && auto_refresh) {
+        nvs_handle_t h;
+        esp_err_t found = nvs_open("kiiko_weather", NVS_READONLY, &h);
+        if (found == ESP_OK) {
+            size_t len = 0;
+            found = nvs_get_blob(h, "prefs", NULL, &len);
+            nvs_close(h);
+        }
+        skip = found == ESP_ERR_NVS_NOT_FOUND;
+    }
+    if (image) return skip ? ESP_OK : restore_nvs_write(image, "kiiko_weather", "prefs", NVS_TYPE_BLOB, &p, sizeof(p));
     app_weather_cancel();
-    if (!save_preferences(s_view.enabled, auto_refresh, has_city, city)) return false;
+    esp_err_t err = skip ? ESP_OK : persist_blob("prefs", &p, sizeof(p), false);
+    if (err != ESP_OK) return err;
     s_view.auto_refresh = auto_refresh;
     s_view.has_city = has_city;
     s_view.city = has_city ? *city : (weather_location_t){0};
@@ -550,7 +570,7 @@ bool app_weather_restore_preferences(bool auto_refresh, bool has_city, const wea
     s_view.state = APP_WEATHER_IDLE;
     app_weather_clear_search();
     s_next_attempt = 0;
-    return true;
+    return ESP_OK;
 }
 void app_weather_clear_search(void) {
     ++s_search_generation;

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复机内配置空间紧张时 TF 备份可保存却无法完整恢复的问题。恢复前先试算设置与阅读记录能否一起装下；容量不足不覆盖原资料，并与内部文件存储故障分别提示。/ Fix incomplete TF restores under NVS pressure. Check that settings and reading history fit together before replacing live data, and distinguish insufficient capacity from an unavailable internal volume.
+
 - 新增可关闭的手势操作：双侧边缘内滑逐层返回，仅在成功返回时边缘浮现一道浅弧，内侧显示朝向屏幕中央的折角（左 `>`、右 `<`）；页面内横滑切换标签或四个主界面；边缘宽度可调。/ Add configurable inward edge swipes with a successful Back indicated by a shallow edge curve and an inward-pointing chevron, and interior swipes for sibling tabs or main pages.
 - 按键控制新增全局「返回」，按一次退一层。/ Add a one-level Back key binding.
 - 便签本先显示书名，未缓存的作者按页一次补齐，只刷新作者列；缺少署名时统一显示「未知」。/ The notepad shows titles first, fills uncached authors in a single column update per page, and shows Unknown for missing authors.

@@ -28,3 +28,5 @@ esp_err_t nvs_entry_find_in_handle(nvs_handle_t, nvs_type_t, nvs_iterator_t *);
 esp_err_t nvs_entry_next(nvs_iterator_t *);
 esp_err_t nvs_entry_info(nvs_iterator_t, nvs_entry_info_t *);
 void nvs_release_iterator(nvs_iterator_t);
+
+esp_err_t nvs_find_key(nvs_handle_t, const char *, nvs_type_t *);

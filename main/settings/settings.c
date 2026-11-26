@@ -41,6 +41,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "weather_restore.h"
 #include "epdiy.h"
 #include "haptics.h"
 #include "device_power.h"
@@ -1769,20 +1770,36 @@ uint32_t app_settings_shelf_category(const char *library) {
     if (shelf_category_key(library, key)) (void)shelf_category_read(library, key, &category);
     return category;
 }
-bool app_settings_set_shelf_category(const char *library, uint32_t category) {
+static esp_err_t restore_category(const char *library, uint32_t category, restore_nvs_t *image) {
     char key[12];
-    if (!shelf_category_key(library, key)) return false;
+    if (!shelf_category_key(library, key)) return ESP_ERR_INVALID_ARG;
     uint32_t saved;
-    if (shelf_category_read(library, key, &saved) && saved == category) return true;
+    if (shelf_category_read(library, key, &saved) && saved == category) return ESP_OK;
+    if (category == UINT32_MAX) {
+        // 缺键已经表示“全部”；不要为默认分类分配 blob。/ A missing selection already means All; do not allocate a default blob.
+        nvs_handle_t existing;
+        esp_err_t found = nvs_open(NVS_NS, NVS_READONLY, &existing);
+        if (found == ESP_OK) {
+            size_t bytes = 0;
+            found = nvs_get_blob(existing, key, NULL, &bytes);
+            nvs_close(existing);
+        }
+        if (found == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    }
     uint8_t record[44] = {0};
     for (unsigned i = 0; i < 4; ++i) record[i] = (uint8_t)(category >> (8 * i));
     memcpy(record + 4, library, strlen(library) + 1);
+    if (image) return restore_nvs_write(image, NVS_NS, key, NVS_TYPE_BLOB, record, sizeof(record));
     nvs_handle_t h;
-    if (settings_write_open(&h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_blob(h, key, record, sizeof(record));
+    esp_err_t err = settings_write_open(&h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(h, key, record, sizeof(record));
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
-    return err == ESP_OK;
+    return err;
+}
+bool app_settings_set_shelf_category(const char *library, uint32_t category) {
+    return restore_category(library, category, NULL) == ESP_OK;
 }
 uint8_t app_settings_book_tracking(void) { return s_book_tracking; }
 void app_settings_set_book_tracking(uint8_t index) {
@@ -2787,13 +2804,140 @@ static bool backup_file_exists(const char *path, bool directory) {
     return stat(path, &st) == 0 && (directory ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
 }
 
+// 设置的编码只生成一次，预检与落盘以相同顺序消费；字符串借用已校验的恢复帧。/ Encode settings once for both passes; strings borrow the validated restore frame.
+typedef struct { const char *key, *str; uint8_t u8; } restore_setting_t;
+typedef struct { restore_setting_t *items; size_t count, capacity; } restore_settings_t;
+static esp_err_t restore_add(restore_settings_t *plan, const char *key, const char *str, uint8_t u8) {
+    if (plan->count == plan->capacity) {
+        size_t cap = plan->capacity + 32;
+        restore_setting_t *items = realloc(plan->items, cap * sizeof(*items));
+        if (!items) return ESP_ERR_NO_MEM;
+        plan->items = items; plan->capacity = cap;
+    }
+    plan->items[plan->count++] = (restore_setting_t){key, str, u8};
+    return ESP_OK;
+}
+// 仅空间不足时省略原先就缺失且开机语义相同的键；有旧值的键绝不能跳过。
+// Under pressure omit only absent keys with the same boot default. Never skip a stored override.
+static bool restore_boot_default(const restore_setting_t *item) {
+    const char *key = item->key;
+    if (item->str) {
+        if (!strcmp(key, NVS_KEY_BOOKS_DIR) || !strcmp(key, NVS_KEY_FONTS_DIR)) return true;
+        if (!strcmp(key, NVS_KEY_DEVICE_NAME)) return !strcmp(item->str, DEFAULT_DEVICE_NAME);
+        if (!strcmp(key, NVS_KEY_QUICK_LAYOUT)) {
+            char encoded[APP_QUICK_ITEM_COUNT + 2];
+            app_quick_layout_t defaults = APP_QUICK_LAYOUT_DEFAULT;
+            quick_layout_encode(&defaults, encoded); return !strcmp(item->str, encoded);
+        }
+        if (!strcmp(key, NVS_KEY_OFF_ART)) {
+            char encoded[OFF_CONFIG_BYTES];
+            off_art_encode(&(app_shutdown_wallpaper_t){.show_hint = 1}, encoded); return !strcmp(item->str, encoded);
+        }
+        // 仅白名单内的空串是开机默认值；未知键和有旧格式回退的点击网格照写。
+        // Only these empty strings are boot defaults. Always write unknown keys and the legacy-dependent tap grid.
+        const char *const empty[] = {NVS_KEY_AVATAR, NVS_KEY_STATUS_SIGNATURE, NVS_KEY_BOOK_BACKGROUND,
+                                     NVS_KEY_FONT, NVS_KEY_SYS_FONT, NVS_KEY_BOOKMARK, NVS_KEY_WALLPAPER};
+        for (size_t i = 0; !item->str[0] && i < sizeof(empty)/sizeof(empty[0]); ++i)
+            if (!strcmp(key, empty[i])) return true;
+        return false;
+    }
+    static const struct { const char *key; uint8_t value; } defaults[] = {
+        {NVS_KEY_TOUCH_DISABLED,0}, {NVS_KEY_HOLD_ACTION,APP_READER_KEY_HOME}, {NVS_KEY_DOUBLE_ACTION,APP_READER_KEY_NONE},
+        {NVS_KEY_SLEEP,APP_SLEEP_DEEP}, {NVS_KEY_SHUTDOWN_MODE,APP_SHUTDOWN_LIGHT}, {NVS_KEY_AUTO_LOCK,5},
+        {NVS_KEY_BLE_TURNER,0}, {NVS_KEY_HOLD_REFRESH,0}, {NVS_KEY_VERTICAL_TURN,0}, {NVS_KEY_VOLUME_TURN,0}, {NVS_KEY_SHAKE_TURN,0},
+        {NVS_KEY_CHROME_HEADER_H,APP_READER_HEADER_HEIGHT_DEFAULT}, {NVS_KEY_CHROME_FOOTER_H,APP_READER_FOOTER_HEIGHT_DEFAULT},
+        {NVS_KEY_READER_PROGRESS,1}, {NVS_KEY_UP_ACTION,APP_READER_KEY_NONE}, {NVS_KEY_BOOK_FONTS,1}, {NVS_KEY_BOOK_VERTICAL,0},
+        {NVS_KEY_BOOK_STYLES,1}, {NVS_KEY_TICKET_BACKGROUND,APP_TICKET_BACKGROUND_TRANSPARENT}, {NVS_KEY_TOUCH_HAPTIC,1}, {NVS_KEY_HAPTIC_LEVEL,APP_HAPTIC_WEAK},
+        {NVS_KEY_CELLULAR,0}, {NVS_KEY_NETWORK_ROUTE,NETWORK_ROUTE_AUTO}, {NVS_KEY_NETWORK_PRIORITY,NETWORK_AUTO_WIFI_FIRST},
+        {NVS_KEY_HOME_FULL,0}, {NVS_KEY_WALLPAPER_MODE,APP_WALLPAPER_MODE_CROP}, {NVS_KEY_MAIN_REFRESH,APP_MAIN_REFRESH_WATER},
+        {NVS_KEY_HOME_COMPONENT,APP_HOME_FOLDER}, {NVS_KEY_HOME_GOAL,30}, {NVS_KEY_HIDE_IMAGES,0}, {NVS_KEY_SHELF_RECENT,0},
+        {NVS_KEY_PICKUP,0}, {NVS_KEY_SYS_SIZE,120}, {NVS_KEY_SYS_CONTRAST,100}, {NVS_KEY_LOCK_STYLE,0}, {NVS_KEY_BOOK_PX,48},
+        {NVS_KEY_READER_FULL,DISPLAY_REFRESH_READER_CLEANUP_DEFAULT}, {NVS_KEY_READER_TURN,0}, {NVS_KEY_POWER_TURN,0},
+        {NVS_KEY_IMMERSIVE,0}, {NVS_KEY_STATUS,1}, {NVS_KEY_BOOK_TITLE_STYLE,APP_BOOK_TITLE_STYLE_DEFAULT}, {NVS_KEY_BOOK_TITLE_SIZE,APP_BOOK_TITLE_SIZE_DEFAULT},
+        {NVS_KEY_BOOK_TRACK,192-APP_BOOK_TRACK_MIN}, {NVS_KEY_BOOK_INDENT,2}, {NVS_KEY_BOOK_INDENT_ADJUST,20}, {NVS_KEY_BOOK_WEIGHT,2},
+        {NVS_KEY_BOOK_AA,1}, {NVS_KEY_BOOK_RULE,0}, {NVS_KEY_BOOK_RULE_TEXT,0}, {NVS_KEY_BOOK_RULE_OFFSET,4},
+        {NVS_KEY_BOOK_LINE,130}, {NVS_KEY_BOOK_MARGIN,24}, {NVS_KEY_BOOK_MARGIN_T,0}, {NVS_KEY_BOOK_MARGIN_B,0},
+        {NVS_KEY_BOOK_PARA,50}, {NVS_KEY_SHELF_STYLE,2}, {NVS_KEY_GESTURES,GESTURES_DEFAULT}, {NVS_KEY_BOOKMARK_MODE,APP_BOOKMARK_MODE_FIT},
+        {NVS_KEY_AUTO_TIME,1}, {NVS_KEY_AUTO_OTA,1}, {NVS_KEY_SHELF_TITLES,0}, {NVS_KEY_FRONTLIGHT_ON,0}, {NVS_KEY_FRONTLIGHT_BRI,40}, {NVS_KEY_FRONTLIGHT_CCT,50}
+    };
+    static const uint8_t key_defaults[] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
+    for (unsigned i = 0; i < 3; ++i) if (!strcmp(key, s_reader_key_names[i])) return item->u8 == key_defaults[i];
+    for (unsigned i = 0; i < 6; ++i) if (!strcmp(key, s_reader_chrome_names[i])) return item->u8 == s_reader_chrome_defaults[i];
+    for (size_t i = 0; i < sizeof(defaults)/sizeof(defaults[0]); ++i)
+        if (!strcmp(key, defaults[i].key)) return item->u8 == defaults[i].value;
+    return false;
+}
+static esp_err_t restore_compact(restore_settings_t *plan) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
+    bool opened = err == ESP_OK;
+    if (!opened && err != ESP_ERR_NVS_NOT_FOUND) return err;
+    size_t kept = 0;
+    for (size_t i = 0; i < plan->count; ++i) {
+        if (restore_boot_default(&plan->items[i])) {
+            nvs_type_t type;
+            err = opened ? nvs_find_key(h, plan->items[i].key, &type) : ESP_ERR_NVS_NOT_FOUND;
+            if (err == ESP_ERR_NVS_NOT_FOUND) continue;
+            if (err != ESP_OK) { nvs_close(h); return err; }
+        }
+        plan->items[kept++] = plan->items[i];
+    }
+    plan->count = kept;
+    if (opened) nvs_close(h);
+    return ESP_OK;
+}
+static esp_err_t restore_settings_write(const restore_settings_t *plan, restore_nvs_t *image) {
+    nvs_handle_t h = 0;
+    esp_err_t err = image ? ESP_OK : settings_write_open(&h);
+    if (err != ESP_OK) return err;
+    for (size_t i = 0; i < plan->count && err == ESP_OK; ++i) {
+        const restore_setting_t *item = &plan->items[i];
+        if (image) err = item->str ? restore_nvs_write(image, NVS_NS, item->key, NVS_TYPE_STR, item->str, strlen(item->str) + 1)
+                                  : restore_nvs_write(image, NVS_NS, item->key, NVS_TYPE_U8, &item->u8, 1);
+        else err = item->str ? nvs_set_str(h, item->key, item->str) : nvs_set_u8(h, item->key, item->u8);
+    }
+    if (!image) {
+        if (err == ESP_OK) err = nvs_commit(h);
+        settings_write_close(h);
+    }
+    return err;
+}
+static esp_err_t restore_tail(unsigned version, const settings_backup_portable_t *portable,
+                              const char *identity, restore_nvs_t *image) {
+    esp_err_t err = ESP_OK;
+    for (unsigned lib = 0; version >= 50 && lib < 2 && err == ESP_OK; ++lib) {
+        if (lib && (!identity[0] || strcmp(portable->card_identity, identity))) continue;
+        uint32_t selected = 0;
+        for (unsigned i = 0; i < 4; ++i) selected |= (uint32_t)portable->last_category[lib][i] << (8u * i);
+        err = restore_category(lib ? identity : "builtin", selected, image);
+    }
+    if (err == ESP_OK) err = wifi_transfer_merge_profiles_backup(&portable->wifi, image);
+    if (err == ESP_OK && version >= 48)
+        err = app_weather_restore_preferences(portable->weather_auto_refresh, portable->weather_has_city, &portable->city, image);
+    return err;
+}
+static esp_err_t restore_history_at(FILE *file, long pos, restore_nvs_t *image) {
+    if (pos < 0) return ESP_OK;
+    return fseek(file, pos, SEEK_SET) == 0 ? book_history_backup_restore(file, image) : ESP_FAIL;
+}
+static esp_err_t restore_rehearse(const restore_settings_t *plan, FILE *file, long history, bool history_first,
+                                 unsigned version, const settings_backup_portable_t *portable, const char *identity) {
+    restore_nvs_t *image = NULL;
+    esp_err_t err = restore_nvs_clone(&image);
+    if (err == ESP_OK && history_first) err = restore_history_at(file, history, image);
+    if (err == ESP_OK) err = restore_settings_write(plan, image);
+    if (err == ESP_OK && !history_first) err = restore_history_at(file, history, image);
+    if (err == ESP_OK) err = restore_tail(version, portable, identity, image);
+    restore_nvs_free(image);
+    return err;
+}
+
 esp_err_t app_settings_backup_restore(void) {
     board_sd_info_t card;
-    if (!backup_card_ready(&card)) return ESP_ERR_INVALID_STATE;
-    const char *source = BACKUP_FILE;
-    FILE *file = fopen(source, "rb");
-    if (!file) { source = BACKUP_PREVIOUS; file = fopen(source, "rb"); }
-    if (!file) return ESP_ERR_NOT_FOUND;
+    if (!backup_card_ready(&card)) return APP_RESTORE_NO_CARD;
+    FILE *file = fopen(BACKUP_FILE, "rb");
+    if (!file && errno == ENOENT) file = fopen(BACKUP_PREVIOUS, "rb");
+    if (!file) return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     settings_backup_v1_t backup;
     bool ok = fread(&backup, 1, sizeof(backup), file) == sizeof(backup);
     unsigned version = ok ? backup_version(&backup) : 0;
@@ -2957,11 +3101,12 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 51) ok = fread(lang, 1, 2, file) == 2 && lang[0] < UI_LANG_COUNT && (lang[0] ^ lang[1]) == 255;
     uint8_t gestures[2] = {0};
     if (ok && version >= 52) ok = fread(gestures, 1, 2, file) == 2 && gestures[0] < 6 && (gestures[0] ^ gestures[1]) == 255;
+    bool needs_volume = false;
     long user_data_position = -1;
     if (ok && version >= 48) {
         user_data_position = ftell(file);
-        ok = user_data_position >= 0 && app_reading_journal_backup_read(file, false) == ESP_OK &&
-            (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, false) == ESP_OK;
+        ok = user_data_position >= 0 && app_reading_journal_backup_read(file, false, &needs_volume) == ESP_OK &&
+            (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, false, &needs_volume) == ESP_OK;
     }
     if (version < 39) tap.mode = (profile.home_full_refresh & 32) ? APP_READER_TAP_VERTICAL : APP_READER_TAP_HORIZONTAL;
     // 旧备份没有本块：chrome 保持默认值并照常写回，与其他设置的恢复语义一致。
@@ -2971,8 +3116,8 @@ esp_err_t app_settings_backup_restore(void) {
         history_position = ftell(file);
         ok = history_position >= 0 && book_history_backup_validate(file);
     } else if (ok) ok = fgetc(file) == EOF && !ferror(file);
-    if (fclose(file) != 0) ok = false;
     if (!ok || !backup_valid(&backup)) {
+        fclose(file);
         backup_erase_secret(&wifi, sizeof(wifi)); backup_erase_secret(&portable, sizeof(portable));
         return ESP_ERR_INVALID_RESPONSE;
     }
@@ -2980,22 +3125,17 @@ esp_err_t app_settings_backup_restore(void) {
     bool lock_cover_crop = version >= 49 && (backup.flags[BK_LOCK] & BACKUP_LOCK_COVER_CROP_BIT) != 0;
     backup.flags[BK_LOCK] &= ~(BACKUP_LOCK_PROTOTYPE_BIT | BACKUP_LOCK_COVER_CROP_BIT);
 
-    if (version >= 48 && book_store_prepare_data() != ESP_OK) {
+    if (needs_volume && book_store_prepare_data() != ESP_OK) {
+        fclose(file);
         backup_erase_secret(&wifi, sizeof(wifi));
         backup_erase_secret(&portable, sizeof(portable));
-        return ESP_FAIL;
+        return APP_RESTORE_INTERNAL_VOLUME;
     }
     if (version < 48 && has_wifi && wifi.credentials.configured) {
         portable.wifi.count = 1;
         portable.wifi.items[0] = wifi.credentials;
     }
     backup_erase_secret(&wifi, sizeof(wifi));
-    esp_err_t wifi_preflight = wifi_transfer_merge_profiles_backup(&portable.wifi, false);
-    if (wifi_preflight != ESP_OK) {
-        backup_erase_secret(&portable, sizeof(portable));
-        return wifi_preflight;
-    }
-
     // 所有校验完成后才折算旧全屏与动作，v44 直接使用独立显隐。
     // Migrate only after all original checksums pass; v44 already stores independent visibility.
     if (version < 44 && open_full.open_full) visibility.header = visibility.footer = 0;
@@ -3054,69 +3194,69 @@ esp_err_t app_settings_backup_restore(void) {
     if (shutdown_mode < APP_SHUTDOWN_LIGHT || shutdown_mode > APP_SHUTDOWN_LIGHT_60)
         shutdown_mode = APP_SHUTDOWN_STAGED;
 
-    nvs_handle_t h;
-    esp_err_t err = settings_write_open(&h);
-    if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); backup_erase_secret(&portable, sizeof(portable)); return err; }
+    restore_settings_t plan = {0};
+    esp_err_t err = ESP_OK;
+#define PLAN_U8(key, value) restore_add(&plan, key, NULL, (uint8_t)(value))
+#define PLAN_STR(key, value) restore_add(&plan, key, value, 0)
     bool touch_disabled = touch_lock.on && reader_touch_binding(keys.actions, hold.action,
         double_action.action, up_action.action);
-    err = nvs_set_u8(h, NVS_KEY_TOUCH_DISABLED, touch_disabled ? 1 : 0);
-#define BACKUP_SET_U8(key, index) do { if (err == ESP_OK) err = nvs_set_u8(h, key, backup.flags[index]); } while (0)
-#define BACKUP_SET_STR(key, value) do { if (err == ESP_OK) err = nvs_set_str(h, key, value); } while (0)
-    for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = nvs_set_u8(h, s_reader_key_names[i], keys.actions[i]);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, hold.action);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_DOUBLE_ACTION, double_action.action);
+    err = PLAN_U8(NVS_KEY_TOUCH_DISABLED, touch_disabled ? 1 : 0);
+#define BACKUP_SET_U8(key, index) do { if (err == ESP_OK) err = PLAN_U8(key, backup.flags[index]); } while (0)
+#define BACKUP_SET_STR(key, value) do { if (err == ESP_OK) err = PLAN_STR(key, value); } while (0)
+    for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = PLAN_U8(s_reader_key_names[i], keys.actions[i]);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HOLD_ACTION, hold.action);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_DOUBLE_ACTION, double_action.action);
     BACKUP_SET_U8(NVS_KEY_SLEEP, BK_SLEEP);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE, (uint8_t)shutdown_mode);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHUTDOWN_MODE, (uint8_t)shutdown_mode);
     uint8_t idle_values[] = {0, 1, 5, 10};
     uint8_t idle_minutes = idle_values[(staged_shutdown >> 1) & 3];
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_LOCK, idle_minutes);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BLE_TURNER, (profile.home_full_refresh & 8) != 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VERTICAL_TURN, tap.mode == APP_READER_TAP_VERTICAL);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_AUTO_LOCK, idle_minutes);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BLE_TURNER, (profile.home_full_refresh & 8) != 0);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HOLD_REFRESH, (profile.home_full_refresh & 16) != 0);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_VERTICAL_TURN, tap.mode == APP_READER_TAP_VERTICAL);
     char tap_encoded[11];
     reader_tap_encode(tap_encoded, tap.mode, tap.actions);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_TAP_CONFIG, tap_encoded);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_VOLUME_TURN, volume.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHAKE_TURN, shake.on);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_TAP_CONFIG, tap_encoded);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_VOLUME_TURN, volume.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHAKE_TURN, shake.on);
     for (unsigned i = 0; i < 6 && err == ESP_OK; ++i)
-        err = nvs_set_u8(h, s_reader_chrome_names[i], chrome.items[i]);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_HEADER_H, heights.header);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_FOOTER_H, heights.footer);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CHROME_VISIBLE, visibility.header | (visibility.footer << 1));
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_READER_PROGRESS, progress_bar.on);
-    if (err == ESP_OK && version >= 33) err = nvs_set_u8(h, "home_regions", regions.value);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_UP_ACTION, up_action.action);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_FONTS, book_fonts.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_VERTICAL, book_vertical.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_STYLES, book_styles.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TICKET_BACKGROUND, ticket_background.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_TOUCH_HAPTIC, haptic.on);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HAPTIC_LEVEL, haptic.level);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_CELLULAR, network.cellular_enabled);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_NETWORK_ROUTE, network.route);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_NETWORK_PRIORITY, network.priority);
+        err = PLAN_U8(s_reader_chrome_names[i], chrome.items[i]);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_CHROME_HEADER_H, heights.header);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_CHROME_FOOTER_H, heights.footer);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_CHROME_VISIBLE, visibility.header | (visibility.footer << 1));
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_READER_PROGRESS, progress_bar.on);
+    if (err == ESP_OK && version >= 33) err = PLAN_U8("home_regions", regions.value);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_UP_ACTION, up_action.action);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_FONTS, book_fonts.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_VERTICAL, book_vertical.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_STYLES, book_styles.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_TICKET_BACKGROUND, ticket_background.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_TOUCH_HAPTIC, haptic.on);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HAPTIC_LEVEL, haptic.level);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_CELLULAR, network.cellular_enabled);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_NETWORK_ROUTE, network.route);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_NETWORK_PRIORITY, network.priority);
     char quick_encoded[APP_QUICK_ITEM_COUNT + 2];
     quick_layout_encode(&quick.layout, quick_encoded);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_QUICK_LAYOUT, quick_encoded);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_QUICK_LAYOUT, quick_encoded);
 
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     // v41 才定义 profile bit6 为壁纸显示方式；更早版本的同一位属于已撤下实验，必须回落裁剪。
     // v41 defines profile bit 6 as wallpaper fit; earlier backups used it for a retired experiment and must crop.
     app_wallpaper_mode_t restored_wallpaper_mode = version >= 41 && (profile.home_full_refresh & 64)
         ? APP_WALLPAPER_MODE_FIT : APP_WALLPAPER_MODE_CROP;
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_WALLPAPER_MODE, restored_wallpaper_mode);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HIDE_IMAGES, (profile.home_full_refresh & 2) != 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_RECENT, (profile.home_full_refresh & 4) != 0);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DEVICE_NAME, profile.device_name);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_AVATAR, profile.avatar);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_STATUS_SIGNATURE, profile.status_signature);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_WALLPAPER_MODE, restored_wallpaper_mode);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HOME_COMPONENT, home.component);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HOME_GOAL, home.minutes);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_HIDE_IMAGES, (profile.home_full_refresh & 2) != 0);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHELF_RECENT, (profile.home_full_refresh & 4) != 0);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_DEVICE_NAME, profile.device_name);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_AVATAR, profile.avatar);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_STATUS_SIGNATURE, profile.status_signature);
     BACKUP_SET_U8(NVS_KEY_PICKUP, BK_PICKUP);
     BACKUP_SET_U8(NVS_KEY_SYS_SIZE, BK_SYS_SIZE);
     BACKUP_SET_U8(NVS_KEY_SYS_CONTRAST, BK_SYS_CONTRAST);
-    BACKUP_SET_U8(NVS_KEY_LOCK_STYLE, BK_LOCK);
     BACKUP_SET_U8(NVS_KEY_BOOK_PX, BK_BOOK_PX);
 
     BACKUP_SET_U8(NVS_KEY_READER_FULL, BK_FULL_PAGES);
@@ -3126,33 +3266,33 @@ esp_err_t app_settings_backup_restore(void) {
     // key from the legacy slot and the inverted status-bar key; both stay in sync across
     // upgrades and downgrades.
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_STYLE, title_style.style);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_SIZE, title_size.px);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_TITLE_STYLE, title_style.style);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_TITLE_SIZE, title_size.px);
     // 新编码：192..222 对应 -15..+15 px，兼容旧的 0..4 档与 128..148 中间格式。
     // New encoding: 192..222 maps -15..+15 px, alongside the legacy 0..4 and 128..148 forms.
-    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_TRACK,192+backup.flags[BK_TRACKING]);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
+    if(err==ESP_OK)err=PLAN_U8(NVS_KEY_BOOK_TRACK,192+backup.flags[BK_TRACKING]);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_INDENT, indent);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
     int fine_weight=weight.encoded<=4?((int)weight.encoded-2)*APP_BOOK_WEIGHT_SUBSTEPS:(int)weight.encoded-128-APP_BOOK_WEIGHT_FINE_MAX;
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT, fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT_FINE, fine_weight+APP_BOOK_WEIGHT_FINE_MAX);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_WEIGHT, fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_WEIGHT_FINE, fine_weight+APP_BOOK_WEIGHT_FINE_MAX);
     const bool antialias = version < 15 || backup.flags[BK_SHAKE] == 0;
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_AA, antialias ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE, backup.flags[BK_READING_LINE] & 3);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_TEXT, (backup.flags[BK_READING_LINE] & 4) ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_AA, antialias ? 1 : 0);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_RULE, backup.flags[BK_READING_LINE] & 3);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_RULE_TEXT, (backup.flags[BK_READING_LINE] & 4) ? 1 : 0);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_RULE_OFFSET, rule_offset);
     BACKUP_SET_U8(NVS_KEY_BOOK_LINE, BK_LINE_SPACING);
     BACKUP_SET_U8(NVS_KEY_BOOK_MARGIN, BK_MARGIN);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_L, margins.left);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_R, margins.right);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_T, margins.top);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_MARGIN_B, margins.bottom);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_MARGIN_L, margins.left);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_MARGIN_R, margins.right);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_MARGIN_T, margins.top);
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOK_MARGIN_B, margins.bottom);
     BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
-    if (err == ESP_OK && version >= 52) err = nvs_set_u8(h, NVS_KEY_GESTURES, gestures[0]);
-    if (err == ESP_OK && version >= 51) err = nvs_set_u8(h, "setup_state", setup_state(lang[0], s_setup));
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
+    if (err == ESP_OK && version >= 52) err = PLAN_U8(NVS_KEY_GESTURES, gestures[0]);
+    if (err == ESP_OK && version >= 51) err = PLAN_U8("setup_state", setup_state(lang[0], s_setup));
+    if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHELF_V22, 1);
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
     BACKUP_SET_STR(NVS_KEY_BOOK_BACKGROUND, background.path);
     BACKUP_SET_STR(NVS_KEY_FONT, backup.font);
@@ -3160,28 +3300,42 @@ esp_err_t app_settings_backup_restore(void) {
     if(bookmark.path[0] && !backup_file_exists(bookmark.path,false))bookmark.path[0]=0;
     if(!bookmark.path[0] && backup.flags[BK_LOCK]==3)backup.flags[BK_LOCK]=0;
     BACKUP_SET_STR(NVS_KEY_BOOKMARK, bookmark.path);
-    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_STYLE,backup.flags[BK_LOCK]);
-    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_LOCK_FACE,lock_face_encode(backup.flags[BK_LOCK],calendar_style.on,lock_cover_crop));
+    if(err==ESP_OK)err=PLAN_U8(NVS_KEY_LOCK_STYLE,backup.flags[BK_LOCK]);
+    if(err==ESP_OK)err=PLAN_U8(NVS_KEY_LOCK_FACE,lock_face_encode(backup.flags[BK_LOCK],calendar_style.on,lock_cover_crop));
     BACKUP_SET_STR(NVS_KEY_WALLPAPER, backup.wallpaper);
     char off_encoded[OFF_CONFIG_BYTES];
     off_art_encode(&restored_off_art, off_encoded);
-    if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_OFF_ART, off_encoded);
+    if (err == ESP_OK) err = PLAN_STR(NVS_KEY_OFF_ART, off_encoded);
     BACKUP_SET_STR(NVS_KEY_BOOKS_DIR, backup.books_dir);
     BACKUP_SET_STR(NVS_KEY_FONTS_DIR, backup.fonts_dir);
 #undef BACKUP_SET_U8
 #undef BACKUP_SET_STR
     if (version >= 48) {
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOKMARK_MODE, portable.bookmark_mode);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_TIME, portable.auto_time);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_AUTO_OTA, portable.auto_ota);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_TITLES, portable.shelf_titles);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_FRONTLIGHT_ON, portable.frontlight_on);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_FRONTLIGHT_BRI, portable.frontlight_brightness);
-        if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_FRONTLIGHT_CCT, portable.frontlight_cct);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_BOOKMARK_MODE, portable.bookmark_mode);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_AUTO_TIME, portable.auto_time);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_AUTO_OTA, portable.auto_ota);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHELF_TITLES, portable.shelf_titles);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_FRONTLIGHT_ON, portable.frontlight_on);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_FRONTLIGHT_BRI, portable.frontlight_brightness);
+        if (err == ESP_OK) err = PLAN_U8(NVS_KEY_FRONTLIGHT_CCT, portable.frontlight_cct);
     }
-    if (err == ESP_OK) err = nvs_commit(h);
-    settings_write_close(h);
-    if (err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); backup_erase_secret(&portable, sizeof(portable)); return err; }
+#undef PLAN_U8
+#undef PLAN_STR
+    // 常规试写不足时，省略缺失的默认键；有历史块才允许先回收旧阅读资料。
+    // On capacity failure omit absent defaults; reclaim the old library first only for backups that replace history.
+    bool guarded = err == ESP_OK && epd_flash_begin();
+    bool history_first = false;
+    if (err == ESP_OK && !guarded) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) err = restore_rehearse(&plan, file, history_position, false, version, &portable, card.identity);
+    if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
+        history_first = has_history;
+        err = restore_compact(&plan);
+        if (err == ESP_OK) err = restore_rehearse(&plan, file, history_position, history_first, version, &portable, card.identity);
+    }
+    if (err == ESP_OK && history_first) err = restore_history_at(file, history_position, NULL);
+    if (err == ESP_OK) err = restore_settings_write(&plan, NULL);
+    free(plan.items);
+    if (err != ESP_OK) goto finish_restore;
 
     if (version >= 48) {
         s_bookmark_mode = (app_bookmark_mode_t)portable.bookmark_mode;
@@ -3275,36 +3429,15 @@ esp_err_t app_settings_backup_restore(void) {
     strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));
     strlcpy(s_bookmark,bookmark.path,sizeof(s_bookmark));
-    esp_err_t result = ESP_OK;
-    if (has_history) {
-        file = fopen(source, "rb");
-        if (!file) result = ESP_FAIL;
-        else {
-            if (version >= 48) {
-                result = fseek(file, user_data_position, SEEK_SET) == 0
-                    ? app_reading_journal_backup_read(file, true) : ESP_FAIL;
-                if (result == ESP_OK) result = (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, true);
-            }
-            if (result == ESP_OK) result = fseek(file, history_position, SEEK_SET) == 0
-                ? book_history_backup_restore(file) : ESP_FAIL;
-            if (fclose(file) != 0 && result == ESP_OK) result = ESP_FAIL;
-        }
+    if (version >= 48) {
+        err = fseek(file, user_data_position, SEEK_SET) == 0 ? app_reading_journal_backup_read(file, true, NULL) : ESP_FAIL;
+        if (err == ESP_OK) err = (version >= 50 ? book_folder_backup_read : book_collection_backup_read)(file, card.identity, true, NULL);
     }
-    if (result == ESP_OK && version >= 50) {
-        for (unsigned library = 0; library < 2; ++library) {
-            if (library && (!card.identity[0] || strcmp(portable.card_identity, card.identity))) continue;
-            uint32_t selected = 0;
-            for (unsigned i = 0; i < 4; ++i) selected |= (uint32_t)portable.last_category[library][i] << (8u * i);
-            if (!app_settings_set_shelf_category(library ? card.identity : "builtin", selected)) {
-                result = ESP_FAIL;
-                break;
-            }
-        }
-    }
-    if (result == ESP_OK) result = wifi_transfer_merge_profiles_backup(&portable.wifi, true);
-    if (result == ESP_OK && version >= 48 &&
-        !app_weather_restore_preferences(portable.weather_auto_refresh, portable.weather_has_city, &portable.city))
-        result = ESP_FAIL;
+    if (err == ESP_OK && has_history && !history_first) err = restore_history_at(file, history_position, NULL);
+    if (err == ESP_OK) err = restore_tail(version, &portable, card.identity, NULL);
+finish_restore:
+    if (guarded) epd_flash_end();
+    if (fclose(file) != 0 && err == ESP_OK) err = ESP_FAIL;
     backup_erase_secret(&portable, sizeof(portable));
-    return result;
+    return err;
 }

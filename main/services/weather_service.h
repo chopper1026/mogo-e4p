@@ -29,8 +29,6 @@ bool app_weather_set_enabled(bool enabled);
 /// 仅控制自动请求；手动更新和选城不受影响。/ Gate automatic requests only, preserving manual updates and city selection.
 bool app_weather_set_auto_refresh(bool enabled);
 bool app_weather_select(const weather_location_t *city);
-/// 恢复城市和自动刷新，不导入缓存或旧组件开关。/ Restore city and automatic refresh without importing cache or the legacy widget switch.
-bool app_weather_restore_preferences(bool auto_refresh, bool has_city, const weather_location_t *city);
 bool app_weather_request(app_weather_request_t request, const char *query);
 /// 页码从零开始；优先本地缓存，仅补取缺失批次。/ Zero-based pages use local results first, fetching only missing batches.
 bool app_weather_search(const char *query, unsigned page);

@@ -67,7 +67,8 @@ esp_err_t book_collection_folders(book_collection_t *state, const char *const *n
 const char *book_collection_record(const book_collection_t *state, size_t index, uint32_t *category);
 esp_err_t book_collection_finish_migration(book_collection_t *state);
 esp_err_t book_folder_backup_write(FILE *file, const char *card_id);
-esp_err_t book_folder_backup_read(FILE *file, const char *card_id, bool apply);
+/// 可选累积标志仅对将要恢复的非空快照置真。/ Set the optional cumulative flag only for a nonempty snapshot applicable to this device.
+esp_err_t book_folder_backup_read(FILE *file, const char *card_id, bool apply, bool *needs_volume);
 /// 独立的有校验流，用于版本化备份。/ Independent checked stream for versioned backups.
 esp_err_t book_collection_export(const book_collection_t *state, FILE *file);
 esp_err_t book_collection_import(book_collection_t *state, FILE *file);
@@ -75,6 +76,6 @@ esp_err_t book_collection_import(book_collection_t *state, FILE *file);
 /// 备份内置及指定TF书库；校验时不写入，恢复时不覆盖其他卡的分类。
 /// Back up internal and specified card libraries; validate without writing and never replace another card's collection.
 esp_err_t book_collection_backup_write(FILE *file, const char *card_id);
-esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool apply);
+esp_err_t book_collection_backup_read(FILE *file, const char *card_id, bool apply, bool *needs_volume);
 /// 分类恢复后令活动书架重取双副本。/ Reload active collections after restoring snapshots.
 uint32_t book_collection_backup_revision(void);

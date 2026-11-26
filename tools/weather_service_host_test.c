@@ -107,6 +107,11 @@ void epd_flash_end(void){assert(flash);flash=false;}
 esp_err_t nvs_open(const char *ns,int mode,nvs_handle_t *h){
     assert(!strcmp(ns,"kiiko_weather"));if(mode==NVS_READWRITE)assert(flash);*h=1;return ESP_OK;
 }
+static unsigned preview_writes;
+esp_err_t restore_nvs_write(restore_nvs_t *image, const char *ns, const char *key, nvs_type_t type, const void *data, size_t len) {
+    assert(image && !strcmp(ns,"kiiko_weather") && !strcmp(key,"prefs") && type == NVS_TYPE_BLOB && data && len == sizeof(weather_preferences_t));
+    ++preview_writes; return ESP_OK;
+}
 void nvs_close(nvs_handle_t h){assert(h==1);}
 esp_err_t nvs_get_blob(nvs_handle_t h,const char *key,void *out,size_t *size){
     assert(h==1);size_t n=!strcmp(key,"prefs")?prefs_size:cache_size;
@@ -341,6 +346,11 @@ static void weather_clocks(void) {
 int main(void) {
     wall_time=weather_timestamp("2026-11-02T00:30:00Z");
     app_weather_init();assert(!s_view.enabled&&!s_view.has_city&&!requests&&s_view.auto_refresh);
+    // 空偏好不建键，非默认值参与预检但不写入也不发布。/ Absent defaults allocate no key; rehearse non-default prefs without writes or publication.
+    restore_nvs_t *image = (restore_nvs_t *)&preview_writes;
+    assert(app_weather_restore_preferences(true, false, NULL, image) == ESP_OK && !preview_writes);
+    assert(app_weather_restore_preferences(false, false, NULL, image) == ESP_OK && preview_writes == 1);
+    assert(app_weather_restore_preferences(true, false, NULL, NULL) == ESP_OK && !ns_writes && s_view.auto_refresh);
     assert(!app_weather_poll(false)&&!requests);
     assert(app_weather_poll(true)&&pending&&!s_view.enabled);
     run_worker();assert(app_weather_poll(false));

@@ -12,6 +12,7 @@
  * Frozen: AP webpage or stopped-service device UI may provision; STA rejects remote credential changes.
  */
 #pragma once
+struct restore_nvs;
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -139,7 +140,8 @@ esp_err_t wifi_transfer_export_profiles_backup(wifi_transfer_profiles_backup_t *
 /// 校验整组和互异 SSID；不访问设备。/ Validate all entries and distinct SSIDs without accessing the device.
 bool wifi_transfer_profiles_backup_valid(const wifi_transfer_profiles_backup_t *backup);
 /// 备份网络优先，保留未覆盖的本机网络；容量不足不写入。/ Backup entries take precedence; keep unmatched local networks and reject over-capacity without writing.
-esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, bool apply);
+/// image 非空时仅在副本试写，不发布网络信息。/ A non-null image rehearses without publishing credentials.
+esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, struct restore_nvs *image);
 /// 遗忘默认网络并保留其他网络；仅热点或 STA 已释放时可用，上传中拒绝。
 /// Forget the preferred network only, while AP or after releasing STA resources; reject during upload.
 esp_err_t wifi_transfer_forget_wifi(void);

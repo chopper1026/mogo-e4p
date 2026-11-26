@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix="settings-backup-") as directory:
     binary = folder / "test"
     subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                     "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
-                    "-Itools/settings_backup_stubs", "-Icomponents/wifi_transfer/include",
+                    "-Itools/settings_backup_stubs", "-Icomponents/restore_nvs/include", "-Icomponents/wifi_transfer/include",
                     "-Imain", "-Imain/services", "tools/settings_backup_host_test.c", "-o", str(binary)],
                    cwd=ROOT, env=env, check=True)
     subprocess.run([str(binary)], cwd=ROOT, env=env, check=True)

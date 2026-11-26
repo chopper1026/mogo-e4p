@@ -37,6 +37,12 @@ static int namespace_index(const char *name) {
         if (!strcmp(name, namespaces[i])) return (int)i;
     return -1;
 }
+esp_err_t restore_nvs_write(restore_nvs_t *image, const char *ns, const char *key, nvs_type_t type, const void *data, size_t len) {
+    (void)image; (void)ns; (void)key; (void)type; (void)data; (void)len; return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+}
+esp_err_t restore_nvs_erase(restore_nvs_t *image, const char *ns, const char *key) {
+    assert(image && namespace_index(ns) >= 0 && !key); return ESP_OK;
+}
 static record_t *find_record(int ns, const char *key) {
     for (int i = 0; i < counts[active]; ++i)
         if (records[active][i].ns == ns && !strcmp(records[active][i].key, key)) return &records[active][i];
@@ -148,7 +154,10 @@ int main(void) {
     snprintf(key,sizeof(key),"h_%08x",path_hash);
     assert(put(5,key,NVS_TYPE_STR,path,path_len)==ESP_OK);
     unsigned before_restore = progress_changes;
-    assert(book_history_backup_restore(f)==ESP_OK);
+    long start = ftell(f);
+    assert(book_history_backup_restore(f, (restore_nvs_t *)&before_restore) == ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    assert(progress_changes == before_restore && fseek(f, start, SEEK_SET) == 0);
+    assert(book_history_backup_restore(f,NULL)==ESP_OK);
     assert(progress_changes > before_restore);
     assert(counts[1]==counts[0]);
     assert(!find_record(3,"f_deadbeef"));
@@ -165,7 +174,7 @@ int main(void) {
     assert(book_history_backup_write(f,NULL,0)==ESP_OK);
     rewind(f); assert(book_history_backup_validate(f));
     active=1; rewind(f);
-    assert(book_history_backup_restore(f)==ESP_OK && counts[1]==counts[0]);
+    assert(book_history_backup_restore(f,NULL)==ESP_OK && counts[1]==counts[0]);
     for (int i=0;i<counts[0];++i) {
         record_t *a=&records[0][i], *b=find_record(a->ns,a->key);
         assert(b && b->type==a->type && b->len==a->len && !memcmp(a->data,b->data,a->len));
@@ -201,11 +210,11 @@ int main(void) {
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_NOT_FOUND);
     active=0; rewind(f); fail_promotion=".restore";
     uint32_t before=521; assert(!put(0,"seq",NVS_TYPE_U32,&before,sizeof(before)));
-    assert(book_history_backup_restore(f)!=ESP_OK); fail_promotion=NULL;
+    assert(book_history_backup_restore(f,NULL)!=ESP_OK); fail_promotion=NULL;
     assert(!memcmp(find_record(0,"seq")->data,&before,sizeof(before)) && !find_record(2,key));
     assert(!book_bookmark_store_load(other,17,&got) && got->entries[5999].byte_off==88); free(got);
-    rewind(f); assert(!book_history_backup_restore(f));
-    rewind(f); fail_history_allocation=bytes; assert(read_stream(f,RESTORE_NVS)==ESP_OK); fail_history_allocation=0; fclose(f);
+    rewind(f); assert(!book_history_backup_restore(f,NULL));
+    rewind(f); fail_history_allocation=bytes; assert(read_stream(f,RESTORE_NVS,NULL)==ESP_OK); fail_history_allocation=0; fclose(f);
     assert(find_record(2,key) && find_record(2,key)->len==internal_bytes);
     assert(!book_bookmark_store_load(path,17,&got) && got->count==6000 && got->entries[5999].byte_off==77); free(got);
     assert(book_bookmark_store_load(other,17,&got)==ESP_ERR_NOT_FOUND);
@@ -215,7 +224,7 @@ int main(void) {
     uint32_t h=hash_bytes(hash_bytes(UINT32_C(2166136261),head,20),&marks,sizeof(marks)); put32(seal+2,h);
     assert(fwrite("RPHIST1",1,8,f)==8 && fwrite(head,1,20,f)==20 && fwrite(&marks,1,sizeof(marks),f)==sizeof(marks) &&
         fwrite(end,1,20,f)==20 && fwrite(seal,1,6,f)==6);rewind(f);
-    assert(!book_history_backup_restore(f) && find_record(2,(char*)head+2)); fclose(f);
+    assert(!book_history_backup_restore(f,NULL) && find_record(2,(char*)head+2)); fclose(f);
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_NOT_FOUND);
     slot_path_t file;assert(record_path(BOOKMARK_ROOT,path,"",file)); f=fopen(file,"wb");assert(f && fputc(1,f)!=EOF && !fclose(f));
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_INVALID_STATE && !got);

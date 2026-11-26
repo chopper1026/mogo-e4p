@@ -1018,6 +1018,8 @@
 {"本章页码","本章頁碼","Chapter page"},
 {"本页全选","本頁全選","Select this page"},
 {"本页无法选字","本頁無法選字","This page cannot select words"},
+{"机内文件存储不可用，无法恢复","機內檔案儲存不可用，無法恢復","Internal file storage unavailable; cannot restore"},
+{"机内配置空间不足，无法恢复","機內設定空間不足，無法恢復","Not enough internal settings space to restore"},
 {"松","松","Loose"},
 {"极简居中标题，以细线收束留白","極簡居中標題，以細線收束留白","An extremely simple middle title, with a thin line to store white"},
 {"柔和","柔和","Soft"},

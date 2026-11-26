@@ -66,6 +66,7 @@
 #include "app_registry.h"
 #include "app_transfer_mode.h"
 #include "settings.h"
+#include "nvs.h"
 #include "haptics.h"
 #include "lock_pin_flow.h"
 #include "ui_pinpad.h"
@@ -2874,7 +2875,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             snprintf(s_notice, sizeof(s_notice), "%s",
                      err == ESP_OK ? (wifi_saved ? ui_tr("配置与阅读记录已恢复；WiFi 请重新连接") :
                                                    ui_tr("配置与阅读记录已恢复")) :
-                     err == ESP_ERR_INVALID_STATE ? ui_tr("未识别到 TF 卡，请插卡后重试") :
+                     err == APP_RESTORE_NO_CARD ? ui_tr("未识别到 TF 卡，请插卡后重试") :
+                     err == APP_RESTORE_INTERNAL_VOLUME ? ui_tr("机内文件存储不可用，无法恢复") :
+                     err == ESP_ERR_NVS_NOT_ENOUGH_SPACE ? ui_tr("机内配置空间不足，无法恢复") :
                      err == ESP_ERR_NOT_FOUND ? ui_tr("未找到配置备份文件") :
                      err == ESP_ERR_INVALID_RESPONSE ? ui_tr("配置文件损坏或版本不兼容") :
                      err == ESP_ERR_INVALID_SIZE ? ui_tr("WiFi 合并超过 8 组，请先遗忘部分网络") :

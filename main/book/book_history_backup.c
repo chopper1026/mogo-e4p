@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nvs.h"
+#include "restore_nvs.h"
 
 #define HISTORY_MAX_RECORDS 512
 #define HISTORY_MAX_VALUE 4096
@@ -152,7 +153,7 @@ esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
 }
 
 typedef enum { VALIDATE, STAGE_CARD, RESTORE_NVS } read_mode_t;
-static esp_err_t read_stream(FILE *file, read_mode_t mode) {
+static esp_err_t read_stream(FILE *file, read_mode_t mode, restore_nvs_t *image) {
     char magic[8];
     if (!file || fread(magic, 1, 8, file) != 8) return ESP_ERR_INVALID_RESPONSE;
     bool v1 = !memcmp(magic, "RPHIST1", 8);
@@ -186,8 +187,8 @@ static esp_err_t read_stream(FILE *file, read_mode_t mode) {
             }
         }
         if (ns == CARD_NS && mode == RESTORE_NVS) {
-            // 卡记录已经校验并发布；重放 NVS 只分块复核校验和，不再分配整本书的缓冲区。
-            // Card records are already published. Recheck the seal in chunks without allocating a whole book during NVS replay.
+            // 预检或重放 NVS 时，卡记录只参与校验和，不分配整本书的缓冲区。
+            // Card records contribute only to the seal during NVS rehearsal or replay; stream them without a book-sized allocation.
             if (strncmp(header.path, "/sdcard/", 8)) { result = ESP_ERR_INVALID_RESPONSE; break; }
             hash = hash_bytes(hash_bytes(hash, head, head_len), &header, prefix);
             uint8_t chunk[512];
@@ -208,7 +209,9 @@ static esp_err_t read_stream(FILE *file, read_mode_t mode) {
         }
         hash = hash_bytes(hash_bytes(hash, head, head_len), value, len); ++count;
         if (ns == CARD_NS && mode == STAGE_CARD) result = book_bookmark_restore_put((void *)value);
-        if (ns < CARD_NS && mode == RESTORE_NVS) {
+        if (ns < CARD_NS && mode == RESTORE_NVS && image) {
+            result = restore_nvs_write(image, namespaces[ns], key, (nvs_type_t)type, value, len);
+        } else if (ns < CARD_NS && mode == RESTORE_NVS) {
             if (open_ns != (int)ns) {
                 if (open_ns >= 0) { result = nvs_commit(h); nvs_close(h); }
                 open_ns = -1;
@@ -236,26 +239,36 @@ static esp_err_t read_stream(FILE *file, read_mode_t mode) {
     return count == stored_count && hash == get32(seal + count_bytes) && fgetc(file) == EOF && !ferror(file) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
-bool book_history_backup_validate(FILE *file) { return read_stream(file, VALIDATE) == ESP_OK; }
-esp_err_t book_history_backup_restore(FILE *file) {
+bool book_history_backup_validate(FILE *file) { return read_stream(file, VALIDATE, NULL) == ESP_OK; }
+esp_err_t book_history_backup_restore(FILE *file, restore_nvs_t *image) {
     if (!file) return ESP_ERR_INVALID_ARG;
-    long start = ftell(file);
-    if (start < 0 || !book_history_backup_validate(file) || fseek(file, start, SEEK_SET))
-        return ESP_ERR_INVALID_RESPONSE;
-    esp_err_t card = book_bookmark_restore_begin();
-    if (card == ESP_OK) card = read_stream(file, STAGE_CARD);
-    if (card != ESP_OK) return card;
-    if (fseek(file, start, SEEK_SET)) return ESP_FAIL;
-    // 先发布卡目录：任一文件写入/换名失败，旧 NVS 阅读数据均保持原样。
-    // Publish before erasing NVS so any card staging or promotion failure leaves the old NVS library intact.
-    card = book_bookmark_restore_finish();
-    if (card != ESP_OK) return card;
+    if (!image) {
+        long start = ftell(file);
+        if (start < 0 || !book_history_backup_validate(file) || fseek(file, start, SEEK_SET))
+            return ESP_ERR_INVALID_RESPONSE;
+        esp_err_t card = book_bookmark_restore_begin();
+        if (card == ESP_OK) card = read_stream(file, STAGE_CARD, NULL);
+        if (card != ESP_OK) return card;
+        if (fseek(file, start, SEEK_SET)) return ESP_FAIL;
+        // TF 发布成功后才替换旧进度。/ Replace old progress only after card promotion succeeds.
+        card = book_bookmark_restore_finish();
+        if (card != ESP_OK) return card;
+    }
     // Recovery replaces the old reading library. Merging leaves stale "last"
     // and per-book records behind, so the restored shelf can appear unchanged.
     // 恢复应替换旧阅读资料；合并会留下备份外的旧书进度与最近阅读排序。
     for (unsigned ns = 0; ns < sizeof(namespaces) / sizeof(namespaces[0]); ++ns) {
+        if (image) {
+            esp_err_t err = restore_nvs_erase(image, namespaces[ns], NULL);
+            if (err != ESP_OK) return err;
+            continue;
+        }
         nvs_handle_t h;
-        esp_err_t err = nvs_open(namespaces[ns], NVS_READWRITE, &h);
+        esp_err_t err = nvs_open(namespaces[ns], NVS_READONLY, &h);
+        if (err == ESP_ERR_NVS_NOT_FOUND) continue;
+        if (err != ESP_OK) return err;
+        nvs_close(h);
+        err = nvs_open(namespaces[ns], NVS_READWRITE, &h);
         if (err != ESP_OK) return err;
         err = nvs_erase_all(h);
         if (err == ESP_OK) err = nvs_commit(h);
@@ -263,5 +276,5 @@ esp_err_t book_history_backup_restore(FILE *file) {
         book_progress_notify_changed();
         if (err != ESP_OK) return err;
     }
-    return read_stream(file, RESTORE_NVS);
+    return read_stream(file, RESTORE_NVS, image);
 }

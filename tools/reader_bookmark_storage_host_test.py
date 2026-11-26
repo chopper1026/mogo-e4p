@@ -148,6 +148,6 @@ with tempfile.TemporaryDirectory(prefix='mogo-bookmarks-') as tmp:
     src, binary = folder / 'test.c', folder / 'test'
     src.write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
-                    '-I'+str(ROOT/'tools/settings_backup_stubs'), '-I'+str(ROOT/'tools'),
+                    '-I'+str(ROOT/'tools/settings_backup_stubs'), '-I'+str(ROOT/'components/restore_nvs/include'), '-I'+str(ROOT/'tools'),
                     str(src), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], cwd=folder, check=True)

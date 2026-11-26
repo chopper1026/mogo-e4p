@@ -505,7 +505,7 @@ static esp_err_t backup_write(FILE *file, const char *card_id, bool folders) {
     return err;
 }
 
-static esp_err_t collection_backup_read_one(FILE *file, const char *library, bool apply, bool folders) {
+static esp_err_t collection_backup_read_one(FILE *file, const char *library, bool apply, bool folders, bool *needs_volume) {
     int present = fgetc(file);
     if (present == 0) return ESP_OK;
     if (present != 1) return ESP_ERR_INVALID_RESPONSE;
@@ -513,6 +513,7 @@ static esp_err_t collection_backup_read_one(FILE *file, const char *library, boo
     uint32_t generation = 0;
     esp_err_t err = read_image(file, &next, &generation);
     if (err == ESP_OK && folders && next->used) err = ESP_ERR_INVALID_RESPONSE;
+    if (err == ESP_OK && needs_volume) *needs_volume = true;
     if (err == ESP_OK && apply) {
         book_collection_t state = {0};
         err = collection_backup_open(&state, library, folders);
@@ -527,20 +528,22 @@ static esp_err_t collection_backup_read_one(FILE *file, const char *library, boo
     return err;
 }
 
-static esp_err_t backup_read(FILE *file, const char *card_id, bool apply, bool folders) {
+static esp_err_t backup_read(FILE *file, const char *card_id, bool apply, bool folders, bool *needs_volume) {
     if (!file || !collection_card_id_valid(card_id)) return ESP_ERR_INVALID_ARG;
     uint8_t header[COLLECTION_CARD_ID_BYTES + 4];
     if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
         get32(header + COLLECTION_CARD_ID_BYTES) != checksum(header, COLLECTION_CARD_ID_BYTES) ||
         !collection_card_id_valid((const char *)header)) return ESP_ERR_INVALID_RESPONSE;
-    esp_err_t err = collection_backup_read_one(file, "builtin", apply, folders);
+    esp_err_t err = collection_backup_read_one(file, "builtin", apply, folders, needs_volume);
     // 跨卡仍可恢复其他内容，但不能把归属写进另一张卡的书库。/ A different card may restore other data, never this card's assignments.
-    if (err == ESP_OK && header[0])
-        err = collection_backup_read_one(file, card_id, apply && card_id && !strcmp((const char *)header, card_id), folders);
+    if (err == ESP_OK && header[0]) {
+        bool same = card_id && !strcmp((const char *)header, card_id);
+        err = collection_backup_read_one(file, card_id, apply && same, folders, same ? needs_volume : NULL);
+    }
     return err;
 }
 
-esp_err_t book_collection_backup_read(FILE *f,const char *id,bool apply) { return backup_read(f,id,apply,false); }
+esp_err_t book_collection_backup_read(FILE *f,const char *id,bool apply, bool *needs_volume) { return backup_read(f,id,apply,false,needs_volume); }
 esp_err_t book_collection_backup_write(FILE *f,const char *id) { return backup_write(f,id,false); }
-esp_err_t book_folder_backup_read(FILE *f,const char *id,bool apply) { return backup_read(f,id,apply,true); }
+esp_err_t book_folder_backup_read(FILE *f,const char *id,bool apply, bool *needs_volume) { return backup_read(f,id,apply,true,needs_volume); }
 esp_err_t book_folder_backup_write(FILE *f,const char *id) { return backup_write(f,id,true); }

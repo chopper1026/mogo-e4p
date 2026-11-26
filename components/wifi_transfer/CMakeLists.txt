@@ -14,5 +14,6 @@ if(NOT transfer_page_result EQUAL 0)
 endif()
 idf_component_register(SRCS "wifi_transfer.c"
     INCLUDE_DIRS "include"
+    PRIV_REQUIRES restore_nvs
     REQUIRES memory_peak ble_page_turner book_search esp_wifi esp_netif esp_event esp_http_server nvs_flash fatfs esp_timer espressif__cjson
     EMBED_FILES "${transfer_page}")

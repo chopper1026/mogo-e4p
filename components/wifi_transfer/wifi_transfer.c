@@ -510,6 +510,7 @@ static int list_books(const char *root, const char *query, size_t page, transfer
 
 #ifndef WIFI_TRANSFER_HOST_TEST
 #include "wifi_transfer.h"
+#include "restore_nvs.h"
 #include "transfer_signature.h"
 #include "ble_page_turner.h"
 #include "memory_peak.h"
@@ -791,7 +792,7 @@ bool wifi_transfer_profiles_backup_valid(const wifi_transfer_profiles_backup_t *
     return true;
 }
 
-esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, bool apply) {
+esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backup_t *backup, struct restore_nvs *image) {
     if (!wifi_transfer_profiles_backup_valid(backup)) return ESP_ERR_INVALID_ARG;
     if (!backup->count) return ESP_OK;
     if (!claim_config()) return ESP_ERR_INVALID_STATE;
@@ -804,7 +805,10 @@ esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backu
             memcpy(next.items[i].password, backup->items[i].password, sizeof(next.items[i].password));
         }
         if (!merge_backup_profiles(&next, &local)) err = ESP_ERR_INVALID_SIZE;
-        else if (apply) {
+        else if (image) {
+            err = restore_nvs_write(image, "rp_wifi", "profiles", NVS_TYPE_BLOB, &next, sizeof(next));
+            if (err == ESP_OK) err = restore_nvs_erase(image, "rp_wifi", "credentials");
+        } else {
             err = store_profiles(&next);
             if (err == ESP_OK && !s_wifi) publish_credentials(&next.items[0]);
         }

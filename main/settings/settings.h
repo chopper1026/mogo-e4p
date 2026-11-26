@@ -499,6 +499,10 @@ const char* app_settings_fonts_dir(void);
 esp_err_t app_settings_backup_save(void);
 /// 最近一次备份遇到的损坏书签文件名，否则为空。/ Corrupt bookmark filename from the last backup, or empty.
 const char *app_settings_backup_bad_bookmark(void);
+enum {
+    APP_RESTORE_NO_CARD = -2,         ///< TF 未挂载 / TF not mounted
+    APP_RESTORE_INTERNAL_VOLUME = -3 ///< 本次恢复需要的内部 FAT 不可用 / Required internal FAT unavailable
+};
 /// 校验备份后恢复 NVS；缺失的外部字体或壁纸回退到内建资源。
 /// Validate before restoring NVS; missing external assets fall back safely.
 esp_err_t app_settings_backup_restore(void);
