@@ -26,6 +26,7 @@ unit = position_state(page=0) + r'''
 enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_TURN_SETTINGS,READER_PANEL_REFRESH_SETTINGS,READER_PANEL_TAP_GRID};
 typedef struct {int64_t now_ms;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
+typedef struct {app_redraw_t redraw;bool accepted;} app_back_result_t;
 typedef enum {UI_GESTURE_TAP,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D} ui_gesture_type_t;
 typedef struct {ui_gesture_type_t type;uint16_t x0,y0;} ui_gesture_event_t;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider;
@@ -70,6 +71,8 @@ static app_redraw_t reader_toggle_touch(app_ctx_t *ctx){(void)ctx;assert(0);retu
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;++turns;last_direction=direction;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_return(app_ctx_t *ctx){(void)ctx;++homes;return APP_REDRAW_PAGE;}
+// 全局返回不应从九宫格触发。/ A tap-grid action must not dispatch global Back.
+static app_back_result_t book_edge_back(app_ctx_t *ctx){(void)ctx;assert(0);return (app_back_result_t){APP_REDRAW_NONE,false};}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;++refreshes;return APP_REDRAW_FULL;}
 static bool frontlight_ready(void){return light_ready;}
 bool app_settings_frontlight_on(void){return light_on;}
