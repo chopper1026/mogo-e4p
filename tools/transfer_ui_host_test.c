@@ -751,7 +751,7 @@ static void qr_regression(app_ctx_t* ctx) {
     on_tick(ctx);
     assert(!s_qr_ready);
     test_qr_failure=false;
-    queue_network_start(WIFI_TRANSFER_MODE_STA);
+    queue_network_start(WIFI_TRANSFER_MODE_STA, false);
     assert(!s_qr_ready && !test_qr_payload[0]);
     test_status.mode=WIFI_TRANSFER_MODE_STA;
     strcpy(test_status.url,"http://10.20.30.40");
@@ -783,6 +783,12 @@ static void wifi_recovery_regression(app_ctx_t* ctx) {
     assert(!test_wifi_running && test_stop_count > stops && s_network_connect_pending);
     network_ui_tick(ctx);
     assert(s_session_started && !s_network_connect_pending);
+    assert(!test_use_selected_wifi);
+    test_start_error = ESP_ERR_NOT_FOUND;
+    tap(ctx, network_control_rect(6));
+    network_ui_tick(ctx);
+    assert(!s_session_started && strstr(s_network_message, "附近没有已保存的 WiFi"));
+    test_start_error = ESP_OK;
     // 上传中不能遗忘；停止后可以重试。/ Forgetting waits for an active upload, then remains retryable.
     test_wifi_running = true;
     s_session_started = false;
@@ -878,6 +884,7 @@ static void multi_network_regression(app_ctx_t *ctx) {
     assert(test_selected_count == selects + 1 && test_save_count == saves && s_network_connect_pending);
     assert(s_view == TRANSFER_NETWORKS && !s_password[0]);
     network_ui_tick(ctx);
+    assert(test_use_selected_wifi);
     // 存满时不覆盖其他网络；改密码与遗忘仍可用。/ A full store never evicts profiles; edit and forget remain available.
     tap(ctx, network_control_rect(1));
     assert(s_view == TRANSFER_NETWORKS && strstr(s_network_message, "8") && test_save_count == saves);

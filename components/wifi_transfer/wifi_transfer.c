@@ -9,8 +9,13 @@
  * 书籍专用入口与 TF 的 books/ 路径预算对齐；图片、字体和内置存储保留原文件名上限。
  * Typed TF book uploads share the books/ path budget; images, fonts and internal storage keep their previous filename limit.
  * 冻结：热点网页或停服设备触屏可配置网络，不自动切模式；凭据只存单个NVS blob，状态不含密码。
- * 用户要求保存多网络：版本化 NVS blob 最多保存八组，兼容旧单网络，最近选择的网络用于连接与对时。
- * User-requested multi-network storage: a versioned NVS blob holds eight profiles, accepts legacy data and connects/syncs using the latest selection.
+ * 冻结：版本化 NVS blob 最多保存八组，兼容旧单网络；自动启动 STA（含临时对时）先扫描，
+ * 仅连接信号最强的可见且认证兼容的已保存网络，同强度按保存顺序；手动选择仍直连指定网络。
+ * 原因：设备可能从家移动到公司，最近选择的网络不一定在附近；自动选择不重排凭据。
+ * Frozen: A versioned NVS blob holds eight profiles and accepts legacy data. On automatic STA startup
+ * (including temporary time sync), scan first and use the strongest visible compatible saved network,
+ * breaking ties by saved order. Explicit selection still connects directly. The device may move between
+ * home and work, so the last selection may be out of range; automatic selection does not reorder profiles.
  * 冻结：显式对时优先复用已连接的 STA；停服时才短暂连接，用毕释放；密码不进入公开状态。
  * Frozen: Explicit time sync reuses connected STA; only a stopped service connects briefly and releases WiFi; public state never contains passwords.
  * 已连接后仍启动临时 WiFi 会返回状态错误，因此改为按连接状态分流。
@@ -844,6 +849,90 @@ static void apply_wifi_country(void) {
     if (err != ESP_OK) ESP_LOGW("transfer", "wifi country setup: %s", esp_err_to_name(err));
 }
 
+static bool supported_station_auth(wifi_auth_mode_t auth) {
+    return auth == WIFI_AUTH_OPEN || auth == WIFI_AUTH_WPA_PSK || auth == WIFI_AUTH_WPA2_PSK ||
+           auth == WIFI_AUTH_WPA_WPA2_PSK || auth == WIFI_AUTH_WPA3_PSK || auth == WIFI_AUTH_WPA2_WPA3_PSK;
+}
+
+static int best_saved_ap(const transfer_profiles_t *profiles, const wifi_ap_record_t *records, uint16_t count) {
+    int best = -1;
+    int strongest = INT8_MIN;
+    for (uint16_t i = 0; i < count; ++i) {
+        const wifi_ap_record_t *ap = &records[i];
+        if (!supported_station_auth(ap->authmode) || ap->rssi < strongest) continue;
+        const size_t len = strnlen((const char *)ap->ssid, sizeof(ap->ssid));
+        if (!len || len > 32) continue;
+        for (size_t p = 0; p < profiles->count; ++p) {
+            const transfer_credentials_t *saved = &profiles->items[p];
+            if (strlen(saved->ssid) != len || memcmp(saved->ssid, ap->ssid, len) ||
+                (saved->password[0] != 0) != (ap->authmode != WIFI_AUTH_OPEN)) continue;
+            if (best < 0 || ap->rssi > strongest || (int)p < best) {
+                best = (int)p;
+                strongest = ap->rssi;
+            }
+            break;
+        }
+    }
+    return best;
+}
+
+// 在已启动、尚未关联的 STA 上扫描；候选不受附近网络页面的 16 条显示上限限制。
+// Scan on an already started, unassociated STA. Do not limit candidates to the 16 rows exposed by the UI.
+static esp_err_t scan_saved_station(const transfer_profiles_t *profiles, int *index) {
+    uint16_t count = 0;
+    wifi_ap_record_t *records = NULL;
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err == ESP_ERR_WIFI_STATE || err == ESP_ERR_WIFI_CONN) {
+        (void)esp_wifi_scan_stop();
+        (void)esp_wifi_clear_ap_list();
+        vTaskDelay(pdMS_TO_TICKS(180));
+        err = esp_wifi_scan_start(NULL, true);
+    }
+    if (err != ESP_OK) {
+        (void)esp_wifi_scan_stop();
+        goto cleanup;
+    }
+    err = esp_wifi_scan_get_ap_num(&count);
+    if (err != ESP_OK) goto cleanup;
+    if (!count) { err = ESP_ERR_NOT_FOUND; goto cleanup; }
+    records = heap_caps_calloc(count, sizeof(*records), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!records) { err = ESP_ERR_NO_MEM; goto cleanup; }
+    err = esp_wifi_scan_get_ap_records(&count, records);
+    if (err == ESP_OK) {
+        *index = best_saved_ap(profiles, records, count);
+        heap_caps_free(records);
+        return *index >= 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+    }
+cleanup:
+    heap_caps_free(records);
+    (void)esp_wifi_clear_ap_list();
+    return err;
+}
+
+static esp_err_t configure_station(const transfer_profiles_t *profiles, bool use_selected_wifi,
+                                   const transfer_credentials_t **selected) {
+    if (!profiles->count) return ESP_ERR_NOT_FOUND;
+    int index = 0;
+    if (!use_selected_wifi) {
+        esp_err_t err = scan_saved_station(profiles, &index);
+        if (err != ESP_OK) return err;
+    }
+    const transfer_credentials_t *saved = &profiles->items[index];
+    wifi_config_t wifi = {0};
+    memcpy(wifi.sta.ssid, saved->ssid, strlen(saved->ssid));
+    memcpy(wifi.sta.password, saved->password, strlen(saved->password));
+    // 保持 WPA/WPA2/WPA3 个人网络兼容，并交给驱动挑选同名 AP。/ Keep personal WPA/WPA2/WPA3 support and let the driver choose among APs of the selected SSID.
+    wifi.sta.threshold.authmode = saved->password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    wifi.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    wifi.sta.pmf_cfg.capable = true;
+    wifi.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi);
+    clear_secret(&wifi, sizeof(wifi));
+    if (err == ESP_OK && selected) *selected = saved;
+    return err;
+}
+
 static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     if (!utc_seconds) return ESP_ERR_INVALID_ARG;
     *utc_seconds = 0;
@@ -854,32 +943,23 @@ static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
         !s_http && !s_netif && status.state == WIFI_TRANSFER_STOPPED);
     if (route == TRANSFER_TIME_ONLINE) return sync_time_online_impl(utc_seconds);
     if (route != TRANSFER_TIME_TEMPORARY) return ESP_ERR_INVALID_STATE;
-    transfer_credentials_t saved = {0};
-    esp_err_t err = load_credentials(&saved);
-    if (err != ESP_OK || saved.version != 1) {
-        clear_secret(&saved, sizeof(saved));
+    transfer_profiles_t profiles;
+    esp_err_t err = load_profiles(&profiles);
+    if (err != ESP_OK || !profiles.count) {
+        clear_secret(&profiles, sizeof(profiles));
         return err == ESP_OK ? ESP_ERR_NOT_FOUND : err;
     }
     memory_peak_token_t peak;
     err = memory_peak_try_begin(MEMORY_PEAK_WIFI_TIME, &peak);
     if (err == ESP_OK) err = ble_pt_network_acquire();
     if (err != ESP_OK) {
-        clear_secret(&saved, sizeof(saved));
+        clear_secret(&profiles, sizeof(profiles));
         memory_peak_finish(peak);
         return err;
     }
     bool loop_owned = false, wifi_initialized = false, wifi_started = false;
     esp_netif_t *netif = NULL;
     esp_event_handler_instance_t wifi_handler = NULL, ip_handler = NULL;
-    wifi_config_t wifi = {0};
-    memcpy(wifi.sta.ssid, saved.ssid, strlen(saved.ssid));
-    memcpy(wifi.sta.password, saved.password, strlen(saved.password));
-    wifi.sta.threshold.authmode = saved.password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
-    wifi.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    wifi.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-    wifi.sta.pmf_cfg.capable = true;
-    wifi.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    clear_secret(&saved, sizeof(saved));
     s_time_events = xEventGroupCreate();
     if (!s_time_events) { err = ESP_ERR_NO_MEM; goto time_cleanup; }
     err = esp_netif_init();
@@ -903,8 +983,6 @@ static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     // 与扫描页一致：12/13 信道的路由器也要能连上。
     // Match the scan page so routers on channels 12/13 can still be joined.
     apply_wifi_country();
-    err = esp_wifi_set_config(WIFI_IF_STA, &wifi); if (err != ESP_OK) goto time_cleanup;
-    clear_secret(&wifi, sizeof(wifi));
     err = esp_wifi_start(); if (err != ESP_OK) goto time_cleanup;
     wifi_started = true;
     // 关闭省电并给托管无线一拍再连接：省电会让单次 NTP 回复被错过，托管射频也要等调度器就绪。
@@ -912,6 +990,11 @@ static esp_err_t sync_time_impl(uint32_t *utc_seconds) {
     // drop the single NTP reply, and the hosted radio is not ready for connect immediately after start.
     (void)esp_wifi_set_ps(WIFI_PS_NONE);
     vTaskDelay(pdMS_TO_TICKS(120));
+    if (time_sync_cancelled()) { err = ESP_ERR_INVALID_STATE; goto time_cleanup; }
+    err = configure_station(&profiles, false, NULL);
+    clear_secret(&profiles, sizeof(profiles));
+    if (err != ESP_OK) goto time_cleanup;
+    if (time_sync_cancelled()) { err = ESP_ERR_INVALID_STATE; goto time_cleanup; }
     err = esp_wifi_connect(); if (err != ESP_OK) goto time_cleanup;
     const int64_t ip_deadline = esp_timer_get_time() + 15000000;
     // 单次 connect 失败不重试会让一次瞬时的断开直接报超时；在截止时间内最多重连三次。
@@ -944,7 +1027,7 @@ time_cleanup:
     if (loop_owned) esp_event_loop_delete_default();
     if (s_time_events) vEventGroupDelete(s_time_events);
     s_time_events = NULL;
-    clear_secret(&wifi, sizeof(wifi));
+    clear_secret(&profiles, sizeof(profiles));
     ble_pt_network_release();
     memory_peak_finish(peak);
     return err;
@@ -1170,10 +1253,7 @@ esp_err_t wifi_transfer_scan_admitted(wifi_transfer_network_t out[WIFI_TRANSFER_
             wifi_transfer_network_t item = {.rssi = ap->rssi, .authmode = (uint8_t)ap->authmode,
                 .requires_password = ap->authmode != WIFI_AUTH_OPEN && ap->authmode != WIFI_AUTH_OWE};
             memcpy(item.ssid, ap->ssid, sizeof(item.ssid) - 1);
-            item.supported = ap->authmode == WIFI_AUTH_OPEN || ap->authmode == WIFI_AUTH_WPA_PSK ||
-                ap->authmode == WIFI_AUTH_WPA2_PSK ||
-                ap->authmode == WIFI_AUTH_WPA_WPA2_PSK || ap->authmode == WIFI_AUTH_WPA3_PSK ||
-                ap->authmode == WIFI_AUTH_WPA2_WPA3_PSK;
+            item.supported = supported_station_auth(ap->authmode);
             scan_offer(out, count, &item);
         }
         heap_caps_free(records);
@@ -2507,12 +2587,17 @@ esp_err_t wifi_transfer_start_admitted(const wifi_transfer_cfg_t *cfg, memory_pe
     s_status.owns_radio = true;
     s_files_disabled = false;
     portEXIT_CRITICAL(&s_lock);
-    transfer_credentials_t saved = {0};
+    transfer_profiles_t profiles;
     wifi_config_t wifi = {0};
-    esp_err_t err = load_credentials(&saved);
-    if (err != ESP_OK && cfg->mode == WIFI_TRANSFER_MODE_STA) goto fail;
-    publish_credentials(&saved);
-    if (cfg->mode == WIFI_TRANSFER_MODE_STA && saved.version != 1) { err = ESP_ERR_NOT_FOUND; goto fail; }
+    esp_err_t err = load_profiles(&profiles);
+    if (cfg->mode == WIFI_TRANSFER_MODE_STA) {
+        if (err != ESP_OK) goto fail;
+        if (!profiles.count) { err = ESP_ERR_NOT_FOUND; goto fail; }
+        portENTER_CRITICAL(&s_lock); s_status.wifi_configured = true; portEXIT_CRITICAL(&s_lock);
+    } else {
+        publish_credentials(err == ESP_OK && profiles.count ? &profiles.items[0] : NULL);
+        clear_secret(&profiles, sizeof(profiles));
+    }
     if (!cfg->network_only) {
         struct stat st;
         if (stat(cfg->root_dir, &st) || !S_ISDIR(st.st_mode)) { err = ESP_ERR_NOT_FOUND; goto fail; }
@@ -2541,18 +2626,7 @@ esp_err_t wifi_transfer_start_admitted(const wifi_transfer_cfg_t *cfg, memory_pe
         wifi.ap.ssid_len = strlen((char *)wifi.ap.ssid);
         wifi.ap.max_connection = 4; wifi.ap.authmode = WIFI_AUTH_WPA2_PSK;
         portENTER_CRITICAL(&s_lock); strcpy(s_status.ssid, (char *)wifi.ap.ssid); portEXIT_CRITICAL(&s_lock);
-    } else {
-        memcpy(wifi.sta.ssid, saved.ssid, strlen(saved.ssid));
-        memcpy(wifi.sta.password, saved.password, strlen(saved.password));
-        // Accept WPA/WPA2/WPA3 personal networks selected by the scanner. The
-        // old WPA2 threshold silently rejected older WPA mixed-mode routers.
-        wifi.sta.threshold.authmode = saved.password[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
-        wifi.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-        wifi.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
-        wifi.sta.pmf_cfg.capable = true;
-        wifi.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
     }
-    clear_secret(&saved, sizeof(saved));
     err = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL, &s_events);
     if (err != ESP_OK) goto fail;
     if (cfg->mode == WIFI_TRANSFER_MODE_STA) {
@@ -2620,7 +2694,9 @@ esp_err_t wifi_transfer_start_admitted(const wifi_transfer_cfg_t *cfg, memory_pe
     // Match the scan page so routers on channels 12/13 can still be joined.
     apply_wifi_country();
     err = esp_wifi_set_mode(cfg->mode == WIFI_TRANSFER_MODE_AP ? WIFI_MODE_AP : WIFI_MODE_STA); if (err != ESP_OK) goto fail;
-    err = esp_wifi_set_config(cfg->mode == WIFI_TRANSFER_MODE_AP ? WIFI_IF_AP : WIFI_IF_STA, &wifi); if (err != ESP_OK) goto fail;
+    if (cfg->mode == WIFI_TRANSFER_MODE_AP) {
+        err = esp_wifi_set_config(WIFI_IF_AP, &wifi); if (err != ESP_OK) goto fail;
+    }
     // 上行走 STA 时与厂商 esp-wifi-connect 一致只用 b/g/n：11ax 与现场路由器协商后
     // 发送重传翻倍、上行间歇超时（实测 1 MB 上传 9 s→26 s 且 408）。热点保持默认
     // 协议：厂商 StartRadio 不改 AP 协议，默认档（含 HE）在本板实测吞吐最好。
@@ -2653,6 +2729,11 @@ esp_err_t wifi_transfer_start_admitted(const wifi_transfer_cfg_t *cfg, memory_pe
         set_error(ESP_OK);
         ESP_LOGI("transfer", "ap ready url=%s", WIFI_TRANSFER_URL);
     } else {
+        const transfer_credentials_t *selected = NULL;
+        err = configure_station(&profiles, cfg->use_selected_wifi, &selected);
+        if (err != ESP_OK) goto fail;
+        publish_credentials(selected);
+        clear_secret(&profiles, sizeof(profiles));
         int64_t now = esp_timer_get_time() / 1000;
         portENTER_CRITICAL(&s_lock); connection_begin(&s_connection, now); portEXIT_CRITICAL(&s_lock);
     }
@@ -2661,7 +2742,7 @@ esp_err_t wifi_transfer_start_admitted(const wifi_transfer_cfg_t *cfg, memory_pe
     if (!admitted && cfg->mode == WIFI_TRANSFER_MODE_STA) wifi_transfer_service_poll();
     return ESP_OK;
 fail:
-    clear_secret(&wifi, sizeof(wifi)); clear_secret(&saved, sizeof(saved));
+    clear_secret(&wifi, sizeof(wifi)); clear_secret(&profiles, sizeof(profiles));
     wifi_transfer_stop();
     if (!s_wifi && !s_netif && !s_http) {
         // 恢复事务仍需上一会话的配置；未拆干净时不可覆盖活动回调。

@@ -210,6 +210,7 @@ static size_t s_saved_count;
 static bool s_show_saved, s_saved_detail;
 static char s_forget_ssid[33];
 static bool s_scan_pending, s_network_connect_pending, s_saved_configured, s_password_visible, s_forget_confirm;
+static bool s_use_selected_wifi;
 static char s_saved_ssid[33], s_password[PASSWORD_MAX + 1], s_network_message[96];
 static ui_text_edit_t s_password_input;
 
@@ -1445,7 +1446,8 @@ static void cloud_before_lock(app_ctx_t *ctx) {
 }
 #endif
 
-static void queue_network_start(wifi_transfer_mode_t mode) {
+static void queue_network_start(wifi_transfer_mode_t mode, bool use_selected_wifi) {
+    s_use_selected_wifi = use_selected_wifi;
     s_mode = mode;
     s_qr_url = mode == WIFI_TRANSFER_MODE_STA;
     clear_qr();
@@ -1463,9 +1465,14 @@ static void queue_network_start(wifi_transfer_mode_t mode) {
     s_saved_configured = s_status.wifi_configured;
     snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
     refresh_saved_networks();
+    if (!use_selected_wifi) s_status.wifi_ssid[0] = 0;
     if (s_wifi_settings_only) {
         s_network_connect_pending = true;
-        snprintf(s_network_message, sizeof(s_network_message), ui_tr("正在连接 %s…"), s_status.wifi_ssid);
+        if (use_selected_wifi) {
+            snprintf(s_network_message, sizeof(s_network_message), ui_tr("正在连接 %s…"), s_status.wifi_ssid);
+        } else {
+            snprintf(s_network_message, sizeof(s_network_message), "%s", ui_tr("正在扫描 2.4 GHz WiFi"));
+        }
     } else s_start_pending = true;
 }
 
@@ -1518,11 +1525,17 @@ static app_redraw_t network_ui_tick(app_ctx_t* ctx) {
     if (s_view != TRANSFER_NETWORKS || s_forget_confirm || ctx->consumed) return APP_REDRAW_NONE;
     if (s_network_connect_pending) {
         s_network_connect_pending = false;
-        wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true};
+        wifi_transfer_cfg_t cfg = {.mode = WIFI_TRANSFER_MODE_STA, .network_only = true,
+                                   .use_selected_wifi = s_use_selected_wifi};
         esp_err_t err = start_owned_session(&cfg);
         if (err != ESP_OK) {
             const char *hint = memory_peak_hint(err);
-            snprintf(s_network_message, sizeof(s_network_message), "%s", hint ? ui_tr(hint) : ui_tr("连接启动失败，请重试"));
+            const char *message = !s_use_selected_wifi && s_saved_configured && err == ESP_ERR_NOT_FOUND
+                ? "附近没有已保存的 WiFi" : "连接启动失败，请重试";
+            snprintf(s_network_message, sizeof(s_network_message), "%s", ui_tr(hint ? hint : message));
+        } else if (s_status.wifi_ssid[0]) {
+            snprintf(s_saved_ssid, sizeof(s_saved_ssid), "%s", s_status.wifi_ssid);
+            snprintf(s_network_message, sizeof(s_network_message), ui_tr("正在连接 %s…"), s_saved_ssid);
         }
         return APP_REDRAW_PAGE;
     }
@@ -1594,7 +1607,7 @@ static app_redraw_t connect_saved_network(const char *ssid) {
     }
     s_network_connect_pending = false;
     esp_err_t err = wifi_transfer_select_saved_wifi(ssid);
-    if (err == ESP_OK) queue_network_start(WIFI_TRANSFER_MODE_STA);
+    if (err == ESP_OK) queue_network_start(WIFI_TRANSFER_MODE_STA, true);
     else snprintf(s_network_message, sizeof(s_network_message), ui_tr("读取网络失败，请重试"));
     return APP_REDRAW_PAGE;
 }
@@ -1676,7 +1689,7 @@ static app_redraw_t provisioning_action(int id) {
             if (!s_selected.requires_password) {
                 esp_err_t err = wifi_transfer_save_wifi(s_selected.ssid, "");
                 if (err == ESP_OK) {
-                    queue_network_start(WIFI_TRANSFER_MODE_STA);
+                    queue_network_start(WIFI_TRANSFER_MODE_STA, true);
                     return APP_REDRAW_PAGE;
                 }
                 snprintf(s_network_message, sizeof(s_network_message), ui_tr("开放网络保存失败，请重试"));
@@ -1702,7 +1715,7 @@ static app_redraw_t provisioning_action(int id) {
                     return APP_REDRAW_PAGE;
                 }
                 s_network_connect_pending = false;
-                queue_network_start(WIFI_TRANSFER_MODE_STA);
+                queue_network_start(WIFI_TRANSFER_MODE_STA, false);
             }
         }
         else if (id == 7 && s_network_page) --s_network_page;
@@ -1715,7 +1728,7 @@ static app_redraw_t provisioning_action(int id) {
             s_scan_pending = true; s_scan_error = ESP_OK; s_network_message[0] = 0;
         }
         else if (id == 9 && (s_network_page + 1) * NETWORK_ROWS < (s_show_saved ? s_saved_count : s_network_count)) ++s_network_page;
-        else if (id == 10) queue_network_start(s_mode);
+        else if (id == 10) queue_network_start(s_mode, false);
         else if (id == 11) {
             snprintf(s_forget_ssid, sizeof(s_forget_ssid), "%s", s_saved_ssid);
             s_forget_confirm = true; s_network_message[0] = 0;
@@ -1732,7 +1745,7 @@ static app_redraw_t provisioning_action(int id) {
         } else {
             esp_err_t err = wifi_transfer_save_wifi(s_selected.ssid,
                 s_selected.requires_password ? s_password : "");
-            if (err == ESP_OK) { queue_network_start(WIFI_TRANSFER_MODE_STA); return APP_REDRAW_PAGE; }
+            if (err == ESP_OK) { queue_network_start(WIFI_TRANSFER_MODE_STA, true); return APP_REDRAW_PAGE; }
             snprintf(s_network_message, sizeof(s_network_message), "%s", err == ESP_ERR_INVALID_ARG ?
                      ui_tr("密码须 8–63 字符或 64 位十六进制") : err == ESP_ERR_NO_MEM ?
                      ui_tr("已保存 8 个网络，请先遗忘不用的网络") : ui_tr("保存失败，输入已保留，请重试"));
@@ -1987,6 +2000,7 @@ static void on_enter(app_ctx_t* ctx) {
     s_heap_before = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     s_internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     s_start_pending = false;
+    s_use_selected_wifi = false;
     s_usb_message[0] = 0;
     s_usb_start_pending = false;
     s_usb_retry_ms = 0;
@@ -2036,7 +2050,7 @@ static void on_enter(app_ctx_t* ctx) {
     if (!s_wifi_settings_only && s_status.wifi_configured) {
         // 先排定前台启动；准入后再由网络事务替换常驻会话。
         // Queue foreground startup; replace the current session only after admission.
-        if (requested) queue_network_start(WIFI_TRANSFER_MODE_STA);
+        if (requested) queue_network_start(WIFI_TRANSFER_MODE_STA, false);
         return;
     }
 
@@ -2303,7 +2317,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (err == ESP_OK) {
             s_media_lost = false;
             s_free = book_store_free_bytes(&s_root);
-            wifi_transfer_cfg_t cfg = {.mode = s_mode, .root_dir = s_root.path, .is_flash = s_root.is_flash,
+            wifi_transfer_cfg_t cfg = {.mode = s_mode, .use_selected_wifi = s_use_selected_wifi,
+                .root_dir = s_root.path, .is_flash = s_root.is_flash,
                 .locale = ui_locale_tag(), .file_limit = book_store_file_limit(&s_root), .free_bytes_cb = free_bytes, .free_bytes_ctx = &s_capacity_roots[s_root.is_flash],
                 .file_changed_cb = book_progress_forget, .file_deleted_cb = transfer_file_deleted,
                 .file_moved_cb = transfer_file_moved,

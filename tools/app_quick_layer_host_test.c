@@ -6,6 +6,7 @@
 #include "ui_quick_menu.h"
 #include "display_normalize.h"
 #include "wifi_transfer.h"
+#include "network_service.h"
 #include "memory_manager.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -325,7 +326,10 @@ int main(void) {
     }
 
     open_layer(); configured = false; p = wifi_starts; tap(0); assert(wifi_starts == p);
-    configured = true; wifi_start_error = ESP_ERR_NO_MEM; tap(0);
+    configured = true; wifi_start_error = ESP_ERR_NOT_FOUND; tap(0);
+    assert(wifi_starts == p && network.state == WIFI_TRANSFER_STOPPED &&
+           strstr(shown_network_notice, "附近没有已保存的 WiFi"));
+    wifi_start_error = ESP_ERR_NO_MEM; tap(0);
     assert(wifi_starts == p && network.state == WIFI_TRANSFER_STOPPED && strstr(shown_network_notice, "内存不足"));
     wifi_start_error = ESP_OK; tap(0); assert(wifi_starts == p + 1);
     // 独占已取得、尚未就绪也要拦；仅提示，不写开关或申请重连。/ Block a pending Wi-Fi lease too, without writes or reconnect.

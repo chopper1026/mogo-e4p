@@ -19,6 +19,7 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NO_MEM 0x101
+#define ESP_ERR_NOT_FOUND 0x105
 #define ESP_ERR_NOT_FINISHED 0x107
 typedef struct { int x,y,width,height; } EpdRect;
 typedef enum { APP_REDRAW_NONE, APP_REDRAW_AREA, APP_REDRAW_PAGE, APP_REDRAW_FULL, APP_REDRAW_DONE } app_redraw_t;
@@ -130,7 +131,7 @@ static inline int app_count(void) {return 0;}
 static inline const app_desc_t* app_at(int i) {(void)i;return NULL;}
 typedef enum {WIFI_TRANSFER_MODE_AP,WIFI_TRANSFER_MODE_STA} wifi_transfer_mode_t;
 typedef enum {WIFI_TRANSFER_STOPPED,WIFI_TRANSFER_STARTING,WIFI_TRANSFER_READY,WIFI_TRANSFER_UPLOADING,WIFI_TRANSFER_ERROR} wifi_transfer_state_t;
-typedef struct {wifi_transfer_mode_t mode;bool network_only;const char *locale;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);bool(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} wifi_transfer_cfg_t;
+typedef struct {wifi_transfer_mode_t mode;bool network_only,use_selected_wifi;const char *locale;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);bool(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} wifi_transfer_cfg_t;
 typedef struct {wifi_transfer_mode_t mode;wifi_transfer_state_t state;uint32_t session_id;bool wifi_configured,network_ready,network_only;char ssid[33],wifi_ssid[33],url[64],cur_name[241];unsigned sta_count,done_count,changed_count;size_t cur_bytes,cur_total;int last_error;} wifi_transfer_status_t;
 #define WIFI_TRANSFER_PASSWORD "mogo1234"
 static wifi_transfer_status_t test_status;
@@ -173,7 +174,9 @@ static inline int wifi_transfer_select_saved_wifi(const char* ssid) {
     }
     return !strcmp(ssid,"saved")?ESP_OK:ESP_FAIL;
 }
-static inline int wifi_transfer_start(const wifi_transfer_cfg_t* c) {if (test_wifi_running) return ESP_FAIL;if (!c->network_only && (!c->file_changed_cb || !c->wallpaper_set_cb || c->file_changed_cb("/flash/books/test.txt"))) return ESP_FAIL;return 0;}
+static bool test_use_selected_wifi;
+static int test_start_error;
+static inline int wifi_transfer_start(const wifi_transfer_cfg_t* c) {test_use_selected_wifi=c->use_selected_wifi;if(test_start_error)return test_start_error;if (test_wifi_running) return ESP_FAIL;if (!c->network_only && (!c->file_changed_cb || !c->wallpaper_set_cb || c->file_changed_cb("/flash/books/test.txt"))) return ESP_FAIL;return 0;}
 static inline void wifi_transfer_service_poll(void) {}
 static inline int wifi_transfer_save_wifi(const char* s,const char* p) {(void)p;test_save_count++;snprintf(test_saved_ssid,33,"%s",s);return test_save_error;}
 static inline int wifi_transfer_scan_wifi(wifi_transfer_network_t* out,size_t* count) {*count=test_scan_error?0:test_scan_count;for(size_t i=0;i<*count;i++){out[i]=(wifi_transfer_network_t){.supported=true,.requires_password=true};snprintf(out[i].ssid,33,"network%u",(unsigned)i);}if(*count)snprintf(out[0].ssid,33,"中文家庭网络");return test_scan_error;}

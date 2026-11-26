@@ -4,6 +4,9 @@
 
 Wi-Fi 和移动网络使用互斥开关。快捷栏保留 Wi-Fi 入口；只有运行时确认移动网络能力后才增加“移动网络”入口。单击打开其中一路时，服务会先检查另一条业务租约；没有进行中的业务或传书操作时自动关闭另一条无线，并把业务联网方式选为刚打开的承载。另一条无线正在传书、OTA、天气或对时时，切换会被拒绝，不中断当前操作。蓝牙翻页器已连接、连接中、配对或扫描时，开启 4G、Wi-Fi、扫描 Wi-Fi 和传书会提示先关闭蓝牙，不自动断开；空闲蓝牙临时让位，网络停止并归还资源后按原设置恢复。Wi-Fi 或 4G 持有独占时，快捷栏和蓝牙设置页拒绝从关闭状态开启蓝牙并指明占用的承载；原先开启但临时暂停的蓝牙仍可手动关闭。长按进入网络设置。业务联网方式默认“自动”，默认 Wi-Fi 优先；设置缺失或无效时也恢复此默认值。强制选择的承载不可用时业务失败并提示用户，避免 SIM 套餐到期后静默产生移动流量。
 
+自动启动 Wi-Fi STA 时（快捷栏、Wi-Fi 传书或业务临时联网），先扫描 2.4 GHz：在认证兼容的可见已保存网络中选信号最强者，同强度按保存顺序；没有匹配时不发起连接，也不改保存顺序。手动点选某条网络仍只连接该网络。扫描选网不是在线漫游；已就绪的 STA 仍由业务复用。
+Automatic Wi-Fi STA startup (quick controls, Wi-Fi transfer or temporary connectivity) scans 2.4 GHz first. Choose the strongest visible compatible saved network, breaking ties by saved order. Without a match, do not associate or reorder profiles. Explicit selection still targets that profile only. This is startup selection, not live roaming; services reuse a ready STA.
+
 移动网络设置页只提供 4G 开关和业务联网方式，移动网络固定使用内置 SIM 卡，Wi-Fi 开关保留在快捷栏。快捷栏、设置列表和状态栏的移动网络入口统一使用四根递增的圆角信号柱，与创建热点的发射塔图标区分。
 
 S31 的 Wi-Fi 管理帧和 NT26 DMA 共用片内 RAM。产品配置沿用原厂关闭 `ESP_WIFI_IRAM_OPT`、`ESP_WIFI_EXTRA_IRAM_OPT` 和 `ESP_WIFI_RX_IRAM_OPT`；Wi-Fi 会话使用 `WIFI_PS_NONE`，同时关闭无需使用的 `ESP_WIFI_SLP_IRAM_OPT`。保留原收发缓冲数量。量产配置不开放 Wi-Fi 或 4G 与蓝牙翻页器并行运行；PSRAM 余量不能替代驱动所需的片内 DMA 内存。该配置取舍可能影响 Wi-Fi 峰值吞吐。

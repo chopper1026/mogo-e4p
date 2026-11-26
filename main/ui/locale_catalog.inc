@@ -1609,6 +1609,7 @@
 {"阅读进度","閱讀進度","Reading progress"},
 {"阅读进度 %u%%","閱讀進度 %u%%","Reading progress: %u%%"},
 {"阅读，让时间慢下来","閱讀，讓時間慢下來","Reading slows the world down."},
+{"附近没有已保存的 WiFi","附近沒有已儲存的 WiFi","No saved WiFi networks nearby"},
 {"附近网络","附近網路","Nearby networks"},
 {"附近网络中连接后即可保存","附近網路中連線後即可儲存","Save when connected to a nearby network"},
 {"附近设备","附近裝置","Nearby devices"},

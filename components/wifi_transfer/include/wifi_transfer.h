@@ -39,6 +39,7 @@ typedef enum {
 typedef struct {
     wifi_transfer_mode_t mode; ///< 网络模式，默认热点 / Network mode, default AP
     bool network_only; ///< 仅连接已有 WiFi，不启动上传服务或访问存储 / Connect saved WiFi without upload server or storage
+    bool use_selected_wifi; ///< 手动直连最近选定网络；默认先扫描。/ Manually connect to the explicitly selected profile; otherwise scan first.
     uint32_t session_id; ///< 本地页面会话标识，跨恢复保留；零表示无页面所有者。/ Local owner ID, preserved on restore; zero means no page owner.
     const char *locale; ///< 静态语言标签 / Static UI language tag
     const char *root_dir; ///< 已挂载根目录，start 内复制 / Mounted root, copied by start
@@ -64,7 +65,7 @@ typedef struct {
     bool owns_radio; ///< 启动、运行或未清完的 Wi-Fi 会话，不含已清理的错误。/ Starting, live or not fully stopped; excludes fully cleaned failures.
     wifi_transfer_mode_t mode; ///< 网络模式 / Network mode
     char url[64]; ///< 可访问地址，未联网为空 / Reachable address, empty when offline
-    char wifi_ssid[33]; ///< 已保存网络名称，不含密码 / Saved network name, never a password
+    char wifi_ssid[33]; ///< STA 目标或热点配置的网络名称，不含密码 / STA target or AP provisioning SSID, never a password
     bool wifi_configured; ///< 存在有效凭据 / Valid credentials saved
     bool network_ready; ///< 已取得可用网络地址 / Usable network address acquired
     bool network_only; ///< 当前或最近一次会话仅联网、不提供文件服务 / Current or last session has no file server

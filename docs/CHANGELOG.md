@@ -6,6 +6,7 @@ User-visible changes by release; see [README](../README.md) for usage.
 ## 未发布 / Unreleased
 
 - 「升级和恢复」移除「屏幕修复」，保留「保存与恢复」「系统升级」。/ Remove Screen Repair from Upgrade and Recovery; keep Backup and Restore and System Update.
+- 自动开启 WiFi 时先扫描，再连接附近信号最强的已保存网络；从家到公司不用重新选网。手动点选仍连接指定网络。/ Turning on WiFi scans first and connects to the strongest saved network nearby. Explicit selection still connects to the chosen network.
 
 - 从 TF 卡确认恢复后，立即显示「正在恢复，请稍候…」；等待时的重复点按不会再触发恢复。/ Show a restoring message immediately after confirming a TF restore, and ignore taps made while waiting.
 

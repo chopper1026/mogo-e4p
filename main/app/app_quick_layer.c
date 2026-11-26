@@ -211,6 +211,8 @@ static void quick_toggle_network(app_ctx_t *ctx, const app_desc_t *current, netw
     if (err == ESP_OK) return;
     const char *hint = memory_peak_hint(err);
     if (!hint && !enabled && err == ESP_ERR_NO_MEM) hint = "内存不足，无法启动网络";
+    if (!hint && !enabled && bearer == NETWORK_BEARER_WIFI && err == ESP_ERR_NOT_FOUND)
+        hint = "附近没有已保存的 WiFi";
     quick_show_notice(ctx, current, hint ? hint : "网络正在使用或启动失败");
 }
 
