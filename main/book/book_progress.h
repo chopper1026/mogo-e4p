@@ -2,8 +2,8 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 按书籍路径保存 NVS 进度，不依赖 UI 或 SD。
- * Per-path NVS reading progress, independent of UI and SD.
+ * 按书籍路径保存机内进度，不依赖 UI 或 SD。
+ * Per-path internal reading progress, independent of UI and SD.
  *
  * 冻结：文件大小不同不恢复；失败返回调用方并告警，不擦除其他记录。
  * 为无 RTC 的最近阅读排序，v2 使用持久序号；v1 保留续读但排序置零。
@@ -50,8 +50,8 @@ typedef struct {
 
 /// 校验版本、完整路径与文件大小后恢复；失败不改 out。/ Restore after version, full-path and size validation; leave out unchanged on failure.
 bool book_progress_load(const char* path, uint32_t size, book_progress_t* out);
-/// 使用调用方借用的只读 NVS 句柄恢复；不打开、不关闭句柄，句柄为 0 时失败。
-/// Load through a caller-owned read-only NVS handle; never open or close it, and fail for handle 0.
+/// 先读内部 FAT；借用只读 NVS 句柄回退旧记录，0 表示仅查内部 FAT。
+/// Read internal FAT first; borrow a legacy NVS handle for fallback, or pass 0 for FAT only.
 bool book_progress_load_handle(uintptr_t handle, const char* path, uint32_t size, book_progress_t* out);
 
 /// 遍历回调：progress 只在回调期间有效，返回 false 提前结束。
@@ -75,3 +75,10 @@ esp_err_t book_progress_forget(const char* path);
 bool book_progress_last_path(char* out, size_t cap);
 /// 保存最后路径；空串清除自动恢复入口。/ Save last path; empty string clears automatic restore.
 esp_err_t book_progress_set_last_path(const char* path);
+
+/// 空闲时最多迁移 1..8 条旧进度；校验后才清旧键。/ Migrate at most 1..8 legacy rows when idle, erasing only after verification.
+esp_err_t book_progress_migrate(size_t limit, size_t *moved);
+/// 分类日志的只读预检或幂等复制；不删旧记录、不更新序号。/ Preflight or idempotently copy for category replay without deleting or resequencing.
+esp_err_t book_progress_copy_path(const char *old, const char *next, bool copy);
+/// 文件管理改名后先复制再更新 last，成功后才遗忘旧路径。/ After a file rename, copy and rebase last before forgetting the source.
+esp_err_t book_progress_move_path(const char *old, const char *next);

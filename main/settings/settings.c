@@ -1122,11 +1122,31 @@ void app_settings_set_haptic_intensity(uint8_t intensity) {
     haptics_set_intensity(intensity);
 }
 
+// 这些可选资源和签名在新旧固件中都将缺键解释为空；不对有旧键回退的设置使用此规则。
+// Both old and new firmware interpret absence as empty for these values; never apply this to keys with legacy fallbacks.
+static bool omit_empty_text(const char *key, const char *value) {
+    if (!value || *value) return false;
+    static const char *const optional[] = {NVS_KEY_AVATAR, NVS_KEY_STATUS_SIGNATURE, NVS_KEY_BOOK_BACKGROUND,
+        NVS_KEY_FONT, NVS_KEY_SYS_FONT, NVS_KEY_BOOKMARK, NVS_KEY_WALLPAPER};
+    for (size_t i = 0; i < sizeof(optional) / sizeof(optional[0]); ++i)
+        if (!strcmp(key, optional[i])) return true;
+    return false;
+}
+static esp_err_t write_text(nvs_handle_t h, restore_nvs_t *image, const char *key, const char *value) {
+    if (omit_empty_text(key, value)) {
+        if (image) return restore_nvs_erase(image, NVS_NS, key);
+        esp_err_t err = nvs_erase_key(h, key);
+        return err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+    }
+    return image ? restore_nvs_write(image, NVS_NS, key, NVS_TYPE_STR, value, strlen(value) + 1)
+                 : nvs_set_str(h, key, value);
+}
+
 static bool nvs_put_str(const char *key, const char *value) {
     nvs_handle_t h;
     esp_err_t err = settings_write_open(&h);
     if (err != ESP_OK) { ESP_LOGE(TAG, "save %s open: %s", key, esp_err_to_name(err)); return false; }
-    err = nvs_set_str(h, key, value);
+    err = write_text(h, NULL, key, value);
     if (err == ESP_OK) err = nvs_commit(h);
     settings_write_close(h);
     if (err != ESP_OK) ESP_LOGE(TAG, "save %s: %s", key, esp_err_to_name(err));
@@ -1223,22 +1243,12 @@ void app_settings_set_bookmark_path(const char *path) {
     if(!path || (path[0] && (strncmp(path,"/sdcard/",8)||!ext||
         (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg")))) ||
         strnlen(path,sizeof(s_bookmark))>=sizeof(s_bookmark)) return;
-    nvs_handle_t h;
-    if(settings_write_open(&h)!=ESP_OK)return;
-    esp_err_t err=nvs_set_str(h,NVS_KEY_BOOKMARK,path);
-    if(err==ESP_OK)err=nvs_commit(h);
-    settings_write_close(h);
-    if(err==ESP_OK)strlcpy(s_bookmark,path,sizeof(s_bookmark));
+    if (nvs_put_str(NVS_KEY_BOOKMARK, path)) strlcpy(s_bookmark, path, sizeof(s_bookmark));
 }
 const char* app_settings_wallpaper_path(void) { return s_wallpaper; }
 void app_settings_set_wallpaper_path(const char* path) {
     if (!path || (path[0] && strncmp(path,"/sdcard/",8)) || strnlen(path,sizeof(s_wallpaper))>=sizeof(s_wallpaper)) return;
-    nvs_handle_t h;
-    if(settings_write_open(&h)!=ESP_OK)return;
-    esp_err_t err=nvs_set_str(h,NVS_KEY_WALLPAPER,path);
-    if(err==ESP_OK)err=nvs_commit(h);
-    settings_write_close(h);
-    if(err==ESP_OK)strlcpy(s_wallpaper,path,sizeof(s_wallpaper));
+    if (nvs_put_str(NVS_KEY_WALLPAPER, path)) strlcpy(s_wallpaper, path, sizeof(s_wallpaper));
 }
 app_bookmark_mode_t app_settings_bookmark_mode(void) { return s_bookmark_mode; }
 bool app_settings_set_bookmark_mode(app_bookmark_mode_t mode) {
@@ -1297,7 +1307,7 @@ bool app_settings_select_lock(uint8_t style,const char *image,unsigned option) {
     if(err!=ESP_OK){
         // NVS逐项立即写入；后续字段失败时尽力恢复已写副项，运行态始终保持旧值。
         // NVS writes items immediately; restore secondary fields on a later failure and retain live state.
-        if(style==1||style==3)(void)nvs_set_str(h,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,style==1?s_wallpaper:s_bookmark);
+        if(style==1||style==3)(void)write_text(h,NULL,style==1?NVS_KEY_WALLPAPER:NVS_KEY_BOOKMARK,style==1?s_wallpaper:s_bookmark);
         if(style==1)(void)nvs_set_u8(h,NVS_KEY_WALLPAPER_MODE,(uint8_t)s_wallpaper_mode);
         if(style==3)(void)nvs_set_u8(h,NVS_KEY_BOOKMARK_MODE,(uint8_t)s_bookmark_mode);
         if(style==0)(void)nvs_set_u8(h,NVS_KEY_TICKET_BACKGROUND,s_ticket_background);
@@ -1410,12 +1420,7 @@ const char *app_settings_book_background_path(void) { return s_book_background; 
 bool app_settings_set_book_background_path(const char *path) {
     if (!path || (path[0] && strncmp(path, "/sdcard/pictures/", 17)) ||
         strnlen(path, sizeof(s_book_background)) >= sizeof(s_book_background) || strstr(path, "/../")) return false;
-    nvs_handle_t h;
-    if (settings_write_open(&h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_str(h, NVS_KEY_BOOK_BACKGROUND, path);
-    if (err == ESP_OK) err = nvs_commit(h);
-    settings_write_close(h);
-    if (err != ESP_OK) return false;
+    if (!nvs_put_str(NVS_KEY_BOOK_BACKGROUND, path)) return false;
     strlcpy(s_book_background, path, sizeof(s_book_background));
     return true;
 }
@@ -2817,8 +2822,8 @@ static esp_err_t restore_add(restore_settings_t *plan, const char *key, const ch
     plan->items[plan->count++] = (restore_setting_t){key, str, u8};
     return ESP_OK;
 }
-// 仅空间不足时省略原先就缺失且开机语义相同的键；有旧值的键绝不能跳过。
-// Under pressure omit only absent keys with the same boot default. Never skip a stored override.
+// 只省略原先就缺失且开机语义相同的键；已有值即使要恢复默认也必须覆盖。
+// Omit only absent keys with the same boot default. Existing overrides must still be restored.
 static bool restore_boot_default(const restore_setting_t *item) {
     const char *key = item->key;
     if (item->str) {
@@ -2833,13 +2838,7 @@ static bool restore_boot_default(const restore_setting_t *item) {
             char encoded[OFF_CONFIG_BYTES];
             off_art_encode(&(app_shutdown_wallpaper_t){.show_hint = 1}, encoded); return !strcmp(item->str, encoded);
         }
-        // 仅白名单内的空串是开机默认值；未知键和有旧格式回退的点击网格照写。
-        // Only these empty strings are boot defaults. Always write unknown keys and the legacy-dependent tap grid.
-        const char *const empty[] = {NVS_KEY_AVATAR, NVS_KEY_STATUS_SIGNATURE, NVS_KEY_BOOK_BACKGROUND,
-                                     NVS_KEY_FONT, NVS_KEY_SYS_FONT, NVS_KEY_BOOKMARK, NVS_KEY_WALLPAPER};
-        for (size_t i = 0; !item->str[0] && i < sizeof(empty)/sizeof(empty[0]); ++i)
-            if (!strcmp(key, empty[i])) return true;
-        return false;
+        return omit_empty_text(key, item->str);
     }
     static const struct { const char *key; uint8_t value; } defaults[] = {
         {NVS_KEY_TOUCH_DISABLED,0}, {NVS_KEY_HOLD_ACTION,APP_READER_KEY_HOME}, {NVS_KEY_DOUBLE_ACTION,APP_READER_KEY_NONE},
@@ -2892,9 +2891,9 @@ static esp_err_t restore_settings_write(const restore_settings_t *plan, restore_
     if (err != ESP_OK) return err;
     for (size_t i = 0; i < plan->count && err == ESP_OK; ++i) {
         const restore_setting_t *item = &plan->items[i];
-        if (image) err = item->str ? restore_nvs_write(image, NVS_NS, item->key, NVS_TYPE_STR, item->str, strlen(item->str) + 1)
-                                  : restore_nvs_write(image, NVS_NS, item->key, NVS_TYPE_U8, &item->u8, 1);
-        else err = item->str ? nvs_set_str(h, item->key, item->str) : nvs_set_u8(h, item->key, item->u8);
+        if (item->str) err = write_text(h, image, item->key, item->str);
+        else if (image) err = restore_nvs_write(image, NVS_NS, item->key, NVS_TYPE_U8, &item->u8, 1);
+        else err = nvs_set_u8(h, item->key, item->u8);
     }
     if (!image) {
         if (err == ESP_OK) err = nvs_commit(h);
@@ -3125,7 +3124,7 @@ esp_err_t app_settings_backup_restore(void) {
     bool lock_cover_crop = version >= 49 && (backup.flags[BK_LOCK] & BACKUP_LOCK_COVER_CROP_BIT) != 0;
     backup.flags[BK_LOCK] &= ~(BACKUP_LOCK_PROTOTYPE_BIT | BACKUP_LOCK_COVER_CROP_BIT);
 
-    if (needs_volume && book_store_prepare_data() != ESP_OK) {
+    if ((needs_volume || has_history) && book_store_prepare_data() != ESP_OK) {
         fclose(file);
         backup_erase_secret(&wifi, sizeof(wifi));
         backup_erase_secret(&portable, sizeof(portable));
@@ -3321,16 +3320,23 @@ esp_err_t app_settings_backup_restore(void) {
     }
 #undef PLAN_U8
 #undef PLAN_STR
-    // 常规试写不足时，省略缺失的默认键；有历史块才允许先回收旧阅读资料。
-    // On capacity failure omit absent defaults; reclaim the old library first only for backups that replace history.
+    // 先生成稀疏写入清单，预检与落盘共用；只有备份包含替换历史时才试另一种顺序。
+    // Rehearse and replay the same sparse plan; retry in a different order only for replacement histories.
     bool guarded = err == ESP_OK && epd_flash_begin();
     bool history_first = false;
     if (err == ESP_OK && !guarded) err = ESP_ERR_INVALID_STATE;
-    if (err == ESP_OK) err = restore_rehearse(&plan, file, history_position, false, version, &portable, card.identity);
-    if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE) {
-        history_first = has_history;
-        err = restore_compact(&plan);
-        if (err == ESP_OK) err = restore_rehearse(&plan, file, history_position, history_first, version, &portable, card.identity);
+    if (err == ESP_OK) err = restore_compact(&plan);
+    if (err == ESP_OK) {
+        err = restore_rehearse(&plan, file, history_position, false, version, &portable, card.identity);
+        if (err == ESP_ERR_NVS_NOT_ENOUGH_SPACE && has_history) {
+            history_first = true;
+            err = restore_rehearse(&plan, file, history_position, true, version, &portable, card.identity);
+        }
+    }
+    // 内部 FAT 满时须在写任何实时配置前失败；暂存区不参与正常读取。
+    // Fail on insufficient FAT space before writing any live settings; readers ignore staging.
+    if (err == ESP_OK && has_history) {
+        err = fseek(file,history_position,SEEK_SET) ? ESP_FAIL : book_history_backup_stage(file);
     }
     if (err == ESP_OK && history_first) err = restore_history_at(file, history_position, NULL);
     if (err == ESP_OK) err = restore_settings_write(&plan, NULL);

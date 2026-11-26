@@ -8433,6 +8433,15 @@ static app_redraw_t notepad_author_tick(app_ctx_t *ctx) {
     return APP_REDRAW_AREA;
 }
 static app_redraw_t on_tick(app_ctx_t* ctx) {
+    // 书架空闲时小批搬迁，无需插卡；遇卷满/损坏退避，不阻塞启动或在 render 中写入。
+    // Drain small batches while the shelf is idle, even without a card; back off on failure and never migrate in render.
+    static int64_t migrate_after;
+    if (s_view == SHELF && !s_scan_pending && !ctx->consumed && !usb_storage_active() &&
+        !(ctx->touch && ctx->touch->touched) && ctx->now_ms >= migrate_after) {
+        size_t moved;
+        esp_err_t e = book_progress_migrate(2, &moved);
+        migrate_after = e == ESP_OK && moved < 2 ? INT64_MAX : ctx->now_ms + (e == ESP_OK ? 500 : 60000);
+    }
     if (s_open_error[0]) {
         // 弹窗期间若 TF 卡刚探测就绪，仍补完书架扫描，避免背景停留在 0 本书。
         // Finish a pending shelf scan behind the open-error modal once TF media becomes ready.

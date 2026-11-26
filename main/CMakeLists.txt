@@ -208,6 +208,7 @@ idf_component_register(
         "book/reader_reflow.c"
         "book/reader_chrome.c"
         "book/book_progress.c"
+        "book/book_progress_store.c"
         "book/book_path_state.c"
         "book/book_bookmark_store.c"
         "book/book_category_ops.c"

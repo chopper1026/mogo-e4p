@@ -130,7 +130,7 @@ static inline int app_count(void) {return 0;}
 static inline const app_desc_t* app_at(int i) {(void)i;return NULL;}
 typedef enum {WIFI_TRANSFER_MODE_AP,WIFI_TRANSFER_MODE_STA} wifi_transfer_mode_t;
 typedef enum {WIFI_TRANSFER_STOPPED,WIFI_TRANSFER_STARTING,WIFI_TRANSFER_READY,WIFI_TRANSFER_UPLOADING,WIFI_TRANSFER_ERROR} wifi_transfer_state_t;
-typedef struct {wifi_transfer_mode_t mode;bool network_only;const char *locale;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);void(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} wifi_transfer_cfg_t;
+typedef struct {wifi_transfer_mode_t mode;bool network_only;const char *locale;const char* root_dir;bool is_flash;size_t file_limit;uint64_t(*free_bytes_cb)(void*);void* free_bytes_ctx;bool(*title_get_cb)(const char*,char*,size_t);int(*title_set_cb)(const char*,const char*);int(*file_changed_cb)(const char*);void(*file_deleted_cb)(const char*);bool(*file_moved_cb)(const char*,const char*,uint32_t);void(*directory_deleted_cb)(const char*);void(*directory_moved_cb)(const char*,const char*);bool(*wallpaper_set_cb)(const char*);bool(*signature_get_cb)(char*,size_t);int(*signature_set_cb)(const char*);} wifi_transfer_cfg_t;
 typedef struct {wifi_transfer_mode_t mode;wifi_transfer_state_t state;uint32_t session_id;bool wifi_configured,network_ready,network_only;char ssid[33],wifi_ssid[33],url[64],cur_name[241];unsigned sta_count,done_count,changed_count;size_t cur_bytes,cur_total;int last_error;} wifi_transfer_status_t;
 #define WIFI_TRANSFER_PASSWORD "mogo1234"
 static wifi_transfer_status_t test_status;
@@ -199,11 +199,13 @@ static inline int wifi_transfer_forget_saved_wifi(const char *ssid) {
 }
 
 static inline int book_progress_forget(const char* path) {(void)path;return ESP_OK;}
-typedef struct {uint32_t file_size;} book_progress_t;
-static inline bool book_progress_load(const char* path,uint32_t size,book_progress_t* out) {(void)path;(void)size;(void)out;return false;}
-static inline bool book_progress_save(const char* path,const book_progress_t* progress) {(void)path;(void)progress;return true;}
-static inline bool book_progress_last_path(char* out,size_t cap) {if(cap)out[0]=0;return false;}
-static inline bool book_progress_set_last_path(const char* path) {(void)path;return true;}
+static esp_err_t test_progress_move_error;
+static unsigned test_progress_moves;
+static inline esp_err_t book_progress_move_path(const char *old_path, const char *new_path) {
+    (void)old_path; (void)new_path;
+    ++test_progress_moves;
+    return test_progress_move_error;
+}
 
 static char test_signature[96];
 static bool test_signature_fail;

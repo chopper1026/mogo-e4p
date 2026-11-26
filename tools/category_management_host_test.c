@@ -13,6 +13,10 @@ void *heap_caps_calloc(size_t n,size_t bytes,int caps){assert(caps==3);return ca
 void *heap_caps_realloc(void *p,size_t bytes,int caps){assert(caps==3);return realloc(p,bytes);}
 #include "book_bookmark_format.h"
 #include "book_progress.h"
+#include "book_progress_store.h"
+esp_err_t book_store_prepare_data(void){return ESP_OK;}
+bool epd_flash_begin(void){return true;}
+void epd_flash_end(void){}
 #include "book_title.h"
 #include "nvs.h"
 
@@ -105,7 +109,7 @@ static void failure_matrix(void) {
         assert(!book_category_pending(root)&&exists(next)&&!exists(old));verify(old,next);
         assert(book_progress_watch_invalidated(watch));book_progress_watch_destroy(watch);remove_tree(root);
     }
-    assert(injected==22);
+    assert(injected==18);
 }
 static void folder_migration(void) {
     char dir[]="/tmp/mogo-legacy-XXXXXX",root[288],prefix[288],src[288],dst[288],nested[288],empty[288],target[288];
@@ -141,6 +145,7 @@ static void folder_migration(void) {
     puts("folder plans: zero-write collisions, stale confirmation, nested preservation, opt-in migration and interruption recovery passed");
 }
 int main(void) {
+    char work[]="/tmp/mogo-fat-category-XXXXXX"; assert(mkdtemp(work) && !chdir(work));
     folder_migration();
     assert(book_category_name_valid("文学")&&book_category_name_valid("Science 2026"));
     const char *invalid[]={"",".","..",".hidden"," leading","trailing ","trailing.","a/b","a\\b","bad:name","未分类","全部书籍","\xc0\xaf"};
@@ -178,7 +183,7 @@ int main(void) {
     // Legacy progress and single bookmarks remain readable without inventing recency.
     assert(!book_category_create(root,"旧记录",flat));path(old,flat,"legacy.txt");file(old);memset(disk,0,sizeof(disk));seed(old);
     nvs_handle_t h;char key[11];uint8_t raw[640];size_t length=sizeof(raw);
-    assert(!nvs_open("rp_books",1,&h));key_for('b',old,key);assert(!nvs_get_blob(h,key,raw,&length));raw[3]=1;
+    assert(!nvs_open("rp_books",1,&h));key_for('b',old,key);assert(!progress_store_get(old,raw,&length));assert(!progress_store_put(old,NULL,0));raw[3]=1;
     memset(raw+16,0,4);assert(!nvs_set_blob(h,key,raw,length)&&!nvs_commit(h));
     legacy_reader_bookmark_t legacy={.magic=0x52504d31,.file_size=4,.chapter=3,.byte_off=99};strcpy(legacy.path,old);
     assert(!nvs_open("rp_marks",1,&h));key_for('m',old,key);assert(!nvs_set_blob(h,key,&legacy,sizeof(legacy))&&!nvs_commit(h));
@@ -194,5 +199,5 @@ int main(void) {
     // 坏日志禁止新写入；不会据此猜测路径或删除文件。/ Corrupt journals block mutations without guessing paths or deleting files.
     path(temp,root,".mogo-category-op");file(temp);assert(book_category_recover(root,extra)==ESP_ERR_INVALID_STATE);
     assert(book_category_create(root,"禁止写入",flat)==ESP_ERR_INVALID_STATE);assert(exists(next));
-    remove_tree(root);puts("category management: PASS (22 write/commit/erase failures, recovery, metadata, collisions, nested rename, non-destructive removal)");
+    remove_tree(root);assert(!chdir("/"));remove_tree(work);puts("category management: PASS (18 write/commit/erase failures, recovery, metadata, collisions, nested rename, non-destructive removal)");
 }

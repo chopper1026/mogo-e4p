@@ -7,6 +7,10 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 - 从 TF 卡确认恢复后，立即显示「正在恢复，请稍候…」；等待时的重复点按不会再触发恢复。/ Show a restoring message immediately after confirming a TF restore, and ignore taps made while waiting.
 
+- 每本书的进度改存机内文件区，不再随阅读书目增加而挤占配置空间。升级后可直接续读，书架空闲时自动搬迁旧进度，原 TF 设置备份仍可恢复。/ Per-book progress now uses internal files rather than configuration space. Resume immediately after upgrading; idle shelf time migrates old records, and existing TF backups still restore.
+
+- 减少个人配置占用：恢复备份不再补写缺失的默认偏好，清空字体、壁纸等可选路径会释放对应条目，仅存一个 WiFi 时不再占用八组网络的空间。无需重置设备或转换旧备份。/ Reduce settings storage: omit absent defaults during restore, release cleared optional paths, and store a lone WiFi network without an eight-slot table. No reset or backup conversion required.
+
 - 修复机内配置空间紧张时 TF 备份可保存却无法完整恢复的问题。恢复前先试算设置与阅读记录能否一起装下；容量不足不覆盖原资料，并与内部文件存储故障分别提示。/ Fix incomplete TF restores under NVS pressure. Check that settings and reading history fit together before replacing live data, and distinguish insufficient capacity from an unavailable internal volume.
 
 - 新增可关闭的手势操作：双侧边缘内滑逐层返回，仅在成功返回时边缘浮现一道浅弧，内侧显示朝向屏幕中央的折角（左 `>`、右 `<`）；页面内横滑切换标签或四个主界面；边缘宽度可调。/ Add configurable inward edge swipes with a successful Back indicated by a shallow edge curve and an inward-pointing chevron, and interior swipes for sibling tabs or main pages.

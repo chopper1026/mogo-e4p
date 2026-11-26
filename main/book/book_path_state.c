@@ -9,9 +9,9 @@
 #include <string.h>
 
 #define CAP BOOK_STORE_PATH_MAX
-typedef enum { PROGRESS, MARKS, FAVORITE, TITLE, HIDDEN, KINDS } kind_t;
-static const char *const namespaces[KINDS] = {"rp_books", "rp_marks", "rp_favs", "rp_titles", "rp_shelf"};
-static const char prefixes[KINDS] = {'b', 'm', 'f', 't', 'h'};
+typedef enum { MARKS, FAVORITE, TITLE, HIDDEN, KINDS } kind_t;
+static const char *const namespaces[KINDS] = {"rp_marks", "rp_favs", "rp_titles", "rp_shelf"};
+static const char prefixes[KINDS] = {'m', 'f', 't', 'h'};
 static uint32_t hash_path(const char *s) {
     uint32_t h = UINT32_C(2166136261);
     while (*s) h = (h ^ (unsigned char)*s++) * UINT32_C(16777619);
@@ -43,7 +43,7 @@ static esp_err_t read_record(nvs_handle_t h, kind_t kind, const char *path, uint
         else err = nvs_get_blob(h, key, NULL, &size);
         if (err != ESP_OK) return err;
         // 重定位可增长路径；只有书签保有自己的定长路径字段。/ Relocation can grow the path; bookmarks already reserve a fixed path field.
-        size_t capacity = kind == PROGRESS ? 24 + CAP : kind == TITLE ? CAP + 121 : kind == HIDDEN ? CAP : size;
+        size_t capacity = kind == TITLE ? CAP + 121 : kind == HIDDEN ? CAP : size;
         if (!size || size > capacity) return ESP_ERR_INVALID_STATE;
         *data = malloc(capacity);
         if (!*data) return ESP_ERR_NO_MEM;
@@ -59,12 +59,6 @@ static esp_err_t read_record(nvs_handle_t h, kind_t kind, const char *path, uint
         size_t p = strlen(path) + 1;
         valid = *len > p && *len - p <= 121 && owned((char *)*data, *len, path) &&
             strnlen((char *)*data + p, *len - p) == *len - p - 1;
-    } else if (kind == PROGRESS) {
-        size_t n = *len >= 24 ? *len - 24 : 0;
-        valid = n > 1 && n <= CAP && !memcmp(*data, "RPB", 3) && ((*data)[3] == 1 || (*data)[3] == 2) &&
-            ((*data)[3] != 1 || (n <= 160 && (*data)[23] == 0)) &&
-            ((size_t)(*data)[22] | ((size_t)(*data)[23] << 8)) == n &&
-            strnlen((char *)*data + 24, n) == n - 1 && owned((char *)*data + 24, n, path);
     } else if (kind == MARKS) {
         const char *owner = reader_bookmarks_owner(*data, *len);
         valid = owner && !strcmp(owner, path);
@@ -74,13 +68,7 @@ static esp_err_t read_record(nvs_handle_t h, kind_t kind, const char *path, uint
 }
 static void rebase(kind_t kind, uint8_t *data, size_t *len, const char *old, const char *next) {
     size_t n = strlen(next) + 1;
-    if (kind == PROGRESS) {
-        // v1 的短路径限制不适用于新位置；升级外壳但保留零排序。
-        // A v1 short-path limit need not constrain relocation; upgrade its envelope with zero order.
-        if (data[3] == 1) { data[3] = 2; memset(data + 16, 0, 4); }
-        data[22] = (uint8_t)n; data[23] = (uint8_t)(n >> 8);
-        memcpy(data + 24, next, n); *len = 24 + n;
-    } else if (kind == TITLE) {
+    if (kind == TITLE) {
         size_t p = strlen(old) + 1, tail = *len - p;
         memmove(data + n, data + p, tail); memcpy(data, next, n); *len = n + tail;
     } else if (kind == HIDDEN) { memcpy(data, next, n); *len = n; }
@@ -118,6 +106,8 @@ static esp_err_t check_or_copy(kind_t kind, const char *old, const char *next, b
 
 esp_err_t book_path_state_prepare(const char *old, const char *next) {
     if (!paths_ok(old, next)) return ESP_ERR_INVALID_ARG;
+    esp_err_t check = book_progress_copy_path(old,next,false);
+    if (check != ESP_OK) return check;
     for (kind_t k = 0; k < KINDS; ++k) {
         esp_err_t err = check_or_copy(k, old, next, false);
         if (err != ESP_OK) return err;
@@ -126,6 +116,8 @@ esp_err_t book_path_state_prepare(const char *old, const char *next) {
 }
 esp_err_t book_path_state_relocate(const char *old, const char *next, uint32_t size, book_path_state_extra_fn extra) {
     if (!paths_ok(old, next)) return ESP_ERR_INVALID_ARG;
+    esp_err_t check = book_progress_copy_path(old,next,true);
+    if (check != ESP_OK) return check;
     for (kind_t k = 0; k < KINDS; ++k) {
         esp_err_t err = check_or_copy(k, old, next, true);
         if (err != ESP_OK) return err;

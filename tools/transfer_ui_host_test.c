@@ -1210,5 +1210,16 @@ int main(void) {
     wifi_recovery_regression(&ctx);
     multi_network_regression(&ctx);
     transfer_entry_regression(&ctx);
+    // 传书改名需要如实返回进度迁移失败；非书籍不调用进度存储。
+    // A transfer rename must surface a progress move failure; non-books bypass progress storage.
+    test_progress_move_error = ESP_ERR_INVALID_STATE;
+    unsigned moves = test_progress_moves;
+    assert(!transfer_file_moved("/sdcard/books/a.txt", "/sdcard/books/b.txt", 42));
+    assert(test_progress_moves == moves + 1);
+    assert(transfer_file_moved("/sdcard/pictures/a.png", "/sdcard/pictures/b.png", 42));
+    assert(test_progress_moves == moves + 1);
+    test_progress_move_error = ESP_OK;
+    assert(transfer_file_moved("/sdcard/books/a.txt", "/sdcard/books/b.txt", 42));
+    assert(test_progress_moves == moves + 2);
     puts("transfer_ui_host_test: PASS");
 }

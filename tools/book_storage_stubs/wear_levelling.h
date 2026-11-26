@@ -4,3 +4,7 @@
 typedef int wl_handle_t;
 #define WL_INVALID_HANDLE -1
 esp_err_t wl_unmount(wl_handle_t);
+
+#include <stddef.h>
+size_t wl_size(wl_handle_t);
+esp_err_t wl_read(wl_handle_t,size_t,void *,size_t);

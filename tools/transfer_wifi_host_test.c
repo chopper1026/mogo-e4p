@@ -46,15 +46,15 @@ enum { ESP_OK, ESP_ERR_NVS_NOT_FOUND, ESP_ERR_INVALID_STATE, ESP_ERR_INVALID_ARG
        ESP_ERR_NO_MEM, ESP_ERR_NOT_FOUND };
 enum { NVS_READONLY, NVS_READWRITE };
 static transfer_credentials_t committed, staged;
-static bool present, pending_present;
+static bool present;
 static bool legacy_present, pending_legacy, profiles_present, pending_profiles;
 static unsigned char committed_profiles[1024], staged_profiles[1024];
 static size_t committed_size, staged_size;
-static int fail_open, fail_write, fail_commit, handles;
+static int fail_open, fail_write, fail_commit, fail_erase, handles;
 static esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *handle) {
     assert(!strcmp(name, "rp_wifi")); (void)mode;
     if (fail_open) return ESP_FAIL;
-    ++handles; *handle = 1; staged = committed; pending_present = present;
+    ++handles; *handle = 1; staged = committed;
     pending_legacy = legacy_present; pending_profiles = profiles_present;
     staged_size = committed_size; memcpy(staged_profiles, committed_profiles, sizeof(staged_profiles));
     return ESP_OK;
@@ -71,26 +71,45 @@ static esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out, s
     assert(*size >= sizeof(committed)); *size = sizeof(committed); memcpy(out, &committed, *size); return ESP_OK;
 }
 static esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *in, size_t size) {
-    assert(handle == 1 && !strcmp(key, "profiles") && size <= sizeof(staged_profiles));
+    assert(handle == 1);
     if (fail_write) return ESP_FAIL;
-    memcpy(staged_profiles, in, size); staged_size = size;
-    pending_profiles = true; pending_present = ((const unsigned char *)in)[1] != 0; return ESP_OK;
+    if (!strcmp(key, "credentials")) {
+        assert(size == sizeof(staged)); memcpy(&staged, in, size); pending_legacy = true;
+    } else {
+        assert(!strcmp(key, "profiles") && size <= sizeof(staged_profiles));
+        memcpy(staged_profiles, in, size); staged_size = size; pending_profiles = true;
+    }
+    return ESP_OK;
 }
 static esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {
-    assert(handle == 1 && !strcmp(key, "credentials"));
-    if (fail_write) return ESP_FAIL;
-    pending_legacy = false; return legacy_present ? ESP_OK : ESP_ERR_NVS_NOT_FOUND;
+    assert(handle == 1);
+    if (fail_write || fail_erase) return ESP_FAIL;
+    bool *slot = !strcmp(key, "credentials") ? &pending_legacy : &pending_profiles;
+    assert(slot == &pending_legacy || !strcmp(key, "profiles"));
+    if (!*slot) return ESP_ERR_NVS_NOT_FOUND;
+    *slot = false; return ESP_OK;
 }
 static esp_err_t nvs_commit(nvs_handle_t handle) {
     assert(handle == 1);
     if (fail_commit) return ESP_FAIL;
-    committed = staged; present = pending_present; legacy_present = pending_legacy;
+    committed = staged; legacy_present = pending_legacy;
+    present = pending_profiles ? staged_profiles[1] != 0 : legacy_present;
     profiles_present = pending_profiles; committed_size = staged_size;
     memcpy(committed_profiles, staged_profiles, sizeof(committed_profiles)); return ESP_OK;
 }
 static void nvs_close(nvs_handle_t handle) {
     assert(handle == 1); --handles; clear_secret(&staged, sizeof(staged));
     clear_secret(staged_profiles, sizeof(staged_profiles));
+}
+// 记录影子分区的操作与字节数，不与实际存储共享状态。/ Record shadow operations and sizes without touching live keys.
+#define NVS_TYPE_BLOB 0x42
+typedef struct { const char *written, *erased; size_t bytes; } restore_nvs_t;
+static esp_err_t restore_nvs_write(restore_nvs_t *image, const char *ns, const char *key, int type, const void *data, size_t len) {
+    assert(!strcmp(ns, "rp_wifi") && type == NVS_TYPE_BLOB && data);
+    image->written = key; image->bytes = len; return ESP_OK;
+}
+static esp_err_t restore_nvs_erase(restore_nvs_t *image, const char *ns, const char *key) {
+    assert(!strcmp(ns, "rp_wifi")); image->erased = key; return ESP_OK;
 }
 #include "../components/wifi_transfer/transfer_credentials_store.h"
 
@@ -142,12 +161,43 @@ static void test_profiles(void) {
     profiles.items[1] = profiles.items[0];
     assert(!profiles_valid(&profiles));
     profiles.count = WIFI_TRANSFER_SAVED_MAX + 1; assert(!profiles_valid(&profiles));
-    assert(store_credentials(NULL) == ESP_OK);
+    // 老 v2 空表仍优先于遗留单条；损坏的权威键不回退或被读取覆盖。/ An old empty v2 table wins over legacy; corrupt authoritative data must not fall back.
+    transfer_profiles_t empty = {.version = 2};
+    memcpy(committed_profiles, &empty, sizeof(empty)); committed_size = sizeof(empty); profiles_present = true;
     legacy_present = true;
     assert(load_profiles(&profiles) == ESP_OK && profiles.count == 0);
     committed_profiles[0] = 99;
     assert(load_profiles(&profiles) == ESP_ERR_INVALID_STATE && profiles.count == 0);
-    assert(store_credentials(NULL) == ESP_OK && !handles);
+    assert(store_credentials(NULL) == ESP_OK && !handles && !profiles_present && !legacy_present);
+
+    // 旧版把单条也写成八槽；只读不迁移，保存空间不足时原凭据仍在。
+    // Old releases wrote one network as a full table. Reads do not migrate and failed compact writes retain it.
+    transfer_profiles_t one = {.version = 2, .count = 1};
+    assert(credentials_from_text("first", "12345678", &one.items[0]));
+    memcpy(committed_profiles, &one, sizeof(one)); committed_size = sizeof(one); profiles_present = true;
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 1 && !legacy_present && profiles_present);
+    fail_write = 1;
+    assert(store_profiles(&profiles) == ESP_FAIL && !legacy_present && profiles_present);
+    assert(load_profiles(&profiles) == ESP_OK && !strcmp(profiles.items[0].password, "12345678"));
+    fail_write = 0;
+    // 2→1 两步提交中断时旧表仍有效；1→2 时已提交的新表优先。/ Interrupt cleanup in both directions and retry against the authoritative table.
+    assert(credentials_from_text("first", "12345678", &next));
+    assert(store_credentials(&next) == ESP_OK && legacy_present && !profiles_present);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 1);
+    restore_nvs_t dry = {0};
+    assert(persist_profiles(&profiles, &dry) == ESP_OK && dry.bytes == sizeof(next) &&
+           !strcmp(dry.written, "credentials") && !strcmp(dry.erased, "profiles"));
+    fail_erase = 1;
+    assert(credentials_from_text("second", "abcdefgh", &next));
+    assert(store_credentials(&next) == ESP_FAIL && legacy_present && profiles_present);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 2 && !strcmp(profiles.items[0].ssid, "second"));
+    assert(persist_profiles(&profiles, &dry) == ESP_OK && dry.bytes == sizeof(profiles) &&
+           !strcmp(dry.written, "profiles") && !strcmp(dry.erased, "credentials"));
+    assert(forget_credentials("second", &next) == ESP_FAIL && !next.version);
+    assert(load_profiles(&profiles) == ESP_OK && profiles.count == 2);
+    fail_erase = 0;
+    assert(forget_credentials("second", &next) == ESP_OK && !strcmp(next.ssid, "first") && legacy_present && !profiles_present);
+    assert(forget_credentials("first", &next) == ESP_OK && !legacy_present && !profiles_present);
     clear_secret(&profiles, sizeof(profiles)); clear_secret(&next, sizeof(next));
 }
 

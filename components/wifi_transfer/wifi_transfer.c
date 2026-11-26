@@ -805,12 +805,9 @@ esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backu
             memcpy(next.items[i].password, backup->items[i].password, sizeof(next.items[i].password));
         }
         if (!merge_backup_profiles(&next, &local)) err = ESP_ERR_INVALID_SIZE;
-        else if (image) {
-            err = restore_nvs_write(image, "rp_wifi", "profiles", NVS_TYPE_BLOB, &next, sizeof(next));
-            if (err == ESP_OK) err = restore_nvs_erase(image, "rp_wifi", "credentials");
-        } else {
-            err = store_profiles(&next);
-            if (err == ESP_OK && !s_wifi) publish_credentials(&next.items[0]);
+        else {
+            err = persist_profiles(&next, image);
+            if (err == ESP_OK && !image && !s_wifi) publish_credentials(&next.items[0]);
         }
     }
     clear_secret(&local, sizeof(local));
@@ -2177,31 +2174,34 @@ static int copy_sd_tree(const char *source, const char *target, unsigned depth) 
     return status;
 }
 
-static void notify_sd_move_tree(const char *old_path, const char *new_path, unsigned depth) {
-    if (!s_cfg.file_moved_cb || depth > TRANSFER_TREE_MAX_DEPTH) return;
+static bool notify_sd_move_tree(const char *old_path, const char *new_path, unsigned depth) {
+    if (!s_cfg.file_moved_cb) return true;
+    if (depth > TRANSFER_TREE_MAX_DEPTH) return false;
     struct stat st;
-    if (stat(new_path, &st)) return;
+    if (stat(new_path, &st)) return false;
     if (S_ISREG(st.st_mode)) {
-        s_cfg.file_moved_cb(old_path, new_path,
+        return s_cfg.file_moved_cb(old_path, new_path,
                             st.st_size >= 0 && (uint64_t)st.st_size <= UINT32_MAX ? (uint32_t)st.st_size : 0);
-        return;
     }
-    if (!S_ISDIR(st.st_mode)) return;
+    if (!S_ISDIR(st.st_mode)) return true;
     if (s_cfg.directory_moved_cb) s_cfg.directory_moved_cb(old_path, new_path);
     DIR *dir = opendir(new_path);
-    if (!dir) return;
+    if (!dir) return false;
     char *names = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!names) { closedir(dir); return; }
+    if (!names) { closedir(dir); return false; }
     char *old_child = names, *new_child = names + 512;
-    struct dirent *entry;
-    while ((entry = readdir(dir))) {
+    bool ok = true;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (!entry) { if (errno) ok = false; break; }
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (snprintf(old_child, 512, "%s/%s", old_path, entry->d_name) >= 512 ||
-            snprintf(new_child, 512, "%s/%s", new_path, entry->d_name) >= 512) continue;
-        notify_sd_move_tree(old_child, new_child, depth + 1);
+            snprintf(new_child, 512, "%s/%s", new_path, entry->d_name) >= 512) { ok = false; continue; }
+        if (!notify_sd_move_tree(old_child, new_child, depth + 1)) ok = false;
     }
     free(names);
-    closedir(dir);
+    return closedir(dir) == 0 && ok;
 }
 
 static bool flat_file_request(const char *body) {
@@ -2302,7 +2302,8 @@ static esp_err_t files_mutation_handler(httpd_req_t *req) {
                 if (status == 200) status = rename(source, target) == 0 ? 200 : 507;
             }
             if (status == 200) {
-                notify_sd_move_tree(source, target, 0);
+                may_have_changed = true;
+                if (!notify_sd_move_tree(source, target, 0)) status = 500;
                 sync_upload_root_after_edit("rename", source, target);
             }
         } else {
@@ -2327,6 +2328,7 @@ static esp_err_t files_mutation_handler(httpd_req_t *req) {
     set_error(ESP_OK);
     cJSON_Delete(json);
     if (status == 200) return files_error(req, "200 OK", "{\"ok\":true}");
+    if (status == 500) return files_error(req, "500 Internal Server Error", "{\"error\":\"存储空间不足或写入失败\"}");
     if (status == 404) return files_error(req, "404 Not Found", "{\"error\":\"文件或目录不存在\"}");
     if (status == 409) return files_error(req, "409 Conflict", "{\"error\":\"目标文件已存在\"}");
     if (status == 507) return files_error(req, "507 Insufficient Storage", "{\"error\":\"TF 卡空间不足或读写失败\"}");

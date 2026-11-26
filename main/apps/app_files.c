@@ -244,16 +244,9 @@ static bool sibling_path(const char *name, char out[288]) {
     return true;
 }
 
-static void migrate_book_state(const char *old_path, const char *new_path, uint32_t size) {
-    if (!is_book_path(old_path)) return;
-    book_progress_t progress = {0};
-    bool had_progress = book_progress_load(old_path, size, &progress);
-    char last[BOOK_STORE_PATH_MAX] = {0};
-    bool was_last = book_progress_last_path(last, sizeof(last)) && !strcmp(last, old_path);
-    if (had_progress) (void)book_progress_save(new_path, &progress);
-    (void)book_progress_forget(old_path);
-    if (was_last) (void)book_progress_set_last_path(new_path);
-    (void)book_title_clear(old_path);
+static bool migrate_book_state(const char *old_path, const char *new_path) {
+    if (!is_book_path(old_path)) return true;
+    return book_progress_move_path(old_path, new_path) == ESP_OK && book_title_clear(old_path) == ESP_OK;
 }
 
 static esp_err_t copy_selected_item(char out_name[128]) {
@@ -316,30 +309,31 @@ static void sync_moved_settings(const char *old_path, const char *new_path) {
         app_settings_set_wallpaper_path(updated);
 }
 
-static void notify_moved_tree(const char *old_path, const char *new_path, unsigned depth) {
-    if (depth > 8) return;
+static bool notify_moved_tree(const char *old_path, const char *new_path, unsigned depth) {
+    if (depth > 8) return false;
     struct stat st;
-    if (stat(new_path, &st)) return;
+    if (stat(new_path, &st)) return false;
     if (S_ISREG(st.st_mode)) {
-        migrate_book_state(old_path, new_path,
-            st.st_size >= 0 && (uint64_t)st.st_size <= UINT32_MAX ? (uint32_t)st.st_size : 0);
-        return;
+        return migrate_book_state(old_path, new_path);
     }
-    if (!S_ISDIR(st.st_mode)) return;
+    if (!S_ISDIR(st.st_mode)) return true;
     DIR *dir = opendir(new_path);
-    if (!dir) return;
+    if (!dir) return false;
     char *paths = heap_caps_malloc(576, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!paths) { closedir(dir); return; }
+    if (!paths) { closedir(dir); return false; }
     char *old_child = paths, *new_child = paths + 288;
-    struct dirent *entry;
-    while ((entry = readdir(dir))) {
+    bool ok = true;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (!entry) { if (errno) ok = false; break; }
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (snprintf(old_child, 288, "%s/%s", old_path, entry->d_name) >= 288 ||
-            snprintf(new_child, 288, "%s/%s", new_path, entry->d_name) >= 288) continue;
-        notify_moved_tree(old_child, new_child, depth + 1);
+            snprintf(new_child, 288, "%s/%s", new_path, entry->d_name) >= 288) { ok = false; continue; }
+        if (!notify_moved_tree(old_child, new_child, depth + 1)) ok = false;
     }
     free(paths);
-    closedir(dir);
+    return closedir(dir) == 0 && ok;
 }
 
 static void file_deleted(const char *path, bool directory, void *ctx) {
@@ -410,10 +404,10 @@ static app_redraw_t move_selected(void) {
         return APP_REDRAW_PAGE;
     }
     sync_moved_settings(s_selected.path, destination);
-    notify_moved_tree(s_selected.path, destination, 0);
+    bool saved = notify_moved_tree(s_selected.path, destination, 0);
     book_store_notify_changed();
     leave_move(true);
-    snprintf(s_message, sizeof(s_message), ui_tr("移动完成"));
+    snprintf(s_message, sizeof(s_message), saved ? ui_tr("移动完成") : ui_tr("保存失败，请检查设置存储"));
     return APP_REDRAW_PAGE;
 }
 
@@ -968,13 +962,13 @@ static app_redraw_t save_rename(void) {
         return APP_REDRAW_PAGE;
     }
     sync_moved_settings(old_path, destination);
-    notify_moved_tree(old_path, destination, 0);
+    bool saved = notify_moved_tree(old_path, destination, 0);
     book_store_notify_changed();
     copy_utf8(s_selected.path, sizeof(s_selected.path), destination);
     copy_utf8(s_selected.name, sizeof(s_selected.name), name);
     s_view = FILE_VIEW_ACTIONS;
     ui_keyboard_end();
-    snprintf(s_message, sizeof(s_message), ui_tr("重命名完成"));
+    snprintf(s_message, sizeof(s_message), saved ? ui_tr("重命名完成") : ui_tr("保存失败，请检查设置存储"));
     return APP_REDRAW_PAGE;
 }
 

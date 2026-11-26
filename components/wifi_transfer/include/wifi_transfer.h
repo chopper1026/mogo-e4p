@@ -50,7 +50,7 @@ typedef struct {
     esp_err_t (*title_set_cb)(const char *path, const char *title); ///< 保存显示书名覆盖 / Save title override
     esp_err_t (*file_changed_cb)(const char *path); ///< 文件提交或删除后清除进度；失败不回滚文件 / Clear progress after commit or deletion; failure never rolls back the file
     void (*file_deleted_cb)(const char *path); ///< 网页文件管理删除后的元数据清理 / Metadata cleanup after web file deletion
-    void (*file_moved_cb)(const char *old_path, const char *new_path, uint32_t size); ///< 网页重命名后的进度与字体路径迁移 / Migrate progress and font selection after rename
+    bool (*file_moved_cb)(const char *old_path, const char *new_path, uint32_t size); ///< 网页重命名后的进度与字体路径迁移 / Migrate progress and font selection after rename
     void (*directory_deleted_cb)(const char *path); ///< 删除目录后清理目录设置 / Clear directory settings after deletion
     void (*directory_moved_cb)(const char *old_path, const char *new_path); ///< 重命名目录后更新目录设置 / Update directory settings after rename
     bool (*signature_get_cb)(char *out, size_t cap); ///< 复制当前签名，不依赖页面 / Copy current signature without page dependencies

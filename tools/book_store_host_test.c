@@ -19,7 +19,10 @@ static bool sd_mounted;
 static bool sd_invalid_present;
 static int mount_calls, mount_error, mkdir_error, is_directory = 1, fat_error;
 static int partial_mounts, mount_cleanups;
-static bool expect_format = true, fail_after_wl;
+static bool blank, fail_after_wl;
+static int formats;
+size_t wl_size(wl_handle_t h) { assert(h==7); return 1024; }
+esp_err_t wl_read(wl_handle_t h,size_t off,void *out,size_t n) { assert(h==7); memset(out,0xff,n); if (!blank && off) ((char *)out)[0]=0; return ESP_OK; }
 static int sd_mkdir_error;
 static int file_mode = S_IFREG, file_error, unlink_error, forget_error, unlinks, forgets;
 static bool sd_exists = true, flash_exists = true;
@@ -87,7 +90,8 @@ esp_err_t board_sd_get_info(board_sd_info_t* out) {
 esp_err_t esp_vfs_fat_spiflash_mount_rw_wl(const char* path, const char* label,
     const esp_vfs_fat_mount_config_t* config, wl_handle_t* out) {
     assert(!strcmp(path, "/flash") && !strcmp(label, "storage"));
-    assert(config->format_if_mount_failed == expect_format && config->max_files == 4 && config->allocation_unit_size == 4096);
+    assert(config->max_files == 4 && config->allocation_unit_size == 4096);
+    if (config->format_if_mount_failed) { assert(blank); ++formats; *out=1; return ESP_OK; }
     ++mount_calls;
     if (mount_error && fail_after_wl) { assert(!partial_mounts); *out = 7; ++partial_mounts; }
     if (!mount_error) *out = 1;
@@ -109,13 +113,12 @@ int main(void) {
     assert(!book_store_flash_ready());
     assert(book_store_roots(NULL, &n) == ESP_ERR_INVALID_ARG);
     mount_error = ESP_FAIL;
-    expect_format = false; fail_after_wl = true;
+    fail_after_wl = true;
     for (unsigned attempt = 0; attempt < 16; ++attempt) {
         assert(book_store_prepare_data() == ESP_FAIL);
         assert(!partial_mounts && !book_store_flash_ready());
     }
     assert(mount_cleanups == 16);
-    expect_format = true;
     assert(book_store_roots(roots, &n) == ESP_FAIL && n == 0);
     assert(mount_cleanups == 17 && !partial_mounts);
     fail_after_wl = false;
@@ -124,8 +127,9 @@ int main(void) {
     assert(book_store_roots(roots, &n) == ESP_OK && n == 1 && !roots[0].is_flash);
     assert(book_store_roots_degraded());
     assert(book_store_upload_root(&upload) == ESP_OK && !upload.is_flash);
-    mount_error = 0;
+    assert(!formats); blank=true; fail_after_wl=true;
     assert(book_store_roots(roots, &n) == ESP_OK && n == 2);
+    assert(formats==1); mount_error=0;
     assert(!book_store_roots_degraded());
     assert(!roots[0].is_flash && roots[1].is_flash && book_store_flash_ready());
     legacy_dir = true;

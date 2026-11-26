@@ -134,20 +134,14 @@ static void transfer_file_deleted(const char *path) {
     if (!strcmp(app_settings_wallpaper_path(), path)) app_settings_set_wallpaper_path("");
 }
 
-static void transfer_file_moved(const char *old_path, const char *new_path, uint32_t size) {
-    if (transfer_book_file(old_path)) {
-        book_progress_t progress = {0};
-        bool saved = book_progress_load(old_path, size, &progress);
-        char last[BOOK_STORE_PATH_MAX] = {0};
-        bool was_last = book_progress_last_path(last, sizeof(last)) && !strcmp(last, old_path);
-        if (saved) (void)book_progress_save(new_path, &progress);
-        (void)book_progress_forget(old_path);
-        if (was_last) (void)book_progress_set_last_path(new_path);
-    }
-    if (transfer_book_file(old_path)) (void)book_title_clear(old_path);
+static bool transfer_file_moved(const char *old_path, const char *new_path, uint32_t size) {
+    (void)size;
+    bool saved = !transfer_book_file(old_path) || (book_progress_move_path(old_path, new_path) == ESP_OK &&
+        book_title_clear(old_path) == ESP_OK);
     if (!strcmp(app_settings_system_font_path(), old_path)) app_settings_set_system_font_path(new_path);
     if (!strcmp(app_settings_font_path(), old_path)) app_settings_set_font_path(new_path);
     if (!strcmp(app_settings_wallpaper_path(), old_path)) app_settings_set_wallpaper_path(new_path);
+    return saved;
 }
 
 static bool transfer_set_wallpaper(const char *path) {

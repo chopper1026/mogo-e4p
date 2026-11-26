@@ -149,5 +149,5 @@ with tempfile.TemporaryDirectory(prefix='mogo-bookmarks-') as tmp:
     src.write_text(unit)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I'+str(ROOT/'tools/settings_backup_stubs'), '-I'+str(ROOT/'components/restore_nvs/include'), '-I'+str(ROOT/'tools'),
-                    str(src), '-o', str(binary)], check=True)
+                    '-DPROGRESS_PARENT="."', str(src), str(ROOT/'main/book/book_progress_store.c'), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], cwd=folder, check=True)

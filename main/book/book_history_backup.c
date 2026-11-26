@@ -8,6 +8,8 @@
  */
 #include "book_history_backup.h"
 #include "book_bookmark_store.h"
+#include "book_progress_store.h"
+#include "book_store.h"
 #include <stdlib.h>
 #include <string.h>
 #include "nvs.h"
@@ -41,10 +43,7 @@ static bool valid_record(unsigned ns, uint8_t type, const char *key, const uint8
         if (!strcmp(key, "seq")) return type == NVS_TYPE_U32 && len == 4;
         if (!strcmp(key, "last")) return type == NVS_TYPE_STR && len >= 1 &&
             data[len - 1] == 0 && strnlen((const char *)data, len) == len - 1;
-        return book_key(key, 'b') && type == NVS_TYPE_BLOB && len >= 26 &&
-            len <= 24 + 288 && !memcmp(data, "RPB", 3) && (data[3] == 1 || data[3] == 2) &&
-            ((size_t)data[22] | ((size_t)data[23] << 8)) == len - 24 &&
-            strnlen((const char *)data + 24, len - 24) == len - 25;
+        return type == NVS_TYPE_BLOB && progress_record_valid(key,data,len);
     }
     if (ns == 1) {
         uint32_t magic = 0;
@@ -120,8 +119,12 @@ static esp_err_t write_card(const reader_bookmarks_unbounded_t *marks, size_t le
     return write_record(ctx, CARD_NS, NVS_TYPE_BLOB, "", marks, len);
 }
 
+static esp_err_t write_progress(const char *key, const uint8_t *row, size_t len, void *ctx) {
+    return write_record(ctx,0,NVS_TYPE_BLOB,key,row,len);
+}
 esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
     if (!file) return ESP_ERR_INVALID_ARG;
+    if (book_store_prepare_data() != ESP_OK) return ESP_FAIL;
     if (fwrite("RPHIST2", 1, 8, file) != 8) return ESP_FAIL;
     history_writer_t w = {file, UINT32_C(2166136261), 0};
     for (unsigned ns = 0; ns < CARD_NS; ++ns) {
@@ -137,7 +140,14 @@ esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
             uint8_t *value = NULL; size_t len = 0;
             if (err == ESP_OK) err = read_value(h, ns, &info, &value, &len);
             if (err == ESP_OK && !valid_record(ns, info.type, info.key, value, len)) err = ESP_ERR_INVALID_STATE;
-            if (err == ESP_OK) err = write_record(&w, ns, info.type, info.key, value, len);
+            bool shadowed = false;
+            if (err == ESP_OK && ns == 0 && info.type == NVS_TYPE_BLOB) {
+                uint8_t row[PROGRESS_CAP]; size_t n;
+                esp_err_t fat = progress_store_get((char *)value+PROGRESS_HEADER,row,&n);
+                shadowed = fat == ESP_OK;
+                if (!shadowed && fat != ESP_ERR_NOT_FOUND) err = fat;
+            }
+            if (err == ESP_OK && !shadowed) err = write_record(&w, ns, info.type, info.key, value, len);
             free(value);
             if (err != ESP_OK) break;
             err = nvs_entry_next(&it);
@@ -145,7 +155,8 @@ esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
         nvs_release_iterator(it); nvs_close(h);
         if (err != ESP_ERR_NVS_NOT_FOUND) return err;
     }
-    esp_err_t err = book_bookmark_store_visit(write_card, &w, bad_slot, cap);
+    esp_err_t err = progress_store_visit(write_progress,&w,false);
+    if (err == ESP_OK) err = book_bookmark_store_visit(write_card, &w, bad_slot, cap);
     if (err != ESP_OK) return err;
     uint8_t end[V2_HEADER] = {0xff}, seal[8];
     put32(seal, w.count); put32(seal + 4, w.hash);
@@ -209,7 +220,9 @@ static esp_err_t read_stream(FILE *file, read_mode_t mode, restore_nvs_t *image)
         }
         hash = hash_bytes(hash_bytes(hash, head, head_len), value, len); ++count;
         if (ns == CARD_NS && mode == STAGE_CARD) result = book_bookmark_restore_put((void *)value);
-        if (ns < CARD_NS && mode == RESTORE_NVS && image) {
+        if (ns == 0 && type == NVS_TYPE_BLOB) {
+            if (mode == STAGE_CARD) result = progress_stage_put(value,len);
+        } else if (ns < CARD_NS && mode == RESTORE_NVS && image) {
             result = restore_nvs_write(image, namespaces[ns], key, (nvs_type_t)type, value, len);
         } else if (ns < CARD_NS && mode == RESTORE_NVS) {
             if (open_ns != (int)ns) {
@@ -240,19 +253,24 @@ static esp_err_t read_stream(FILE *file, read_mode_t mode, restore_nvs_t *image)
 }
 
 bool book_history_backup_validate(FILE *file) { return read_stream(file, VALIDATE, NULL) == ESP_OK; }
+esp_err_t book_history_backup_stage(FILE *file) {
+    esp_err_t e=book_store_prepare_data();
+    if (e!=ESP_OK) return e;
+    e=progress_stage_begin();
+    if (e==ESP_OK) e=book_bookmark_restore_begin();
+    if (e==ESP_OK) e=read_stream(file,STAGE_CARD,NULL);
+    if (e!=ESP_OK) progress_stage_discard();
+    return e;
+}
 esp_err_t book_history_backup_restore(FILE *file, restore_nvs_t *image) {
     if (!file) return ESP_ERR_INVALID_ARG;
     if (!image) {
-        long start = ftell(file);
-        if (start < 0 || !book_history_backup_validate(file) || fseek(file, start, SEEK_SET))
-            return ESP_ERR_INVALID_RESPONSE;
-        esp_err_t card = book_bookmark_restore_begin();
-        if (card == ESP_OK) card = read_stream(file, STAGE_CARD, NULL);
-        if (card != ESP_OK) return card;
-        if (fseek(file, start, SEEK_SET)) return ESP_FAIL;
-        // TF 发布成功后才替换旧进度。/ Replace old progress only after card promotion succeeds.
-        card = book_bookmark_restore_finish();
-        if (card != ESP_OK) return card;
+        long pos=ftell(file);
+        if (pos<0 || !book_history_backup_validate(file) || fseek(file,pos,SEEK_SET)) return ESP_ERR_INVALID_RESPONSE;
+        esp_err_t e=book_bookmark_restore_finish();
+        if (e==ESP_OK) e=progress_stage_finish();
+        if (e!=ESP_OK) return e;
+        book_progress_notify_changed();
     }
     // Recovery replaces the old reading library. Merging leaves stale "last"
     // and per-book records behind, so the restored shelf can appear unchanged.

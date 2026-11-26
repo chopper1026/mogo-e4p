@@ -18,16 +18,11 @@ unit = r'''
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-#define BOOK_STORE_PATH_MAX 288
-typedef struct {uint32_t file_size,byte_off;uint16_t chapter;} book_progress_t;
-static book_progress_t saved={77,123,2};
+#define ESP_OK 0
 static char last[288],old_path[288],new_path[288];
-static unsigned saves,forgets,titles;
-static bool book_progress_load(const char *p,uint32_t size,book_progress_t *out){assert(!strcmp(p,old_path)&&size==77);*out=saved;return true;}
-static bool book_progress_last_path(char *out,size_t cap){snprintf(out,cap,"%s",last);return true;}
-static int book_progress_save(const char *p,const book_progress_t *value){assert(!strcmp(p,new_path)&&!memcmp(value,&saved,sizeof(saved)));++saves;return 0;}
+static unsigned saves,forgets,titles; static bool full;
 static int book_progress_forget(const char *p){assert(!strcmp(p,old_path));++forgets;return 0;}
-static int book_progress_set_last_path(const char *p){strcpy(last,p);return 0;}
+static int book_progress_move_path(const char *old,const char *next){assert(!strcmp(old,old_path)&&!strcmp(next,new_path));if(full)return -1; ++saves;strcpy(last,next);return book_progress_forget(old);}
 static int book_title_clear(const char *p){assert(!strcmp(p,old_path));++titles;return 0;}
 static const char *app_settings_system_font_path(void){return "";}
 static const char *app_settings_font_path(void){return "";}
@@ -45,7 +40,7 @@ int main(void){
   snprintf(old_path,sizeof(old_path),"/sdcard/books/old.%s",extensions[i]);
   snprintf(new_path,sizeof(new_path),"/sdcard/books/new.%s",extensions[i]);strcpy(last,old_path);
   saves=forgets=titles=0;bool book=i<4;
-  assert(transfer_book_file(old_path)==book);transfer_file_moved(old_path,new_path,77);
+  assert(transfer_book_file(old_path)==book); full=true; assert(transfer_file_moved(old_path,new_path,77)==!book && !saves && !forgets && !titles); full=false; assert(transfer_file_moved(old_path,new_path,77));
   assert(saves==book&&forgets==book&&titles==book&&!strcmp(last,book?new_path:old_path));
   saves=forgets=titles=0;transfer_file_deleted(old_path);
   assert(!saves&&forgets==book&&titles==book);

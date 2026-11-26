@@ -147,17 +147,18 @@ esp_err_t book_folder_backup_read(FILE *file,const char *id,bool apply, bool *ne
 // 在容量边界注入失败，真实 IDF 分配器另由设备构建使用。/ Inject capacity boundaries; the device build uses the actual IDF allocator.
 struct restore_nvs { bool reclaimed; };
 static bool pressure, history_too_large;
+static const char *shadow_erased, *live_erased;
+static esp_err_t erase_text_error;
 static const char *existing_compact_key;
-esp_err_t nvs_find_key(nvs_handle_t h, const char *key, nvs_type_t *type) {
-    (void)h;
-    if (existing_compact_key && !strcmp(existing_compact_key, key)) { *type = NVS_TYPE_U8; return ESP_OK; }
-    return ESP_ERR_NVS_NOT_FOUND;
-}
 esp_err_t restore_nvs_clone(restore_nvs_t **out) { *out = calloc(1, sizeof(**out)); return *out ? ESP_OK : ESP_ERR_NO_MEM; }
 void restore_nvs_free(restore_nvs_t *image) { free(image); }
 esp_err_t restore_nvs_write(restore_nvs_t *image, const char *ns, const char *key, nvs_type_t type, const void *data, size_t len) {
     (void)key; (void)ns; (void)data; (void)len; (void)type;
     return (pressure && !image->reclaimed) ? ESP_ERR_NVS_NOT_ENOUGH_SPACE : ESP_OK;
+}
+esp_err_t restore_nvs_erase(restore_nvs_t *image, const char *ns, const char *key) {
+    assert(image && !strcmp(ns, NVS_NS) && omit_empty_text(key, ""));
+    shadow_erased = key; return erase_text_error;
 }
 static unsigned history_saves, history_restores;
 esp_err_t book_history_backup_write(FILE *file, char *bad_slot, size_t cap) {
@@ -169,6 +170,8 @@ bool book_history_backup_validate(FILE *file) {
     char marker[8];
     return fread(marker, 1, 8, file) == 8 && !memcmp(marker, "RPHIST1", 8) && fgetc(file) == EOF;
 }
+static bool staging_full;
+esp_err_t book_history_backup_stage(FILE *file) { return staging_full || !book_history_backup_validate(file) ? ESP_FAIL : ESP_OK; }
 esp_err_t book_history_backup_restore(FILE *file, struct restore_nvs *image) {
     if (!image) ++history_restores;
     if (image && history_too_large) return ESP_ERR_NVS_NOT_ENOUGH_SPACE;
@@ -284,6 +287,9 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) {
 }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) {
     (void)h;
+    if (omit_empty_text(key, "")) {
+        assert(flash_depth); live_erased = key; return erase_text_error;
+    }
     if (!strcmp(key, NVS_KEY_SCREEN_OFFSET)) {
         assert(flash_depth && has_screen);
         ++screen_erases;
@@ -870,6 +876,7 @@ static void test_device_name_branding(void) {
         assert(!strcmp(app_settings_device_name(), cases[i].expected));
         if (!cases[i].stored || !cases[i].stored[0]) continue;
         loaded_device_name = NULL;
+        written_device_name[0] = 0;
         strlcpy(s_device_name, cases[i].stored, sizeof(s_device_name));
         assert(app_settings_backup_save() == ESP_OK);
         strlcpy(s_device_name, "Keep current", sizeof(s_device_name));
@@ -879,7 +886,7 @@ static void test_device_name_branding(void) {
         commit_fails = false;
         assert(app_settings_backup_restore() == ESP_OK);
         assert(!strcmp(app_settings_device_name(), cases[i].expected));
-        assert(!strcmp(written_device_name, cases[i].expected));
+        assert(!strcmp(written_device_name, !strcmp(cases[i].expected, DEFAULT_DEVICE_NAME) ? "" : cases[i].expected));
     }
     loaded_device_name = NULL;
     app_settings_init();
@@ -1898,6 +1905,7 @@ static void test_portable_backup(void) {
     mount_failure = true;
     assert(app_settings_backup_restore() == APP_RESTORE_INTERNAL_VOLUME && commits == commit_count && records == history_restores);
     mount_failure = false;
+    staging_full = true; assert(app_settings_backup_restore() == ESP_FAIL && commits == commit_count && records == history_restores); staging_full = false;
     history_too_large = true;
     assert(app_settings_backup_restore() == ESP_ERR_NVS_NOT_ENOUGH_SPACE && commits == commit_count && records == history_restores);
     history_too_large = false;
@@ -1913,7 +1921,7 @@ static void test_portable_backup(void) {
     assert(app_settings_backup_restore() == ESP_OK && records + 1 == history_restores);
     pressure = false;
     mount_failure = empty_volume_payload = true;
-    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_backup_restore() == APP_RESTORE_INTERNAL_VOLUME);
     mount_failure = empty_volume_payload = false;
     assert(weather_view.has_city && !weather_view.auto_refresh && !strcmp(weather_view.city.id, "CITY123"));
     assert(saved_profiles.count == 2 && !strcmp(saved_profiles.items[1].ssid, "Two"));
@@ -2022,6 +2030,17 @@ static void test_setup_resume(void) {
     durable_setup=0x96;load_setup();assert(ui_language()==UI_LANG_CN && app_setup_step()==SETUP_DONE);
     assert(app_setup_save(UI_LANG_CN,SETUP_DONE));commit_count=0;
 }
+esp_err_t nvs_find_key(nvs_handle_t h, const char *key, nvs_type_t *type) {
+    uint8_t scalar;
+    char text[512]; size_t size = sizeof(text);
+    if (existing_compact_key ? !strcmp(existing_compact_key, key) : backup_nvs_get_u8(h, key, &scalar) == ESP_OK) {
+        *type = NVS_TYPE_U8; return ESP_OK;
+    }
+    if (!existing_compact_key && backup_nvs_get_str(h, key, text, &size) == ESP_OK) {
+        *type = NVS_TYPE_STR; return ESP_OK;
+    }
+    return ESP_ERR_NVS_NOT_FOUND;
+}
 static void test_compact_settings(void) {
     // 已有键即使要恢复默认值也得覆盖；非默认值和依赖旧键的设置必须保留。/ Keep stored overrides, non-default values, and legacy-dependent settings.
     existing_compact_key = NVS_KEY_FRONTLIGHT_BRI;
@@ -2036,6 +2055,20 @@ static void test_compact_settings(void) {
     assert(!strcmp(plan.items[1].key, NVS_KEY_BOOK_PX) && plan.items[1].u8 == 60);
     assert(!strcmp(plan.items[2].key, NVS_KEY_BOOK_MARGIN_R));
     free(plan.items); existing_compact_key = NULL;
+
+    // 清除旧字体既不需要写空字符串，也不能在删除失败时丢弃运行态；预检使用同一操作。
+    // Clearing a legacy font must not write an empty string or discard live state on erase failure; rehearse the same erase.
+    strlcpy(s_font, "/sdcard/fonts/keep.ttf", sizeof(s_font));
+    live_erased = shadow_erased = NULL;
+    erase_text_error = ESP_FAIL;
+    app_settings_set_font_path("");
+    assert(live_erased && !strcmp(live_erased, NVS_KEY_FONT) && !strcmp(s_font, "/sdcard/fonts/keep.ttf") && !flash_depth);
+    restore_nvs_t image = {0}; live_erased = NULL;
+    assert(write_text(0, &image, NVS_KEY_FONT, "") == ESP_FAIL && !live_erased && shadow_erased && !strcmp(shadow_erased, NVS_KEY_FONT));
+    erase_text_error = ESP_ERR_NVS_NOT_FOUND;
+    app_settings_set_font_path(""); assert(!s_font[0] && !flash_depth);
+    erase_text_error = ESP_OK;
+    assert(!omit_empty_text(NVS_KEY_TAP_CONFIG, "") && !omit_empty_text(NVS_KEY_SYS_FONT, "/sdcard/fonts/keep.ttf"));
 }
 int main(void) {
     test_setup_resume();

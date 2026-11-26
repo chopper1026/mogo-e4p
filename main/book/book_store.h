@@ -26,8 +26,8 @@ typedef struct {
     bool is_flash;
 } book_store_root_t;
 
-/// 返回可用目录，SD 在前；至少一个可用即成功。可能首次格式化内置分区。
-/// Return usable roots, SD first; succeeds if any is usable. May initially format flash.
+/// 返回可用目录，SD 在前；至少一个可用即成功。仅在确认逻辑卷全空时允许首次格式化。
+/// Return usable roots, SD first; succeeds if any is usable. May initialize only a verified blank internal volume.
 esp_err_t book_store_roots(book_store_root_t out[BOOK_STORE_ROOT_MAX], int* n);
 /// 最近一次 roots 扫描有来源失败；未插 SD 不算失败，成功返回也可能为 true。
 /// Whether the last roots scan lost a source; absent SD is not failure, and a successful call may still be degraded.

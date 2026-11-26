@@ -7,6 +7,7 @@
 #pragma once
 #ifndef WIFI_TRANSFER_NVS_TEST
 #include "nvs.h"
+#include "restore_nvs.h"
 #endif
 #include "transfer_policy.h"
 
@@ -58,19 +59,38 @@ static esp_err_t load_profiles(transfer_profiles_t *out) {
     return ESP_OK;
 }
 
-static esp_err_t store_profiles(const transfer_profiles_t *next) {
+// 单条复用旧凭据，多条沿用 v2；两键同时存在时 profiles 始终优先。先提交新副本，再删旧键。
+// Reuse legacy credentials for one network and v2 for multiple; profiles always wins if both exist. Commit before cleanup.
+static esp_err_t erase_profile_key(restore_nvs_t *image, nvs_handle_t h, const char *key) {
+    if (image) return restore_nvs_erase(image, "rp_wifi", key);
+    esp_err_t err = nvs_erase_key(h, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND) return ESP_OK;
+    return err == ESP_OK ? nvs_commit(h) : err;
+}
+static esp_err_t persist_profiles(const transfer_profiles_t *next, restore_nvs_t *image) {
     if (!profiles_valid(next)) return ESP_ERR_INVALID_ARG;
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open("rp_wifi", NVS_READWRITE, &handle);
+    nvs_handle_t h = 0;
+    esp_err_t err = image ? ESP_OK : nvs_open("rp_wifi", NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
-    err = nvs_set_blob(handle, "profiles", next, sizeof(*next));
-    if (err == ESP_OK) {
-        esp_err_t erased = nvs_erase_key(handle, "credentials");
-        if (erased != ESP_OK && erased != ESP_ERR_NVS_NOT_FOUND) err = erased;
+    if (next->count) {
+        bool single = next->count == 1;
+        const char *key = single ? "credentials" : "profiles";
+        const void *data = single ? (const void *)&next->items[0] : (const void *)next;
+        size_t size = single ? sizeof(next->items[0]) : sizeof(*next);
+        err = image ? restore_nvs_write(image, "rp_wifi", key, NVS_TYPE_BLOB, data, size)
+                    : nvs_set_blob(h, key, data, size);
+        if (!image && err == ESP_OK) err = nvs_commit(h);
+        if (err == ESP_OK) err = erase_profile_key(image, h, single ? "profiles" : "credentials");
+    } else {
+        // 先删回退键再删权威键，避免断电后复活旧网络；无需保留八槽空表。/ Remove fallback first so interruptions cannot resurrect it; no empty table needed.
+        err = erase_profile_key(image, h, "credentials");
+        if (err == ESP_OK) err = erase_profile_key(image, h, "profiles");
     }
-    if (err == ESP_OK) err = nvs_commit(handle);
-    nvs_close(handle);
+    if (!image) nvs_close(h);
     return err;
+}
+static esp_err_t store_profiles(const transfer_profiles_t *next) {
+    return persist_profiles(next, NULL);
 }
 
 static esp_err_t load_credentials(transfer_credentials_t *out) {

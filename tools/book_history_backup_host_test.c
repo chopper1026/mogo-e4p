@@ -29,6 +29,13 @@ typedef struct { int ns; char key[16]; nvs_type_t type; size_t len; uint8_t data
 static record_t records[2][32];
 static int counts[2], active;
 static unsigned progress_changes;
+esp_err_t book_store_prepare_data(void) { return ESP_OK; }
+static esp_err_t restore_live(FILE *f) {
+    long pos=ftell(f); assert(pos>=0);
+    esp_err_t e=book_history_backup_stage(f);
+    if(e==ESP_OK) { assert(!fseek(f,pos,SEEK_SET)); e=book_history_backup_restore(f,NULL); }
+    return e;
+}
 void book_progress_notify_changed(void) { ++progress_changes; }
 struct nvs_iterator_opaque { int ns, index; };
 
@@ -157,13 +164,17 @@ int main(void) {
     long start = ftell(f);
     assert(book_history_backup_restore(f, (restore_nvs_t *)&before_restore) == ESP_ERR_NVS_NOT_ENOUGH_SPACE);
     assert(progress_changes == before_restore && fseek(f, start, SEEK_SET) == 0);
-    assert(book_history_backup_restore(f,NULL)==ESP_OK);
+    assert(restore_live(f)==ESP_OK);
     assert(progress_changes > before_restore);
-    assert(counts[1]==counts[0]);
+    assert(counts[1]==counts[0]-2);
     assert(!find_record(3,"f_deadbeef"));
     assert(!find_record(5,key));
     for (int i=0;i<counts[0];++i) {
         record_t *a=&records[0][i], *b=find_record(a->ns,a->key);
+        if (a->ns==0 && a->type==NVS_TYPE_BLOB) {
+            uint8_t row[PROGRESS_CAP]; size_t n;
+            assert(!b && !progress_store_get((char*)a->data+24,row,&n) && n==a->len && !memcmp(row,a->data,n)); continue;
+        }
         assert(b && b->type==a->type && b->len==a->len && !memcmp(a->data,b->data,a->len));
     }
     fclose(f);
@@ -174,9 +185,13 @@ int main(void) {
     assert(book_history_backup_write(f,NULL,0)==ESP_OK);
     rewind(f); assert(book_history_backup_validate(f));
     active=1; rewind(f);
-    assert(book_history_backup_restore(f,NULL)==ESP_OK && counts[1]==counts[0]);
+    assert(restore_live(f)==ESP_OK && counts[1]==counts[0]-2);
     for (int i=0;i<counts[0];++i) {
         record_t *a=&records[0][i], *b=find_record(a->ns,a->key);
+        if (a->ns==0 && a->type==NVS_TYPE_BLOB) {
+            uint8_t row[PROGRESS_CAP]; size_t n;
+            assert(!b && !progress_store_get((char*)a->data+24,row,&n) && n==a->len && !memcmp(row,a->data,n)); continue;
+        }
         assert(b && b->type==a->type && b->len==a->len && !memcmp(a->data,b->data,a->len));
     }
     assert(!valid_record(5,NVS_TYPE_STR,key,(const uint8_t*)other,other_len));
@@ -210,26 +225,34 @@ int main(void) {
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_NOT_FOUND);
     active=0; rewind(f); fail_promotion=".restore";
     uint32_t before=521; assert(!put(0,"seq",NVS_TYPE_U32,&before,sizeof(before)));
-    assert(book_history_backup_restore(f,NULL)!=ESP_OK); fail_promotion=NULL;
+    assert(restore_live(f)!=ESP_OK); fail_promotion=NULL;
     assert(!memcmp(find_record(0,"seq")->data,&before,sizeof(before)) && !find_record(2,key));
     assert(!book_bookmark_store_load(other,17,&got) && got->entries[5999].byte_off==88); free(got);
-    rewind(f); assert(!book_history_backup_restore(f,NULL));
+    rewind(f); assert(!restore_live(f));
     rewind(f); fail_history_allocation=bytes; assert(read_stream(f,RESTORE_NVS,NULL)==ESP_OK); fail_history_allocation=0; fclose(f);
     assert(find_record(2,key) && find_record(2,key)->len==internal_bytes);
     assert(!book_bookmark_store_load(path,17,&got) && got->count==6000 && got->entries[5999].byte_off==77); free(got);
     assert(book_bookmark_store_load(other,17,&got)==ESP_ERR_NOT_FOUND);
-    // 真正的 v1 字节流（含旧 NVS 书签）；恢复必须替换卡上较新的记录。/ Actual v1 bytes with NVS bookmarks must supersede newer card records.
-    f=tmpfile();assert(f); uint8_t head[20]={2,NVS_TYPE_BLOB},end[20]={0xff},seal[6]={1};
+    // v1 字节流包含旧书签与进度；覆盖较新历史而不把每书键写回 NVS。
+    // Replay literal v1 bookmark and progress rows; replace newer history without per-book NVS writes.
+    f=tmpfile();assert(f); uint8_t head[20]={2,NVS_TYPE_BLOB},end[20]={0xff},seal[6]={2};
     snprintf((char*)head+2,16,"m_%08x",path_hash);head[18]=(uint8_t)sizeof(marks);head[19]=sizeof(marks)>>8;
-    uint32_t h=hash_bytes(hash_bytes(UINT32_C(2166136261),head,20),&marks,sizeof(marks)); put32(seal+2,h);
-    assert(fwrite("RPHIST1",1,8,f)==8 && fwrite(head,1,20,f)==20 && fwrite(&marks,1,sizeof(marks),f)==sizeof(marks) &&
-        fwrite(end,1,20,f)==20 && fwrite(seal,1,6,f)==6);rewind(f);
-    assert(!book_history_backup_restore(f,NULL) && find_record(2,(char*)head+2)); fclose(f);
+    uint32_t h=hash_bytes(hash_bytes(UINT32_C(2166136261),head,20),&marks,sizeof(marks));
+    assert(fwrite("RPHIST1",1,8,f)==8 && fwrite(head,1,20,f)==20 && fwrite(&marks,1,sizeof(marks),f)==sizeof(marks));
+    uint8_t v1[PROGRESS_CAP]={'R','P','B',1}, hp[20]={0,NVS_TYPE_BLOB};
+    v1[14]=24;v1[15]=81;v1[22]=path_len;memcpy(v1+24,path,path_len);progress_key(path,(char*)hp+2);hp[18]=24+path_len;
+    h=hash_bytes(hash_bytes(h,hp,20),v1,hp[18]);put32(seal+2,h);
+    assert(fwrite(hp,1,20,f)==20 && fwrite(v1,1,hp[18],f)==hp[18] && fwrite(end,1,20,f)==20 && fwrite(seal,1,6,f)==6); rewind(f);
+    assert(!restore_live(f) && find_record(2,(char*)head+2)); fclose(f);
+    uint8_t restored[PROGRESS_CAP]; size_t restored_len;
+    assert(!find_record(0,(char*)hp+2) && !progress_store_get(path,restored,&restored_len) && restored_len==hp[18] && !memcmp(v1,restored,restored_len));
+    assert(progress_store_get(other,restored,&restored_len)==ESP_ERR_NOT_FOUND);
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_NOT_FOUND);
     slot_path_t file;assert(record_path(BOOKMARK_ROOT,path,"",file)); f=fopen(file,"wb");assert(f && fputc(1,f)!=EOF && !fclose(f));
     assert(book_bookmark_store_load(path,17,&got)==ESP_ERR_INVALID_STATE && !got);
     assert(book_bookmark_store_save(card)!=ESP_OK && book_bookmark_store_remove(path)!=ESP_OK);
     char bad[25]; f=tmpfile(); assert(f && book_history_backup_write(f,bad,sizeof(bad))!=ESP_OK && !strcmp(bad,strrchr(file,'/')+1)); fclose(f);
+    assert(!progress_store_put(path,NULL,0) && !rmdir("progress"));
     assert(!unlink(file) && !rmdir(BOOKMARK_ROOT) && !rmdir(BOOKMARK_PARENT) && !chdir(cwd) && !rmdir(tmp));
     free(card);free(internal);
     puts("book history: v1/v2 restore, 6000 card / 450 internal bookmarks, failed promotion and retry, relocation and short-file rejection passed");
