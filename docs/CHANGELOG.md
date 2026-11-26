@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 设置主列表改为随手指位移滚动，松手即停；保留原分隔线，松手后只对旧横线已变白的位置定点补白。/ The Settings list now follows the drag and stops on release. Dividers retain their appearance; old rule positions that are now white can receive a targeted cleanup.
+
 ## v1.2.1 · 2026-11-26
 
 - 电源菜单改用黑白按钮：点按「关机」并松手即可确认，不再拖动滑轨；「重启」和「取消」仍可直接点按。/ The power menu replaces the slider with black-and-white buttons. Tap and release Power off to confirm; Restart and Cancel remain one tap away.

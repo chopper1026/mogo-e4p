@@ -22,6 +22,7 @@ unit=r'''
 #define UI_GRAY_BLACK 0
 #define SETTINGS_ROW_H settings_main_row_height()
 #define SETTINGS_ICON_PX 32
+enum { LIST_RULE_X=88, LIST_RULE_WIDTH=544 };
 #define UI_ICON_CHEVRON_RIGHT 7
 #define EPD_DRAW_ALIGN_RIGHT 1
 #define EPD_DRAW_ALIGN_LEFT 0

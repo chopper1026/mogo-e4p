@@ -25,10 +25,10 @@
  * User revision: present feedback before starting online work; append black progress without erasing completed segments or counting page cleanup. Release off-screen cover caches before updating.
  * 用户确认：字号并入系统字体并预览；选择字体后询问同步阅读字体，设置按连接/显示/个性化/升级分组。
  * Approved revision: size and preview live with the UI face; ask before syncing the reading face, and group connection/display/personalization/maintenance.
- * 用户修订：设置题头与列表周围留白保持纯白，普通主页切入/周期整理复用书架同轮分区输出；题头柔和，内容白像素只向白擦除，灰阶保留。普通列表滑动使用柔和差分；手动全刷、离散滚动和水波纹节奏保持。
- * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh, discrete gestures and ripple pacing.
- * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
- * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
+ * 用户修订：设置题头与列表周围留白保持纯白，普通主页切入/周期整理复用书架同轮分区输出；题头柔和，内容白像素只向白擦除，灰阶保留。普通列表滑动使用柔和差分；手动全刷和水波纹切页节奏保持。
+ * User revision: keep setting chrome/list whitespace white. Ordinary root entry/periodic cleanup reuse simultaneous shelf regions with soft chrome, directional white content and preserved grays. Scroll ordinary lists with soft differences; retain manual full refresh and ripple navigation pacing.
+ * 用户 2026-11-26 修订：为改善起步迟滞和旧横线残影，仅设置主列表改为按实距跟手；保留原墨色，松手无惯性，至多一次定点补白。子页仍离散翻页。
+ * User revision: only the root list tracks actual displacement to reduce lag and old-rule ghosts. Keep original ink, no inertia and at most one targeted release cleanup; selectors retain discrete paging.
  * 用户 2026-10-27 修订：设置「升级和恢复」恢复系统升级入口，BOOT 刷机入口仍撤下。
  * User revision of 2026-10-27: restore system upgrade in maintenance; keep the BOOT flashing entry withdrawn.
  * 用户 2026-11-02 修订：隐藏 TF 卡升级入口；自动 OTA 默认开启，每十二小时只检查清单并提示确认。
@@ -105,6 +105,7 @@
 #include "esp_timer.h"
 #include "display.h"
 #include "display_refresh.h"
+#include "display_list.h"
 #include "pmu_selftest.h"
 #include "cloudzao_service.h"
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -240,7 +241,20 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
 static int s_main_scroll;
-static bool s_scroll_drag_consumed, s_scroll_present_pending;
+static bool s_scroll_present_pending;
+enum { LIST_TOP = 160, LIST_HEIGHT = UI_NAV_REFRESH_END - LIST_TOP, LIST_RULE_X = 88, LIST_RULE_WIDTH = 544 };
+static const EpdRect s_list_area = {0, LIST_TOP, UI_LOCK_WIDTH, LIST_HEIGHT};
+static struct {
+    bool contact, dragging, released, defer_clean, has_rules;
+    int origin, target, limit;
+    int64_t release_ms;
+} s_drag;
+static EXT_RAM_BSS_ATTR display_rule_span_t s_old_rules[LIST_HEIGHT];
+
+static void list_drag_reset(void) {
+    if (s_drag.has_rules) memset(s_old_rules, 0, sizeof(s_old_rules));
+    memset(&s_drag, 0, sizeof(s_drag));
+}
 static int s_font_page, s_wallpaper_page;
 static bool s_sync_pending, s_sync_waiting;
 static bool s_font_sync_confirm;
@@ -948,7 +962,7 @@ static void setting_group(uint8_t *fb, int title_y, const char *title,
     for (int i = 0; i < count; ++i) {
         int y = card_y + i * row_height;
         if (y + row_height <= 160 || y >= UI_NAV_TOP) continue;
-        if (i) settings_divider(fb, y, 88, 544);
+        if (i) settings_divider(fb, y, LIST_RULE_X, LIST_RULE_WIDTH);
         setting_icon(fb, icons[i], 67, y + row_height / 2);
         settings_pair(fb, (EpdRect){100, y+4, 494, row_height-8}, 25, labels[i], 20, values[i]);
         // 导航是图标，不依赖用户字体是否包含 › 字形，也不会被截短掉。
@@ -1397,6 +1411,7 @@ static void config_render_controls(uint8_t *fb) {
     if (s_notice[0]) ui_text_box(fb, (EpdRect){48, 819, 588, 40}, 21, s_notice, EPD_DRAW_ALIGN_LEFT, false);
 }
 
+static void paint_main_list(uint8_t *fb);
 static void render(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     if (s_page == SETTINGS_PIN_ENTRY) { ui_pinpad_paint(fb, &s_pinpad, ui_pinpad_full()); return; }
@@ -1904,6 +1919,24 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     if (s_page == SETTINGS_BLUETOOTH) { settings_bluetooth_render(fb); return; }
+    paint_main_list(fb);
+    // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
+    // The main list needs a notice line too: confirmation and the repair result land here, or a tap
+    // would have no answer at all.
+    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);
+    ui_nav_status(fb);
+    ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    ui_nav_draw(fb, 3);
+    if(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
+        // 与书架共用逐相输出：状态栏/题头柔和，内容白像素不反向压黑；不影响其他模式。
+        // Reuse shelf scan phases: soft status/title and no reverse-blackening on content whites, without changing other modes.
+        const EpdRect content={0,160,UI_LOCK_WIDTH,UI_NAV_REFRESH_END-160};
+        display_main_transition_gray_bands(&content,1);
+    }
+}
+
+static void paint_main_list(uint8_t *fb) {
     const int profile_y=180-s_main_scroll, profile_h=settings_profile_height();
     if (profile_y+profile_h>160) {
         settings_card(fb,(EpdRect){36,profile_y,612,profile_h},24,UI_GRAY_WHITE,0x70);
@@ -2002,20 +2035,6 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int version_center_y = settings_version_center_y() - s_main_scroll;
     if (version_center_y - version_half > 160 && version_center_y + version_half < UI_NAV_TOP)
         draw_settings_version(fb, version_center_y);
-    // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
-    // The main list needs a notice line too: confirmation and the repair result land here, or a tap
-    // would have no answer at all.
-    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);
-    ui_nav_status(fb);
-    ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
-    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
-    ui_nav_draw(fb, 3);
-    if(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL){
-        // 与书架共用逐相输出：状态栏/题头柔和，内容白像素不反向压黑；不影响其他模式。
-        // Reuse shelf scan phases: soft status/title and no reverse-blackening on content whites, without changing other modes.
-        const EpdRect content={0,160,UI_LOCK_WIDTH,UI_NAV_REFRESH_END-160};
-        display_main_transition_gray_bands(&content,1);
-    }
 }
 
 static void settings_prepare_profile(void) {
@@ -2057,7 +2076,8 @@ static void on_enter(app_ctx_t *ctx) {
     s_notice[0] = 0;
     s_page = SETTINGS_MAIN;
     s_main_scroll = s_font_page = s_wallpaper_page = 0;
-    s_scroll_drag_consumed = s_scroll_present_pending = false;
+    list_drag_reset();
+    s_scroll_present_pending = false;
     s_wallpaper_selected = -1;
 
     s_sync_pending = false;
@@ -2160,8 +2180,29 @@ static app_redraw_t config_restore_tick(app_ctx_t *ctx) {
     return APP_REDRAW_DONE;
 }
 
+static app_redraw_t list_drag_tick(app_ctx_t *ctx) {
+    if (s_drag.released && ((ctx->touch && ctx->touch->touched) || ctx->last_input_ms > s_drag.release_ms))
+        list_drag_reset();
+    if (!s_drag.dragging) return APP_REDRAW_NONE;
+    if (s_drag.target != s_main_scroll) return APP_REDRAW_AREA;
+    if (s_drag.released) {
+        // 最终帧结束后先让下一轮采样取得新触摸。/ Give input another turn after the final synchronous scan.
+        if (s_drag.defer_clean) { s_drag.defer_clean = false; return APP_REDRAW_NONE; }
+        if (s_drag.has_rules) {
+            enum EpdDrawError err = display_list_clean_rules(ctx->hl, s_list_area, s_old_rules);
+            guard_draw_result(ctx->hl, err);
+        }
+        list_drag_reset();
+    }
+    return APP_REDRAW_NONE;
+}
+
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     if (s_page == SETTINGS_CONFIG && s_config_restore_pending) return config_restore_tick(ctx);
+    if (s_page == SETTINGS_MAIN && s_drag.dragging) {
+        app_redraw_t motion = list_drag_tick(ctx);
+        if (motion != APP_REDRAW_NONE || s_drag.contact) return motion;
+    }
     if (s_page == SETTINGS_BATT_CALIBRATION && ctx->now_ms >= s_batt_calibration_next_ms) {
         device_power_batt_calibration_status_t next;
         device_power_get_batt_calibration(&next);
@@ -2360,40 +2401,39 @@ save_text:
     return APP_REDRAW_PAGE;
 }
 
-// 越过阈值按段推进，一次手势只更新一次，松手不再播放惯性。
-// Advance one discrete step after crossing the threshold, with one update per gesture and no release inertia.
-static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, int limit, bool *handled) {
-    *handled = ev->type != UI_GESTURE_TAP || s_scroll_drag_consumed;
+// MOVE 只覆盖目的地。tick 在采样回放排空后提交最新位置；抬手可提交最后一帧。
+// MOVE replaces the destination. The tick presents after input replay drains; release may flush the last position.
+static bool list_drag_event(app_ctx_t *ctx, const ui_gesture_event_t *ev, app_redraw_t *redraw) {
+    *redraw = APP_REDRAW_NONE;
     if (ev->type == UI_GESTURE_PRESS) {
-        s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
+        list_drag_reset();
+        s_drag.contact = ev->y0 >= LIST_TOP && ev->y0 < UI_NAV_TOUCH_TOP;
+        if (s_drag.contact) {
+            s_drag.origin = s_drag.target = s_main_scroll;
+            s_drag.limit = SETTINGS_SCROLL_MAX;
+        }
+        return true;
     }
-    if (ev->type == UI_GESTURE_TAP || ev->type == UI_GESTURE_CANCEL) {
-        s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
-    }
-    if (ev->type != UI_GESTURE_MOVE && ev->type != UI_GESTURE_SWIPE_U && ev->type != UI_GESTURE_SWIPE_D)
-        return APP_REDRAW_NONE;
-    if (ev->y0 < (s_page == SETTINGS_MAIN ? 160 : 190) || ev->y0 >= UI_NAV_TOP)
-        return APP_REDRAW_NONE;
-    if (s_scroll_drag_consumed) {
-        if (ev->type != UI_GESTURE_MOVE) s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
-    }
+    if (!s_drag.contact) return ev->type != UI_GESTURE_TAP;
+    const bool lift = ctx->released && !ctx->consumed && ctx->touch && !ctx->touch->touched;
+    // 识别器把不足整划阈值的正常短拖也报 CANCEL；抢占/多指取消绝不提交。
+    // A short lifted drag is also reported as CANCEL; ownership loss and multitouch never commit.
+    if (ev->type == UI_GESTURE_CANCEL && !lift) { list_drag_reset(); return true; }
+    if (ev->type == UI_GESTURE_TAP) { list_drag_reset(); return false; }
+    if (ev->type != UI_GESTURE_MOVE && !lift) return true;
     int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
-    int distance = abs(dy);
-    if (ev->type == UI_GESTURE_MOVE && (distance < 108 || distance <= abs(dx))) return APP_REDRAW_NONE;
-    int step = distance < 204 ? 204 : distance > 450 ? 450 : distance;
-    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
-    int next = *offset + (up ? step : -step);
-    if (limit < 0) limit = 0;
-    if (next < 0) next = 0;
-    if (next > limit) next = limit;
-    if (ev->type == UI_GESTURE_MOVE) s_scroll_drag_consumed = true;
-    if (next == *offset) return APP_REDRAW_NONE;
-    *offset = next;
-    s_scroll_present_pending = true;
-    return APP_REDRAW_AREA;
+    if (!s_drag.dragging && abs(dy) > UI_TOUCH_SLOP_PX && abs(dy) > abs(dx)) s_drag.dragging = true;
+    if (s_drag.dragging) {
+        int target = s_drag.origin - dy;
+        s_drag.target = target < 0 ? 0 : target > s_drag.limit ? s_drag.limit : target;
+    }
+    if (lift) {
+        s_drag.contact = false;
+        s_drag.release_ms = ctx->now_ms;
+        s_drag.released = s_drag.defer_clean = s_drag.dragging;
+        if (s_drag.target != s_main_scroll) *redraw = APP_REDRAW_AREA;
+    }
+    return true;
 }
 
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
@@ -2518,9 +2558,8 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return settings_bluetooth_gesture(ev) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_MAIN) {
-        bool handled;
-        app_redraw_t redraw = scroll_gesture(ev, &s_main_scroll, SETTINGS_SCROLL_MAX, &handled);
-        if (handled) return redraw;
+        app_redraw_t redraw;
+        if (list_drag_event(ctx, ev, &redraw)) return redraw;
     }
 
     if (s_page == SETTINGS_AVATAR && (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
@@ -3042,6 +3081,7 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return settings_navigate(ctx, key == 1);
 }
 static void settings_exit(app_ctx_t *ctx) {
+    list_drag_reset();
     s_config_restore_pending = false;
     s_batt_calibration_confirm = false;
     ui_lock_style_close();
@@ -3058,6 +3098,7 @@ static void settings_exit(app_ctx_t *ctx) {
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); settings_bluetooth_close();
 }
 static void on_before_lock(app_ctx_t *ctx) {
+    list_drag_reset();
     // 锁屏先于 tick 时取消尚未开始的恢复，不在解锁后补做。
     // If locking wins before the tick, cancel the unstarted restore rather than run it on unlock.
     s_config_restore_pending = false;
@@ -3080,6 +3121,7 @@ static void on_before_lock(app_ctx_t *ctx) {
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
+    list_drag_reset();
     ui_lock_style_media_lost();
     // 拔卡后背景图片和列表都失效；退回主列表，避免停留在一个空预览。
     // Losing the card invalidates the image and the list; fall back to the main list instead
@@ -3129,7 +3171,42 @@ static app_redraw_t settings_step_tab(app_ctx_t *ctx, int delta) {
     return s_page == SETTINGS_LOCK_STYLE && ui_lock_style_step_tab(delta) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
 }
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
+static bool list_drag_present(app_ctx_t *ctx, app_redraw_t redraw) {
+    if (redraw == APP_REDRAW_FULL || redraw == APP_REDRAW_PAGE) list_drag_reset();
+    if (redraw != APP_REDRAW_AREA || s_page != SETTINGS_MAIN || !s_drag.dragging ||
+        s_main_scroll == s_drag.target) return false;
+    // 从上次真实落屏的 back 捕获长线，不把合并掉的手指位置算作残影。
+    // Read long rules from the committed back buffer, never from skipped input positions.
+    const bool held = display_present_begin();
+#if !CONFIG_SETTINGS_SCROLL_SKIP_CLEANUP
+    // 识别区取分隔线与圆角卡片横边的共同内段；显示层保留实际黑线全长。
+    // Seed inside both dividers and rounded card rules; the display retains the full black run.
+    s_drag.has_rules |= display_list_capture_rules(ctx->hl, s_list_area, LIST_RULE_X,
+                                                  UI_LOCK_WIDTH - LIST_RULE_X, s_old_rules);
+#endif
+    int previous = s_main_scroll;
+    s_main_scroll = s_drag.target;
+    if (!display_list_paint(ctx->hl, s_list_area, paint_main_list)) {
+        display_present_end(held);
+        s_main_scroll = previous;
+        list_drag_reset();
+        return true;
+    }
+    enum EpdDrawError err = display_refresh_area(ctx->hl, DISPLAY_REFRESH_MAIN_SCROLL, s_list_area, DISPLAY_REFRESH_DEFAULT);
+    if (err != EPD_DRAW_SUCCESS) {
+        // 按真实显示基准恢复命中坐标和绘图目标，沿用显示层既有故障恢复。
+        // Restore hit coordinates and the paint target to the committed position before normal recovery.
+        s_main_scroll = previous;
+        display_list_paint(ctx->hl, s_list_area, paint_main_list);
+        list_drag_reset();
+    }
+    guard_draw_result(ctx->hl, err);
+    display_present_end(held);
+    return true;
+}
+
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
+    if (list_drag_present(ctx, redraw)) return true;
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
         display_main_transition_cancel(); render(ctx, ctx->fb);
         guard_draw_result(ctx->hl, display_refresh_area(ctx->hl, DISPLAY_REFRESH_DETAIL, ui_pinpad_full(), DISPLAY_REFRESH_DEFAULT));
@@ -3152,13 +3229,12 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         return true;
     }
     if (redraw == APP_REDRAW_AREA && s_scroll_present_pending &&
-        (s_page == SETTINGS_MAIN ||
-         s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
+        (s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
          s_page == SETTINGS_AVATAR ||
          s_page == SETTINGS_READING_BG)) {
         s_scroll_present_pending = false;
         render(ctx, ctx->fb);
-        int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
+        int top = s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
         EpdRect area = {0, top, UI_LOCK_WIDTH, UI_NAV_REFRESH_END - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // 脏区向外扩 1 行/1 字节，让差分跳过的白底邻像素重新走 GL16 白推，擦掉旧分隔线残影。
@@ -3185,6 +3261,7 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
 const app_desc_t app_device_settings = {
     .title = "设置 Settings", .detail = "显示、连接与设备", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = no_menu_handle, .modal_input_owned = settings_modal_input_owned,
+    .on_deferred_press = list_drag_reset, .gesture_long_drag = main_page_visible,
     .edge_back = settings_edge_back, .horizontal_zone = settings_zone, .step_tab = settings_step_tab,
     .main_page_visible = main_page_visible,
     .on_enter = on_enter, .on_exit = settings_exit, .on_before_lock = on_before_lock, .render = render, .on_tick = on_tick, .on_gesture = on_gesture, .on_key = on_key,

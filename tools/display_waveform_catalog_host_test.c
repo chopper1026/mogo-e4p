@@ -64,6 +64,9 @@ int main(void) {
             assert(info.equal_pairs_driven==equal&&info.black_pushes_from_white==black&&info.white_pushes_from_black==white);
         }
     }
+    const EpdWaveformPhases *apply = e0470_waveform_phases(&E0470_APPLY_WAVEFORM, MODE_DU);
+    assert(apply && apply->phases == 1 && e0470_phase_action(apply, 0, 15, 0) == 2 &&
+           e0470_phase_action(apply, 0, 15, 15) == 0);
     check_comic_waveform();
     assert(DISPLAY_WAVE_COUNT==24&&reserved==3&&executor==1);
     background="/background.png";

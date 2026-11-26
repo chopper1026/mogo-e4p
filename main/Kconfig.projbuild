@@ -111,6 +111,14 @@ menu "Bring-up diagnostics"
             and replay at boot for USB reconnection. No extra wakeups or per-slice
             logs. Timings are not current measurements; save errors never block wake.
 
+    config SETTINGS_SCROLL_SKIP_CLEANUP
+        bool "Skip Settings list release cleanup for panel A/B comparison"
+        default n
+        help
+            仅实屏对照使用：手势、列表样式和滚动刷新不变，跳过旧横线采集和松手补白。
+            Panel comparison only: keep gesture, artwork and motion refresh identical,
+            but skip collecting old rules and the optional release white pulse.
+
     config DISPLAY_POWER_DIAG
         bool "Log panel power requests and idle deadlines"
         default n

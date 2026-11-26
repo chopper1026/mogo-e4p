@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "display.h"
+#include "display_list.h"
 #include "display_reader_waveform.h"
 #include "display_static_black.h"
 #include "app_config.h"
@@ -89,6 +90,8 @@ static const EpdWaveform comic_wave = {.num_modes=1};
 static const uint8_t *comic_front, *comic_back;
 static EpdRect comic_body;
 static unsigned comic_scans;
+static int list_scans;
+static const uint8_t *list_expected;
 static bool check_static_black, check_reader_black, check_reader_background, check_joined, full_size_fb;
 static unsigned static_black_scans, forgotten_waveforms;
 static uint8_t test_gl16_lut[8][16][4];
@@ -112,6 +115,13 @@ enum EpdDrawError epd_draw_base(EpdRect area, const uint8_t *data, EpdRect crop,
     enum EpdDrawMode mode, int temperature, const bool *lines,
     const uint8_t *columns, const EpdWaveform *waveform) {
     assert(ota_display_depth && !lines && !columns && temperature == 25);
+    if (waveform == &E0470_APPLY_WAVEFORM && list_expected) {
+        assert(mode == (MODE_PACKING_1PPB_DIFFERENCE | MODE_DU));
+        assert(area.width == 1216 && area.height == 684 && !memcmp(&crop, &area, sizeof(area)));
+        assert(!memcmp(data, list_expected, (size_t)area.width * area.height));
+        physical_scan_power(); ++list_scans;
+        enum EpdDrawError err = next_draw_error; next_draw_error = EPD_DRAW_SUCCESS; return err;
+    }
     if (waveform == &comic_wave) {
         assert(mode == (MODE_PACKING_1PPB_DIFFERENCE | MODE_GC16) && last_scan == BOARD_EPD_SCAN_FULL);
         assert(area.width == 1216 && area.height == 684 && !memcmp(&area, &crop, sizeof(area)));
@@ -456,6 +466,82 @@ static void test_static_black(void) {
     free(diff); free(back); free(front);
 }
 
+// 由测试独立构造旋转后的旧线与目标，核对每个原生像素的物理驱动编码。
+// Construct old lines and targets independently in each rotation; verify drive codes for every native pixel.
+static int list_at(int x, int y) {
+    int w = epd_width(), h = epd_height();
+    switch (rotation) {
+        case EPD_ROT_PORTRAIT: return x*w + w-1-y;
+        case EPD_ROT_INVERTED_PORTRAIT: return (h-1-x)*w+y;
+        case EPD_ROT_INVERTED_LANDSCAPE: return (h-1-y)*w+w-1-x;
+        default: return y*w+x;
+    }
+}
+static void list_ink(uint8_t *fb, int x, int y, int level) {
+    int i = list_at(x,y), shift = 4*(i&1);
+    fb[i/2] = (fb[i/2] & ~(15u<<shift)) | (level<<shift);
+}
+static void list_overhang(uint8_t *fb) {
+    for (int y=18;y<35;++y) for (int x=30;x<52;++x) list_ink(fb,x,y,3);
+}
+static void test_list_rules(void) {
+    const size_t n = (size_t)epd_width()*epd_height();
+    uint8_t *front=malloc(n/2), *back=malloc(n/2), *diff=malloc(n), *expected=malloc(n), *target_copy=malloc(n/2);
+    assert(front && back && diff && expected && target_copy);
+    EpdiyHighlevelState hl={.front_fb=front, .back_fb=back, .difference_fb=diff};
+    const EpdRect view={24,20,100,12};
+    for (int rot=0;rot<4;++rot) {
+        rotation=rot;
+        display_rule_span_t rows[12]={0};
+        memset(back,0xff,n/2); memset(front,0x77,n/2); memset(expected,0x77,n/2);
+        for (int x=20;x<130;++x) for (int y=19;y<=21;++y) list_ink(back,x,y,0);
+        for (int x=31;x<89;++x) list_ink(back,x,22,0);
+        list_ink(back,51,22,7);
+        assert(display_list_capture_rules(&hl,view,32,86,rows));
+        for (int y=0;y<12;++y) assert(rows[y].end==(y<2?124:0) && rows[y].left==(y<2?24:0));
+        // 合并另一张真实旧帧，部分相交的线段只保留其并集。
+        // Merge another committed position; overlapping spans retain their union.
+        memset(back,0xff,n/2);
+        for (int x=30;x<92;++x) list_ink(back,x,28,0);
+        assert(display_list_capture_rules(&hl,view,32,86,rows));
+        assert(rows[8].left==30 && rows[8].end==92 && rows[1].end==124);
+        for (int y=20;y<32;++y) for (int x=24;x<124;++x) list_ink(expected,x,y,x>=30&&x<52?3:15);
+        assert(display_list_paint(&hl,view,list_overhang));
+        assert(!memcmp(expected,front,n/2));
+        memcpy(back,front,n/2); list_ink(back,56,20,2);
+        memcpy(target_copy,front,n/2);
+        memset(expected,0xff,n);
+        for (int y=20;y<32;++y) for (int x=24;x<124;++x) {
+            if (!(y<=21 || (y==28 && x>=30 && x<92)) || (x>=30&&x<52) || (x==56&&y==20)) continue;
+            expected[list_at(x,y)]=0xf0;
+        }
+        list_expected=expected;
+        int calls=list_scans;
+        assert(display_list_clean_rules(&hl,view,rows)==EPD_DRAW_SUCCESS && list_scans==calls+1);
+        assert(!memcmp(front,target_copy,n/2)); list_ink(target_copy,56,20,2); assert(!memcmp(back,target_copy,n/2));
+        next_draw_error=EPD_DRAW_OTHER_ERROR;
+        assert(display_list_clean_rules(&hl,view,rows)==EPD_DRAW_OTHER_ERROR && list_scans==calls+2);
+        memset(back,0,n/2);
+        assert(display_list_clean_rules(&hl,view,rows)==EPD_DRAW_SUCCESS && list_scans==calls+2);
+        memset(rows,0,sizeof(rows)); memset(back,0xff,n/2);
+        assert(!display_list_capture_rules(&hl,view,32,86,rows));
+        assert(display_list_clean_rules(&hl,view,rows)==EPD_DRAW_SUCCESS && list_scans==calls+2);
+        rows[0].end=500;
+        assert(display_list_clean_rules(&hl,view,rows)==EPD_DRAW_INVALID_CROP && list_scans==calls+2);
+
+        // 卡片横边向左多伸一段，但右端短于分隔线；只用它们共有的内段识别。
+        // Card rules extend farther left but end before dividers; seed inside both.
+        const EpdRect settings_view={0,20,684,12};
+        memset(rows,0,sizeof(rows)); memset(back,0xff,n/2);
+        for (int x=58;x<626;++x) list_ink(back,x,24,0);
+        for (int x=88;x<632;++x) list_ink(back,x,29,0);
+        assert(display_list_capture_rules(&hl,settings_view,88,596,rows));
+        assert(rows[4].left==58 && rows[4].end==626);
+        assert(rows[9].left==88 && rows[9].end==632);
+    }
+    list_expected=NULL;free(target_copy);free(expected);free(diff);free(back);free(front);
+}
+
 static void test_comic_regions(void) {
     size_t bytes = (size_t)epd_width() * epd_height() / 2;
     uint8_t *front = malloc(bytes), *back = malloc(bytes), *original = malloc(bytes), *diff = malloc(2 * bytes);
@@ -724,6 +810,7 @@ int main(void) {
     puts("boot: one clear for a centered start; power rejection defers the baseline rebuild");
     test_static_black();
     test_comic_regions();
+    test_list_rules();
 }
 
 // Continuous state is exercised separately with native-size buffers.

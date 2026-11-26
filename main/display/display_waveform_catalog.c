@@ -23,7 +23,7 @@ static const display_waveform_descriptor_t s_catalog[DISPLAY_WAVE_COUNT] = {
     ENTRY(DISPLAY_WAVE_CAPSULE_DRAG,"capsule-drag",BASE,DISPLAY_WAVE_COUNT,DISPLAY_WAVE_ACTIVE,"仅灰 3 与白 15 互转 / Only level 3 and white 15 transitions"),
     ENTRY(DISPLAY_WAVE_CAPSULE_WHITE,"capsule-white",BASE,DISPLAY_WAVE_COUNT,DISPLAY_WAVE_RESERVED,"备用胶囊擦白 / Reserved capsule whitening"),
     ENTRY(DISPLAY_WAVE_CAPSULE_GRAY,"capsule-gray",BASE,DISPLAY_WAVE_COUNT,DISPLAY_WAVE_RESERVED,"备用胶囊落灰，换底色需重标 / Reserved capsule gray, recoloring requires calibration"),
-    ENTRY(DISPLAY_WAVE_APPLY,"apply",BASE,DISPLAY_WAVE_FOLLOW,DISPLAY_WAVE_EXECUTOR,"错相逐带 LUT 的单相执行壳 / Single-phase shell for staggered band LUTs"),
+    ENTRY(DISPLAY_WAVE_APPLY,"apply",BASE,DISPLAY_WAVE_FOLLOW,DISPLAY_WAVE_EXECUTOR,"错相逐带执行壳与旧线单相补白 / Single-phase staggered executor and old-rule white pulse"),
     ENTRY(DISPLAY_WAVE_MAIN_GRAY,"main-gray",MAIN,DISPLAY_WAVE_DEFAULT,DISPLAY_WAVE_ACTIVE,"原灰阶保持相等对 / Original grays with equal pairs held"),
     ENTRY(DISPLAY_WAVE_SHELF_EXIT,"shelf-exit",MAIN,DISPLAY_WAVE_DEFAULT,DISPLAY_WAVE_ACTIVE,"DU 加四相擦白 / DU plus four whitening phases"),
     ENTRY(DISPLAY_WAVE_MAIN_WATER,"main-water",MAIN,DISPLAY_WAVE_DEFAULT,DISPLAY_WAVE_ACTIVE,"24 擦白、18 推黑、等灰保持 / 24 white pushes, 18 black pushes, held equals"),

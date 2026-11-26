@@ -55,6 +55,7 @@
 #include "display_main_waveform.h"
 #include "display_reader_waveform.h"
 #include "display_static_black.h"
+#include "display_list.h"
 #include "ui/ui_nav_layout.h"
 
 static const char* TAG = "read_pico";
@@ -923,6 +924,102 @@ static bool display_needs_full(void) { return s_full_refresh_requested || s_powe
 
 bool display_local_feedback_ready(void) {
     return !display_needs_full() && !s_main_fault && !s_main_armed;
+}
+
+// 局刷前隔离绘图：行和圆角可跨过视口边缘，只把视口内像素拷回目标。
+// Isolate painting before a partial scan: rows and round corners may overhang, but only the viewport reaches front.
+bool display_list_paint(EpdiyHighlevelState *hl, EpdRect viewport, void (*paint)(uint8_t *)) {
+    EpdRect a;
+    if (!hl || !hl->front_fb || !hl->difference_fb || !paint || !display_static_black_native(viewport, &a) ||
+        ((a.x | a.width) & 1)) return false;
+    const int stride = epd_width() / 2;
+    for (int y = a.y; y < a.y + a.height; ++y)
+        memset(hl->difference_fb + y * stride + a.x / 2, 0xff, a.width / 2);
+    paint(hl->difference_fb);
+    for (int y = a.y; y < a.y + a.height; ++y) {
+        const int i = y * stride + a.x / 2;
+        memcpy(hl->front_fb + i, hl->difference_fb + i, a.width / 2);
+    }
+    return true;
+}
+
+// 逻辑扫描线按旋转后的原生像素步长遍历，避免逐像素查询屏幕几何。
+// Walk logical scanlines with native pixel strides instead of querying geometry per pixel.
+typedef struct { int base, dx, dy; } list_axes_t;
+static list_axes_t list_axes(void) {
+    const int w = epd_width(), h = epd_height();
+    switch (epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT: return (list_axes_t){w - 1, w, -1};
+        case EPD_ROT_INVERTED_PORTRAIT: return (list_axes_t){(h - 1) * w, -w, 1};
+        case EPD_ROT_INVERTED_LANDSCAPE: return (list_axes_t){w * h - 1, -1, -w};
+        default: return (list_axes_t){0, 1, w};
+    }
+}
+static unsigned list_pixel(const uint8_t *fb, int i) { return (fb[i / 2] >> (4 * (i & 1))) & 15; }
+
+bool display_list_capture_rules(const EpdiyHighlevelState *hl, EpdRect viewport, int left, int end,
+                                display_rule_span_t *rows) {
+    EpdRect native;
+    if (!hl || !hl->back_fb || !rows || !display_static_black_native(viewport, &native) ||
+        left < viewport.x || end <= left || end > viewport.x + viewport.width) return false;
+    const list_axes_t axis = list_axes();
+    bool found = false;
+    for (int y = 0; y < viewport.height; ++y) {
+        int base = axis.base + (viewport.y + y) * axis.dy;
+        const uint8_t *back = hl->back_fb;
+        if (list_pixel(back, base + left * axis.dx) || list_pixel(back, base + (end - 1) * axis.dx)) continue;
+        int x = left + 1;
+        while (x < end && !list_pixel(back, base + x * axis.dx)) ++x;
+        if (x != end) continue;
+        int lo = left, hi = end;
+        while (lo > viewport.x && !list_pixel(back, base + (lo - 1) * axis.dx)) --lo;
+        while (hi < viewport.x + viewport.width && !list_pixel(back, base + hi * axis.dx)) ++hi;
+        if (!rows[y].end || lo < rows[y].left) rows[y].left = lo;
+        if (hi > rows[y].end) rows[y].end = hi;
+        found = true;
+    }
+    return found;
+}
+
+enum EpdDrawError display_list_clean_rules(EpdiyHighlevelState *hl, EpdRect viewport, const display_rule_span_t *rows) {
+    EpdRect native;
+    if (!hl || !hl->front_fb || !hl->back_fb || !hl->difference_fb || !rows ||
+        !display_static_black_native(viewport, &native)) return EPD_DRAW_INVALID_CROP;
+    bool held = display_present_begin();
+    enum EpdDrawError err = EPD_DRAW_SUCCESS;
+    // 定点补白是可丢弃的，不消耗已有全刷、转场或恢复请求。
+    // Cosmetic cleanup is disposable; never consume an armed transition or pending full recovery.
+    if (display_local_feedback_ready()) {
+        const list_axes_t axis = list_axes();
+        bool any = false;
+        EpdRect full = epd_full_screen();
+        for (int y = 0; y < viewport.height; ++y) {
+            int base = axis.base + (viewport.y + y) * axis.dy;
+            const int end = rows[y].end;
+            if (!end) continue;
+            if (rows[y].left < viewport.x || end > viewport.x + viewport.width || rows[y].left >= end) {
+                err = EPD_DRAW_INVALID_CROP; break;
+            }
+            for (int x = rows[y].left, i = base + x * axis.dx; x < end; ++x, i += axis.dx) {
+                if (list_pixel(hl->front_fb, i) != 15 || list_pixel(hl->back_fb, i) != 15) continue;
+                if (!any) { memset(hl->difference_fb, 0xff, (size_t)full.width * full.height); any = true; }
+                hl->difference_fb[i] = 0xf0;
+            }
+        }
+        if (any && err == EPD_DRAW_SUCCESS) {
+            if (!display_power_ready()) err = DISPLAY_DRAW_POWER_NOT_READY;
+            else {
+                // APPLY 的单相 DU：F0 只向白推一次，FF 保持。借用编码，不伪造 back。
+                // Single-phase APPLY DU: F0 pulses white once and FF holds. Encode drive without faking back.
+                use_scan_for(&E0470_APPLY_WAVEFORM, MODE_DU);
+                epd_leading_skip_discard();
+                err = epd_draw_base(full, hl->difference_fb, full, MODE_PACKING_1PPB_DIFFERENCE | MODE_DU,
+                                    25, NULL, NULL, &E0470_APPLY_WAVEFORM);
+            }
+        }
+    }
+    display_present_end(held);
+    return err;
 }
 
 static void retain_failed_frame(enum EpdDrawError result) {

@@ -10,7 +10,7 @@
 typedef struct {
     uint8_t *fb;
     void *hl;
-    int64_t now_ms;
+    int64_t now_ms, last_input_ms;
     const app_touch_t *touch;
     bool pressed, released, consumed;
 } app_ctx_t;

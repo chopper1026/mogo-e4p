@@ -136,6 +136,7 @@ static enum EpdDrawMode pushed_mode;
 static EpdRect pushed_area;
 static const EpdWaveform *pushed_waveform;
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++render_calls;feedback_presented=true;}
+static bool list_drag_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}
 static void display_main_transition_cancel(void){}
 static void guard_draw_result(void *hl,enum EpdDrawError error){(void)hl;assert(error==EPD_DRAW_SUCCESS);}
 static enum EpdDrawError update_display_area_diff_with(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area){

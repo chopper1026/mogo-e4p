@@ -143,6 +143,7 @@ SUITES = {
     "ui_hanzi": [sys.executable, "tools/ui_hanzi_host_test.py"],
     "images": [sys.executable, "tools/reader_images_host_test.py"],
     "webp": [sys.executable, "tools/webp_host_test.py"],
+    "settings_scroll": [sys.executable, "tools/settings_scroll_host_test.py"],
     "settings_view": ["bash", "tools/run_reader_settings_host_tests.sh"],
     "reader_lines": [sys.executable, "tools/reader_toolbar_preview.py"],
     "tap_grid": [sys.executable, "tools/reader_tap_grid_host_test.py"],

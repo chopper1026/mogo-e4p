@@ -49,6 +49,16 @@ AUTO retains the old exit behavior: area GL16 drives all pixels, DU uses the ori
 仅 READER_BODY 接受 QUICK/IMAGE，READER_LAYOUT 接受 QUICK，RESTORE 接受 HOLD_GRAY；其余意图只接受 DEFAULT。无效意图、无效标志或整屏组合返回 `EPD_DRAW_INVALID_CROP`，缺表返回 `EPD_DRAW_NO_PHASES_AVAILABLE`；都不扫描。
 Only READER_BODY accepts QUICK/IMAGE, READER_LAYOUT accepts QUICK, and RESTORE accepts HOLD_GRAY. Other intents accept DEFAULT only. Invalid intents, flags or screen combinations return EPD_DRAW_INVALID_CROP; missing tables return EPD_DRAW_NO_PHASES_AVAILABLE. Neither scans.
 
+### 设置主列表滚动 / Settings root list scrolling
+
+主列表越过纵向触摸容差后按起点位移跟手，合并移动中的采样，松手不续滑。绘制借用已有差分缓冲，只将列表窗口复制到目标帧；题头、底栏与子页翻页不变。每步沿用 MAIN_SCROLL 的灰阶差分，不因滚动次数强刷。
+After vertical touch slop, the root tracks displacement from contact, coalesces moves and stops on release. Painting borrows difference scratch and publishes only the list viewport. Header, navigation and selector paging remain unchanged. Motion retains MAIN_SCROLL gray differences without count-based wipes.
+
+松手后可丢弃地补白至多一次：从已呈现的 back 识别旧分隔线与卡片横边，新旧帧均为白的候选像素才接受一相白推，其余保持。不会伪造参考帧、加入惯性或恢复全屏；再触摸、离页或锁屏取消未执行的补白。物理残影仍需真机对照。
+Release permits at most one optional white pulse. Detect old horizontal rules and card edges from committed pixels; only candidates white in both buffers receive drive. Other pixels hold. Never fabricate a baseline or add inertia or a full-screen settle. A new contact, page change or lock cancels pending cleanup. Optical results require panel comparison.
+
+实屏 A/B 使用同起点、同手势、同刷新模式；仅对照构建开启 `CONFIG_SETTINGS_SCROLL_SKIP_CLEANUP`，产品默认关闭。/ Use matched starts, gestures and refresh modes; enable `CONFIG_SETTINGS_SCROLL_SKIP_CLEANUP` only in the comparison build (off by default).
+
 ## 阅读状态与输出顺序 / Reader status and output order
 
 解锁恢复与退出阅读到主页面（包括同页返回书架）统一使用完整48相 `E0470_FULL_WAVEFORM`、GC16及整屏全像素输出，包含固定底栏和未变化像素。定时关机后启动恢复的首张目标页也使用这一策略。阅读返回按状态转场识别，与触发该动作的按键绑定无关。`display_request_full_refresh()` 只在目标输出成功后消费请求，失败重试保留48相；输出后恢复默认波形。锁屏出图成功时保留真实前后帧，不增加预清白；供电或输出故障仍按真实白底重建。日常阅读翻页、主页切页及未请求转场的手动全刷保持既有策略。软件验证不代表实屏残影改善。
@@ -108,8 +118,8 @@ The quick layer uses opaque white; frontlight capsules use black tracks, white f
 | 阅读 / Reader (6) | reader-text, reader-ink, reader-water, reader-background, reader-image, reader-comic |
 | 归一 / Normalize (2) | normalize, normalize-gray |
 
-gray8、capsule-white、capsule-gray 是保留的备用表；apply 是错相逐带执行壳。目录不因为无当前产品调用而删除表，也不合并光学目的不同的派生表。
-gray8, capsule-white and capsule-gray are reserved; apply is the staggered-band execution shell. The catalog neither removes unused product alternatives nor merges derivatives with different optical purposes.
+gray8、capsule-white、capsule-gray 是保留的备用表；apply 是错相逐带执行壳，设置主列表定点补白也复用其单相 DU。目录不因为无当前产品调用而删除表，也不合并光学目的不同的派生表。
+gray8, capsule-white and capsule-gray are reserved; apply is the staggered-band execution shell; settings rule cleanup also uses its one-phase DU. The catalog neither removes unused product alternatives nor merges derivatives with different optical purposes.
 
 `parent` 是首要基底，并非完整依赖图。`reader-background` 和 `reader-image` 都从无背景的 `reader-water` 裁出。为应对背景翻页的残影反馈，背景表黑→白连续推白 21 拍，灰→白恢复从主页水波纹借来的单向序列，保留 29 相及末尾 3 相保持；独立插图表继续使用无背景 `reader-water` 白列。黑白闪与擦白余量须实屏确认。归一以 `reader-ink` 为基底。目录 getter 不隐式读取背景设置，原低层兼容 getter 保留设置和回退规则。
 The parent field identifies the primary base, not every dependency. Both `reader-background` and `reader-image` are trimmed from the plain `reader-water` table. In response to background-turn ghosting reports, the background table uses 21 consecutive white pushes from black and restores the one-way gray-to-white sequence from main-page water, retaining 29 phases and three trailing holds. The separate illustration table keeps the plain `reader-water` white column. Flashing and whitening margin require panel validation. Normalize builds on `reader-ink`. Catalog getters do not read background settings implicitly; compatibility getters retain their settings and fallbacks.
