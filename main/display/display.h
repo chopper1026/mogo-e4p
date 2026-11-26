@@ -101,11 +101,6 @@ enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
 /// 物理清白后，以完整48相GC16整屏提交现有前缓冲。/ Physically clear the panel, then present the existing front buffer with complete 48-phase GC16.
 enum EpdDrawError update_display_full_clean(EpdiyHighlevelState* hl);
 
-/// 面板修复：不看 framebuffer 的整屏盲刷，专治刷新中途断电留下的条纹。
-/// Panel repair: a blind full-screen drive that ignores the framebuffer, for the stripes a power
-/// cut in the middle of a refresh leaves behind.
-/// 返回最终整屏输出结果；失败时调用方不能报告成功。/ Return the final full-frame result; callers must not report success on failure.
-enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl);
 /// 图片页清除旧光学状态，再驱动完整灰阶。/ Clear the prior optical state and drive the full gray ladder for images.
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl);
 /// 阅读开书首帧只做一轮清理，再驱动完整灰阶，减少黑闪。/ Reader entry image frame uses one cleanup cycle before the full gray ladder.

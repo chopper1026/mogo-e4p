@@ -264,10 +264,6 @@ static bool settings_modal_input_owned(app_ctx_t *ctx) {
 static bool s_batt_calibration_confirm;
 static device_power_batt_calibration_status_t s_batt_calibration_status;
 static int64_t s_batt_calibration_next_ms;
-// 屏幕修复：点一下就开始。整屏盲刷要几秒，活儿交给 tick——不能在触摸回调里做。
-// Panel repair: one tap starts it. The blind full-screen drive takes seconds, so the work goes to the
-// tick rather than a touch callback.
-static bool s_panel_repair_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
 static bool s_upgrade_shortcut_back;
@@ -450,7 +446,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_PERSONAL_ROWS 9
 // BOOT 刷机入口已按用户要求从设置列表撤下；页面代码保留，恢复入口只需加回一行。
 // The BOOT flashing entry is hidden per the user's request; the page stays, re-adding one row restores it.
-#define SETTINGS_MAINTENANCE_ROWS 3
+#define SETTINGS_MAINTENANCE_ROWS 2
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 static int settings_wireless_rows(void) {
     network_status_t network = {0};
@@ -918,8 +914,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_EYE_CLOSED,        // 14 自动休眠
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
-        UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
-        UI_ICON_VIBRATE,           // 18 触摸震动 / touch vibration
+        [18] = UI_ICON_VIBRATE,    // 18 触摸震动 / touch vibration
         UI_ICON_BOOK_OPEN,         // 19 阅读背景 / reading background
         UI_ICON_ZAP,               // 20 电源管理 / power management
         UI_ICON_LIBRARY_BIG,       // 21 组件库 / components
@@ -1988,9 +1983,9 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10,18,23,19,21,15};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"保存与恢复","屏幕修复","系统升级"};
-    const char *maintenance_values[]={"配置","清除条纹","TF 卡 / 联网"};
-    const int maintenance_icons[]={8,17,12};
+    const char *maintenance_labels[]={"保存与恢复","系统升级"};
+    const char *maintenance_values[]={"配置","TF 卡 / 联网"};
+    const int maintenance_icons[]={8,12};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
                   maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     char batt_log_value[16];
@@ -2071,7 +2066,6 @@ static void on_enter(app_ctx_t *ctx) {
     s_config_ignore_through_ms = 0;
     s_batt_calibration_confirm = false;
     s_batt_calibration_next_ms = 0;
-    s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     s_upgrade_shortcut_back = false;
@@ -2205,21 +2199,6 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         }
         return APP_REDRAW_NONE;
     }
-    // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
-    // Paint the final notice before the tick's full restoration; do not push the page twice on success.
-    if (s_panel_repair_pending) {
-        s_panel_repair_pending = false;
-        if (s_page != SETTINGS_MAIN) return APP_REDRAW_NONE;
-        s_scroll_present_pending = false;
-        snprintf(s_notice, sizeof(s_notice), ui_tr("屏幕修复完成；若条纹仍在可再做一次"));
-        render(ctx, ctx->fb);
-        if (display_panel_repair(ctx->hl) != EPD_DRAW_SUCCESS) {
-            snprintf(s_notice, sizeof(s_notice), ui_tr("屏幕输出未完成，请稍后重试"));
-            return APP_REDRAW_FULL;
-        }
-        return APP_REDRAW_DONE;
-    }
-
     if (s_page==SETTINGS_MAIN && s_avatar_pending && !(ctx->touch && ctx->touch->touched)) {
         ui_avatar_state_t state=ui_avatar_poll(s_avatar_path,82,s_avatar_pixels);
         s_avatar_pending=state==UI_AVATAR_PENDING;
@@ -2985,17 +2964,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
         if(row==0){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
-        else if(row==1){
-            // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；点一下就整屏盲刷
-            // 一遍，然后自己把当前页面（含底栏）推回面板。
-            // A power cut mid-refresh leaves the panel half-driven, and an ordinary differential
-            // refresh can never cover that stripe. One tap runs the blind full-screen pass, which
-            // then pushes the current page -- navigation bar included -- back onto the panel.
-            s_panel_repair_pending=true;
-            snprintf(s_notice,sizeof(s_notice),ui_tr("屏幕修复中…"));
-            return APP_REDRAW_PAGE;
-        }
-        else if(row==2) upgrade_open();
+        else if(row==1) upgrade_open();
         return APP_REDRAW_PAGE;
     }
     if(y>=SETTINGS_POWER_Y && y<SETTINGS_POWER_Y+SETTINGS_POWER_ROWS*SETTINGS_ROW_H) {

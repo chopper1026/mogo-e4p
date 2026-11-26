@@ -76,7 +76,7 @@ static void app_settings_set_font_path(const char*p){++reader_writes;if(!write_f
 static void app_font_activate_system(void){++system_activations;}
 static void ui_text_set_system_scale(bool b){assert(b);}
 static int s_font_page,s_main_scroll;
-static bool s_font_sync_confirm,s_config_confirm,s_panel_repair_pending;
+static bool s_font_sync_confirm,s_config_confirm;
 static bool s_batt_calibration_confirm;
 static int64_t s_batt_calibration_next_ms;
 typedef struct{bool enabled,applied,save_error;uint8_t sampled_bins,trusted_bins,total_bins;}device_power_batt_calibration_status_t;
@@ -126,19 +126,18 @@ int main(void){
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
    assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+8*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y,SETTINGS_POWER_Y};
-   const int counts[]={3,8,9,3,3};
-   assert(SETTINGS_DISPLAY_ROWS==8&&SETTINGS_POWER_ROWS==3);
+   const int counts[]={3,8,9,2,3};
+   assert(SETTINGS_DISPLAY_ROWS==8&&SETTINGS_MAINTENANCE_ROWS==2&&SETTINGS_POWER_ROWS==3);
    const int destinations[][9]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,SETTINGS_POWER_SLEEP,-6,-7},
      {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3,SETTINGS_HAPTIC,SETTINGS_GESTURES,SETTINGS_READING_BG,-5,SETTINGS_QUICK_BAR},
-     {SETTINGS_CONFIG,-4,SETTINGS_UPGRADE},{SETTINGS_BATT_CALIBRATION,SETTINGS_POWER_LOG,SETTINGS_CHARGE_CURRENT}};
+     {SETTINGS_CONFIG,SETTINGS_UPGRADE},{SETTINGS_BATT_CALIBRATION,SETTINGS_POWER_LOG,SETTINGS_CHARGE_CURRENT}};
    for(int group=0;group<5;++group)for(int i=0;i<counts[group];++i){
-     s_page=SETTINGS_MAIN;s_panel_repair_pending=false;s_quick_notice[0]='x';int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
+     s_page=SETTINGS_MAIN;s_quick_notice[0]='x';int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
      main_tap(&ctx,300,500);
      if(destinations[group][i]>=0)assert((int)s_page==destinations[group][i]);
      else if(destinations[group][i]==-1)assert(ctx.request_app==&app_transfer);
      else if(destinations[group][i]==-2)assert(s_page==SETTINGS_MAIN);
-     else if(destinations[group][i]==-4)assert(s_panel_repair_pending&&s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-5)assert(ctx.request_app==&app_components);
      else if(destinations[group][i]<=-6)assert(ctx.request_app==&setup && setup_mode==(i==6?APP_SETUP_LANGUAGE_ONLY:APP_SETUP_REPLAY));
      else assert(profile_edits>0);
@@ -146,7 +145,7 @@ int main(void){
      if(destinations[group][i]==SETTINGS_BATT_CALIBRATION)assert(!s_batt_calibration_confirm&&s_batt_calibration_status.total_bins==21&&s_batt_calibration_next_ms==ctx.now_ms+1000);
      s_page=SETTINGS_MAIN;assert(main_tap(&ctx,10,500)==APP_REDRAW_NONE&&s_page==SETTINGS_MAIN);
    }
-   s_main_scroll=SETTINGS_SCROLL_MAX;s_page=SETTINGS_MAIN;s_panel_repair_pending=false;
+   s_main_scroll=SETTINGS_SCROLL_MAX;s_page=SETTINGS_MAIN;
    int last=SETTINGS_POWER_Y+SETTINGS_POWER_ROWS*SETTINGS_ROW_H-1-s_main_scroll;
    assert(last<UI_NAV_TOP&&main_tap(&ctx,300,last)==APP_REDRAW_PAGE&&s_page==SETTINGS_CHARGE_CURRENT);
    int footer_half=(ui_text_effective_px(20)+1)/2;

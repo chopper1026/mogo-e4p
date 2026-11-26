@@ -48,7 +48,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "settings.h"
 
 #include <string.h>
@@ -1028,66 +1027,6 @@ enum EpdDrawError update_display_full_clean(EpdiyHighlevelState* hl) {
     bool held = display_present_begin();
     display_request_full_refresh();
     enum EpdDrawError result = update_display_full_impl_unlocked(hl, true);
-    display_present_end(held);
-    return result;
-}
-
-// 屏幕修复的遍数与单帧时长：遍数是盲刷黑/白走几轮，越多越彻底、整段也越久。
-// Panel repair passes and per-frame time: the count is how many black/white rounds the blind drive
-// walks -- more is more thorough and takes longer.
-#define DISPLAY_REPAIR_CYCLES 6
-#define DISPLAY_REPAIR_TIME 15
-// 掉电保持时长：够面板把停在半帧的像素放掉，又不至于让用户等。
-// How long the rails stay down: enough for pixels stuck mid-frame to let go, short enough to wait.
-#define DISPLAY_REPAIR_OFF_MS 400
-
-// 面板修复：整屏盲驱动，不看 framebuffer。刷新中途断电会让面板停在半帧状态，而这里所有常规
-// 刷新都是差分的（只重写与 RAM 上一帧不同的像素与相位），停在半路的那些行永远轮不到重写——
-// 现象就是怎么刷新都留着一道条纹。这条路把每一行按同一电平重新驱动几轮，最后停在白色。
-// Panel repair: a blind full-screen drive that ignores the framebuffer. A power cut in the middle of
-// a refresh leaves the panel stuck mid-frame, and every ordinary path here is differential -- it
-// rewrites only what differs from the RAM frame -- so those rows are never driven again and the
-// stripe survives every refresh. This drives every row to the same level for several rounds and ends
-// on white.
-enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
-    if (!hl || !hl->front_fb || !hl->back_fb) return EPD_DRAW_INVALID_CROP;
-    bool held = display_present_begin();
-    s_full_refresh_requested = s_complete_refresh_requested = false;
-    display_main_transition_cancel();
-    // 先真掉一次电：VCOM/VGH/VGL 重新建立，停在半路的像素失去保持电压。
-    // One real power cycle first: VCOM/VGH/VGL are rebuilt and pixels stuck mid-frame lose their hold.
-    epd_poweroff();
-    vTaskDelay(pdMS_TO_TICKS(DISPLAY_REPAIR_OFF_MS));
-    use_scan_for(&E0470_WAVEFORM, MODE_GC16);
-    if (!display_power_ready()) {
-        display_present_end(held);
-        return DISPLAY_DRAW_POWER_NOT_READY;
-    }
-    // 盲刷黑/白：与 framebuffer 无关；每轮之间让出 CPU，整段要几秒。
-    // Blind black/white drive, independent of the framebuffer; the CPU is released between rounds
-    // because the whole pass takes seconds.
-    const EpdRect area = epd_full_screen();
-    for (int cycle = 0; cycle < DISPLAY_REPAIR_CYCLES; ++cycle) {
-        for (int i = 0; i < 10; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 0);
-        for (int i = 0; i < 13; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 1);
-        for (int i = 0; i < 3; ++i) epd_push_pixels(area, DISPLAY_REPAIR_TIME, 2);
-        vTaskDelay(1);
-    }
-    // 面板刚被盲刷成白：把「面板显示的是白」这件事也写进基准，然后整屏推一次当前画面，连底栏
-    // 一起推回去。这里不能用 epd_hl_set_all_white()——它清的是绘制缓冲（页面画在 front_fb 上），
-    // 会把用户正看的那一页擦掉；修复只该动基准，画面由这一记整屏刷新重新落到面板上。
-    // The blind drive left the panel white: the baseline is told so, and one full update pushes the
-    // current frame -- navigation bar included -- back onto it. epd_hl_set_all_white() must not be
-    // used here: it clears the *drawing* buffer (pages draw into front_fb) and would wipe the page
-    // the user is looking at. The repair touches the baseline only; this full update re-lands the
-    // frame on the panel.
-    // 直接走受锁保护的整屏白底出口，包含底栏；不能被主页裁剪拦截，也不再重复推页。
-    // Use the locked full-frame white-baseline path including navigation, without a main-page crop or duplicate page push.
-    enum EpdDrawError result = update_display_from_white_with_unlocked(hl, &E0470_WAVEFORM, MODE_GC16);
-    if (result != EPD_DRAW_SUCCESS) result = main_recover(hl, result);
-    s_main_fault = result != EPD_DRAW_SUCCESS;
-    if (s_main_fault) s_full_refresh_requested = true;
-    display_power_recovered(result);
     display_present_end(held);
     return result;
 }

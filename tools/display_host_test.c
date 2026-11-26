@@ -76,8 +76,7 @@ static bool white_baseline, correct_target_at_draw;
 static int scan_at_draw, prefill_at_draw;
 static enum EpdDrawError next_draw_error;
 static unsigned draw_errors_remaining;
-static unsigned blind_pushes, repair_delays, poweroffs, clear_cycles;
-static bool checking_repair;
+static unsigned clear_cycles;
 static bool drive_active, no_change;
 static bool power_failure;
 static unsigned drive_releases, release_failures;
@@ -230,21 +229,8 @@ bool board_epd_release_drive(void) {
     drive_active = false;
     return true;
 }
-void epd_poweroff(void) { if (checking_repair) assert(ota_display_depth); ++poweroffs; actual_power = false; drive_active = false; }
+void epd_poweroff(void) { actual_power = false; drive_active = false; }
 EpdRect epd_full_screen(void) { return (EpdRect){0,0,1216,684}; }
-void vTaskDelay(uint32_t ticks) {
-    assert(checking_repair && ota_display_depth);
-    assert((repair_delays == 0 && ticks == 400) || (repair_delays > 0 && ticks == 1));
-    ++repair_delays;
-}
-void epd_push_pixels(EpdRect area, short time, int color) {
-    physical_scan_power();
-    assert(checking_repair && ota_display_depth && poweroffs && powerons);
-    assert(area.x == 0 && area.y == 0 && area.width == 1216 && area.height == 684 && time == 15);
-    const unsigned phase = blind_pushes % 26;
-    assert(color == (phase < 10 ? 0 : phase < 23 ? 1 : 2));
-    ++blind_pushes;
-}
 void epd_clear(void) { physical_scan_power(); assert(ota_display_depth); assert(powerons > 0); ++clears; }
 void epd_clear_area_cycles(EpdRect area, int cycles, int cycle_time) {
     physical_scan_power();
@@ -344,7 +330,7 @@ static enum EpdDrawError power_fault_present(EpdiyHighlevelState *hl, unsigned p
         case 13: return update_display_area_full_with(hl, &E0470_WAVEFORM, MODE_GL16, area);
         case 14: return update_display_click_feedback(hl, area);
         case 15: return update_display_water_turn(hl, area, E0470_TURN_RTL);
-        default: return display_panel_repair(hl);
+        default: assert(false); return EPD_DRAW_INVALID_CROP;
     }
 }
 
@@ -688,49 +674,18 @@ int main(void) {
     assert(clears==0&&draws==1&&full_draws==1&&last_mode==MODE_GC16&&!white_baseline&&correct_target_at_draw);
     assert(waveform_at_draw==&E0470_WAVEFORM);
     assert(!memcmp(front,target,FB_BYTES)&&!memcmp(back,target,FB_BYTES));
-    // 手动修复保留目标页和底栏，只做一次最终整屏输出；成功后局部更新不再被迫全刷。
-    // Manual repair preserves the target and navigation with one final full output, then allows local updates again.
-    checking_repair = true;
-    for (int failure = 0; failure < 3; ++failure) {
-        memcpy(front, target, FB_BYTES); memset(back, 0x55, FB_BYTES);
-        blind_pushes = repair_delays = poweroffs = 0;
-        draws = full_draws = clears = 0;
-        next_draw_error = failure ? EPD_DRAW_EMPTY_LINE_QUEUE : EPD_DRAW_SUCCESS;
-        draw_errors_remaining = failure;
-        display_main_transition_arm(&hl, true, true);
-        display_request_full_refresh();
-        enum EpdDrawError repaired = display_panel_repair(&hl);
-        assert(blind_pushes == 6 * 26 && repair_delays == 7 && poweroffs == 1);
-        assert(!memcmp(front, target, FB_BYTES) && hl.waveform == &E0470_WAVEFORM);
-        assert(draws == (failure ? 2 : 1) && full_draws == draws);
-        assert(correct_target_at_draw && white_baseline && !ota_display_depth);
-        assert((repaired == EPD_DRAW_SUCCESS) == (failure != 2));
-        int prior = full_draws;
-        assert(update_display_area_diff_with(&hl, &E0470_WAVEFORM, MODE_GL16,
-                                            (EpdRect){0,160,16,16}) == EPD_DRAW_SUCCESS);
-        assert(full_draws == prior + (failure == 2));
-    }
-    unsigned prior_pushes = blind_pushes;
-    assert(display_panel_repair(NULL) == EPD_DRAW_INVALID_CROP && blind_pushes == prior_pushes);
-    checking_repair = false;
-    assert(!ota_display_depth);
-    puts("display recovery: front retained, locked blind panel repair, single final frame, retry/failure recovery and bulk prefill passed");
     // 每个输出出口都必须拒绝未就绪的供电；连续输入不重复等待，恢复失败继续要求整屏重建。
     // Every output must reject unready power; queued input cannot repeat the wait, and failed recovery retains the full-screen rebuild request.
     no_change = false;
-    for (unsigned path = 0; path <= 16; ++path) {
+    for (unsigned path = 0; path < 16; ++path) {
         now_us += 2000000;
         for (unsigned i = 0; i < FB_BYTES; ++i) target[i] = (uint8_t)(i + path * 13);
         memcpy(front, target, FB_BYTES); memset(back, 0x5a, FB_BYTES);
         power_failure = true;
-        checking_repair = path == 16;
-        if (checking_repair) repair_delays = 0;
         int before_draws = draws, before_clears = clears, before_water = water_calls;
-        unsigned before_blind = blind_pushes;
         assert(power_fault_present(&hl, path) == DISPLAY_DRAW_POWER_NOT_READY);
-        checking_repair = false;
         assert(draws == before_draws && clears == before_clears && water_calls == before_water);
-        assert(blind_pushes == before_blind && !drive_active && !ota_display_depth);
+        assert(!drive_active && !ota_display_depth);
         for (unsigned i = 0; i < FB_BYTES; ++i) assert(back[i] == 0x5a);
         // white 出口的目标本来就是白；其他出口必须保留调用方的完整目标。
         // White output intentionally requests white; every other output preserves the caller's complete target.

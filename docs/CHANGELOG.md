@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 「升级和恢复」移除「屏幕修复」，保留「保存与恢复」「系统升级」。/ Remove Screen Repair from Upgrade and Recovery; keep Backup and Restore and System Update.
+
 - 从 TF 卡确认恢复后，立即显示「正在恢复，请稍候…」；等待时的重复点按不会再触发恢复。/ Show a restoring message immediately after confirming a TF restore, and ignore taps made while waiting.
 
 - 每本书的进度改存机内文件区，不再随阅读书目增加而挤占配置空间。升级后可直接续读，书架空闲时自动搬迁旧进度，原 TF 设置备份仍可恢复。/ Per-book progress now uses internal files rather than configuration space. Resume immediately after upgrading; idle shelf time migrates old records, and existing TF backups still restore.

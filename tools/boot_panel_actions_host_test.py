@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""中文：执行真实 RTC 标记和设置修复动作，验证开机截止、取消与单次推屏。
-English: Execute real RTC marks and Settings repair actions for boot cutoff, cancellation and single presentation.
+"""中文：执行真实 RTC 标记和设置维护入口，验证开机标记截止与触点路由。
+English: Execute real RTC marks and Settings maintenance routing for boot cutoff and tap handling.
 SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
 """
 from pathlib import Path
@@ -52,8 +52,6 @@ int main(void) {
 }
 '''
 
-tick = function('on_tick', SETTINGS)
-tick = tick[tick.index('    if (s_panel_repair_pending)'):tick.index('    if (s_page==SETTINGS_MAIN && s_avatar_pending')]
 gesture = function('on_gesture', SETTINGS)
 gesture = gesture[gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):gesture.index('    if(y>=SETTINGS_POWER_Y')]
 render = function('render', SETTINGS)
@@ -61,61 +59,37 @@ root_render = re.sub(r'\s+', '', render[render.index('const char *maintenance_la
 assert root_render.index('if(s_notice[0])') > root_render.index(
     'ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);')
 
+rows = re.search(r'^#define SETTINGS_MAINTENANCE_ROWS \d+$', SETTINGS.read_text(), re.M).group()
+assert 'maintenance_labels[]={"保存与恢复","系统升级"}' in render
+
 ACTIONS = r'''
 #include <assert.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
-#include <string.h>
-#include "ui_locale.h"
-typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL,APP_REDRAW_DONE} app_redraw_t;
-typedef struct { void *hl; uint8_t *fb; } app_ctx_t;
-enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_UPGRADE, SETTINGS_BOOT };
-enum EpdDrawError { EPD_DRAW_SUCCESS, EPD_DRAW_ERROR };
+typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE} app_redraw_t;
+enum { SETTINGS_MAIN, SETTINGS_CONFIG, SETTINGS_UPGRADE };
 #define SETTINGS_MAINTENANCE_Y 500
-#define SETTINGS_MAINTENANCE_ROWS 3
 #define SETTINGS_ROW_H 68
-static int s_page, repairs, paints, upgrade_opens;
+''' + rows + r'''
+
+static int s_page, upgrade_opens;
 static void upgrade_open(void) { ++upgrade_opens; s_page = SETTINGS_UPGRADE; }
-static bool s_panel_repair_pending, s_scroll_present_pending, s_config_confirm;
+static bool s_config_confirm;
 static char s_notice[96];
-static enum EpdDrawError result;
-static void render(app_ctx_t *ctx, uint8_t *fb) {
-    assert(ctx->fb == fb && strstr(s_notice,"修复完成")); ++paints;
-}
-static enum EpdDrawError display_panel_repair(void *hl) {
-    assert(hl && paints == repairs + 1 && !s_scroll_present_pending);
-    ++repairs; return result;
-}
-static app_redraw_t tick(app_ctx_t *ctx) {
-''' + tick + r'''
-    return APP_REDRAW_NONE;
-}
 static app_redraw_t tap(int y) {
     int row;
 ''' + gesture + r'''
     return APP_REDRAW_NONE;
 }
 int main(void) {
-    uint8_t fb;
-    app_ctx_t ctx={.hl=&fb,.fb=&fb};
-    assert(tick(&ctx)==APP_REDRAW_NONE && !repairs && !paints);
+    s_config_confirm = true;
+    s_notice[0] = 'x';
     assert(tap(SETTINGS_MAINTENANCE_Y)==APP_REDRAW_PAGE && s_page==SETTINGS_CONFIG);
-    s_page=SETTINGS_MAIN; s_scroll_present_pending=true;
-    assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE);
-    assert(s_panel_repair_pending && !repairs && !paints && strstr(s_notice,"修复中"));
-    assert(tick(&ctx)==APP_REDRAW_DONE && repairs==1 && paints==1 && !s_panel_repair_pending);
-    assert(tick(&ctx)==APP_REDRAW_NONE && repairs==1);
-    assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE);
-    result=EPD_DRAW_ERROR;
-    assert(tick(&ctx)==APP_REDRAW_FULL && repairs==2 && strstr(s_notice,"未完成"));
-    assert(!s_panel_repair_pending && tick(&ctx)==APP_REDRAW_NONE);
-    assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE);
-    s_page=SETTINGS_CONFIG;
-    assert(tick(&ctx)==APP_REDRAW_NONE && repairs==2 && !s_panel_repair_pending);
-    assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_UPGRADE && upgrade_opens==1);
-    assert(tap(SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H)==APP_REDRAW_NONE);
-    puts("PASS: actual Settings rows map to config, repair and upgrade, the BOOT row is gone; repair defers work, cancels after leaving, paints final notice once and reports output failure");
+    assert(!s_config_confirm && !s_notice[0]);
+    s_page=SETTINGS_MAIN;
+    assert(tap(SETTINGS_MAINTENANCE_Y+SETTINGS_ROW_H)==APP_REDRAW_PAGE && s_page==SETTINGS_UPGRADE && upgrade_opens==1);
+    assert(tap(SETTINGS_MAINTENANCE_Y+2*SETTINGS_ROW_H)==APP_REDRAW_NONE);
+    puts("PASS: Settings maintenance renders and routes only backup/restore and system upgrade");
 }
 '''
 
@@ -129,6 +103,7 @@ with tempfile.TemporaryDirectory(prefix='mogo-boot-panel-') as directory:
     for name, unit in [('boot', BOOT), ('actions', ACTIONS)]:
         (work/f'{name}.c').write_text(unit, encoding='utf-8')
         subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g',
+                        '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                         '-I'+str(work),'-I'+str(CRASH),'-I'+str(CRASH/'include'),'-I'+str(ROOT/'main/ui'),
                         str(work/f'{name}.c'),'-o',str(work/name)],check=True)
         subprocess.run([str(work/name)],check=True)
