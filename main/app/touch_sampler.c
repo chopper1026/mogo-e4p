@@ -1,12 +1,12 @@
 // F4 触摸采样任务实现。结构：5ms 节拍读 CST836U，帧写入环形队列；主循环排空回放。
 // 队列采用"序号环 + 读者侧钳制"：写者只发布写序号 wr（release），读者维护私有读
 // 序号 rd，发现 wr - rd 超过容量即钳制到 wr - LEN（等价丢最旧，最新边沿总在队尾
-// 被保全）。err 帧不入队：芯片复位/唤醒窗口的 NACK 不构成输入事件；深睡模式下
+// 被保全）。err 帧不入队：芯片复位/唤醒窗口的 NACK 不构成输入事件，但下一帧会标记中断；深睡模式下
 // cst836u_read 早退返回零帧（无 I2C 访问），照常入队无害。
 // / F4 touch sampler implementation: 5ms polling task feeds an SPSC ring built
 // on a monotonic write sequence with a reader-side clamp (overwrite-oldest, so
-// the newest edges always survive at the tail). Error frames are dropped; the
-// driver's deep-sleep early return yields harmless zero frames.
+// the newest edges always survive at the tail). Errors do not enqueue frames, but mark
+// the next sample as interrupted. The driver's deep-sleep early return yields harmless zero frames.
 
 #include "touch_sampler.h"
 
@@ -37,6 +37,7 @@ static touch_frame_t s_queue[TS_QUEUE_LEN];
 static void sampler_task(void* arg) {
     (void)arg;
     cst836u_touch_t t;
+    bool interrupted = false;
     while (true) {
         // 按事务开始时间归属坐标，跨越落屏边界的读取仍属于旧画面。
         // Timestamp at read start so transactions spanning a display commit still belong to the old image.
@@ -49,8 +50,12 @@ static void sampler_task(void* arg) {
             slot->y = t.y;
             slot->count = t.count;
             slot->touched = t.touched ? 1 : 0;
+            slot->interrupted = interrupted;
+            interrupted = false;
             // release：保证帧数据先于序号对读者可见。
             atomic_store_explicit(&s_wr, wr + 1, memory_order_release);
+        } else {
+            interrupted = true;
         }
         vTaskDelay(pdMS_TO_TICKS(TS_PERIOD_MS));
     }
@@ -89,9 +94,11 @@ bool touch_sampler_pop(touch_frame_t* out) {
     if (out == NULL || s_task == NULL) return false;
     unsigned wr = atomic_load_explicit(&s_wr, memory_order_acquire);
     unsigned rd = s_rd;
-    if (wr - rd > TS_QUEUE_LEN) rd = wr - TS_QUEUE_LEN;  // 慢消费者：跳过被覆盖的最旧帧
+    const bool overrun = wr - rd > TS_QUEUE_LEN;
+    if (overrun) rd = wr - TS_QUEUE_LEN;
     if (wr == rd) return false;
     *out = s_queue[rd & TS_QUEUE_MASK];
+    out->interrupted |= overrun;
     s_rd = rd + 1;
     return true;
 }

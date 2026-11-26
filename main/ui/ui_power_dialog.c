@@ -1,9 +1,9 @@
 /* SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
- * 中文：长按电源的滑动关机层与最终画面；控件纯绘制，独立准备入口可分配并读取TF关机图。
- * English: Slide-to-off controls and final art; controls paint only, while the separate prepare entry may allocate and read SD-cached shutdown art.
- * 用户修订：恢复原实心滑轨与圆钮，不再生成液态玻璃或缓存控件底图。
- * User revision: restore the solid track and circle buttons without liquid glass or cached control backdrops.
+ * 中文：长按电源的静态点按菜单与最终画面；控件纯绘制，独立准备入口可分配并读取TF关机图。
+ * English: Static tap-to-act power menu and final art; controls paint only, while the separate prepare entry may allocate and read SD-cached shutdown art.
+ * 用户修订：用静态黑白按钮取代滑轨，不生成按压或拖动反馈帧。
+ * User revision: replace the slider with static black-and-white buttons, with no press or drag feedback frames.
  */
 #include "ui_power_dialog.h"
 #include "shutdown_wallpaper.h"
@@ -14,171 +14,100 @@
 #include "book_lock_cover.h"
 #include "lock_calendar.h"
 #include <stdlib.h>
-#include <string.h>
 #include "ui_kit.h"
 
-enum { HIT_NONE, HIT_SLIDER, HIT_RESTART, HIT_CANCEL };
+enum {
+    POWER_MARGIN = 64,
+    POWER_WIDTH = UI_LOCK_WIDTH - 2 * POWER_MARGIN,
+    POWER_GAP = 24,
+    POWER_PRIMARY_Y = 542,
+    POWER_PRIMARY_H = 116,
+    POWER_SECONDARY_Y = POWER_PRIMARY_Y + POWER_PRIMARY_H + POWER_GAP,
+    POWER_SECONDARY_W = (POWER_WIDTH - POWER_GAP) / 2,
+    POWER_SECONDARY_H = 100,
+};
 
-static bool in_circle(int x, int y, int cx, int cy, int r) {
-    int dx = x - cx, dy = y - cy;
-    return abs(dx) <= r && abs(dy) <= r && dx * dx + dy * dy <= r * r;
+EpdRect ui_power_dialog_button_rect(ui_power_action_t action) {
+    switch (action) {
+        case UI_POWER_ACTION_SHUTDOWN:
+            return (EpdRect){POWER_MARGIN, POWER_PRIMARY_Y, POWER_WIDTH, POWER_PRIMARY_H};
+        case UI_POWER_ACTION_RESTART:
+            return (EpdRect){POWER_MARGIN, POWER_SECONDARY_Y, POWER_SECONDARY_W, POWER_SECONDARY_H};
+        case UI_POWER_ACTION_CANCEL:
+            return (EpdRect){POWER_MARGIN + POWER_SECONDARY_W + POWER_GAP, POWER_SECONDARY_Y,
+                POWER_SECONDARY_W, POWER_SECONDARY_H};
+        default:
+            return (EpdRect){0};
+    }
 }
 
-static EpdRect slider_change(int before, int after) {
-    if (before == after) return (EpdRect){0};
-    int left = before < after ? before : after;
-    return (EpdRect){UI_POWER_THUMB_X + left - UI_POWER_THUMB_R - 1,
-        UI_POWER_THUMB_Y - UI_POWER_THUMB_R - 1,
-        abs(after - before) + 2 * UI_POWER_THUMB_R + 3, 2 * UI_POWER_THUMB_R + 3};
-}
-
-static EpdRect button_area(int hit) {
-    int x = hit == HIT_RESTART ? UI_POWER_RESTART_X : UI_POWER_CANCEL_X;
-    return (EpdRect){x - UI_POWER_BUTTON_R - 1, UI_POWER_BUTTON_Y - UI_POWER_BUTTON_R - 1,
-        2 * UI_POWER_BUTTON_R + 3, 2 * UI_POWER_BUTTON_R + 3};
+static bool hit_button(ui_power_action_t action, int x, int y) {
+    const EpdRect rect = ui_power_dialog_button_rect(action);
+    return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
 }
 
 void ui_power_dialog_reset(ui_power_dialog_t *dialog, bool touching) {
-    if (!dialog) return;
-    memset(dialog, 0, sizeof(*dialog));
-    dialog->swallow = touching;
+    if (dialog) *dialog = (ui_power_dialog_t){.swallow = touching};
 }
 
-void ui_power_dialog_cancel_input(ui_power_dialog_t *dialog, EpdRect *dirty) {
-    if (dirty) *dirty = (EpdRect){0};
-    if (!dialog) return;
-    if (dirty) {
-        if (dialog->position) *dirty = slider_change(dialog->position, 0);
-        else if (dialog->pressed) *dirty = button_area(dialog->hit);
-    }
-    ui_power_dialog_reset(dialog, true);
-}
-
-ui_power_action_t ui_power_dialog_feed(ui_power_dialog_t *dialog, const app_ctx_t *ctx, EpdRect *dirty) {
-    if (!dirty) return UI_POWER_ACTION_NONE;
-    *dirty = (EpdRect){0};
+ui_power_action_t ui_power_dialog_feed(ui_power_dialog_t *dialog, const app_ctx_t *ctx) {
     if (!dialog) return UI_POWER_ACTION_NONE;
-    if (!ctx || ctx->consumed || !ctx->touch ||
-        (ctx->touch->touched && (ctx->touch->count != 1 ||
-          ctx->touch->x >= UI_LOCK_WIDTH || ctx->touch->y >= UI_LOCK_HEIGHT))) {
-        ui_power_dialog_cancel_input(dialog, dirty);
+    if (!ctx || ctx->consumed || !ctx->touch) {
+        ui_power_dialog_reset(dialog, true);
         return UI_POWER_ACTION_NONE;
     }
     const app_touch_t *touch = ctx->touch;
+    const int x = touch->x, y = touch->y;
+    if (touch->touched && (touch->count != 1 || x >= UI_LOCK_WIDTH || y >= UI_LOCK_HEIGHT)) {
+        ui_power_dialog_reset(dialog, true);
+        return UI_POWER_ACTION_NONE;
+    }
     if (dialog->swallow) {
         if (!touch->touched) dialog->swallow = false;
         return UI_POWER_ACTION_NONE;
     }
-    int x = touch->x, y = touch->y;
-    if (ctx->pressed && touch->touched && !dialog->tracking) {
-        dialog->tracking = true;
-        dialog->x0 = x; dialog->y0 = y;
-        dialog->started_ms = ctx->now_ms;
-        int cx = UI_POWER_THUMB_X + dialog->position;
-        if (in_circle(x, y, cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R + 6)) {
-            dialog->hit = HIT_SLIDER;
-            dialog->grab_x = x - cx;
-        } else if (in_circle(x, y, UI_POWER_RESTART_X, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R)) {
-            dialog->hit = HIT_RESTART;
-        } else if (in_circle(x, y, UI_POWER_CANCEL_X, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R)) {
-            dialog->hit = HIT_CANCEL;
-        }
-        if (dialog->hit >= HIT_RESTART) {
-            dialog->pressed = true;
-            *dirty = button_area(dialog->hit);
-        }
-    }
-    if (!dialog->tracking) return UI_POWER_ACTION_NONE;
-    if (ctx->now_ms < dialog->started_ms || (!touch->touched && !ctx->released)) {
-        ui_power_dialog_cancel_input(dialog, dirty);
-        return UI_POWER_ACTION_NONE;
-    }
-    if (dialog->hit == HIT_SLIDER) {
-        // 捕获后可水平越界；垂直滑出取消，不能在别处抬手触发关机。
-        // Capture permits horizontal overshoot; leaving vertically cancels, preventing off-track release shutdown.
-        if (abs(y - UI_POWER_THUMB_Y) > UI_POWER_TRACK_H) {
-            ui_power_dialog_cancel_input(dialog, dirty);
-            return UI_POWER_ACTION_NONE;
-        }
-        if (touch->touched) {
-            int next = x - dialog->grab_x - UI_POWER_THUMB_X;
-            if (next < 0) next = 0;
-            if (next > UI_POWER_SLIDE_RANGE) next = UI_POWER_SLIDE_RANGE;
-            *dirty = slider_change(dialog->position, next);
-            dialog->position = next;
-        } else if (ctx->released) {
-            if (dialog->position >= UI_POWER_SLIDE_COMMIT) {
-                ui_power_dialog_reset(dialog, false);
-                return UI_POWER_ACTION_SHUTDOWN;
+    if (dialog->target == UI_POWER_ACTION_NONE && ctx->pressed && touch->touched) {
+        for (ui_power_action_t action = UI_POWER_ACTION_CANCEL; action <= UI_POWER_ACTION_RESTART; ++action) {
+            if (hit_button(action, x, y)) {
+                dialog->target = action;
+                dialog->x0 = x;
+                dialog->y0 = y;
+                dialog->started_ms = ctx->now_ms;
+                break;
             }
-            ui_power_dialog_cancel_input(dialog, dirty);
-            dialog->swallow = false;
         }
-    } else if (dialog->hit >= HIT_RESTART) {
-        int cx = dialog->hit == HIT_RESTART ? UI_POWER_RESTART_X : UI_POWER_CANCEL_X;
-        if (!in_circle(x, y, cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R) ||
-            abs(x - dialog->x0) > UI_TOUCH_SLOP_PX || abs(y - dialog->y0) > UI_TOUCH_SLOP_PX) {
-            ui_power_dialog_cancel_input(dialog, dirty);
-            if (!touch->touched) dialog->swallow = false;
-        } else if (ctx->released) {
-            ui_power_action_t action = dialog->hit == HIT_RESTART ? UI_POWER_ACTION_RESTART : UI_POWER_ACTION_CANCEL;
-            ui_power_dialog_reset(dialog, false);
-            return action;
-        }
-    } else if (ctx->released) {
+    }
+    if (dialog->target == UI_POWER_ACTION_NONE) return UI_POWER_ACTION_NONE;
+    if (ctx->now_ms < dialog->started_ms || !hit_button(dialog->target, x, y) ||
+        abs(x - dialog->x0) > UI_TOUCH_SLOP_PX || abs(y - dialog->y0) > UI_TOUCH_SLOP_PX) {
+        ui_power_dialog_reset(dialog, touch->touched);
+    } else if (!touch->touched) {
+        const ui_power_action_t action = ctx->released ? dialog->target : UI_POWER_ACTION_NONE;
         ui_power_dialog_reset(dialog, false);
+        return action;
     }
     return UI_POWER_ACTION_NONE;
 }
 
 EpdRect ui_power_dialog_rect(void) { return (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}; }
 
-static void draw_circle_button(uint8_t *fb, const ui_power_dialog_t *dialog, int hit, int cx) {
-    epd_fill_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R,
-        dialog->pressed && dialog->hit == hit ? UI_GRAY_LIGHT : UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R, UI_GRAY_BLACK, fb);
-    epd_draw_circle(cx, UI_POWER_BUTTON_Y, UI_POWER_BUTTON_R - 1, UI_GRAY_BLACK, fb);
-    if (hit == HIT_RESTART) ui_draw_icon(fb, cx, UI_POWER_BUTTON_Y, 46, UI_ICON_ROTATE_CW, UI_GRAY_BLACK);
-    else {
-        // 圆帽取消符号，圆钮外部保持原白底。/ Round-ended cancel mark; preserve the white outside the circle.
-        for (int i = -14; i <= 14; ++i) {
-            epd_fill_circle(cx + i, UI_POWER_BUTTON_Y + i, 2, UI_GRAY_BLACK, fb);
-            epd_fill_circle(cx + i, UI_POWER_BUTTON_Y - i, 2, UI_GRAY_BLACK, fb);
-        }
-    }
+static void draw_button(uint8_t *fb, ui_power_action_t action, const char *label, int px) {
+    const EpdRect rect = ui_power_dialog_button_rect(action);
+    const bool primary = action == UI_POWER_ACTION_SHUTDOWN;
+    if (primary) ui_fill_round_rect(fb, rect, UI_BTN_RADIUS, UI_GRAY_BLACK);
+    else ui_draw_control_frame(fb, rect, UI_BTN_RADIUS, UI_GRAY_BLACK);
+    ui_text_box(fb, ui_inset_rect(rect, UI_PAD), px, label, EPD_DRAW_ALIGN_CENTER, primary);
 }
 
-void ui_power_dialog_end(void) {}
-
-void ui_power_dialog_draw_controls(uint8_t *fb, const ui_power_dialog_t *dialog, EpdRect dirty) {
-    (void)dirty;
-    if (!fb || !dialog) return;
-    EpdRect track = {UI_POWER_TRACK_X, UI_POWER_TRACK_Y, UI_POWER_TRACK_W, UI_POWER_TRACK_H};
-    ui_fill_round_rect(fb, track, UI_POWER_TRACK_H / 2, 0xe0);
-    ui_draw_control_frame(fb, track, UI_POWER_TRACK_H / 2, 0x60);
-    ui_text_box(fb, (EpdRect){254, UI_POWER_TRACK_Y + 28, 302, 56}, 30,
-        "滑动关机", EPD_DRAW_ALIGN_CENTER, false);
-    int cx = UI_POWER_THUMB_X + dialog->position;
-    epd_fill_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R, UI_GRAY_BLACK, fb);
-    epd_draw_circle(cx, UI_POWER_THUMB_Y, UI_POWER_THUMB_R - 1, UI_GRAY_BLACK, fb);
-    ui_draw_icon(fb, cx, UI_POWER_THUMB_Y, 46, UI_ICON_POWER, UI_GRAY_BLACK);
-    draw_circle_button(fb, dialog, HIT_RESTART, UI_POWER_RESTART_X);
-    draw_circle_button(fb, dialog, HIT_CANCEL, UI_POWER_CANCEL_X);
-}
-
-void ui_power_dialog_draw(uint8_t *fb, const ui_power_dialog_t *dialog) {
-    if (!fb || !dialog) return;
+void ui_power_dialog_draw(uint8_t *fb) {
+    if (!fb) return;
     ui_clear_page(fb);
-    ui_text_box(fb, (EpdRect){48, 166, UI_LOCK_WIDTH - 96, 84}, 44,
+    ui_draw_icon(fb, UI_LOCK_WIDTH / 2, 356, 64, UI_ICON_POWER, UI_GRAY_BLACK);
+    ui_text_box(fb, (EpdRect){POWER_MARGIN, 409, POWER_WIDTH, 80}, 48,
         "电源选项", EPD_DRAW_ALIGN_CENTER, false);
-    ui_text_box(fb, (EpdRect){72, 458, UI_LOCK_WIDTH - 144, 48}, 24,
-        "向右滑动，松手后关机", EPD_DRAW_ALIGN_CENTER, false);
-    ui_power_dialog_draw_controls(fb, dialog, ui_power_dialog_rect());
-    ui_text_box(fb, (EpdRect){UI_POWER_RESTART_X - 90, 1044, 180, 54}, 28,
-        "重启", EPD_DRAW_ALIGN_CENTER, false);
-    ui_text_box(fb, (EpdRect){UI_POWER_CANCEL_X - 90, 1044, 180, 54}, 28,
-        "取消", EPD_DRAW_ALIGN_CENTER, false);
+    draw_button(fb, UI_POWER_ACTION_SHUTDOWN, "关机", 42);
+    draw_button(fb, UI_POWER_ACTION_RESTART, "重启", UI_PX_BTN);
+    draw_button(fb, UI_POWER_ACTION_CANCEL, "取消", UI_PX_BTN);
 }
 
 void ui_power_final_draw(uint8_t *fb, bool restarting) {

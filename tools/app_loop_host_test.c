@@ -36,6 +36,7 @@ static app_back_result_t test_back(app_ctx_t *ctx) {
 }
 void touch_sampler_test_enable(bool active);
 void touch_sampler_test_push(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count);
+void touch_sampler_test_push_frame(int64_t t_ms, uint16_t x, uint16_t y, uint8_t count, bool interrupted);
 
 static void enter(app_ctx_t*);
 static void leave(app_ctx_t*);
@@ -118,50 +119,47 @@ static app_redraw_t auto_update_return_tick(app_ctx_t *c) {
     if (auto_update_return) c->request_return = true;
     return APP_REDRAW_NONE;
 }
-static int power_open_draws, power_controls_draws, power_final_draws;
+static int power_open_draws, power_final_draws;
 static int power_trigger_step = -1, shutdowns, restarts;
 static bool staged_shutdown,light_only_shutdown,shutdown_draw_fails,shutdown_handoff_fails;
 int64_t esp_timer_get_time(void);
-static bool power_tap_during_draw;
-static bool power_drag_during_draw;
-static bool power_commit_during_draw;
-static EpdRect last_du_area;
+enum { POWER_BUFFER_NONE, POWER_BUFFER_RESTART, POWER_BUFFER_OFF, POWER_BUFFER_DRAG, POWER_BUFFER_INTERRUPTED, POWER_BUFFER_FIRST };
+static int power_buffer;
 EpdRect ui_power_dialog_rect(void) {return (EpdRect){0,0,684,1216};}
-void ui_power_dialog_draw(uint8_t* fb,const ui_power_dialog_t *dialog) {
- (void)fb;(void)dialog;++power_open_draws;
- // 电源弹窗展开的整屏 GL16 阻塞期间，用户快速点按“重启”；两帧都在队列里。
- // While the dialog's opening full-screen GL16 blocks, the user taps Restart fast.
- if (power_tap_during_draw) {
-    power_tap_during_draw = false;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    touch_sampler_test_push(now, UI_POWER_RESTART_X, UI_POWER_BUTTON_Y, 1);
-    touch_sampler_test_push(now + 10, 0, 0, 0);
+#define POWER_BUTTON_X(r) ((r).x + (r).width / 2)
+#define POWER_BUTTON_Y(r) ((r).y + (r).height / 2)
+void ui_power_dialog_draw(uint8_t* fb) {
+ (void)fb;++power_open_draws;
+ if(power_buffer==POWER_BUFFER_NONE)return;
+ const int64_t now=esp_timer_get_time()/1000;
+ const EpdRect off=ui_power_dialog_button_rect(UI_POWER_ACTION_SHUTDOWN);
+ const EpdRect restart=ui_power_dialog_button_rect(UI_POWER_ACTION_RESTART);
+ const EpdRect cancel=ui_power_dialog_button_rect(UI_POWER_ACTION_CANCEL);
+ const int x=POWER_BUTTON_X(off),y=POWER_BUTTON_Y(off);
+ // 在开屏刷新期间模拟积压的点按、拖动和打断。/ Buffer taps, drags and a sample interruption during the opening refresh.
+ if(power_buffer==POWER_BUFFER_RESTART){
+    touch_sampler_test_push(now,POWER_BUTTON_X(restart),POWER_BUTTON_Y(restart),1);
+    touch_sampler_test_push(now+5,0,0,0);
+ }else if(power_buffer==POWER_BUFFER_OFF){
+    touch_sampler_test_push(now,x,y,1);
+    touch_sampler_test_push(now+5,0,0,0);
+ }else if(power_buffer==POWER_BUFFER_DRAG){
+    touch_sampler_test_push(now,x,y,1);
+    touch_sampler_test_push(now+5,x,y+80,1);
+    touch_sampler_test_push(now+10,x,y,1);
+    touch_sampler_test_push(now+15,0,0,0);
+ }else if(power_buffer==POWER_BUFFER_INTERRUPTED){
+    touch_sampler_test_push(now,x,y,1);
+    touch_sampler_test_push_frame(now+10,0,0,0,true);
+ }else if(power_buffer==POWER_BUFFER_FIRST){
+    touch_sampler_test_push(now,POWER_BUTTON_X(cancel),POWER_BUTTON_Y(cancel),1);
+    touch_sampler_test_push(now+5,0,0,0);
+    touch_sampler_test_push(now+10,x,y,1);
+    touch_sampler_test_push(now+15,0,0,0);
+    touch_sampler_test_push(now+20,550,950,1);
  }
- // 展开期间积压一段快速拖动：按住拇指连扫三帧后在低位松手（不足提交位，且让
- // 下一场景从抬手状态开始）。
- // A fast drag buffered while the dialog opens: three sweeping frames on the thumb, released
- // below the commit line (and leaving the next scenario starting from a lifted finger).
- if (power_drag_during_draw) {
-    power_drag_during_draw = false;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    touch_sampler_test_push(now, UI_POWER_THUMB_X, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 10, UI_POWER_THUMB_X + 30, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 20, UI_POWER_THUMB_X + 70, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 30, UI_POWER_THUMB_X + 120, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 40, UI_POWER_THUMB_X + 120, UI_POWER_THUMB_Y, 0);
- }
- // 展开期间积压"拖过提交位再松手"整段。/ A full drag-past-commit-and-release buffered while opening.
- if (power_commit_during_draw) {
-    power_commit_during_draw = false;
-    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    touch_sampler_test_push(now, UI_POWER_THUMB_X, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 10, UI_POWER_THUMB_X + 200, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 20, UI_POWER_THUMB_X + UI_POWER_SLIDE_RANGE, UI_POWER_THUMB_Y, 1);
-    touch_sampler_test_push(now + 30, UI_POWER_THUMB_X + UI_POWER_SLIDE_RANGE, UI_POWER_THUMB_Y, 0);
- }
+ power_buffer=POWER_BUFFER_NONE;
 }
-void ui_power_dialog_draw_controls(uint8_t* fb,const ui_power_dialog_t *dialog,EpdRect dirty) {(void)fb;(void)dialog;(void)dirty;++power_controls_draws;}
-void ui_power_dialog_end(void) {}
 void ui_power_final_draw(uint8_t* fb,bool restarting) {(void)fb;(void)restarting;++power_final_draws;}
 // 与 ui_kit.c 同实现（桩里没有 clip_refresh_rect，宿主无刷新区裁剪）。
 // Same shape as ui_kit.c (no clip_refresh_rect in the stub; the host has no refresh-area clip).
@@ -382,7 +380,7 @@ int64_t esp_timer_get_time(void) {return time_offset+(int64_t)(step+1)*time_step
 void vTaskDelay(int ms) {(void)ms;if (++step>=sample_count) longjmp(done,1);}
 void display_request_full_refresh(void) {++wake_clean_requests;}
 void guard_draw_result(EpdiyHighlevelState* h,enum EpdDrawError e) {(void)h;assert(e==0);}
-enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {(void)h;(void)w;last_du_area=a;nav_area_draws+=nav_armed!=NULL;nav_armed=NULL;if(m==MODE_DU)du_areas++;else if(m==MODE_GL16)gl_areas++;return 0;}
+enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {(void)h;(void)w;(void)a;nav_area_draws+=nav_armed!=NULL;nav_armed=NULL;if(m==MODE_DU)du_areas++;else if(m==MODE_GL16)gl_areas++;return 0;}
 enum EpdDrawError update_display_full(EpdiyHighlevelState*h) {(void)h;fulls++;nav_full_arms+=nav_armed!=NULL;nav_armed=NULL;return 0;}
 bool app_shutdown_present(EpdiyHighlevelState *hl){++power_final_draws;guard_draw_result(hl,update_display_full(hl));return !shutdown_draw_fails;}
 enum EpdDrawError update_display_mode(EpdiyHighlevelState*h,int m) {(void)h;(void)m;mode++;return 0;}
@@ -507,8 +505,7 @@ static void reset(void) {
     network_test=false;network_cached=network_shown=false;memset(network_samples,0,sizeof(network_samples));
     battery_refreshes=battery_status_draws=0;memset(battery_samples,0,sizeof(battery_samples));
     quick_button_draws=quick_status_draws=quick_press_draws=quick_recent_requests=base_renders=0;
-    power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=light_only_shutdown=shutdown_draw_fails=shutdown_handoff_fails=false;
-    last_du_area=(EpdRect){0};
+    power_open_draws=power_final_draws=shutdowns=restarts=0;power_buffer=POWER_BUFFER_NONE;power_trigger_step=-1;staged_shutdown=light_only_shutdown=shutdown_draw_fails=shutdown_handoff_fails=false;
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(wifi_transfer_status_t){0};
     white_restores=normalize_pushes=0;
@@ -1341,69 +1338,63 @@ int main(void) {
         add(0,0,0,0);add(0,0,0,0);run();assert(idle_locks==1&&before_locks==1&&!lock_feedback_calls&&!lock_badges);
     }
     puts("PASS: manual lock acknowledgement precedes page save/reader joins in all three modes; consumed power turns and auto sleep omit the badge");
-    reset();power_trigger_step=1;time_step=3000000;
-    add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+112,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);run();
-    assert(power_open_draws==1&&power_controls_draws==2&&shutdowns==1&&!restarts&&power_final_draws==1&&!touch_calls&&ticks==1&&du_areas==2&&gl_areas==1);
-    /* 「彻底关机」档不再改变「关机」按钮：任何档位都立即断电。/ The full-off style no longer rebinds 关机: every style powers off immediately. */
-    reset();power_trigger_step=1;time_step=3000000;staged_shutdown=true;
-    add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);add(0,0,0,0);run();
-    assert(power_open_draws==1&&shutdowns==1&&power_final_draws==1&&!restarts&&!idle_locks&&!wake_clean_requests);
-    // 推屏失败不下电；断电失败重新绘制原页并继续响应，不重新退出/打开页面。
-    // Presentation failure blocks off; failed handoff repaints and resumes the same page without reopening it.
+    const EpdRect power_off=ui_power_dialog_button_rect(UI_POWER_ACTION_SHUTDOWN);
+    const EpdRect power_restart=ui_power_dialog_button_rect(UI_POWER_ACTION_RESTART);
+    const EpdRect power_cancel=ui_power_dialog_button_rect(UI_POWER_ACTION_CANCEL);
+    const int off_x=POWER_BUTTON_X(power_off), off_y=POWER_BUTTON_Y(power_off);
+    // 三种待机方式下，同一个点按都立即断电而不触发反馈刷新。
+    // A tap powers off immediately for all three standby policies, without feedback refreshes.
+    for(int style=0;style<3;++style){
+        reset();power_trigger_step=1;time_step=3000000;
+        staged_shutdown=style==1;light_only_shutdown=style==2;
+        add(0,0,0,0);add(0,0,0,0);add(off_x,off_y,1,0);add(off_x+8,off_y,1,0);add(0,0,0,0);run();
+        assert(power_open_draws==1&&shutdowns==1&&!restarts&&power_final_draws==1&&!touch_calls&&du_areas==0&&gl_areas==1);
+        assert(!idle_locks&&!wake_clean_requests);
+    }
+    // 推屏失败不下电；断电失败重新绘制原页，不重新打开页面。
+    // Presentation failure blocks power-off; failed handoff repaints without reopening the page.
     for(unsigned fault=0;fault<2;++fault){
         reset();power_trigger_step=1;time_step=3000000;
         shutdown_draw_fails=fault==0;shutdown_handoff_fails=fault==1;
-        add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);
-        add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);add(0,0,0,0);run();
+        add(0,0,0,0);add(0,0,0,0);add(off_x,off_y,1,0);add(0,0,0,0);add(0,0,0,0);run();
         assert(power_final_draws==1&&shutdowns==(int)fault&&!restarts&&!idle_locks);
         assert(base_renders==2&&!exits&&enters==1&&ticks>=2);
     }
     reset();power_trigger_step=1;time_step=3000000;
-    add(0,0,0,0);add(0,0,0,0);add(UI_POWER_RESTART_X,UI_POWER_BUTTON_Y,1,0);add(0,0,0,0);run();
-    assert(restarts==1&&!shutdowns&&power_final_draws==1);
+    add(0,0,0,0);add(0,0,0,0);add(POWER_BUTTON_X(power_restart),POWER_BUTTON_Y(power_restart),1,0);add(0,0,0,0);run();
+    assert(restarts==1&&!shutdowns&&power_final_draws==1&&du_areas==0);
     reset();enable_main_tabs();power_trigger_step=1;time_step=3000000;
-    add(0,0,0,0);add(0,0,0,0);add(UI_POWER_CANCEL_X,UI_POWER_BUTTON_Y,1,0);add(0,0,0,0);add(0,0,0,0);run();
-    assert(!shutdowns&&!restarts&&!power_final_draws&&nav_arms==0&&mode==1);
-    for(int fault=0;fault<2;++fault){
+    add(0,0,0,0);add(0,0,0,0);add(POWER_BUTTON_X(power_cancel),POWER_BUTTON_Y(power_cancel),1,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(!shutdowns&&!restarts&&!power_final_draws&&nav_arms==0&&mode==1&&du_areas==0);
+    reset();power_trigger_step=4;time_step=3000000;
+    add(650,1150,1,0);add(0,0,0,0);add(550,500,1,0);add(0,0,0,0);add(0,0,0,0);
+    add(POWER_BUTTON_X(power_cancel),POWER_BUTTON_Y(power_cancel),1,0);add(0,0,0,0);run();
+    assert(menus==3&&last_menu_leaf==1&&menu_background==&first&&power_open_draws==1&&!shutdowns&&!restarts);
+    for(int fault=0;fault<3;++fault){
         reset();power_trigger_step=1;time_step=3000000;
-        add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,fault?2:0,fault?0:1);add(0,0,0,0);run();
-        assert(!shutdowns&&!restarts&&power_controls_draws==2&&!touch_calls);
+        add(0,0,0,0);add(0,0,0,0);add(off_x,off_y,1,0);
+        if(fault==0)add(off_x,off_y,0,1);
+        if(fault==1)add(off_x,off_y,2,0);
+        if(fault==2)add(off_x+100,off_y,1,0);
+        add(off_x,off_y,1,0);add(0,0,0,0);run();
+        assert(!shutdowns&&!restarts&&!touch_calls&&du_areas==0&&gl_areas==1);
     }
     reset();power_trigger_step=1;time_step=3000000;
-    add(0,0,0,0);add(UI_POWER_THUMB_X,UI_POWER_THUMB_Y,1,0);add(UI_POWER_THUMB_X+UI_POWER_SLIDE_RANGE,UI_POWER_THUMB_Y,1,0);add(0,0,0,0);run();
-    assert(power_open_draws==1&&!power_controls_draws&&!shutdowns&&!restarts);
-    puts("PASS: real loop and power recognizer: DU-only contact, release commits off/restart once in every shutdown style, cancel restores full navigation, touch/multitouch errors and entry-held suppression");
-    // 采样回放：电源弹窗展开的整屏刷新期间快速点按“重启”，按下沿不能丢。
-    // Sampler replay: a fast Restart tap during the dialog's opening refresh keeps its press edge.
-    reset();power_trigger_step=1;time_step=3000000;
-    touch_sampler_test_enable(true);power_tap_during_draw=true;
-    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
-    assert(restarts==1&&!shutdowns&&power_final_draws==1&&!touch_calls);
-    touch_sampler_test_enable(false);power_tap_during_draw=false;
-    puts("power dialog replay: a tap buffered during the opening refresh keeps its press edge");
-    // 采样回放：拖动期间积压的多帧必须合并成一次控件重绘和一次 DU 推屏，合并区覆盖整段
-    // 轨迹；逐帧推屏（旧行为）会在 5ms 采样对 55–90ms 扫描下积压，滑块越拖越落后。
-    // Sampler replay: frames buffered during a drag must merge into one controls redraw and one
-    // DU push whose area spans the whole sweep; per-frame pushes (old behavior) backlog at 5 ms
-    // sampling against 55-90 ms scans and the slider falls further behind.
-    reset();power_trigger_step=1;time_step=3000000;
-    touch_sampler_test_enable(true);power_drag_during_draw=true;
-    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
-    touch_sampler_test_enable(false);
-    assert(power_open_draws==1&&gl_areas==1&&power_controls_draws==1&&du_areas==1&&
-           !shutdowns&&!restarts&&power_final_draws==0&&
-           last_du_area.x==UI_POWER_THUMB_X-UI_POWER_THUMB_R-1&&
-           last_du_area.width==120+2*UI_POWER_THUMB_R+3);
-    puts("power dialog replay: buffered drag frames merge into one push covering the sweep");
-    // 拖动到提交位后松手也积压在回放里：动作延迟执行一次，不再为中途轨迹浪费推屏。
-    // A release past the commit line buffered in the same replay: the action runs once and no
-    // intermediate trajectory push is wasted.
-    reset();power_trigger_step=1;time_step=3000000;
-    touch_sampler_test_enable(true);power_commit_during_draw=true;
-    add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
-    touch_sampler_test_enable(false);
-    assert(shutdowns==1&&power_final_draws==1&&!restarts&&du_areas==0&&gl_areas==1&&power_controls_draws==0);
-    puts("power dialog replay: buffered release past the commit line still powers off once");
+    add(0,0,0,0);add(off_x,off_y,1,0);add(off_x,off_y,1,0);add(0,0,0,0);run();
+    assert(power_open_draws==1&&!shutdowns&&!restarts&&du_areas==0&&gl_areas==1);
+    puts("PASS: real loop power taps, standby independence, restoration, invalid contact without feedback scans");
+    for(int buffered=POWER_BUFFER_RESTART;buffered<=POWER_BUFFER_FIRST;++buffered){
+        reset();power_trigger_step=1;time_step=3000000;
+        touch_sampler_test_enable(true);power_buffer=buffered;
+        add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);run();
+        touch_sampler_test_enable(false);
+        assert(power_open_draws==1&&!touch_calls&&du_areas==0);
+        assert(shutdowns==(buffered==POWER_BUFFER_OFF)&&restarts==(buffered==POWER_BUFFER_RESTART));
+        assert(power_final_draws==shutdowns+restarts);
+        if(buffered==POWER_BUFFER_FIRST)assert(base_renders==2);
+        else assert(gl_areas==1);
+    }
+    puts("PASS: buffered power taps keep their edges, consume only the first action and never leak to the underlay");
     reset();enable_main_tabs();first.owns_keys=true;first.on_main_key=root_key_tap;root_key_taps=0;time_step=100000;
     add(0,0,0,0);add(240,1500,1,0);add(0,0,0,0);run();assert(root_key_taps==1&&!keys[1]);
     reset();enable_main_tabs();first.owns_keys=true;first.on_main_key=root_key_tap;root_key_taps=0;time_step=300000;

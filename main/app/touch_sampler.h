@@ -23,6 +23,7 @@ typedef struct {
     uint16_t y;
     uint8_t count;
     uint8_t touched;
+    bool interrupted; ///< 上一帧后读失败或丢帧。/ Read error or dropped frames since the previous sample.
 } touch_frame_t;
 
 // 启动采样任务（core 1 / prio 4 / 5ms 节拍）。false = 创建失败，主循环回退直读。

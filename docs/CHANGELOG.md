@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 电源菜单改用黑白按钮：点按「关机」并松手即可确认，不再拖动滑轨；「重启」和「取消」仍可直接点按。/ The power menu replaces the slider with black-and-white buttons. Tap and release Power off to confirm; Restart and Cancel remain one tap away.
+
 - 「升级和恢复」移除「屏幕修复」，保留「保存与恢复」「系统升级」。/ Remove Screen Repair from Upgrade and Recovery; keep Backup and Restore and System Update.
 - 自动开启 WiFi 时先扫描，再连接附近信号最强的已保存网络；从家到公司不用重新选网。手动点选仍连接指定网络。/ Turning on WiFi scans first and connects to the strongest saved network nearby. Explicit selection still connects to the chosen network.
 

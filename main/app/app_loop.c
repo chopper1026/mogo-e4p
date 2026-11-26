@@ -770,7 +770,7 @@ void app_loop_run(const app_loop_config_t* config) {
         bool quick_lock_requested = false;
         bool quick_input_owned = false;
         ui_power_action_t replay_power_action = UI_POWER_ACTION_NONE;
-        EpdRect replay_power_dirty = {0};
+        bool sample_interrupted = false;
 #if CONFIG_TOUCH_DIAG
         int64_t td_gap_ms = td_last_read_us ? (esp_timer_get_time() - td_last_read_us) / 1000 : 0;
         td_last_read_us = esp_timer_get_time();
@@ -814,19 +814,10 @@ void app_loop_run(const app_loop_config_t* config) {
                     // only the last frame drops press edges, so a fast tap needs a second
                     // click. A dialog action runs in this tick's dialog branch.
                     if (power_dialog_open) {
-                        ctx.consumed = touch_blocked;
-                        EpdRect dirty;
-                        ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
-                        if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
-                            // 回放只攒 dirty 不推屏：一次扫描 55–90ms 而触摸帧 5ms 一帧，逐帧推
-                            // 屏永远追不上手指，滑块越拖越落后。排空后统一推一次合并区域。
-                            // Replay only accumulates the dirty rect: one scan costs 55-90 ms while
-                            // touch frames arrive every 5 ms, so per-frame pushes never catch the
-                            // finger and the slider falls further behind. One merged push after the drain.
-                            replay_power_dirty = replay_power_dirty.height > 0
-                                ? ui_rect_union(replay_power_dirty, dirty) : dirty;
-                        } else if (action != UI_POWER_ACTION_NONE) {
-                            replay_power_action = action;
+                        if (replay_power_action == UI_POWER_ACTION_NONE) {
+                            if (f.interrupted) ui_power_dialog_reset(&power_dialog, true);
+                            ctx.consumed = touch_blocked;
+                            replay_power_action = ui_power_dialog_feed(&power_dialog, &ctx);
                         }
                         ctx.consumed = true;
                     } else if (!menu_open) {
@@ -864,20 +855,6 @@ void app_loop_run(const app_loop_config_t* config) {
                 } else {
                     app_quick_layer_discard_frontlight();
                 }
-                // 排空后统一推一次电源弹窗滑块；动作仍延迟到本 tick 的弹窗分支执行。
-                // Push the power-dialog slider once after the drain; actions still defer to this tick's dialog branch.
-                if (power_dialog_open && replay_power_action == UI_POWER_ACTION_NONE &&
-                    replay_power_dirty.height > 0) {
-                    ui_power_dialog_draw_controls(ctx.fb, &power_dialog, replay_power_dirty);
-                    enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, replay_power_dirty, DISPLAY_REFRESH_DEFAULT);
-                    guard_draw_result(ctx.hl, result);
-                    if (result != EPD_DRAW_SUCCESS) {
-                        power_dialog_open = false;
-                        ui_power_dialog_end();
-                        ui_power_dialog_reset(&power_dialog, touch.touched);
-                        app_present(&ctx, current, APP_REDRAW_FULL);
-                    }
-                }
                 replayed = true;
                 frame_ms = esp_timer_get_time() / 1000;
 #if CONFIG_TOUCH_DIAG
@@ -888,6 +865,7 @@ void app_loop_run(const app_loop_config_t* config) {
             } else if (touch_sampler_pop(&f)) {
                 s_last_frame = f;
                 key_frame_ms = f.t_ms;
+                sample_interrupted = f.interrupted;
                 app_input_frame_to_touch(&s_last_frame, &touch);
             } else {
                 // 无新帧：复用最近帧（采样节拍 5ms 与循环节拍不完全同相），边沿天然无变化。
@@ -973,7 +951,6 @@ void app_loop_run(const app_loop_config_t* config) {
             TD_TIME("media_poll", media_changed = app_media_poll(&ctx, current, &media_mounted, &media_invalidated));
             if (media_changed) {
                 power_dialog_open = false;
-                ui_power_dialog_end();
                 ui_power_dialog_reset(&power_dialog, touch.touched);
                 app_quick_layer_reset();
                 panel_key_cancel(&key_hold);
@@ -1013,39 +990,32 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
         if (power_input_owned && err == ESP_OK) {
-            ctx.consumed = touch_blocked;
-            EpdRect dirty;
-            ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
-            if (action == UI_POWER_ACTION_NONE) action = replay_power_action;
-            if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
-                ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
-                enum EpdDrawError result = display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT);
-                guard_draw_result(ctx.hl, result);
-                if (result != EPD_DRAW_SUCCESS) {
-                    power_dialog_open = false;
-                    ui_power_dialog_end();
-                    ui_power_dialog_reset(&power_dialog, touch.touched);
-                    app_present(&ctx, current, APP_REDRAW_FULL);
+            ui_power_action_t action = replay_power_action;
+            if (!replayed) {
+                if (sample_interrupted) ui_power_dialog_reset(&power_dialog, true);
+                const int64_t now_ms = ctx.now_ms;
+                ctx.now_ms = sample_ms;
+                ctx.consumed = touch_blocked;
+                action = ui_power_dialog_feed(&power_dialog, &ctx);
+                ctx.now_ms = now_ms;
+            }
+            if (action != UI_POWER_ACTION_NONE) {
+                power_dialog_open = false;
+                ui_power_dialog_reset(&power_dialog, false);
+                // 回放可能在确认后还带着另一次按下；该接触留给电源层直到抬手。
+                // Replay can end with another finger down after confirmation; suppress that contact until lift.
+                if (touch.touched) {
+                    touch_filter.blocked = true;
+                    app_input_drop_contact(&latest, &was_touched);
+                    touch = (app_touch_t){0};
                 }
-            } else {
                 if (action == UI_POWER_ACTION_CANCEL) {
-                    power_dialog_open = false;
-                    ui_power_dialog_end();
-                    ui_power_dialog_reset(&power_dialog, false);
                     if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
-                } else if (action == UI_POWER_ACTION_SHUTDOWN) {
-                    power_dialog_open = false;
-                    ui_power_dialog_end();
-                    ui_power_dialog_reset(&power_dialog, false);
-                    // 「关机」固定立即断电；「彻底关机」待机只决定锁屏是否立即断电，与本按钮无关。
-                    // 关机 always powers off immediately; the "full off" standby style only decides whether locking powers off at once.
-                    run_power_action(&ctx, current, false);
-                } else if (action == UI_POWER_ACTION_RESTART) {
-                    power_dialog_open = false;
-                    ui_power_dialog_end();
-                    ui_power_dialog_reset(&power_dialog, false);
-                    run_power_action(&ctx, current, true);
+                } else {
+                    // 电源菜单关机固定立即断电，不受待机方式影响。
+                    // Power-menu shutdown always powers off immediately, regardless of standby style.
+                    run_power_action(&ctx, current, action == UI_POWER_ACTION_RESTART);
                 }
             }
             ctx.consumed = true;
@@ -1062,12 +1032,7 @@ void app_loop_run(const app_loop_config_t* config) {
             }
 #endif
             app_input_cancel_gesture(&ctx, current, &gesture);
-            EpdRect dirty;
-            ui_power_dialog_cancel_input(&power_dialog, &dirty);
-            if (power_dialog_open && dirty.height > 0) {
-                ui_power_dialog_draw_controls(ctx.fb, &power_dialog, dirty);
-                guard_draw_result(ctx.hl, display_refresh_area(ctx.hl, DISPLAY_REFRESH_FEEDBACK, dirty, DISPLAY_REFRESH_DEFAULT));
-            }
+            if (power_dialog_open) ui_power_dialog_reset(&power_dialog, true);
             ctx.consumed = true;
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
@@ -1206,12 +1171,12 @@ void app_loop_run(const app_loop_config_t* config) {
                     } else {
                         const bool underlay_changed = current->on_system_overlay && current->on_system_overlay(&ctx);
                         power_dialog_open = true;
-                        ui_power_dialog_reset(&power_dialog, touch.touched);
+                        ui_power_dialog_reset(&power_dialog, touch.touched || touch_filter.contact);
                         ctx.request_app = NULL;
                         ctx.request_return = ctx.request_menu = false;
                         main_lock_boundary();
                         ui_text_set_system_scale(true);
-                        ui_power_dialog_draw(ctx.fb, &power_dialog);
+                        ui_power_dialog_draw(ctx.fb);
                         const EpdRect dialog_area = underlay_changed
                             ? (EpdRect){0, 0, epd_rotated_display_width(), epd_rotated_display_height()}
                             : ui_power_dialog_rect();
@@ -1219,7 +1184,6 @@ void app_loop_run(const app_loop_config_t* config) {
                         guard_draw_result(ctx.hl, result);
                         if (result != EPD_DRAW_SUCCESS) {
                             power_dialog_open = false;
-                            ui_power_dialog_end();
                             ui_power_dialog_reset(&power_dialog, touch.touched);
                             app_present(&ctx, current, APP_REDRAW_FULL);
                         }
