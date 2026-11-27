@@ -17,12 +17,19 @@
 
 static bool sd_mounted;
 static bool sd_invalid_present;
+static bool forbid_sd;
 static int mount_calls, mount_error, mkdir_error, is_directory = 1, fat_error;
 static int partial_mounts, mount_cleanups;
-static bool blank, fail_after_wl;
+static bool blank, fail_after_wl, wl_read_failure;
 static int formats;
 size_t wl_size(wl_handle_t h) { assert(h==7); return 1024; }
-esp_err_t wl_read(wl_handle_t h,size_t off,void *out,size_t n) { assert(h==7); memset(out,0xff,n); if (!blank && off) ((char *)out)[0]=0; return ESP_OK; }
+esp_err_t wl_read(wl_handle_t h, size_t off, void *out, size_t n) {
+    assert(h == 7);
+    if (wl_read_failure && off) return ESP_FAIL;
+    memset(out, 0xff, n);
+    if (!blank && off) ((char *)out)[0] = 0;
+    return ESP_OK;
+}
 static int sd_mkdir_error;
 static int file_mode = S_IFREG, file_error, unlink_error, forget_error, unlinks, forgets;
 static bool sd_exists = true, flash_exists = true;
@@ -84,6 +91,7 @@ esp_err_t book_progress_forget(const char* path) {
 #undef rename
 
 esp_err_t board_sd_get_info(board_sd_info_t* out) {
+    assert(!forbid_sd);
     memset(out, 0, sizeof(*out)); out->mounted = sd_mounted;
     out->present = sd_mounted || sd_invalid_present; return ESP_OK;
 }
@@ -105,6 +113,31 @@ esp_err_t wl_unmount(wl_handle_t handle) {
 esp_err_t esp_vfs_fat_info(const char* path, uint64_t* total, uint64_t* free_bytes) {
     assert(!strcmp(path, "/flash") || !strcmp(path, "/sdcard"));
     *total = 9999; *free_bytes = 1234; return fat_error;
+}
+
+static void test_restore_mount(void) {
+    assert(!book_store_flash_ready());
+    forbid_sd = true;
+    mount_error = ESP_FAIL;
+    fail_after_wl = true;
+    const int before_formats = formats, before_cleanups = mount_cleanups, before_mounts = mount_calls;
+
+    // 后续扇区非空或读错均禁止格式化；普通数据挂载也不能初始化确认全空的卷。
+    // Data or read failure in a later sector forbids formatting; ordinary mounts cannot initialize even a blank volume.
+    blank = false;
+    assert(book_store_prepare_restore_data() == ESP_FAIL && !partial_mounts);
+    blank = wl_read_failure = true;
+    assert(book_store_prepare_restore_data() == ESP_FAIL && !partial_mounts);
+    wl_read_failure = false;
+    assert(book_store_prepare_data() == ESP_FAIL && !partial_mounts);
+    assert(!book_store_flash_ready() && formats == before_formats && mount_cleanups == before_cleanups + 3);
+
+    assert(book_store_prepare_restore_data() == ESP_OK && book_store_flash_ready() && !partial_mounts);
+    assert(mount_cleanups == before_cleanups + 4);
+    assert(book_store_prepare_restore_data() == ESP_OK && book_store_prepare_data() == ESP_OK);
+    assert(formats == before_formats + 1 && mount_calls == before_mounts + 4);
+    forbid_sd = false;
+    puts("book store restore: initialize blank once without shelf or SD; preserve nonblank and unreadable volumes");
 }
 
 int main(void) {
@@ -228,4 +261,5 @@ int main(void) {
     assert(book_store_delete(path, NULL) == ESP_ERR_INVALID_ARG);
     puts("book store: mount fallback, precedence, capacity, lazy init and directory errors passed");
     puts("book delete: path bounds, symlinks, unlink failure, partial cleanup, retry and root isolation passed");
+    test_restore_mount();
 }

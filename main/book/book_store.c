@@ -5,8 +5,12 @@
  * 书目录与 FAT 容量查询；调用方负责先显示首次初始化提示。
  * Book directories and FAT capacity queries; callers show initialization feedback first.
  *
- * 冻结：不格式化 SD；内部 FAT 也承载用户进度，只有书库初始化且逻辑卷全为擦除态才允许格式化。
- * Frozen: never format SD; internal FAT now owns progress, so only library initialization may format a verified blank logical volume.
+ * 冻结：不格式化 SD；内部 FAT 承载用户进度，只允许书库初始化或已确认且通过校验的配置恢复
+ * 初始化全为擦除态的逻辑卷；存在数据或读错时禁止格式化。
+ * Frozen: never format SD. Only library setup or a confirmed, validated settings restore may
+ * initialize a fully erased internal logical volume. Never format on existing data or a read error.
+ * 决策变更：整擦后可直接恢复配置，无需先进入书架。
+ * Decision change: restore after a full erase no longer depends on opening the shelf first.
  * 冻结：有卡但挂载失效时不把上传静默切换到内置存储；拔卡不复用旧容量。
  * Frozen: present but invalid media must not silently redirect uploads to flash; never reuse removed-card capacity.
  * 冻结：用户确认后仅删已挂载根内的直接普通书籍；文件与进度部分失败必须返回，不通知 UI 版本。
@@ -167,6 +171,10 @@ bool book_store_flash_ready(void) {
 esp_err_t book_store_prepare_data(void) {
     if (book_store_flash_ready()) return ESP_OK;
     return mount_flash(false);
+}
+
+esp_err_t book_store_prepare_restore_data(void) {
+    return mount_flash(true);
 }
 
 esp_err_t book_store_delete(const char* path, bool* removed) {

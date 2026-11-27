@@ -3124,7 +3124,7 @@ esp_err_t app_settings_backup_restore(void) {
     bool lock_cover_crop = version >= 49 && (backup.flags[BK_LOCK] & BACKUP_LOCK_COVER_CROP_BIT) != 0;
     backup.flags[BK_LOCK] &= ~(BACKUP_LOCK_PROTOTYPE_BIT | BACKUP_LOCK_COVER_CROP_BIT);
 
-    if ((needs_volume || has_history) && book_store_prepare_data() != ESP_OK) {
+    if ((needs_volume || has_history) && book_store_prepare_restore_data() != ESP_OK) {
         fclose(file);
         backup_erase_secret(&wifi, sizeof(wifi));
         backup_erase_secret(&portable, sizeof(portable));

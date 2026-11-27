@@ -42,6 +42,9 @@ uint64_t book_store_free_bytes(const book_store_root_t* root);
 bool book_store_flash_ready(void);
 /// 为本机数据挂载已有内置卷，绝不格式化或访问TF卡。/ Mount an existing internal volume for local data; never format or access SD.
 esp_err_t book_store_prepare_data(void);
+/// 用户确认且备份通过校验后调用；仅允许初始化全为擦除态的机内逻辑卷，不访问 TF 卡。
+/// Call after restore confirmation and backup validation. May initialize only a verified erased internal volume; no SD access.
+esp_err_t book_store_prepare_restore_data(void);
 /// 仅删除已挂载书根内的直接 TXT/EPUB/MOBI 普通文件，然后清对应进度及 last。
 /// Delete only a direct regular TXT/EPUB/MOBI file in a mounted book root, then forget its progress and last path.
 /// 先清同名普通覆盖备份；仅有备份时先恢复再删除，失败不声称文件已删。

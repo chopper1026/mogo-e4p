@@ -124,8 +124,13 @@ esp_err_t wifi_transfer_merge_profiles_backup(const wifi_transfer_profiles_backu
 void haptics_set_enabled(bool on) { (void)on; }
 void haptics_set_intensity(uint8_t intensity) { (void)intensity; }
 
-static bool mount_failure, empty_volume_payload;
-esp_err_t book_store_prepare_data(void) { return mount_failure ? ESP_FAIL : ESP_OK; }
+static bool mount_failure, erased_volume, empty_volume_payload;
+esp_err_t book_store_prepare_data(void) { return mount_failure || erased_volume ? ESP_FAIL : ESP_OK; }
+esp_err_t book_store_prepare_restore_data(void) {
+    if (mount_failure) return ESP_FAIL;
+    erased_volume = false;
+    return ESP_OK;
+}
 static long journal_offset;
 esp_err_t app_reading_journal_backup_write(FILE *file) { journal_offset = ftell(file); return fputc('J', file) == 'J' ? ESP_OK : ESP_FAIL; }
 esp_err_t app_reading_journal_backup_read(FILE *file, bool apply, bool *needs_volume) {
@@ -1899,7 +1904,10 @@ static void test_portable_backup(void) {
     assert(bad && journal_offset > 2 && fseek(bad, journal_offset - 1, SEEK_SET) == 0);
     int inverse = fgetc(bad);
     assert(inverse == (uint8_t)~4 && fseek(bad, -1, SEEK_CUR) == 0 && fputc(0,bad) == 0 && fclose(bad) == 0);
+    erased_volume = true;
     assert(app_settings_backup_restore() == ESP_ERR_INVALID_RESPONSE && commit_count == commits && records == history_restores);
+    assert(erased_volume);
+    erased_volume = false;
     bad = fopen(BACKUP_FILE, "r+b");
     assert(bad && fseek(bad, journal_offset - 1, SEEK_SET) == 0 && fputc(inverse,bad) == inverse && fclose(bad) == 0);
     mount_failure = true;
@@ -1918,7 +1926,10 @@ static void test_portable_backup(void) {
     assert(commits == commit_count && records == history_restores);
     wifi_capacity_full = false;
     pressure = true;
-    assert(app_settings_backup_restore() == ESP_OK && records + 1 == history_restores);
+    // 模拟整擦后未扫书架，带阅读记录段的备份可直接恢复。
+    // Simulate a full erase without a shelf scan: a backup with a history section restores directly.
+    erased_volume = true;
+    assert(app_settings_backup_restore() == ESP_OK && !erased_volume && records + 1 == history_restores);
     pressure = false;
     mount_failure = empty_volume_payload = true;
     assert(app_settings_backup_restore() == APP_RESTORE_INTERNAL_VOLUME);
