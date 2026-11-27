@@ -26,7 +26,11 @@ void heap_caps_free(void*);
 size_t heap_caps_get_free_size(int);
 size_t heap_caps_get_largest_free_block(int);
 ''')
- (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text().replace('int64_t now_ms;', 'int64_t now_ms; int leaf;'))
+ # 列表反馈还需要分页字段；不要依赖计时字段的声明格式。/ List feedback also needs the page index; do not depend on the timer declaration format.
+ app=(ROOT/'tools/ui_gesture_stubs/app.h').read_text()
+ ctx_end='} app_ctx_t;'
+ assert app.count(ctx_end)==1
+ (p/'app.h').write_text(app.replace(ctx_end, '    int leaf;\n'+ctx_end, 1))
  (p/'app_touch.h').write_text((ROOT/'main/app/app_touch.h').read_text())
  epd=(ROOT/'tools/ui_gesture_stubs/epdiy.h').read_text()+'\nvoid epd_fill_circle(int,int,int,uint8_t,uint8_t*);\n'
  (p/'epdiy.h').write_text(epd)

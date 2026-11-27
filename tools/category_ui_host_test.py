@@ -349,6 +349,11 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw){assert(false);return inp
 #define READER_BAR_TOP 1000
 #define READER_WIDTH 684
 static bool s_toolbar;
+// 分类夹具不进入阅读页；若错误进入阅读专用路由则立即失败。
+// The category fixture stays out of the reader; fail if it reaches a reader-only route.
+static bool s_landscape_notice_open;
+static app_redraw_t reader_landscape_notice_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev){(void)ctx;(void)ev;assert(false);return APP_REDRAW_NONE;}
+static EpdRect reader_chapter_bar_rect(void){assert(false);return (EpdRect){0};}
 static int s_reader_panel;
 static int s_reader_slider=-1;
 static int64_t s_stats_activity_ms,s_shake_touch_ms;
