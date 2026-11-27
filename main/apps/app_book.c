@@ -60,6 +60,10 @@
  * 单本管理仍为书架弹窗；原文件批量管理保留其筛选、搜索及重扫清除勾选的语义。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
+ * 周期进度保存等正文出屏、输入空闲后再合并写入；换章、离开、锁屏和失卡仍同步提交待保存的位置。
+ * 已确认且未变的书位不重复写；跨页退出由离页回调保存，避免返回时重复写盘。
+ * Periodic progress waits for body presentation and quiet input; chapter changes, exit, lock and media loss still commit pending positions synchronously.
+ * Do not rewrite an unchanged, confirmed checkpoint. The exit callback owns cross-page saves to avoid duplicate writes on return.
  * 用户2026-11-22修订：在封面和列表样式之外增加便签本，白底每页十本，不加载封面，作者列统一左对齐；不改变收录与移出规则。
  * 冻结修订：连续逐行局刷会削弱静止书名的墨色。便签本首屏仍不等冷书，逐本核对后只合并刷新当前页的作者列。
  * Frozen revision: repeated row scans fade resting titles. Keep first paint independent of cold books; resolve one at a time and reveal only the current author column in one update.
@@ -442,6 +446,7 @@ static batch_kind_t s_batch_kind;
 typedef struct pending_progress {
     char path[BOOK_STORE_PATH_MAX];
     book_progress_t value;
+    uint32_t persisted_revision;
     bool dirty, progress_saved;
     book_progress_watch_t* watch;
     struct pending_progress* next;
@@ -455,6 +460,8 @@ static ui_text_edit_t s_editor_input;
 static uint8_t* s_editor_cover;
 static bool s_save_failed;
 static bool s_pending_invalidated;
+enum { READER_PROGRESS_SAVE_TURNS = 8, READER_PROGRESS_IDLE_MS = 2500, READER_PROGRESS_RETRY_MS = 15000 };
+static int64_t s_progress_frame_ms;
 static int64_t s_save_retry_ms;
 static unsigned s_store_revision;
 static uint32_t s_progress_revision=UINT32_MAX;
@@ -1559,6 +1566,7 @@ static bool pending_flush(pending_progress_t* p) {
         p->progress_saved = true;
     }
     if (!strcmp(p->path, s_latest_path) && book_progress_set_last_path(p->path) != ESP_OK) return false;
+    p->persisted_revision = book_progress_revision();
     p->dirty = false;
     return true;
 }
@@ -1820,19 +1828,23 @@ static void save_progress(void) {
     (void)book_excerpt_flush(s_reader_session.book.path);
     bool was_failed = s_save_failed;
     pending_progress_t* pending = pending_find(s_reader_session.book.path);
-    if (!pending) { s_save_failed = true; return; }
+    if (!pending || book_progress_watch_invalidated(pending->watch)) { s_save_failed = true; return; }
     book_progress_t p = {
         .file_size = s_reader_session.book.file_size, .chapter = (uint16_t)s_reader_session.position.chapter,
         .byte_off = (uint32_t)reader_page_offset(s_reader_session.position.page),
         .px = (uint8_t)s_px, .pct = (uint8_t)percent(s_reader_session.position.page),
         .last_open_s = 0,
     };
-    if (!pending->dirty || pending->value.file_size != p.file_size || pending->value.chapter != p.chapter ||
+    // 别把新会话当成已保存；存储版本变化后须重写书位，防止重试旧书改变当前书的最近顺序。
+    // A fresh session is not saved yet. Reassert recency if the store changed, e.g. while retrying an older book.
+    const bool checkpoint_stale = !pending->dirty &&
+        (!pending->progress_saved || pending->persisted_revision != book_progress_revision());
+    if (checkpoint_stale || pending->value.file_size != p.file_size || pending->value.chapter != p.chapter ||
         pending->value.byte_off != p.byte_off || pending->value.px != p.px || pending->value.pct != p.pct) {
         pending->value = p;
         pending->progress_saved = false;
+        pending->dirty = true;
     }
-    pending->dirty = true;
     if (pending_flush(pending)) {
         s_unsaved = 0;
         s_save_failed = false;
@@ -1840,6 +1852,36 @@ static void save_progress(void) {
     }
     else { if (!s_unsaved) s_unsaved = 1; s_save_failed = true; }
     if (was_failed != s_save_failed) invalidate_prep();
+}
+static void reader_progress_note_turn(void) {
+    // 新页还没推屏；到阈值后只保留待保存状态，由空闲轮询取届时的最新位置。
+    // The new page isn't on screen yet. Saturate at the threshold and let idle polling save the then-current position.
+    if (s_unsaved < READER_PROGRESS_SAVE_TURNS) ++s_unsaved;
+    s_progress_frame_ms = 0;
+}
+static void reader_progress_note_frame(bool ready) {
+    s_progress_frame_ms = ready ? esp_timer_get_time() / 1000 : 0;
+}
+static app_redraw_t reader_progress_tick(const app_ctx_t *ctx) {
+    const bool retry = s_save_failed;
+    const bool reading = s_view == READING;
+    if (!retry && (!reading || s_unsaved < READER_PROGRESS_SAVE_TURNS)) return APP_REDRAW_NONE;
+    if (ctx->consumed || ctx->user_activity || ctx->pressed || ctx->released ||
+        ctx->request_app || ctx->request_menu || ctx->request_return ||
+        (ctx->touch && ctx->touch->touched) || s_middle_pending || usb_storage_active() ||
+        ctx->now_ms - ctx->last_input_ms < READER_PROGRESS_IDLE_MS) return APP_REDRAW_NONE;
+    if (reading && (!app_book_reader_body_visible() || s_dictionary_view.open || s_dictionary_notice_until ||
+        s_reader_notice[0] || !s_progress_frame_ms || ctx->now_ms - s_progress_frame_ms < READER_PROGRESS_IDLE_MS))
+        return APP_REDRAW_NONE;
+    if (retry && ctx->now_ms - s_save_retry_ms < READER_PROGRESS_RETRY_MS) return APP_REDRAW_NONE;
+    // 写盘与扫描仍须互斥；跳过当前输入窗口，不把写入挪到推屏返回的同一轮。
+    // Flash writes and scanning still exclude each other; wait for idle rather than write in the presenting iteration.
+    s_save_retry_ms = ctx->now_ms;
+    if (retry) retry_progress();
+    else TD_TIME("save_progress", save_progress());
+    if (s_save_failed == retry) return APP_REDRAW_NONE;
+    invalidate_prep();
+    return APP_REDRAW_PAGE;
 }
 static void invalidate_prep(void) { reader_prefetch_invalidate(); }
 
@@ -4322,12 +4364,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
         !s_dictionary_selection.active && !s_dictionary_view.open &&
         book_layout_page_image_count(s_reader_session.position.page) == 0;
-    reader_excerpt_presented(reader_frame_ok && reader_image_slots(s_reader_session.position.page) == 0 &&
-        !s_reader_notice[0] && !s_dictionary_notice_until, !tools_band &&
+    const bool body_updated = !tools_band &&
         (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL ||
          (s_area.x <= output_request.body_area.x && s_area.y <= output_request.body_area.y &&
           s_area.x + s_area.width >= output_request.body_area.x + output_request.body_area.width &&
-          s_area.y + s_area.height >= output_request.body_area.y + output_request.body_area.height)));
+          s_area.y + s_area.height >= output_request.body_area.y + output_request.body_area.height));
+    reader_excerpt_presented(reader_frame_ok && reader_image_slots(s_reader_session.position.page) == 0 &&
+        !s_reader_notice[0] && !s_dictionary_notice_until, body_updated);
     s_reader_text_frame = reader_frame_ok && !app_settings_book_background_path()[0];
     s_reader_stable_frame = reader_frame_ok;
     s_reader_cleanup = false;
@@ -4346,6 +4389,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
     s_cover_batch_present_pending = false;
     s_reader_turn_pending = false;
     s_mode = MODE_GL16;
+    if (body_updated)
+        reader_progress_note_frame(err == EPD_DRAW_SUCCESS && app_book_reader_body_visible() && !s_dictionary_view.open);
     return true;
 }
 static app_redraw_t paint_reading(app_ctx_t* ctx, enum EpdDrawMode mode) {
@@ -4463,6 +4508,7 @@ static void free_book(void) {
     e0470_page_turn_release();
     s_water_turn_pending = false;
     s_reader_notice[0] = 0;
+    s_progress_frame_ms = 0;
     s_reader_turn_pending = s_reader_text_frame = s_reader_stable_frame = false;
     pending_progress_t* pending = pending_find(s_reader_session.book.path);
     if (pending && !pending->dirty) pending_discard(s_reader_session.book.path);
@@ -5685,8 +5731,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     else s_turns = 0;
     s_reader_cleanup = full_pages > 0 && s_turns >= full_pages;
     if (s_reader_cleanup) s_turns = 0;
-    if (s_unsaved < 8) ++s_unsaved;
-    if (s_unsaved >= 8 && !s_save_failed) TD_TIME("save_progress", save_progress());
+    reader_progress_note_turn();
     ESP_LOGI(TAG, "turn chapter=%u page=%u/%u pct=%u", (unsigned)s_reader_session.position.chapter, (unsigned)s_reader_session.position.page + 1, (unsigned)book_layout_page_count(), percent(s_reader_session.position.page));
     // 预渲染未命中时也使用 GL16；到达设定页数后在本次翻页整屏全刷。
     // A cache miss still uses GL16; the selected turn count triggers a full-screen refresh on this turn.
@@ -5974,11 +6019,13 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
 // 返回主页以本次开书来源为准；分类页码已在书架开书前记忆，不被目录/工具栏覆盖。
 // Return to this opening's origin; shelf category/page were saved before opening, independently of TOC/tools.
 static app_redraw_t reader_return(app_ctx_t *ctx) {
-    save_progress();
     if (s_reader_return_home) {
+        // 跨页由 book_on_exit 保存；返回本页书架不会触发离页回调。
+        // Cross-page navigation saves in book_on_exit; the in-page shelf return has no exit callback.
         ui_nav_request(ctx, 0);
         return APP_REDRAW_NONE;
     }
+    save_progress();
     free_book();
     s_view = SHELF;
     s_reader_panel = READER_PANEL_NONE;
@@ -8605,12 +8652,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (shake != APP_REDRAW_NONE) return shake;
     app_redraw_t notice = reader_notice_tick(ctx);
     if (notice != APP_REDRAW_NONE) return notice;
-    if (s_save_failed && ctx->now_ms - s_save_retry_ms >= 15000) {
-        s_save_retry_ms = ctx->now_ms;
-        bool failed = s_save_failed;
-        retry_progress();
-        if (failed != s_save_failed) { invalidate_prep(); return APP_REDRAW_PAGE; }
-    }
+    const app_redraw_t progress = reader_progress_tick(ctx);
+    if (progress != APP_REDRAW_NONE) return progress;
     if (s_requested_resume && s_view == SHELF && !ctx->request_app && !ctx->request_menu && !ctx->request_return &&
         ctx->now_ms >= s_resume_next_ms) {
         if (open_requested_book(ctx)) {

@@ -145,13 +145,15 @@ int main(void){app_ctx_t ctx={0};consume_s_reader_tap();
  assert(reader_key_action(&ctx,APP_READER_KEY_FRONTLIGHT)==APP_REDRAW_NONE&&!s_fl_on&&s_fl_applies==2);
  for(int via_key=0;via_key<2;++via_key)for(int from_home=0;from_home<2;++from_home){
   s_view=READING;s_reader_panel=READER_PANEL_TOOLS;s_reader_return_home=from_home;
-  nav=-1;ctx.leaf=99;int before=freed;
+  nav=-1;ctx.leaf=99;int before=freed,before_save=saved;
   strcpy(s_reader_session.book.path,"/a.txt");
   app_redraw_t result=via_key?reader_key_action(&ctx,APP_READER_KEY_HOME):reader_return(&ctx);
-  if(from_home)assert(result==APP_REDRAW_NONE&&nav==0&&freed==before);
-  else assert(result==APP_REDRAW_PAGE&&nav==-1&&s_view==SHELF&&ctx.leaf==4&&freed==before+1&&s_reader_panel==READER_PANEL_NONE);
+  // 首页跳转只发请求，由离页回调保存；书架仍在当前页内，立即保存。
+  // A request to Home defers the save to on_exit; the in-page shelf return saves immediately.
+  if(from_home)assert(result==APP_REDRAW_NONE&&nav==0&&freed==before&&saved==before_save);
+  else assert(result==APP_REDRAW_PAGE&&nav==-1&&s_view==SHELF&&ctx.leaf==4&&freed==before+1&&saved==before_save+1&&s_reader_panel==READER_PANEL_NONE);
  }
- assert(saved==4&&restored==2);
+ assert(saved==2&&restored==2);
  printf("PASS: 13 unique layouts, six reading placements, %d hit points, fixed cover-feedback bounds, move/cancel/swipe/empty/open-failure guards; screen/key/hold shared return routes retain home or shelf category/page; renamed label\n",points);
 }
 '''

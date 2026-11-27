@@ -45,7 +45,7 @@ static bool s_chrome_visible[2]={true,true};
 static bool s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
 static bool s_excerpt_forward;
 static char s_reader_notice[64];
-static int64_t s_dictionary_notice_until;
+static int64_t s_dictionary_notice_until,s_progress_frame_ms;
 // 书摘由专用回归验证；此处只保留真实呈现和翻页调用的状态边界。
 // Dedicated excerpt tests cover selection; retain its state boundary for actual present/turn calls here.
 static void reader_excerpt_presented(bool body_ok,bool body_updated){(void)body_ok;(void)body_updated;s_excerpt_forward=false;}
@@ -158,7 +158,7 @@ static void guard_draw_result(void *hl,int error){(void)hl;assert(error==EPD_DRA
 static EpdRect reader_area(void){return (EpdRect){36,176,612,856};}
 static EpdRect progress_rect(void){return s_chrome_visible[1]?(EpdRect){36,1040,612,42}:(EpdRect){0};}
 static unsigned percent(unsigned page){return page;}
-static bool test_hide_images,test_load_failed,s_save_failed,s_input_settle;
+static bool test_hide_images,test_load_failed,s_input_settle;
 static int test_types[2][2],test_push_error,test_effect;
 static uint8_t test_full_pages;
 static unsigned s_turns,s_unsaved,s_stats_pending_turns,s_session_turns;
@@ -253,7 +253,9 @@ for rel in ('main/display/display_refresh_policy.c','main/display/display_refres
     shelf+=re.sub(r'^#include[^\n]*','',(root/rel).read_text(),flags=re.M)+'\n'
 shelf+='static bool reader_text_body(void){return book_layout_page_image_count(s_page)==0;}\nstatic void book_layout_adopt_page(unsigned page){(void)page;}\n'
 shelf+='#define READER_PANEL_TOOLS 99\n'
-for name in ("reader_status_prepare", "notepad_author_present", "present", "paint_reading", "reader_turn_chrome", "turn_page"):
+shelf += re.search(r"^enum \{ READER_PROGRESS_SAVE_TURNS[^\n]+;", (root/"main/apps/app_book.c").read_text(), re.M).group(0) + "\n"
+for name in ("app_book_reader_body_visible", "reader_progress_note_turn", "reader_progress_note_frame",
+             "reader_status_prepare", "notepad_author_present", "present", "paint_reading", "reader_turn_chrome", "turn_page"):
     shelf += function("main/apps/app_book.c", name) + "\n"
 shelf += r'''
 int main(void){
@@ -463,14 +465,14 @@ int main(void){
  // Failed presents, panels and leaving reading invalidate history; a successful body restores it.
  memset(test_types,0,sizeof(test_types));s_chapter=s_page=0;
  test_push_error=EPD_DRAW_ERROR;trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
- assert(!s_reader_text_frame);test_push_error=0;
- assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending);
- trace_count=0;present(&ctx,APP_REDRAW_AREA);assert(s_reader_text_frame);
- s_reader_panel=99;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_reader_text_frame);
+ assert(!s_reader_text_frame&&!s_progress_frame_ms);test_push_error=0;
+ assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending&&!s_progress_frame_ms);
+ trace_count=0;present(&ctx,APP_REDRAW_AREA);assert(s_reader_text_frame&&s_progress_frame_ms);
+ s_reader_panel=99;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_reader_text_frame&&!s_progress_frame_ms);
  s_reader_panel=READER_PANEL_NONE;s_page=0;
- assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending);
- trace_count=0;present(&ctx,APP_REDRAW_AREA);assert(s_reader_text_frame);
- s_view=SHELF;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_reader_text_frame);
+ assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_reader_turn_pending&&!s_progress_frame_ms);
+ trace_count=0;present(&ctx,APP_REDRAW_AREA);assert(s_reader_text_frame&&s_progress_frame_ms);
+ s_view=SHELF;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(!s_reader_text_frame&&!s_progress_frame_ms);
  s_view=s_presented_view=READING;s_chapter=0;s_page=1;test_load_failed=true;
  assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&!s_reader_turn_pending&&s_view==TOC);
  test_load_failed=false;s_view=s_presented_view=READING;s_page=0;

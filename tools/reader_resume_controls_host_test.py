@@ -2,6 +2,7 @@
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -54,8 +55,7 @@ static unsigned s_stats_pending_turns,s_session_turns,s_turns,s_unsaved,journal_
 static void app_reading_journal_record(const char *path,const char *title,uint32_t size,unsigned chapter,uint32_t ms,uint32_t turns){
  assert(!strcmp(path,"/book.epub")&&!strcmp(title,"Book")&&size==500&&chapter==s_chapter&&!ms&&turns==1);journal_turns+=turns;
 }
-static int64_t s_last_turn_ms,s_stats_activity_ms;
-static bool s_save_failed;
+static int64_t s_last_turn_ms,s_stats_activity_ms,s_progress_frame_ms;
 static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
 static const char *app_settings_book_background_path(void){return "";}
@@ -107,8 +107,9 @@ unit += function('reader_turn_load', BOOK) + '\n'
 from reader_reflow_test_code import reflow_code
 unit += reflow_code("indent")
 unit += function('apply_reader_indent', BOOK) + '\n'
+unit += re.search(r"^enum \{ READER_PROGRESS_SAVE_TURNS[^\n]+;", BOOK.read_text(), re.M).group(0) + "\n"
 for name in ('app_book_request_open', 'app_book_request_open_from_home', 'app_book_request_resume',
-             'reader_turn_chrome', 'turn_page'):
+             'reader_progress_note_turn', 'reader_turn_chrome', 'turn_page'):
     if name == 'turn_page':
         unit += '#define turn_page actual_turn_page\n' + function(name, BOOK) + '\n#undef turn_page\n'
         unit += 'static app_redraw_t turn_page(app_ctx_t *ctx,int dir){app_redraw_t result=actual_turn_page(ctx,dir);assert(journal_turns==s_stats_pending_turns);return result;}\n'
@@ -120,6 +121,7 @@ static void reset(bool full,bool tools,size_t page,size_t chapter){
  strcpy(s_reader_session.book.path,"/book.epub");strcpy(s_reader_session.book.title,"Book");s_reader_session.book.file_size=500;journal_turns=0;
  s_reader_panel=tools?READER_PANEL_TOOLS:READER_PANEL_NONE;s_reader_slider=2;
  reflows=paints=saves=s_stats_pending_turns=s_session_turns=s_turns=s_unsaved=excerpt_repositions=0;
+ s_progress_frame_ms=1;
  failed_reflows=0;load_failed=false;full_pages=0;s_reader_text_frame=s_reader_stable_frame=true;
  s_reader_turn_pending=s_water_turn_pending=s_reader_cleanup=false;s_jump_offset=0;
  s_reader_image_refresh_pending=false;s_page_images=NULL;
@@ -148,7 +150,7 @@ int main(void){
   reset(full,tools,2,0);size_t destination=book_layout_page_start_offset(s_page+dir);
   app_redraw_t r=turn_page(&ctx,dir);
   assert(s_chrome_visible[0]==!full&&s_chrome_visible[1]==!full&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
-  assert(s_stats_pending_turns==1&&s_session_turns==1&&paints==1);
+  assert(s_stats_pending_turns==1&&s_session_turns==1&&paints==1&&!s_progress_frame_ms);
   assert(s_excerpt_forward==(dir>0));
   assert(excerpt_repositions==(unsigned)(dir<0));
   assert(book_layout_page_start_offset(s_page)==destination);

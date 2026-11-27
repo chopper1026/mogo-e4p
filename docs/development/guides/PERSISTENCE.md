@@ -65,6 +65,14 @@ A fresh 32 KiB partition has 882 available entries after the allocator reserves 
 
 Legacy progress with a 40-byte NUL-terminated path cost four NVS entries per book. New records share 32 checked internal FAT buckets and retain the original sequence, path and backup encoding. Legacy rows remain readable while idle shelf batches migrate them; a failed copy never authorizes deleting its source. A full internal volume can still prevent saves or restores. Older firmware cannot see migrated rows directly; keep a compatible backup before downgrading.
 
+正文每累计翻 8 页只标记待保存；等最新正文成功推屏，且距推屏完成和最近一次输入都至少 2.5 秒，再一次写入当时的最新位置。连续翻页不强插周期写入；换章、离开阅读、锁屏和失卡仍同步尝试提交待保存的位置。周期写入失败会退避 15 秒再尝试，不改变原有持久化格式和校验流程。连续翻页期间若突然断电，续读以最后成功保存的位置为准，可能回退超过 8 页。
+
+After eight turns, mark the reader checkpoint as pending. Write only the latest position once at least 2.5 seconds have elapsed since both the latest successful body presentation and the last input. Periodic writes do not interrupt a burst; chapter changes, leaving the reader, locking, and media loss still attempt to commit pending positions synchronously. A failed periodic write backs off for 15 seconds; the on-disk format and verification are unchanged. Sudden power loss during a burst resumes from the last successful checkpoint, which may be more than eight pages back.
+
+退出到首页时由离页回调保存；返回同页书架时由阅读器直接保存。当前会话已确认保存、书位不变且进度存储没有其他变动时，不重写进度；新开书仍登记最近顺序，只剩续读入口写入失败时仍单独重试该入口。
+
+The exit callback saves when returning to Home, while the reader saves directly when returning to its own shelf. Skip a checkpoint only if this session already confirmed the same position and the progress store has not changed. Opening a book still records its recency; if only the resume pointer failed, retry that write alone.
+
 单个已存 WiFi 的应用凭据为 99 字节（单块 6 条目），多网络沿用旧版 794 字节表（单块 27 条目），TF 备份不随设备编码变化。 / Single-network credentials cost six NVS entries instead of the full table’s 27 when stored in one chunk.
 
 ## 操作影响 / Operation Effects

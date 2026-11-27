@@ -63,7 +63,7 @@ typedef struct {unsigned now_ms;} app_ctx_t;
 typedef struct {bool present,mounted;} board_sd_info_t;
 typedef struct pending_progress {
     char path[BOOK_STORE_PATH_MAX]; book_progress_t value;
-    bool dirty,progress_saved; book_progress_watch_t *watch; struct pending_progress *next;
+    uint32_t persisted_revision; bool dirty,progress_saved; book_progress_watch_t *watch; struct pending_progress *next;
 } pending_progress_t;
 struct book_progress_watch {int unused;};
 typedef struct {int unused;} reader_dims_ctx_t;
@@ -71,7 +71,7 @@ enum {SHELF,READING,READER_PANEL_NONE=0};
 static pending_progress_t *s_pending;
 static reader_session_t s_reader_session;
 static reader_orientation_t s_orientation;
-static int64_t s_orientation_retry_ms;
+static int64_t s_orientation_retry_ms,s_progress_frame_ms;
 static display_orientation_t display_orientation = DISPLAY_ORIENTATION_PORTRAIT;
 static unsigned image_bleed_width;
 static const char *background_path = "";
@@ -346,9 +346,10 @@ int main(void){
         reset();assert(open_checked(&ctx,a));background_path=background?"/sdcard/paper.png":"";
         display_orientation=DISPLAY_ORIENTATION_RIGHT;
         s_orientation=(reader_orientation_t){.automatic=true,.locked=DISPLAY_ORIENTATION_RIGHT,.candidate=2,.since_ms=500};
-        s_orientation_retry_ms=900;free_book();
+        s_orientation_retry_ms=900;s_progress_frame_ms=900;free_book();
         assert(display_orientation==DISPLAY_ORIENTATION_PORTRAIT&&!s_orientation.automatic);
         assert(s_orientation.locked==DISPLAY_ORIENTATION_PORTRAIT&&!s_orientation.candidate&&!s_orientation.since_ms&&!s_orientation_retry_ms);
+        assert(!s_progress_frame_ms);
         assert(image_bleed_width==(background?0u:UI_LOCK_WIDTH));
     }
     reset(); assert(open_checked(&ctx,a));

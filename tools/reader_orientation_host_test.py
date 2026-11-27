@@ -123,7 +123,7 @@ static reader_orientation_t s_orientation;
 static display_orientation_t direction;
 display_orientation_t display_orientation_get(void){return direction;}
 void display_orientation_set(display_orientation_t next){direction=next;}
-static int64_t s_orientation_retry_ms;
+static int64_t s_orientation_retry_ms,s_progress_frame_ms;
 static book_shake_gate_t s_shake_gate;
 static const char *s_text;
 static size_t s_jump_offset=SIZE_MAX,s_jump_page,s_selected_toc;

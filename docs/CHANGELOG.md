@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 连续翻页不再每隔几页停下来保存进度；停翻后合并保存最新位置，换章、退出和锁屏仍即时保存。/ Progress checkpoints no longer interrupt a burst of page turns. Save the latest position after a pause, and still save immediately on chapter changes, exit, or lock.
+- 退出阅读不再重复写入已保存的书位；如果翻到了新位置，仍会在离开前保存。/ Leaving the reader no longer rewrites an already saved position. A new position is still saved before leaving.
 - 词典卡片改用「上一页 / 下一页」，只显示确实能翻到的方向；单页释义不显示翻页按钮。/ Dictionary cards show Previous and Next only when a page exists in that direction.
 
 - 阅读正文新增离线英汉和英英字典：长按英文整词，拖选短语，在释义卡片切换；英文词库独立安装到 TF 卡。/ Long-press an English word or drag over a phrase to switch between offline EN-ZH and EN-EN definitions. Install the English package separately on the TF card.

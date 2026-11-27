@@ -1,4 +1,4 @@
-"""Compile actual shelf helpers for deterministic ordering and failure regressions.
+"""Compile actual shelf and reader helpers for deterministic timing and failure regressions.
 
 SPDX-FileCopyrightText: 2026 mindreset
 SPDX-License-Identifier: Apache-2.0
@@ -7,6 +7,7 @@ English: Extract real static helpers without linking hardware page dependencies.
 """
 from pathlib import Path
 from shelf_cover_test_support import declarations as cover_declarations, implementation as cover_implementation
+import re
 import subprocess
 import tempfile
 
@@ -15,7 +16,6 @@ layout_source = Path(__file__).resolve().parents[1] / "main/book/book_layout.c"
 
 def function(name, path=source):
     text = path.read_text(encoding="utf-8")
-    import re
     # 注释中的引号/花括号不是 C 语法，保持位置后再匹配函数边界。
     # Quotes/braces in comments are not C syntax; mask comments while preserving positions.
     tokens = r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
@@ -80,15 +80,26 @@ static ble_pt_action_t ble_pt_action_for_frame(const ble_pt_frame_t *frame){
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 #define ESP_LOGI(...) ((void)0)
+#define TD_TIME(src, ...) do { __VA_ARGS__; } while (0)
 typedef int esp_err_t;
 typedef struct app_desc {int unused;} app_desc_t;
 typedef struct {bool touched;} test_touch_t;
-typedef struct {int leaf;bool request_menu,consumed;int64_t now_ms;uint8_t *fb;const app_desc_t *request_app;test_touch_t *touch;void *acc;} app_ctx_t;
+typedef struct {
+    int leaf;
+    bool request_menu,request_return,consumed,user_activity,pressed,released;
+    int64_t now_ms,last_input_ms;
+    uint8_t *fb;
+    const app_desc_t *request_app;
+    test_touch_t *touch;
+    void *acc;
+} app_ctx_t;
 typedef enum {APP_REDRAW_PAGE,APP_REDRAW_AREA,APP_REDRAW_NONE,APP_REDRAW_FULL} app_redraw_t;
 typedef struct {app_redraw_t redraw; bool accepted;} app_back_result_t;
 static app_back_result_t book_edge_back(app_ctx_t *ctx){(void)ctx;return (app_back_result_t){APP_REDRAW_PAGE,true};}
 typedef struct {ui_gesture_type_t type;int x0,y0;} ui_gesture_event_t;
 static struct {bool active;} s_dictionary_selection;
+static struct {bool open;} s_dictionary_view;
+static int64_t s_dictionary_notice_until;
 static void dictionary_cancel(void){s_dictionary_selection.active=false;}
 static app_redraw_t dictionary_dismiss(void){dictionary_cancel();return APP_REDRAW_PAGE;}
 static void book_layout_enable_selection(bool enabled){(void)enabled;}
@@ -208,12 +219,13 @@ static int book_metadata_cached(const char* path,char* title,size_t tcap,char* a
 static bool book_title_get(const char* path,char* out,size_t cap){(void)path;(void)out;(void)cap;return false;}
 static void book_title_clean_import(char* title){(void)title;}
 static bool book_title_from_path(const char* path,char* out,size_t cap){const char* name=strrchr(path,'/');name=name?name+1:path;size_t n=strlen(name);const char* dot=strrchr(name,'.');if(dot)n=(size_t)(dot-name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;return n>0;}
-typedef struct pending_progress {char path[288];book_progress_t value;bool dirty,progress_saved;book_progress_watch_t* watch;struct pending_progress* next;} pending_progress_t;
+typedef struct pending_progress {char path[288];book_progress_t value;uint32_t persisted_revision;bool dirty,progress_saved;book_progress_watch_t* watch;struct pending_progress* next;} pending_progress_t;
 static pending_progress_t* s_pending;
 typedef book_shelf_retry_t delete_retry_t;
 static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
+static int64_t s_progress_frame_ms,s_save_retry_ms;
 static char s_requested_open[288];
 static bool s_requested_open_home,s_requested_resume,s_reader_return_home;
 static int64_t s_resume_next_ms,s_resume_deadline_ms;
@@ -232,13 +244,21 @@ static bool load_chapter(app_ctx_t *ctx,size_t chapter,size_t offset,bool last_p
 }
 static size_t s_jump_offset=SIZE_MAX,s_jump_page;
 static int test_save_error,test_last_error,test_save_calls,test_last_calls;
+static book_progress_t test_saved_progress;
+static bool test_usb_active;
+static bool usb_storage_active(void){return test_usb_active;}
 static size_t book_layout_page_count(void){return 3;}
 static size_t book_layout_page_start_offset(size_t page){return page*100;}
 static unsigned percent(size_t page){return (unsigned)page*20;}
-static int book_progress_save(const char* p,const book_progress_t* value){(void)p;(void)value;test_save_calls++;book_progress_bump();return test_save_error;}
+static int book_progress_save(const char* p,const book_progress_t* value){
+    (void)p;test_save_calls++;book_progress_bump();
+    if(!test_save_error)test_saved_progress=*value;
+    return test_save_error;
+}
 static int book_progress_set_last_path(const char* p){test_last_calls++;if(!test_last_error)snprintf(test_last_path,sizeof(test_last_path),"%s",p);book_progress_bump();return test_last_error;}
 static void save_progress(void);
-static bool book_excerpt_flush(const char *path){assert(path&&*path);return true;}
+static int test_excerpt_flush_calls;
+static bool book_excerpt_flush(const char *path){assert(path&&*path);++test_excerpt_flush_calls;return true;}
 static void track_ticket_stats(app_ctx_t *ctx){(void)ctx;}
 static void invalidate_prep(void){}
 static void invalidate_covers(void){}
@@ -324,7 +344,8 @@ static int book_chapter_image_dimensions(size_t chapter,const char *name,unsigne
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 static void release_page_images(void){}
 static char s_reader_notice[96];static int64_t s_reader_notice_until;
-static int64_t esp_timer_get_time(void){return 1000000;}
+static int64_t test_clock_us=1000000;
+static int64_t esp_timer_get_time(void){return test_clock_us;}
 static void prepare_inline_image(void){test_image_preparations++;}
 static bool book_layout_build_blocks(const char* text,size_t len,const void* blocks,size_t count,EpdRect rect,int px){
     (void)text;(void)len;(void)blocks;(void)count;(void)px;assert(test_draw_locked);test_reflows++;test_reflow_rect=rect;
@@ -549,6 +570,15 @@ for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_value", "s
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_selection_clear", "bookmark_selection_prepare", "bookmark_selected_set", "bookmark_selected_at", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "shelf_management_context", "shelf_managed_removed", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "toggle_reader_tools_panel", "reader_key_action", "middle_short_press", "middle_pending_tick", "cancel_auto_resume", "open_error_button", "dismiss_open_error", "open_error_gesture", "open_error_input_owned", "draw_open_error", "show_open_error", "shelf_back_level", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     fragment = function(name)
     unit += (fragment.replace("calloc(", "selection_alloc(") if name == "bookmark_selection_prepare" else fragment) + "\n"
+unit += re.search(r"^enum \{ READER_PROGRESS_SAVE_TURNS[^\n]+;", source.read_text(), re.M).group(0) + "\n"
+for name in ("app_book_reader_body_visible", "reader_progress_note_turn", "reader_progress_note_frame", "reader_progress_tick"):
+    unit += function(name) + "\n"
+assert "reader_progress_note_turn();" in function("turn_page") and "save_progress(" not in function("turn_page")
+present = function("present")
+assert 0 <= present.index("reader_present_output(") < present.index("reader_progress_note_frame(")
+assert "reader_progress_tick(ctx)" in function("on_tick")
+for name in ("reader_turn_save", "book_on_exit", "before_lock", "book_on_media_lost"):
+    assert "save_progress();" in function(name), name
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
 unit += "static unsigned app_settings_system_font_size(void){return 100;}\n"
@@ -559,7 +589,6 @@ for name in ("apply_reader_layout", "reader_ui_extra", "reader_slider_rect", "re
 scan_source = source.parents[1] / "book/book_shelf_scan.c"
 manage_source = source.parents[1] / "book/book_shelf_manage.c"
 unit += service_hooks
-import re
 unit += re.search(r"#define BOOK_SCAN_DEPTH_LIMIT [^\n]+\ntypedef struct \{[^{}]+\} shelf_scan_frame_t;", scan_source.read_text()).group(0) + "\n"
 unit += "#define copy_text shelf_service_copy_text\n#define clean_filename shelf_service_clean_filename\n"
 unit += re.search(r"typedef struct \{[^{}]+\} shelf_backfill_t;", scan_source.read_text()).group(0) + "\n"
@@ -575,6 +604,146 @@ unit += r'''
 static int compare_books(const shelf_entry_t *a, const shelf_entry_t *b) {
     book_shelf_query_t query = shelf_query();
     return book_shelf_compare(&query, a, b);
+}
+static void test_idle_progress(void) {
+    test_touch_t touch={0};
+    app_ctx_t ctx={.touch=&touch};
+    s_view=READING;s_reader_panel=READER_PANEL_NONE;s_clear_confirm=false;
+    s_text="text";s_chapter=7;s_unsaved=0;s_reader_notice[0]=0;s_save_retry_ms=0;
+    strcpy(s_path,"/flash/books/idle.txt");
+    assert(pending_reserve(s_path));pending_mark_latest(s_path);
+    int calls=test_save_calls, last_calls=test_last_calls;
+
+    // 连续三倍阈值的翻页不中断；只有最新出屏位置在空闲时落盘。
+    // Three thresholds of consecutive turns stay uninterrupted; idle saves only the latest shown position.
+    for (int i=0;i<3*READER_PROGRESS_SAVE_TURNS;++i) {
+        s_page=(size_t)i%3;
+        ctx.now_ms=ctx.last_input_ms=1000+1050*i;
+        reader_progress_note_turn();
+        assert(!s_progress_frame_ms&&reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+        test_clock_us=(ctx.now_ms+820)*1000;
+        reader_progress_note_frame(true);
+        ctx.now_ms+=1049;
+        assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+    }
+    assert(s_unsaved==READER_PROGRESS_SAVE_TURNS);
+    ctx.now_ms=s_progress_frame_ms+READER_PROGRESS_IDLE_MS-1;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+
+    reader_progress_note_frame(false);
+    ctx.now_ms+=READER_PROGRESS_IDLE_MS;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+    test_clock_us=ctx.now_ms*1000;
+    reader_progress_note_frame(true);
+    ctx.now_ms+=READER_PROGRESS_IDLE_MS;
+    touch.touched=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);touch.touched=false;
+    ctx.released=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);ctx.released=false;
+    ctx.request_return=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);ctx.request_return=false;
+    s_middle_pending=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);s_middle_pending=false;
+    test_usb_active=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);test_usb_active=false;
+    s_reader_panel=READER_PANEL_TOOLS;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);s_reader_panel=READER_PANEL_NONE;
+    s_dictionary_view.open=true;assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE);s_dictionary_view.open=false;
+    ctx.last_input_ms=ctx.now_ms-READER_PROGRESS_IDLE_MS+1;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+    ++ctx.now_ms;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==++calls&&test_last_calls==last_calls+1);
+    assert(!s_unsaved&&!s_save_failed&&test_saved_progress.chapter==7&&test_saved_progress.byte_off==200);
+    ctx.now_ms+=READER_PROGRESS_IDLE_MS;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+
+    // 失败不紧循环，退避后以新位置重试；显式保存不受帧和空闲门槛限制。
+    // Back off on failure and retry at the new position; explicit saves bypass frame and idle gates.
+    for (int i=0;i<READER_PROGRESS_SAVE_TURNS;++i) reader_progress_note_turn();
+    s_page=0;ctx.last_input_ms=ctx.now_ms;
+    test_clock_us=(ctx.now_ms+820)*1000;reader_progress_note_frame(true);
+    const int64_t fail_at=s_progress_frame_ms+READER_PROGRESS_IDLE_MS;
+    ctx.now_ms=fail_at;test_save_error=ESP_FAIL;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_PAGE&&test_save_calls==++calls);
+    assert(s_save_failed&&s_unsaved==READER_PROGRESS_SAVE_TURNS&&pending_find(s_path)->dirty);
+    test_save_error=ESP_OK;s_page=1;ctx.last_input_ms=fail_at+1000;
+    reader_progress_note_turn();test_clock_us=(ctx.last_input_ms+820)*1000;reader_progress_note_frame(true);
+    ctx.now_ms=fail_at+READER_PROGRESS_RETRY_MS-1;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+    ++ctx.now_ms;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_PAGE&&test_save_calls==++calls);
+    assert(!s_save_failed&&!s_unsaved&&test_saved_progress.byte_off==100);
+    s_page=2;reader_progress_note_turn();
+    test_clock_us=ctx.now_ms*1000;reader_progress_note_frame(true);
+    ctx.now_ms+=READER_PROGRESS_IDLE_MS;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_NONE&&test_save_calls==calls);
+    reader_progress_note_frame(false);
+    save_progress();
+    assert(test_save_calls==++calls&&!s_unsaved&&test_saved_progress.byte_off==200);
+
+    // 离开正文后，还能在书架空闲时重试已排队的位置。
+    // After leaving the body, the idle shelf can still retry the queued position.
+    s_page=1;reader_progress_note_turn();test_save_error=ESP_FAIL;save_progress();
+    assert(test_save_calls==++calls&&s_save_failed);
+    s_text=NULL;s_view=SHELF;test_save_error=ESP_OK;ctx.now_ms+=READER_PROGRESS_RETRY_MS;
+    assert(reader_progress_tick(&ctx)==APP_REDRAW_PAGE&&test_save_calls==calls+1);
+    assert(!s_save_failed&&test_saved_progress.byte_off==100);
+    pending_discard(s_path);
+}
+static void test_close_progress(void) {
+    const char *path="/flash/books/close.txt", *older="/flash/books/older.txt";
+    app_ctx_t ctx={0};
+    s_px=48;s_unsaved=0;s_view=READING;s_reader_panel=READER_PANEL_NONE;
+    s_text="text";s_chapter=0;s_page=0;
+    strcpy(s_path,path);assert(pending_reserve(path));pending_mark_latest(path);
+    int writes=test_save_calls, last_writes=test_last_calls, excerpts=test_excerpt_flush_calls;
+    save_progress();
+    assert(test_save_calls==++writes&&test_last_calls==++last_writes&&test_saved_progress.byte_off==0);
+    s_unsaved=READER_PROGRESS_SAVE_TURNS;
+    save_progress();
+    assert(test_save_calls==writes&&test_last_calls==last_writes&&!s_unsaved);
+    assert(test_excerpt_flush_calls==excerpts+2);
+
+    // 先补写旧书后，当前书即使没翻页也必须恢复最近顺序。
+    // After retrying an older book, restore the active book's recency even if its position matches.
+    assert(pending_reserve(older));
+    pending_find(older)->dirty=true;pending_find(older)->value.byte_off=999;
+    retry_progress();writes+=2;++last_writes;
+    assert(test_save_calls==writes&&test_last_calls==last_writes&&!pending_find(older));
+    assert(!strcmp(test_last_path,path)&&test_saved_progress.byte_off==0&&!s_save_failed);
+
+    s_page=1;s_unsaved=1;test_last_error=ESP_FAIL;
+    save_progress();
+    assert(test_save_calls==++writes&&test_last_calls==++last_writes&&s_save_failed);
+    assert(pending_find(path)->dirty&&pending_find(path)->progress_saved);
+    test_last_error=ESP_OK;
+    save_progress();
+    assert(test_save_calls==writes&&test_last_calls==++last_writes&&!s_save_failed&&!s_unsaved);
+    pending_discard(path);
+
+    for (int home=0;home<2;++home) for (int changed=0;changed<2;++changed) {
+        s_view=READING;s_text="text";s_page=1;s_reader_return_home=home;
+        strcpy(s_path,path);assert(pending_reserve(path));pending_mark_latest(path);
+        save_progress();
+        assert(test_save_calls==++writes&&test_last_calls==++last_writes);
+        if (changed) { s_page=2;s_unsaved=1; }
+        test_nav_target=-1;
+        if (home) {
+            assert(reader_return(&ctx)==APP_REDRAW_NONE&&test_nav_target==0&&s_text);
+            assert(test_save_calls==writes&&test_last_calls==last_writes);
+            book_on_exit(&ctx);
+        } else {
+            assert(reader_return(&ctx)==APP_REDRAW_PAGE&&test_nav_target==-1&&s_view==SHELF);
+        }
+        writes+=changed;last_writes+=changed;
+        assert(test_save_calls==writes&&test_last_calls==last_writes&&!s_text&&!s_unsaved);
+        assert(!s_save_failed&&test_saved_progress.byte_off==(changed?200u:100u));
+        pending_discard(path);
+    }
+
+    s_text="text";strcpy(s_path,path);assert(pending_reserve(path));pending_mark_latest(path);
+    save_progress();
+    assert(test_save_calls==++writes&&test_last_calls==++last_writes);
+    assert(book_progress_forget(path)==ESP_OK);
+    save_progress();
+    assert(test_save_calls==writes&&test_last_calls==last_writes&&s_save_failed);
+    pending_drop_invalidated();
+    assert(!pending_find(path)&&!s_save_failed);
+    s_text=NULL;s_path[0]=0;
 }
 int main(void) {
     for(unsigned placeholder=0;placeholder<2;++placeholder){
@@ -1103,6 +1272,8 @@ int main(void) {
     assert(!open_error_input_owned(&ctx));
     show_open_error();
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&!open_error_input_owned(&ctx));
+    test_idle_progress();
+    test_close_progress();
     puts("book_ui_host_test: PASS");
 }
 '''
