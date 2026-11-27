@@ -211,6 +211,8 @@ bool app_settings_set_quick_layout(const app_quick_layout_t *layout) {
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
 #define NVS_KEY_VOLUME_TURN "rd_volume"
+#define NVS_KEY_VOLUME_REVERSE "rd_vol_rev"
+#define NVS_KEY_LANDSCAPE_NOTICE "rd_land_tip"
 #define NVS_KEY_SHAKE_TURN "rd_shake"
 #define NVS_KEY_TOUCH_DISABLED "rd_no_touch"
 // 状态栏显隐新键；rd_immersive 是旧「全屏沉浸」位，仅作老固件升级迁移与降级回写。/ New
@@ -330,6 +332,8 @@ static uint8_t s_book_margin_l = 24, s_book_margin_r = 24;
 static uint8_t s_book_margin_t, s_book_margin_b;
 static bool s_reader_power_turn;
 static bool s_reader_volume_turn;
+static bool s_reader_volume_reverse;
+static bool s_reader_landscape_notice_muted;
 static bool s_reader_shake_turn;
 static bool s_reader_touch_disabled;
 static bool s_reader_statusbar = true;
@@ -549,6 +553,8 @@ static void load_setup(void) {
 
 void app_settings_init(void) {
     s_gestures = GESTURES_DEFAULT;
+    s_reader_volume_reverse = false;
+    s_reader_landscape_notice_muted = false;
     s_shelf_titles = 0;
     s_quick_layout = (app_quick_layout_t)APP_QUICK_LAYOUT_DEFAULT;
     s_network_route = NETWORK_ROUTE_AUTO;
@@ -732,6 +738,10 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
     uint8_t volume_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VOLUME_TURN, &volume_turn) == ESP_OK) s_reader_volume_turn = volume_turn == 1;
+    uint8_t volume_reverse = 0;
+    if (nvs_get_u8(h, NVS_KEY_VOLUME_REVERSE, &volume_reverse) == ESP_OK) s_reader_volume_reverse = volume_reverse == 1;
+    uint8_t landscape_notice = 0;
+    if (nvs_get_u8(h, NVS_KEY_LANDSCAPE_NOTICE, &landscape_notice) == ESP_OK) s_reader_landscape_notice_muted = landscape_notice == 1;
     uint8_t shake_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_SHAKE_TURN, &shake_turn) == ESP_OK) s_reader_shake_turn = shake_turn == 1;
     // 状态栏显隐：新键优先；老固件只有沉浸位，沉浸=1 迁移为隐藏，两键皆无则默认显示。
@@ -1449,6 +1459,22 @@ void app_settings_set_reader_volume_turn(bool on) {
     if (s_reader_volume_turn == on) return;
     s_reader_volume_turn = on;
     nvs_put_u8(NVS_KEY_VOLUME_TURN, on ? 1 : 0);
+}
+bool app_settings_reader_volume_reverse(void) { return s_reader_volume_reverse; }
+bool app_settings_set_reader_volume_reverse(bool reversed) {
+    if (reversed != s_reader_volume_reverse &&
+        preference_save_u8(NVS_KEY_VOLUME_REVERSE, reversed ? 1 : 0) != ESP_OK)
+        return false;
+    s_reader_volume_reverse = reversed;
+    return true;
+}
+bool app_settings_reader_landscape_notice_muted(void) { return s_reader_landscape_notice_muted; }
+bool app_settings_set_reader_landscape_notice_muted(bool muted) {
+    if (muted != s_reader_landscape_notice_muted &&
+        preference_save_u8(NVS_KEY_LANDSCAPE_NOTICE, muted ? 1 : 0) != ESP_OK)
+        return false;
+    s_reader_landscape_notice_muted = muted;
+    return true;
 }
 bool app_settings_reader_shake_turn(void) { return s_reader_shake_turn; }
 void app_settings_set_reader_shake_turn(bool on) {
@@ -2303,7 +2329,9 @@ static unsigned backup_version(const settings_backup_v1_t *backup) {
     // m appends portable preferences, weather and WiFi; n records the book-cover style in existing fields.
     // o 仅保存目录显示偏好；旧版逻辑归属不得写进目录偏好副本。
     // o stores only folder preferences; never import legacy assignments into a folder snapshot.
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : c == 'p' ? 51 : c == 'q' ? 52 : 0;
+    // r 追加 v53 阅读标志字节（bit0 音量键反向、bit1 静音横屏提示）。
+    // r appends v53 reader flags (bit 0 volume reverse, bit 1 mute landscape notice).
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : c == 'M' ? 22 : c == 'N' ? 23 : c == 'O' ? 24 : c == 'P' ? 25 : c == 'Q' ? 26 : c == 'R' ? 27 : c == 'S' ? 28 : c == 'T' ? 29 : c == 'U' ? 30 : c == 'V' ? 31 : c == 'W' ? 32 : c == 'X' ? 33 : c == 'Y' ? 34 : c == 'Z' ? 35 : c == 'a' ? 36 : c == 'b' ? 37 : c == 'c' ? 38 : c == 'd' ? 39 : c == 'e' ? 40 : c == 'f' ? 41 : c == 'g' ? 42 : c == 'h' ? 43 : c == 'i' ? 44 : c == 'j' ? 45 : c == 'k' ? 46 : c == 'l' ? 47 : c == 'm' ? 48 : c == 'n' ? 49 : c == 'o' ? 50 : c == 'p' ? 51 : c == 'q' ? 52 : c == 'r' ? 53 : 0;
 }
 
 typedef struct { char encoded[OFF_CONFIG_BYTES]; uint8_t checksum[4]; } settings_backup_off_art_t;
@@ -2498,7 +2526,7 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
     // v42：追加移动网络开关及业务路由；v43 追加页眉页脚独立显隐。
     // V42 appends cellular and business-route settings; V43 appends independent chrome visibility.
     // v50 仅备份目录显示偏好，不恢复书籍文件布局。/ V50 backs up folder preferences, never file placement.
-    memcpy(backup.magic, portable_format ? "PICOSETq" : "PICOSETl", sizeof(backup.magic));
+    memcpy(backup.magic, portable_format ? "PICOSETr" : "PICOSETl", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -2732,6 +2760,11 @@ static esp_err_t settings_backup_save_file(bool portable_format) {
         uint8_t gestures[2] = {s_gestures, (uint8_t)~s_gestures};
         ok = fwrite(gestures, 1, sizeof(gestures), file) == sizeof(gestures);
     }
+    if (ok && portable_format) {
+        uint8_t flags = (s_reader_volume_reverse ? 1u : 0u) | (s_reader_landscape_notice_muted ? 2u : 0u);
+        uint8_t reader_flags[2] = {flags, (uint8_t)~flags};
+        ok = fwrite(reader_flags, 1, sizeof(reader_flags), file) == sizeof(reader_flags);
+    }
     if (ok && portable_format) ok = book_store_prepare_data() == ESP_OK &&
         app_reading_journal_backup_write(file) == ESP_OK &&
         book_folder_backup_write(file, card.identity) == ESP_OK;
@@ -2843,7 +2876,8 @@ static bool restore_boot_default(const restore_setting_t *item) {
     static const struct { const char *key; uint8_t value; } defaults[] = {
         {NVS_KEY_TOUCH_DISABLED,0}, {NVS_KEY_HOLD_ACTION,APP_READER_KEY_HOME}, {NVS_KEY_DOUBLE_ACTION,APP_READER_KEY_NONE},
         {NVS_KEY_SLEEP,APP_SLEEP_DEEP}, {NVS_KEY_SHUTDOWN_MODE,APP_SHUTDOWN_LIGHT}, {NVS_KEY_AUTO_LOCK,5},
-        {NVS_KEY_BLE_TURNER,0}, {NVS_KEY_HOLD_REFRESH,0}, {NVS_KEY_VERTICAL_TURN,0}, {NVS_KEY_VOLUME_TURN,0}, {NVS_KEY_SHAKE_TURN,0},
+        {NVS_KEY_BLE_TURNER,0}, {NVS_KEY_HOLD_REFRESH,0}, {NVS_KEY_VERTICAL_TURN,0}, {NVS_KEY_VOLUME_TURN,0},
+        {NVS_KEY_VOLUME_REVERSE,0}, {NVS_KEY_LANDSCAPE_NOTICE,0}, {NVS_KEY_SHAKE_TURN,0},
         {NVS_KEY_CHROME_HEADER_H,APP_READER_HEADER_HEIGHT_DEFAULT}, {NVS_KEY_CHROME_FOOTER_H,APP_READER_FOOTER_HEIGHT_DEFAULT},
         {NVS_KEY_READER_PROGRESS,1}, {NVS_KEY_UP_ACTION,APP_READER_KEY_NONE}, {NVS_KEY_BOOK_FONTS,1}, {NVS_KEY_BOOK_VERTICAL,0},
         {NVS_KEY_BOOK_STYLES,1}, {NVS_KEY_TICKET_BACKGROUND,APP_TICKET_BACKGROUND_TRANSPARENT}, {NVS_KEY_TOUCH_HAPTIC,1}, {NVS_KEY_HAPTIC_LEVEL,APP_HAPTIC_WEAK},
@@ -3100,6 +3134,8 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 51) ok = fread(lang, 1, 2, file) == 2 && lang[0] < UI_LANG_COUNT && (lang[0] ^ lang[1]) == 255;
     uint8_t gestures[2] = {0};
     if (ok && version >= 52) ok = fread(gestures, 1, 2, file) == 2 && gestures[0] < 6 && (gestures[0] ^ gestures[1]) == 255;
+    uint8_t reader_flags[2] = {0};
+    if (ok && version >= 53) ok = fread(reader_flags, 1, 2, file) == 2 && reader_flags[0] < 4 && (reader_flags[0] ^ reader_flags[1]) == 255;
     bool needs_volume = false;
     long user_data_position = -1;
     if (ok && version >= 48) {
@@ -3290,6 +3326,8 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_BOOK_PARA, BK_PARAGRAPH);
     BACKUP_SET_U8(NVS_KEY_SHELF_STYLE, BK_SHELF);
     if (err == ESP_OK && version >= 52) err = PLAN_U8(NVS_KEY_GESTURES, gestures[0]);
+    if (err == ESP_OK && version >= 53) err = PLAN_U8(NVS_KEY_VOLUME_REVERSE, (reader_flags[0] & 1u) != 0);
+    if (err == ESP_OK && version >= 53) err = PLAN_U8(NVS_KEY_LANDSCAPE_NOTICE, (reader_flags[0] & 2u) != 0);
     if (err == ESP_OK && version >= 51) err = PLAN_U8("setup_state", setup_state(lang[0], s_setup));
     if (err == ESP_OK) err = PLAN_U8(NVS_KEY_SHELF_V22, 1);
     if (background.path[0] && !backup_file_exists(background.path, false)) background.path[0] = 0;
@@ -3353,6 +3391,10 @@ esp_err_t app_settings_backup_restore(void) {
         s_frontlight_cct = portable.frontlight_cct;
     }
     if (version >= 52) s_gestures = gestures[0];
+    if (version >= 53) {
+        s_reader_volume_reverse = (reader_flags[0] & 1u) != 0;
+        s_reader_landscape_notice_muted = (reader_flags[0] & 2u) != 0;
+    }
     if (version >= 51) s_language = lang[0];
     if (version >= 33) app_home_components_apply(regions.value);
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));

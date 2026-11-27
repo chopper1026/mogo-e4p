@@ -64,16 +64,23 @@ static void observe(int x,int y,int px,const char *s,enum EpdFontFlags align){
 #define READER_WIDTH 684
 #define READER_HEIGHT 1216
 #define READER_BAR_TOP 1096
+#define READER_CHAPTER_BAR_HEIGHT 84
+#define READER_CHAPTER_BAR_GAP 18
+#define READER_CHAPTER_BAR_SHADOW 4
+#define READER_CHAPTER_BAR_TOP (READER_BAR_TOP - READER_CHAPTER_BAR_GAP - READER_CHAPTER_BAR_HEIGHT)
 #define READER_TOOL_ICON_PX 40
-static bool marked,s_shelf_selecting;
+static bool marked,s_shelf_selecting,chapter_title_on;
 static int s_pressed_control=-1;
 static bool bookmark_is_current(void){return marked;}
+static bool reader_chapter_jump_available(int index){(void)index;return true;}
+static void reader_chapter_bar_title(char *dst,size_t cap){snprintf(dst,cap,"%s",chapter_title_on?"Chapter 12":"");}
 static void check_line(int cy,bool uniform){group_y=cy;group_px=uniform?-1:0;group_n=last_right=0;}
 '''
-    for name in ('reader_tools_area', 'tool_rect', 'draw_reader_tool_icon', 'draw_reader_toolbar',
+    code += host.function('ui_text_value_box', native.KIT) + '\n'
+    for name in ('reader_tools_area', 'tool_rect', 'reader_chapter_bar_rect', 'reader_chapter_jump_rect',
+                 'draw_reader_tool_icon', 'draw_reader_chapter_bar_title', 'draw_reader_chapter_bar', 'draw_reader_toolbar',
                  'shelf_header_action_rect', 'draw_shelf_header_button'):
         code += host.function(name, BOOK) + '\n'
-    code += host.function('ui_text_value_box', native.KIT) + '\n'
     code += host.function('settings_pair', SETTINGS) + '\n'
     code += r'''
 int main(int argc,char **argv){
@@ -92,8 +99,12 @@ int main(int argc,char **argv){
         for(int i=0;i<4;++i)draw_shelf_header_button(fb,shelf_header_action_rect(i),i);
         assert(group_n==3);
         int normal=0;
-        for(int i=0;i<2;++i){marked=i;check_line(1179,true);draw_reader_toolbar(fb);assert(group_n==5);
+        for(int i=0;i<2;++i){marked=i;chapter_title_on=i!=0;check_line(1179,true);draw_reader_toolbar(fb);assert(group_n==5);
             if(!i)normal=group_px;else assert(group_px==normal);}
+        chapter_title_on=false;check_line(READER_CHAPTER_BAR_TOP+READER_CHAPTER_BAR_HEIGHT/2,true);
+        draw_reader_chapter_bar(fb);assert(group_n==2);
+        chapter_title_on=true;check_line(READER_CHAPTER_BAR_TOP+READER_CHAPTER_BAR_HEIGHT/2,false);
+        draw_reader_chapter_bar(fb);assert(group_n==3);
         check_line(500,false);
         settings_pair(fb,(EpdRect){100,463,494,74},25,"蓝牙翻页器",20,"已关闭");assert(group_n==2);
         check_line(650,false);expect_suffix="…";min_value_px=ui_text_effective_px(20)*3/4;

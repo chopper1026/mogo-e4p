@@ -32,7 +32,7 @@ typedef struct {ui_gesture_type_t type;uint16_t x0,y0;} ui_gesture_event_t;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static char s_reader_notice[128];
-static bool s_reader_tools_toggle, s_clear_confirm;
+static bool s_reader_tools_toggle, s_clear_confirm, s_landscape_notice_open;
 static char *s_text="book";
 static struct {bool active;} s_dictionary_selection;
 static EpdRect current_body={36,96,612,1104};
@@ -47,6 +47,10 @@ bool app_settings_reader_statusbar(void){return status_bar;}
 static int screen_width=684;
 #define READER_WIDTH screen_width
 #define READER_BAR_TOP 1096
+#define READER_CHAPTER_BAR_HEIGHT 84
+#define READER_CHAPTER_BAR_GAP 18
+#define READER_CHAPTER_BAR_SHADOW 4
+#define READER_CHAPTER_BAR_TOP (READER_BAR_TOP - READER_CHAPTER_BAR_GAP - READER_CHAPTER_BAR_HEIGHT)
 static EpdRect body_rect(void){return current_body;}
 
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
@@ -99,7 +103,7 @@ for name in ('ui_reader_tap_cancel_rect','ui_reader_tap_save_rect','ui_reader_ta
     unit += function(name,UI)+'\n'
 for name in ('ui_reader_turn_mode_rect','ui_reader_turn_shake_rect'):
     unit += function(name,ROOT/'main/ui/ui_reader_settings.c')+'\n'
-for name in ('app_book_reader_body_visible','share_top_edge_tap','reader_footer_height','reader_area','reader_grid_tap_area','reader_tap_grid_action','reader_turn_settings_action','toggle_reader_tools_panel','reader_key_action','reader_swipe_direction'):
+for name in ('app_book_reader_body_visible','share_top_edge_tap','reader_footer_height','reader_area','reader_chapter_bar_rect','reader_grid_tap_area','reader_tap_grid_action','reader_turn_settings_action','toggle_reader_tools_panel','reader_key_action','reader_swipe_direction'):
     unit += function(name,BOOK)+'\n'
 unit += r'''
 static app_redraw_t reader_panel_action(app_ctx_t *ctx,uint16_t x,uint16_t y){

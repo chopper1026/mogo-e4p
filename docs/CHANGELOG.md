@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 阅读页横屏提示改为带「确认」按钮与「今后不再提示」选项的居中弹框；未勾选时每次横屏仍会提示，勾选确认后不再重复提示（随 v53 配置备份保存）。/ Replace the transient landscape reading notice with a centered confirmation dialog and an optional "Don't show again" toggle (persisted in v53 backups); leaving it unchecked prompts on each portrait-to-landscape switch.
+- 阅读按键控制新增「音量键反向」开关：默认上键上一页、下键下一页，开启反向后上键下一页、下键上一页（随 v53 配置备份保存）。/ Add a "Reverse volume keys" toggle in reader Key Settings to swap Volume Up/Down between previous and next page (persisted in v53 backups).
+- 阅读底部工具栏上方新增悬浮快捷章节跳转栏，可直接点按「上一章 / 下一章」并在中央查看当前章节标题，横竖屏自适应。/ Add a floating quick chapter-jump bar above the reader toolbar with direct Previous/Next chapter buttons and the current chapter title in both portrait and landscape.
 - 修复新机或整片擦除后，不先打开书架就无法恢复 TF 配置的问题。恢复只会初始化确认全空的机内存储。/ Restore TF backups on a new or fully erased device without opening the shelf first. Only verified blank internal storage is initialized.
 - 连续翻页不再每隔几页停下来保存进度；停翻后合并保存最新位置，换章、退出和锁屏仍即时保存。/ Progress checkpoints no longer interrupt a burst of page turns. Save the latest position after a pause, and still save immediately on chapter changes, exit, or lock.
 - 退出阅读不再重复写入已保存的书位；如果翻到了新位置，仍会在离开前保存。/ Leaving the reader no longer rewrites an already saved position. A new position is still saved before leaving.

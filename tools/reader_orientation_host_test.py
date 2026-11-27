@@ -108,15 +108,37 @@ layout += r'''
 #define READER_WIDTH (display_orientation_get()%2?1216:684)
 #define READER_HEIGHT (display_orientation_get()%2?684:1216)
 #define READER_BAR_TOP (READER_HEIGHT-UI_BAR_MARGIN-UI_BAR_H)
+#define READER_CHAPTER_BAR_HEIGHT 84
+#define READER_CHAPTER_BAR_GAP 18
+#define READER_CHAPTER_BAR_SHADOW 4
+#define READER_CHAPTER_BAR_TOP (READER_BAR_TOP-READER_CHAPTER_BAR_GAP-READER_CHAPTER_BAR_HEIGHT)
 #define READER_FOOTER_PROGRESS_SPACE 19
 enum {MARGIN_LEFT,MARGIN_RIGHT,MARGIN_TOP,MARGIN_BOTTOM,MARGIN_COUNT};
 enum {READING,SHELF,TOC};
 enum {READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_SETTINGS};
 typedef struct {int unused;} book_shake_gate_t;
-typedef struct {void *acc;uint8_t *fb;int64_t now_ms;} app_ctx_t;
+typedef struct {void *acc;uint8_t *fb;int64_t now_ms;bool user_activity;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE, APP_REDRAW_PAGE} app_redraw_t;
+typedef enum {UI_GESTURE_TAP, UI_GESTURE_SWIPE_L} ui_gesture_type_t;
+typedef struct {ui_gesture_type_t type; uint16_t x0, y0, x, y;} ui_gesture_event_t;
+typedef struct {EpdRect area, checkbox, confirm;} ui_reader_notice_confirm_layout_t;
 static char s_reader_notice[128];
-static int64_t s_reader_notice_until;
+static int64_t s_reader_notice_until, s_stats_activity_ms;
+static bool s_landscape_notice_open, s_landscape_notice_mute;
+static bool landscape_notice_muted, landscape_notice_save_fail;
+static bool app_settings_reader_landscape_notice_muted(void){return landscape_notice_muted;}
+static bool app_settings_set_reader_landscape_notice_muted(bool muted){
+    if(landscape_notice_save_fail)return false;
+    landscape_notice_muted=muted;return true;
+}
+static unsigned app_settings_system_font_size(void){return 120;}
+static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
+static ui_reader_notice_confirm_layout_t ui_reader_notice_confirm_layout(const char *msg,unsigned scale){
+    (void)msg;(void)scale;
+    return (ui_reader_notice_confirm_layout_t){
+        .area={310,120,596,420}, .checkbox={346,360,524,60}, .confirm={346,434,524,76},
+    };
+}
 static void copy_text(char *out, size_t size, const char *text){snprintf(out,size,"%s",text);}
 static reader_session_t s_reader_session;
 static reader_orientation_t s_orientation;
@@ -169,7 +191,8 @@ static void app_font_activate_system(void){}
 layout += re.search(r'^static const char s_landscape_turn_notice\[\] = .+;$', BOOK.read_text(), re.M).group(0) + "\n"
 for name in ("reader_footer_height", "reader_area", "body_rect_for_tracking", "body_rect",
              "reader_status_area", "progress_rect", "reader_tools_area", "reader_page_offset",
-             "free_book", "reader_reflow_build", "reader_orientation_apply", "reader_orientation_portrait",
+             "free_book", "reader_reflow_build", "reader_orientation_apply", "reader_landscape_notice_dismiss",
+             "reader_landscape_notice_gesture", "reader_orientation_portrait",
              "reader_orientation_sync", "reader_notice_tick", "rotation_available", "rotation_enabled", "on_rotation_toggle", "on_system_overlay"):
     layout += function(name, BOOK) + "\n"
 layout += r'''
@@ -193,20 +216,49 @@ int main(void){
   for(int d=1;d<=4;++d){
    display_orientation_t next=(display_orientation_t)(d%4);assert(reader_orientation_apply(next));s_orientation.locked=next;
    bool landscape=next==DISPLAY_ORIENTATION_LEFT||next==DISPLAY_ORIENTATION_RIGHT;
-   assert(landscape?(!strcmp(s_reader_notice,s_landscape_turn_notice)&&s_reader_notice_until==126000):!s_reader_notice[0]);
+   assert(landscape?(s_landscape_notice_open&&!s_landscape_notice_mute&&!s_reader_notice[0]):(!s_landscape_notice_open&&!s_reader_notice[0]));
    assert(!locks&&reader_page_offset(s_reader_session.position.page)==anchor);
    size_t page=s_reader_session.position.page;assert(book_layout_page_start_offset(page)<=anchor&&book_layout_page_start_offset(page+1)>anchor);
    in_screen(body_rect());in_screen(reader_area());if(status||!full)in_screen(reader_status_area());if(!full)in_screen(progress_rect());in_screen(reader_tools_area());
-   if(next){int before=rendered;on_system_overlay(&ctx);assert(direction==0&&rendered==before+1&&s_orientation.locked==next&&s_orientation.automatic);
+   if(next){int before=rendered;on_system_overlay(&ctx);assert(direction==0&&rendered==before+1&&s_orientation.locked==next&&s_orientation.automatic&&!s_landscape_notice_open);
     assert(reader_orientation_sync()&&direction==next&&reader_page_offset(s_reader_session.position.page)==anchor);
-    assert(!s_reader_notice[0]);}
+    assert(!s_landscape_notice_open&&!s_reader_notice[0]);}
   }
  }
  s_chrome_visible[0]=s_chrome_visible[1]=true;statusbar=true;book_layout_set_vertical(false);
+ // 确认提示默认不勾选：直接确认后，下次再切横屏仍会提示。
+ // Confirmation defaults unchecked: confirming without ticking keeps prompting on later landscape entries.
  assert(reader_orientation_apply(DISPLAY_ORIENTATION_RIGHT));s_orientation.locked=DISPLAY_ORIENTATION_RIGHT;
- assert(strstr(s_reader_notice,"仅支持普通翻页"));
- ctx.now_ms=s_reader_notice_until-1;assert(reader_notice_tick(&ctx)==APP_REDRAW_NONE&&s_reader_notice[0]);
- ++ctx.now_ms;assert(reader_notice_tick(&ctx)==APP_REDRAW_PAGE&&!s_reader_notice[0]);
+ assert(s_landscape_notice_open&&!s_landscape_notice_mute&&!rotation_available(&ctx));
+ ui_reader_notice_confirm_layout_t box=ui_reader_notice_confirm_layout(s_landscape_turn_notice,120);
+ ui_gesture_event_t outside={.type=UI_GESTURE_TAP,.x0=50,.y0=50,.x=50,.y=50};
+ assert(reader_landscape_notice_gesture(&ctx,&outside)==APP_REDRAW_NONE&&s_landscape_notice_open);
+ ui_gesture_event_t ok_tap={.type=UI_GESTURE_TAP,.x0=box.confirm.x+20,.y0=box.confirm.y+20,.x=box.confirm.x+20,.y=box.confirm.y+20};
+ ctx.now_ms=1000;assert(reader_landscape_notice_gesture(&ctx,&ok_tap)==APP_REDRAW_PAGE);
+ assert(!s_landscape_notice_open&&!landscape_notice_muted&&!s_reader_notice[0]&&rotation_available(&ctx));
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_PORTRAIT));s_orientation.locked=DISPLAY_ORIENTATION_PORTRAIT;
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_LEFT));s_orientation.locked=DISPLAY_ORIENTATION_LEFT;
+ assert(s_landscape_notice_open&&!s_landscape_notice_mute);
+ // 勾选「今后不再提示」后保存失败：给出错误提示且不静音，下次仍会提示。
+ // Ticking "don't show again" with a failed save reports an error and keeps prompting.
+ ui_gesture_event_t chk_tap={.type=UI_GESTURE_TAP,.x0=box.checkbox.x+20,.y0=box.checkbox.y+20,.x=box.checkbox.x+20,.y=box.checkbox.y+20};
+ assert(reader_landscape_notice_gesture(&ctx,&chk_tap)==APP_REDRAW_PAGE&&s_landscape_notice_mute);
+ landscape_notice_save_fail=true;ctx.now_ms=2000;
+ assert(reader_landscape_notice_gesture(&ctx,&ok_tap)==APP_REDRAW_PAGE);
+ assert(!s_landscape_notice_open&&!landscape_notice_muted&&strstr(s_reader_notice,"未保存")&&s_reader_notice_until==4000);
+ ctx.now_ms=4000;assert(reader_notice_tick(&ctx)==APP_REDRAW_PAGE&&!s_reader_notice[0]);
+ landscape_notice_save_fail=false;
+ // 保存成功后，后续切入横屏不再弹出提示。
+ // After a successful muted confirmation, future portrait-to-landscape entries stay quiet.
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_PORTRAIT));s_orientation.locked=DISPLAY_ORIENTATION_PORTRAIT;
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_RIGHT));s_orientation.locked=DISPLAY_ORIENTATION_RIGHT;
+ assert(s_landscape_notice_open&&!s_landscape_notice_mute);
+ assert(reader_landscape_notice_gesture(&ctx,&chk_tap)==APP_REDRAW_PAGE&&s_landscape_notice_mute);
+ assert(reader_landscape_notice_gesture(&ctx,&ok_tap)==APP_REDRAW_PAGE&&!s_landscape_notice_open&&landscape_notice_muted&&!s_reader_notice[0]);
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_PORTRAIT));s_orientation.locked=DISPLAY_ORIENTATION_PORTRAIT;
+ assert(reader_orientation_apply(DISPLAY_ORIENTATION_RIGHT));s_orientation.locked=DISPLAY_ORIENTATION_RIGHT;
+ assert(!s_landscape_notice_open&&!s_reader_notice[0]);
+ landscape_notice_muted=false;
  on_rotation_toggle(&ctx);assert(!s_orientation.automatic&&s_orientation.locked==DISPLAY_ORIENTATION_RIGHT);
  s_reader_panel=READER_PANEL_SETTINGS;assert(!rotation_available(&ctx)&&reader_orientation_sync()&&direction==0);
  s_reader_panel=READER_PANEL_NONE;assert(reader_orientation_sync()&&direction==1);
@@ -219,9 +271,9 @@ int main(void){
  open_book();s_orientation.automatic=true;fail_mask=3;build_attempt=0;
  assert(reader_orientation_apply(DISPLAY_ORIENTATION_RIGHT));assert(direction==0&&s_view==SHELF&&!s_text&&!s_reader_session.layout_owned&&!s_orientation.automatic);
  fail_mask=0;open_book();assert(reader_orientation_apply(DISPLAY_ORIENTATION_LEFT));s_orientation.automatic=true;
- free_book();assert(direction==0&&!s_text&&!s_reader_session.layout_owned&&!s_orientation.automatic&&!s_orientation_retry_ms&&!locks&&!s_reader_notice[0]);
+ free_book();assert(direction==0&&!s_text&&!s_reader_session.layout_owned&&!s_orientation.automatic&&!s_orientation_retry_ms&&!locks&&!s_reader_notice[0]&&!s_landscape_notice_open);
  assert(invalidates>10&&releases>10&&prepared>10&&saves>10);
- puts("PASS: real reader/session/paginator preserve text anchors through four orientations, chrome bounds, system round trips, manual lock, landscape notice/timeout, rollback, double failure and close cleanup");
+ puts("PASS: real reader/session/paginator preserve text anchors through four orientations, chrome bounds, system round trips, manual lock, interactive landscape notice/mute, rollback, double failure and close cleanup");
 }
 '''
 

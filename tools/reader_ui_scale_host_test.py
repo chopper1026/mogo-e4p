@@ -51,6 +51,7 @@ static int s_px=32;
 static unsigned app_settings_system_font_size(void){return scale;}
 static bool app_settings_reader_touch_disabled(void){return false;}
 static int ui_text_effective_px(int px){return scaling?(px+2)*scale/100:px+2;}
+static bool ttf_font_ready(void){return true;}
 static bool ttf_font_is_builtin(void){return face==0;}
 static bool ui_font_has_text(const char *text){(void)text;return true;}
 static int chars(const char *s){int n=0;for(;*s;s++)if(((unsigned char)*s&0xc0)!=0x80)++n;return n;}
@@ -66,11 +67,14 @@ static void ui_text_fixed_vc(uint8_t *fb,int x,int cy,int px,const char *text,en
  assert(!strchr(text,'\n'));++glyphs;
 }
 static int ttf_text_width_px(int px,const char *text){return ui_text_fixed_width_px(px,text);}
+static unsigned ttf_draws;
 static void ttf_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *text,enum EpdFontFlags a,int fg,int bg){
- (void)fb;(void)a;assert(antialias&&selected_slot==0&&fg==0&&bg==15);
+ (void)fb;assert(antialias&&selected_slot==0&&fg==0&&bg==15);
  int above,below;ttf_measure_line_px(px,text,&above,&below);
- assert(x>=last_box.x&&x+ttf_text_width_px(px,text)<=last_box.x+last_box.width);
- assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);++glyphs;
+ int w=ttf_text_width_px(px,text);
+ int left=a==EPD_DRAW_ALIGN_LEFT?x:a==EPD_DRAW_ALIGN_RIGHT?x-w:x-w/2;
+ assert(left>=last_box.x&&left+w<=last_box.x+last_box.width);
+ assert(baseline-above>=last_box.y&&baseline+below<=last_box.y+last_box.height);++glyphs;++ttf_draws;
 }
 static void epd_fill_rect(EpdRect r,int color,uint8_t *fb){(void)r;(void)color;(void)fb;}
 static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}static void epd_fill_circle(int x,int y,int radius,int color,uint8_t *fb){(void)x;(void)y;(void)radius;(void)color;(void)fb;}
@@ -111,6 +115,8 @@ static void ui_text_box_bw(uint8_t *fb,EpdRect box,int px,const char *text,enum 
  ui_text_box(fb,box,px,text,align,inv);
 }
 '''
+unit+=function('ui_text_value_box',kit)+'\n'
+unit+=function('draw_reader_chapter_bar_title',book)+'\n'
 unit+=function('draw_reading_font_name',book).replace('static void draw_reading_font_name(', 'static void actual_reading_font_name(')+'\n'
 unit+=r'''
 static void draw_reading_font_name(uint8_t *fb,EpdRect box,const char *text){
@@ -128,7 +134,7 @@ for name in ('reader_ui_extra','reader_font_top','reader_font_card','reader_slid
 for name in ['s_font_card','s_weight_card','s_title_style_card','s_layout_card','s_bookfont_card','s_rule_card','s_antialias_card']:
     unit+=re.search(r'^#define '+name+r' .*',s,re.M)[0]+'\n'
 unit+=function('reader_panel_text_vc',book)+'\n'
-unit+=re.search(r'^#define KEY_SETTINGS_TOP .*',s,re.M)[0]+'\n'
+unit+=re.search(r'^#define CHROME_SETTINGS_TOP .*',s,re.M)[0]+'\n'
 unit+='\n'.join(re.findall(r'^#define CHROME_(?:ROW_.*|PROGRESS_ROW.*)',s,re.M))+'\n'
 unit+=r'''
 static int s_chrome_scroll,s_chrome_height[2]={144,121};
@@ -150,6 +156,14 @@ int main(void){uint8_t fb[1]={0};
    for(s_chrome_scroll=0;s_chrome_scroll<=CHROME_ROW_MAX_SCROLL;s_chrome_scroll+=CHROME_ROW_PITCH)
      for(int row=0;row<CHROME_ROW_COUNT;++row)draw_chrome_row(fb,row);
    draw_font_settings(fb);assert(!antialias&&selected_slot==2);
+   EpdRect ch_box={226,1004,232,64};last_box=ch_box;
+   unsigned ttf_before=ttf_draws;
+   draw_reader_chapter_bar_title(fb,ch_box,36,"第十八章 风起云涌之长篇章节标题测试");
+   assert(!antialias&&selected_slot==2);
+   assert((ttf_draws-ttf_before)==(face==0?0u:1u));
+   draw_reader_chapter_bar_title(fb,ch_box,36,"序章");
+   assert(!antialias&&selected_slot==2);
+   assert((ttf_draws-ttf_before)==(face==0?0u:2u));
    for(s_reader_settings_group=0;s_reader_settings_group<UI_READER_SETTINGS_GROUP_COUNT;++s_reader_settings_group){
     draw_reading_settings(fb);
     for(int i=0;i<10;++i){EpdRect a=reading_setting_rect(i);

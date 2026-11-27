@@ -85,6 +85,7 @@ static bool s_reader_return_home,s_book_fonts_applied;
 static bool s_shelf_key_mode,s_shelf_key_paint_pending,s_save_failed;
 static bool s_water_turn_pending,s_reader_turn_pending,s_reader_text_frame,s_reader_stable_frame,s_excerpt_forward;
 static bool s_reader_entry_full,s_reader_image_refresh_pending,s_clear_confirm,s_batch_confirm;
+static bool s_landscape_notice_open,s_landscape_notice_mute;
 static int s_shelf_key_delta,s_shelf_key_pressed,s_px,s_view,s_reader_panel;
 static unsigned s_stats_last_ms,s_stats_activity_ms,s_session_read_ms,s_session_turns,s_turns,s_unsaved;
 static size_t s_selected_toc,s_jump_offset,s_chapter_lead_skip,s_chapter_lead_height,s_chapter_lead_width;

@@ -62,6 +62,8 @@ static int s_chrome_height[2]={80,57};
 static bool s_chrome_visible[2]={true,true};
 static int s_reader_panel=READER_PANEL_NONE,s_px=48;
 static char s_chapter_heading_title[128]="",s_chapter_heading_label[64]="",s_reader_notice[64]="";
+static const char s_landscape_turn_notice[] = "横屏阅读\n仅支持普通翻页";
+static bool s_landscape_notice_open, s_landscape_notice_mute;
 static int s_chapter_lead_height,s_chapter_lead_width;
 // 桩：只有正文与页眉/页脚/状态栏计数，别的页面函数都不参与。
 // Stubs: only the body and a chrome call count; no other page function takes part.
@@ -72,6 +74,7 @@ static int app_settings_book_tracking(void){return 0;}
 static bool app_settings_book_vertical(void){return false;}
 static unsigned app_settings_system_font_size(void){return 120;}
 static void ui_reader_notice_draw(uint8_t *fb,const char *message,unsigned scale){(void)fb;(void)message;(void)scale;}
+static void ui_reader_notice_confirm_draw(uint8_t *fb,const char *message,const char *checkbox,const char *confirm,bool muted,unsigned scale){(void)fb;(void)message;(void)checkbox;(void)confirm;(void)muted;(void)scale;}
 static void ui_text_set_system_scale(bool on){(void)on;}
 static void ui_nav_status(uint8_t *fb){(void)fb;++chrome_calls;}
 static void draw_reader_header(uint8_t *fb){(void)fb;++chrome_calls;}

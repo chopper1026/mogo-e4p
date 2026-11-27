@@ -47,7 +47,7 @@ static void xTaskNotifyGive(task_t *task){xSemaphoreGive(&task->notify);}
 static void vTaskDelete(task_t *task){pthread_mutex_lock(&task->notify.lock);task->quit=true;pthread_cond_signal(&task->notify.cond);pthread_mutex_unlock(&task->notify.lock);pthread_join(task->thread,NULL);pthread_mutex_destroy(&task->notify.lock);pthread_cond_destroy(&task->notify.cond);free(task);}
 static struct {bool active;} s_dictionary_selection;
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE;static const char *s_text="text";
-static bool s_toolbar,s_clear_confirm;
+static bool s_toolbar,s_clear_confirm,s_landscape_notice_open;
 static uint32_t generation=1;
 static unsigned work,allocs;static bool fail_alloc,fail_draw,wallpaper,images;
 static size_t free_space=4u*1024u*1024u;
@@ -127,6 +127,7 @@ int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
  // 阅读背景沿用逐行预绘，仍在推屏结束前交还资源。/ Backgrounds retain row prefetch and return resources before output completes.
  wallpaper=true;assert(app_settings_book_background_path()[0]&&kick_prep());reader_prefetch_end(true);wallpaper=false;
  s_toolbar=true;assert(!kick_prep());s_toolbar=false;s_reader_panel=READER_PANEL_FONT;assert(!kick_prep());s_reader_panel=READER_PANEL_NONE;
+ s_landscape_notice_open=true;assert(!kick_prep());s_landscape_notice_open=false;
  s_page=499;assert(!kick_prep());
  assert(reader_prefetch_trim()&&!s_next_fb);
  assert(reader_prefetch_trim());

@@ -32,12 +32,13 @@ enum {SHELF,READING,TOC,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_NOTE};
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_pressed_control=-1;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static char s_reader_notice[128];
-static bool s_reader_tools_toggle,s_middle_pending;
+static bool s_reader_tools_toggle,s_middle_pending,s_landscape_notice_open,s_landscape_notice_mute;
 static int64_t s_middle_pending_ms;
 static struct {bool active;} s_dictionary_selection;
-static bool disabled,bound,fail_save,volume_enabled=true;
+static bool disabled,bound,fail_save,volume_enabled=true,volume_reverse;
 static uint8_t volume_keys;
 static unsigned turns,volume_reads,invalidations;
+static int last_turn_dir;
 static bool app_settings_reader_touch_disabled(void){return disabled;}
 static bool app_settings_reader_touch_toggle_bound(void){return bound;}
 static bool app_settings_set_reader_touch_disabled(bool on){if(fail_save||(on&&!bound))return false;disabled=on;return true;}
@@ -46,9 +47,9 @@ static void dictionary_cancel(void){s_dictionary_selection.active=false;}
 static void middle_pending_clear(void){s_middle_pending=false;}
 static void invalidate_prep(void){++invalidations;}
 static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
-static bool app_book_reader_body_visible(void){return s_view==READING&&s_reader_panel==READER_PANEL_NONE;}
+static bool app_book_reader_body_visible(void){return s_view==READING&&s_reader_panel==READER_PANEL_NONE&&!s_landscape_notice_open;}
 static app_redraw_t dictionary_dismiss(void){dictionary_cancel();return APP_REDRAW_PAGE;}
-static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;assert(direction==1||direction==-1);++turns;s_reader_panel=READER_PANEL_NONE;return APP_REDRAW_PAGE;}
+static app_redraw_t turn_page(app_ctx_t *ctx,int direction){(void)ctx;assert(direction==1||direction==-1);last_turn_dir=direction;++turns;s_reader_panel=READER_PANEL_NONE;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_return(app_ctx_t *ctx){ctx->request_return=true;return APP_REDRAW_PAGE;}
 static app_redraw_t reader_manual_refresh(app_ctx_t *ctx){(void)ctx;return APP_REDRAW_FULL;}
 static bool frontlight_ready(void){return false;}
@@ -59,6 +60,7 @@ static unsigned app_settings_frontlight_cct(void){return 50;}
 static int frontlight_apply(bool on,unsigned brightness,unsigned cct){(void)on;(void)brightness;(void)cct;return 0;}
 static int board_read_volume_keys(uint8_t *keys){++volume_reads;*keys=volume_keys;return ESP_OK;}
 static bool app_settings_reader_volume_turn(void){return volume_enabled;}
+static bool app_settings_reader_volume_reverse(void){return volume_reverse;}
 '''
 unit += settings[start:end] + '\n'
 unit += r'''
@@ -113,7 +115,21 @@ int main(void){
  assert(app_book_up_key_action(&ctx)==APP_REDRAW_FULL);
  s_view=SHELF;assert(app_book_up_key_action(&ctx)==APP_REDRAW_NONE);s_view=READING;
  disabled=true;s_reader_panel=READER_PANEL_TOOLS;ctx.now_ms+=1000;volume_keys=0;reader_volume_tick(&ctx);
- ctx.now_ms+=80;volume_keys=1;assert(reader_volume_tick(&ctx)==APP_REDRAW_PAGE&&turns==2);
+ ctx.now_ms+=80;volume_keys=1;assert(reader_volume_tick(&ctx)==APP_REDRAW_PAGE&&turns==2&&last_turn_dir==-1);
+ ctx.now_ms+=80;volume_keys=2;assert(reader_volume_tick(&ctx)==APP_REDRAW_PAGE&&turns==3&&last_turn_dir==1);
+ // 开启反向后：上音量键下一页(+1)，下音量键上一页(-1)。/ Reversed: Up goes next (+1), Down goes previous (-1).
+ volume_reverse=true;
+ ctx.now_ms+=80;volume_keys=0;reader_volume_tick(&ctx);
+ ctx.now_ms+=80;volume_keys=1;assert(reader_volume_tick(&ctx)==APP_REDRAW_PAGE&&turns==4&&last_turn_dir==1);
+ ctx.now_ms+=80;volume_keys=2;assert(reader_volume_tick(&ctx)==APP_REDRAW_PAGE&&turns==5&&last_turn_dir==-1);
+ volume_reverse=false;
+ // 横屏确认提示期间屏蔽音量翻页与普通上键，仍保留触摸恢复快捷键。
+ // Landscape confirmation blocks volume turns and ordinary up-key actions while keeping touch recovery.
+ s_landscape_notice_open=true;
+ ctx.now_ms+=80;volume_keys=0;reader_volume_tick(&ctx);
+ ctx.now_ms+=80;volume_keys=1;assert(reader_volume_tick(&ctx)==APP_REDRAW_NONE&&turns==5);
+ up_action=APP_READER_KEY_NEXT;assert(app_book_up_key_action(&ctx)==APP_REDRAW_NONE);
+ up_action=APP_READER_KEY_TOUCH;assert(app_book_up_key_action(&ctx)==APP_REDRAW_PAGE&&!disabled&&!s_landscape_notice_open);
  s_view=SHELF;unsigned before=volume_reads;ctx.now_ms+=1000;reader_volume_tick(&ctx);assert(volume_reads==before);
  // 绑定双击后挂起的单击只在超时且抬手后执行一次。
  // A deferred single after a double binding fires once after timeout and lift.

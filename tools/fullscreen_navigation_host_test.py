@@ -23,7 +23,7 @@ static reader_panel_t s_reader_panel, s_bookmark_parent;
 static int s_reader_slider;
 static bool s_open_error[1], s_shelf_categories, s_shelf_selecting, s_clear_confirm, s_batch_confirm;
 static bool s_toc_jump_open,s_toc_jump_drag,s_text,s_tap_picker,s_bookmark_delete_confirm,s_bookmark_delete_error;
-static bool s_bookmark_edit,s_reader_tools_toggle;
+static bool s_bookmark_edit,s_reader_tools_toggle,s_landscape_notice_open,landscape_confirmed;
 static struct {bool active;} s_dictionary_selection;
 static void cancel_auto_resume(void){} static void middle_pending_clear(void){} static void reader_indent_hold_cancel(void){}
 static void invalidate_prep(void){} static void clear_selection(void){} static void bookmark_selection_clear(void){}
@@ -33,6 +33,7 @@ static void set_reader_view(book_view_t v){s_view=v;}
 static void ui_nav_request(app_ctx_t *ctx,int tab){assert(ctx->target==-1);ctx->target=tab;}
 static app_redraw_t dismiss_open_error(void){s_open_error[0]=false;return APP_REDRAW_PAGE;}
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
+static app_redraw_t reader_landscape_notice_dismiss(app_ctx_t *ctx,bool confirm){(void)ctx;s_landscape_notice_open=false;landscape_confirmed=confirm;return APP_REDRAW_PAGE;}
 static app_redraw_t shelf_back_level(app_ctx_t *ctx){(void)ctx;assert(false);return APP_REDRAW_NONE;}
 '''
 for name in ('toggle_reader_tools_panel', 'book_edge_back'):
@@ -48,6 +49,8 @@ int main(void) {
         assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_reader_panel==chain[i] && ctx.target==-1);
     }
     assert(s_reader_tools_toggle && expect_back(&ctx,true)==APP_REDRAW_NONE && ctx.target==0);
+    ctx.target=-1;s_landscape_notice_open=true;landscape_confirmed=true;
+    assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_landscape_notice_open && !landscape_confirmed && ctx.target==-1);
     ctx.target=-1;s_reader_panel=READER_PANEL_TAP_GRID;s_tap_picker=true;
     assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && !s_tap_picker && s_reader_panel==READER_PANEL_TAP_GRID);
     assert(expect_back(&ctx,true)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TURN_SETTINGS);

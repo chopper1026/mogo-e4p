@@ -344,6 +344,10 @@ static int book_chapter_image_dimensions(size_t chapter,const char *name,unsigne
 static void vTaskDelay(unsigned ticks){(void)ticks;}
 static void release_page_images(void){}
 static char s_reader_notice[96];static int64_t s_reader_notice_until;
+static bool s_landscape_notice_open, s_landscape_notice_mute;
+static app_redraw_t reader_landscape_notice_dismiss(app_ctx_t *ctx, bool confirm){
+    (void)ctx; (void)confirm; s_landscape_notice_open = s_landscape_notice_mute = false; return APP_REDRAW_PAGE;
+}
 static int64_t test_clock_us=1000000;
 static int64_t esp_timer_get_time(void){return test_clock_us;}
 static void prepare_inline_image(void){test_image_preparations++;}

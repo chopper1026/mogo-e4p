@@ -45,6 +45,7 @@ static bool s_chrome_visible[2]={true,true};
 static bool s_water_turn_pending,s_reader_footer_pending,s_reader_turn_pending,s_reader_text_frame;
 static bool s_excerpt_forward;
 static char s_reader_notice[64];
+static bool s_landscape_notice_open;
 static int64_t s_dictionary_notice_until,s_progress_frame_ms;
 // 书摘由专用回归验证；此处只保留真实呈现和翻页调用的状态边界。
 // Dedicated excerpt tests cover selection; retain its state boundary for actual present/turn calls here.
@@ -538,6 +539,15 @@ int main(void){
   assert(trace_area[0].x==0&&trace_area[0].y==0&&trace_area[0].width==684&&trace_area[0].height==1216);
   trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(trace_route[0]!=LOCAL_FULL);
  }
+ // 横屏确认弹层关闭同样触发一次整屏归一，失败保留重试状态。
+ // Dismissing the interactive landscape notice uses the same one-shot whole-screen normalization.
+ test_types[0][0]=0;test_hold_gray=false;s_reader_panel=s_presented_panel=READER_PANEL_NONE;
+ s_landscape_notice_open=true;trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(s_reader_notice_presented&&!s_reader_text_frame);
+ s_landscape_notice_open=false;test_push_error=EPD_DRAW_ERROR;trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+ assert(s_reader_notice_presented&&trace_count==1&&trace_route[0]==LOCAL_FULL);
+ test_push_error=0;trace_count=0;present(&ctx,APP_REDRAW_PAGE);
+ assert(!s_reader_notice_presented&&trace_count==1&&trace_route[0]==LOCAL_FULL&&trace_wave[0]==normalize_wave);
+ trace_count=0;present(&ctx,APP_REDRAW_PAGE);assert(trace_route[0]!=LOCAL_FULL);
  puts("PASS: notice dismissal normalizes the complete screen once, protects image/background gray, retries display failures and does not repeat");
  puts("PASS: text/mixed/image/hidden-image combinations with both footer visibility states, bidirectional chapter transitions, failed image/display/load guards and actual cleanup/water turns");
 }

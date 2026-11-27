@@ -121,7 +121,7 @@ static bool reader_reflow_build(void){
  if(build_failures){--build_failures;return false;}return true;
 }
 '''
-unit += re.search(r'^#define KEY_SETTINGS_TOP .*', page, re.M)[0] + '\n'
+unit += re.search(r'^#define CHROME_SETTINGS_TOP .*', page, re.M)[0] + '\n'
 for name in ('reader_sheet_back_rect', 'chrome_row_rect', 'chrome_pick_card'):
     unit += function(name, book) + '\n'
 if 'static bool chrome_row_visible(' in page:
@@ -156,7 +156,7 @@ int main(void){
  }
  app_ctx_t ctx={0};
  assert(CHROME_ROW_VISIBLE==10&&CHROME_ROW_COUNT==10&&CHROME_ROW_MAX_SCROLL==0&&CHROME_ROW_HEIGHT<80);
- assert(CHROME_ROW_TOP>=KEY_SETTINGS_TOP+92&&CHROME_ROW_TOP<=KEY_SETTINGS_TOP+108);
+ assert(CHROME_ROW_TOP>=CHROME_SETTINGS_TOP+92&&CHROME_ROW_TOP<=CHROME_SETTINGS_TOP+108);
  assert(CHROME_ROW_TOP+CHROME_ROW_VIEW_HEIGHT<=1174);
  for(int row=0;row<CHROME_ROW_COUNT;++row)
   assert(row < CHROME_ROW_VISIBLE || !chrome_row_visible(chrome_row_rect(row),CHROME_ROW_TOP,CHROME_ROW_VIEW_HEIGHT));

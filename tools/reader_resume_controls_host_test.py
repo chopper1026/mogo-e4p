@@ -47,7 +47,7 @@ static struct {bool active;} s_dictionary_selection;
 static app_redraw_t dictionary_dismiss(void){s_dictionary_selection.active=false;return APP_REDRAW_PAGE;}
 static int s_px=48,s_reader_panel=READER_PANEL_NONE,s_reader_slider=-1,s_view=READING;
 #define s_toolbar (s_reader_panel!=READER_PANEL_NONE)
-static bool s_clear_confirm,s_reader_text_frame,s_reader_turn_pending;
+static bool s_clear_confirm,s_landscape_notice_open,s_reader_text_frame,s_reader_turn_pending;
 static bool s_reader_stable_frame,s_reader_footer_strong,s_excerpt_forward;
 static bool s_water_turn_pending,s_reader_cleanup,draw_locked,load_failed;
 static int s_water_turn_dir;
@@ -189,6 +189,9 @@ int main(void){
  assert(s_text&&s_chrome_visible[0]&&!s_toolbar&&layout_span==100&&s_page==3&&reflows==0);
  reset(false,true,2,0);failed_reflows=2;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
  assert(s_text&&s_view==READING&&s_page==3&&reflows==0&&paints==1&&s_stats_pending_turns==1);
+ reset(false,false,2,0);s_landscape_notice_open=true;
+ assert(turn_page(&ctx,1)==APP_REDRAW_NONE&&s_page==2&&!paints);
+ s_landscape_notice_open=false;
  puts("PASS: open/resume origin and independent visibility; anchored indentation; turns retain bar state, dismiss tools and preserve chapter/boundary positions");
 }
 '''

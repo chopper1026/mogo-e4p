@@ -65,6 +65,9 @@ static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum Epd
  assert(fit>=12);++text_checks;
  actual_text_box(fb,box,px,text,align,inverted);
 }
+'''
+    code += host.function('ui_text_value_box', KIT) + '\n'
+    code += r'''
 static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
 static int s_px=36,s_reader_slider=-1;
 static ui_reader_settings_group_t s_reader_settings_group;
@@ -100,10 +103,16 @@ static bool bookmark_is_current(void){return false;}
 #define READER_WIDTH 684
 #define READER_HEIGHT 1216
 #define READER_BAR_TOP 1096
+#define READER_CHAPTER_BAR_HEIGHT 84
+#define READER_CHAPTER_BAR_GAP 18
+#define READER_CHAPTER_BAR_SHADOW 4
+#define READER_CHAPTER_BAR_TOP (READER_BAR_TOP - READER_CHAPTER_BAR_GAP - READER_CHAPTER_BAR_HEIGHT)
 #define BOOK_TOOL_COUNT 5
 #define READER_TOOL_ICON_PX 40
 #define BOOK_PX_MIN BOOK_READER_PX_MIN
 #define BOOK_PX_MAX BOOK_READER_PX_MAX
+static bool reader_chapter_jump_available(int index){return index == 1;}
+static void reader_chapter_bar_title(char *dst,size_t cap){snprintf(dst,cap,"%s","第 1 章 目录与排版");}
 '''
     code += host.enum_block(BOOK, 'READER_PANEL_NONE', 'reader_panel_t')
     code += host.enum_block(ROOT / 'main/settings/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM', 'app_book_title_style_t')
@@ -114,11 +123,13 @@ static bool bookmark_is_current(void){return false;}
         code += re.search(r'^static const EpdRect ' + name + r' = .*;', BOOK.read_text(), re.M)[0] + '\n'
     for name in ('s_font_card', 's_weight_card', 's_title_style_card', 's_layout_card', 's_bookfont_card', 's_rule_card', 's_antialias_card'):
         code += re.search(r'^#define ' + name + r' .*', BOOK.read_text(), re.M)[0] + '\n'
-    for name in ('reader_tools_area', 'tool_rect', 'reader_more_rect', 'reader_ui_extra', 'reader_font_top',
+    for name in ('reader_tools_area', 'tool_rect', 'reader_chapter_bar_rect', 'reader_chapter_jump_rect',
+                 'reader_more_rect', 'reader_ui_extra', 'reader_font_top',
                  'reader_font_card', 'reader_slider_rect', 'reader_panel_text_vc', 'reader_panel_text', 'draw_sheet', 'reader_sheet_back_rect', 'draw_sheet_back',
                  'draw_pill_slider', 'draw_reader_size_slider', 'draw_reading_font_name', 'draw_font_pair', 'reader_weight_value',
                  'draw_reading_switch', 'draw_font_settings', 'rule_style_rect', 'draw_rule_settings', 'draw_reader_more', 'reading_setting_rect',
-                 'reading_settings_top', 'draw_reading_settings', 'draw_reader_tool_icon', 'draw_reader_toolbar'):
+                 'reading_settings_top', 'draw_reading_settings', 'draw_reader_tool_icon',
+                 'draw_reader_chapter_bar_title', 'draw_reader_chapter_bar', 'draw_reader_toolbar'):
         code += host.function(name, BOOK) + '\n'
     code += re.sub(r'^#include[^\n]*\n', '', (ROOT / 'main/ui/ui_reader_settings.c').read_text(), flags=re.M)
     # Only leaf sheets not shown in this preview are replaced. All new screens use actual production paint.

@@ -203,7 +203,7 @@ enum {EPD_DRAW_SUCCESS,EPD_DRAW_FAILED,READING,SHELF,READER_PANEL_NONE,READER_PA
 static struct {struct {size_t chapter,page;} position;} s_reader_session={.position={2,1}};
 static html_text_t content;
 static const html_text_t *reader_session_content(const void *session){assert(session==&s_reader_session);return &content;}
-static bool s_excerpt_forward,tools_band,s_toolbar,s_clear_confirm;
+static bool s_excerpt_forward,tools_band,s_toolbar,s_clear_confirm,s_landscape_notice_open;
 static struct {bool active;} s_dictionary_selection;
 static struct {bool open;} s_dictionary_view;
 static char s_reader_notice[64];
@@ -228,9 +228,9 @@ GATE += "\n" + function("reader_image_slots", BOOK)
 GATE += "\nstatic void confirmed(void){\n" + present[present.index("    const bool reader_frame_ok"):present.index("    s_reader_text_frame =")] + "}\n"
 GATE += r'''
 int main(void){
- for(int scenario=0;scenario<22;++scenario){
+ for(int scenario=0;scenario<23;++scenario){
   err=EPD_DRAW_SUCCESS;s_view=READING;s_text="body";s_reader_panel=READER_PANEL_NONE;
-  s_dictionary_selection.active=s_dictionary_view.open=tools_band=s_toolbar=s_clear_confirm=false;
+  s_dictionary_selection.active=s_dictionary_view.open=tools_band=s_toolbar=s_clear_confirm=s_landscape_notice_open=false;
   images=0;fallback_image=-1;redraw=APP_REDRAW_PAGE;s_area=output_request.body_area;s_excerpt_forward=true;
   s_reader_notice[0]=0;s_dictionary_notice_until=0;
   switch(scenario){
@@ -248,6 +248,7 @@ int main(void){
    case 19:strcpy(s_reader_notice,"bookmark saved");s_dictionary_notice_until=2400;break;
    case 20:break;
    case 21:fallback_image=0;break;
+   case 22:s_landscape_notice_open=true;break;
   }
   assert(reader_image_slots(1)==(images?images:fallback_image>=0?1:0));
   unsigned before=observations;confirmed();

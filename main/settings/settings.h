@@ -255,6 +255,14 @@ void app_settings_set_reader_power_turn(bool on);
 /// Turn pages with the side volume keys in the reader body: up goes back, down forward; off by default.
 bool app_settings_reader_volume_turn(void);
 void app_settings_set_reader_volume_turn(bool on);
+/// 音量键翻页反向：关闭时音量+上一页/音量-下一页，开启后音量+下一页/音量-上一页；默认关闭，保存失败保留原值。
+/// Reverse volume-key turning: off maps up/down to previous/next, on swaps them; defaults off and retains the old value on failure.
+bool app_settings_reader_volume_reverse(void);
+bool app_settings_set_reader_volume_reverse(bool reversed);
+/// 横屏阅读提示「今后不再提示」：默认关闭（每次切入横屏都提示），勾选并确认后持久化；保存失败保留原值。
+/// Suppress the landscape reading notice ("don't show again"): defaults off so each portrait-to-landscape entry prompts; retains the old value on failure.
+bool app_settings_reader_landscape_notice_muted(void);
+bool app_settings_set_reader_landscape_notice_muted(bool muted);
 /// 阅读正文里横向晃动翻页：左晃上一页、右晃下一页；默认关闭。
 /// Shake the reader body horizontally to turn: left goes back, right forward; off by default.
 bool app_settings_reader_shake_turn(void);

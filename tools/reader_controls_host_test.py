@@ -29,7 +29,7 @@ static bool s_reader_tools_toggle;
 static int s_title_style_scroll;
 static bool s_title_style_drag;
 static char *s_text="text";
-static bool s_clear_confirm,s_scan_pending;
+static bool s_clear_confirm,s_scan_pending,s_landscape_notice_open;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static unsigned invalidations;
 static void invalidate_prep(void){++invalidations;}
@@ -65,7 +65,7 @@ b=action.index('        if (ui_rect_hit(layout, x, y)) {',a)
 unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 unit+=r'''
 static void reset(app_ctx_t *ctx){
- s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
+ s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=s_landscape_notice_open=false;
  s_reader_slider=3;s_pressed_control=2;invalidations=0;s_reader_tools_toggle=false;
  *ctx=(app_ctx_t){.now_ms=2200};
 }
@@ -86,6 +86,7 @@ int main(void){
  for(int panel=READER_PANEL_TOOLS;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){reset(&ctx);s_reader_panel=panel;assert(!reader_tools_swipe(&ctx,&e));}
  reset(&ctx);ctx.consumed=true;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_clear_confirm=true;assert(!reader_tools_swipe(&ctx,&e));
+ reset(&ctx);s_landscape_notice_open=true;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_scan_pending=true;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_view=SHELF;assert(!reader_tools_swipe(&ctx,&e));
  reset(&ctx);s_text=NULL;assert(!reader_tools_swipe(&ctx,&e));

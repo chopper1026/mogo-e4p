@@ -23,7 +23,7 @@ unit=r'''
 #define UI_LOCK_HEIGHT 1216
 enum {READING,SHELF,MODE_DU};
 static int s_view=READING,s_mode;static const char *s_text="踽踽独行";static size_t s_text_len=12;
-static bool s_toolbar,s_clear_confirm,storage;
+static bool s_toolbar,s_clear_confirm,s_landscape_notice_open,storage;
 static reader_selection_t s_dictionary_selection;static ui_reader_dictionary_t s_dictionary_view;
 static book_dictionary_result_t s_dictionary_result;static size_t s_dictionary_history[128],s_dictionary_history_count;
 static size_t s_dictionary_character,s_dictionary_chapter;static int64_t s_dictionary_feedback_ms;
@@ -68,6 +68,7 @@ static app_redraw_t event(ui_gesture_type_t type,int x,int y){ui_gesture_event_t
 int main(void){
  ctx.fb=fb;ctx.touch=&touch;ctx.now_ms=500;memset(fb,255,sizeof(fb));
  assert(dictionary_long_drag(&ctx));s_toolbar=true;assert(!dictionary_long_drag(&ctx));s_toolbar=false;
+ s_landscape_notice_open=true;assert(!dictionary_long_drag(&ctx));s_landscape_notice_open=false;
  unsigned before=queries;assert(event(UI_GESTURE_LONG_PRESS,15,30)==APP_REDRAW_AREA);
  assert(s_dictionary_selection.active&&s_dictionary_selection.dragging&&queries==before);
  ctx.now_ms=650;assert(event(UI_GESTURE_MOVE,115,30)==APP_REDRAW_AREA);assert(!strcmp(s_dictionary_selection.query,"踽踽独行")&&queries==before);

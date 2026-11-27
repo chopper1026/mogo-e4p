@@ -13,8 +13,8 @@ Feature ID: `F-ORIENTATION`. Local implementation from 2026-11-08, entered throu
   Flat placement, held touch, selection, dictionary, quick controls and other overlays suspend body rotation; release adds a 600ms quiet window. Mode and locked direction belong only to the open-book session, without settings or backup persistence.
 - 正文、页眉页脚、进度线、章节题头和底部工具栏跟随方向。目录、阅读设置、系统菜单、电源弹层和锁屏暂用正常竖屏；回正文时恢复会话方向。关书、返回书架或离开阅读应用后恢复正常竖屏，下次开书重新关闭自动模式。
   Body, chrome, progress, headings and the bottom toolbar follow orientation. TOC, reader settings, system menus, power dialogs and lock screens temporarily use normal portrait, restoring the session direction on return. Closing the book, returning to the shelf or leaving the app restores normal portrait; the next opening starts with automatic mode off.
-- 切入任一横屏时显示「横屏阅读 · 仅支持普通翻页」，无需确认，提示自动消失；暂用系统竖屏后恢复原横屏方向不会重复弹出。横屏固定普通翻页，不更改保存的翻页效果；转回正竖屏或倒竖屏后恢复所选效果。主页的刷新模式不受影响。
-  Entering either landscape orientation shows a brief non-blocking “Landscape reading — ordinary page turns only” notice. It does not repeat when returning from temporary system portrait. Landscape never rewrites the saved turn effect; either portrait orientation restores it. Main-page refresh mode is unaffected.
+- 切入任一横屏时弹出「横屏阅读 · 仅支持普通翻页」确认提示，提供「今后不再提示」勾选项与「确认」按钮。未勾选时每次从竖屏切入横屏都会再次提示；勾选并确认后写入设置与 v53 配置备份，之后不再重复提示。暂用系统竖屏后恢复原横屏方向不会重复弹出。横屏固定普通翻页，不更改保存的翻页效果；转回正竖屏或倒竖屏后恢复所选效果。主页的刷新模式不受影响。
+  Entering either landscape orientation shows a “Landscape reading — ordinary page turns only” confirmation modal with a “Don't show again” checkbox and a Confirm button. Leaving it unchecked prompts again on each portrait-to-landscape switch; checking and confirming persists the mute in settings and v53 backups. Returning from temporary system portrait does not repeat the prompt. Landscape never rewrites the saved turn effect; either portrait orientation restores it. Main-page refresh mode is unaffected.
 
 屏幕方向与「横排/竖排文字」独立。翻页分区与手势按当前画面解释，三枚屏外触摸键保留原来的实体位置和动作映射。
 Screen orientation is independent of horizontal/vertical typesetting. Tap regions and gestures follow the visible frame; the three off-panel cover keys keep their physical positions and action mappings.
