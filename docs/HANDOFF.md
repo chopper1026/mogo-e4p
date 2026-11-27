@@ -19,7 +19,7 @@ This file holds **only the protocol and the template** and is safe to merge upst
 
 ## 交接方 / Handing off
 
-在切换 agent、结束会话、完成里程碑之前，把下面模板复制到 `docs/HANDOFF.local.md` 顶部（最新在上）。文件不存在就新建，第一行写 `# HANDOFF.local · 本机进行中任务账本（不入库）`。
+在切换 agent、结束会话、完成里程碑之前，把下面模板复制到 `docs/HANDOFF.local.md` 顶部（最新在上）。文件不存在就新建，第一行写 `# HANDOFF.local · 本机进行中任务账本（不入库）`。分区布局以[产品分区表](../partitions_16M.csv)为准，活动槽以当次证据为准；授权与本地操作见[项目刷机说明](../.agents/skills/mogo-e4p-flash/SKILL.md)。
 
 ```markdown
 ## YYYY-MM-DD HH:MM · <agent 或人名> · <任务短名>

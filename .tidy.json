@@ -30,7 +30,8 @@
         "title": "现行契约",
         "patterns": [
           "docs/development/designs/DISPLAY_REFRESH.md",
-          "docs/development/designs/MEMORY_MANAGEMENT.md"
+          "docs/development/designs/MEMORY_MANAGEMENT.md",
+          "docs/development/guides/PERSISTENCE.md"
         ]
       },
       {
@@ -95,7 +96,8 @@
       "components/cst836u/README.md",
       "components/fca9555/README.md",
       "components/sc7a20h/README.md",
-      "components/e0470_epaper_waveform/README.md"
+      "components/e0470_epaper_waveform/README.md",
+      ".agents/skills/mogo-e4p-flash/SKILL.md"
     ],
     "exclude": [
       "docs/development/history/*",
@@ -176,6 +178,30 @@
       {
         "document": "docs/development/guides/RELEASE.md",
         "target": "tools/release_assets.py"
+      },
+      {
+        "document": "docs/ONBOARDING.md",
+        "target": "tools/check_architecture.py"
+      },
+      {
+        "document": "docs/ARCHITECTURE.md",
+        "target": "main/book/book_progress_store.c"
+      },
+      {
+        "document": "docs/HANDOFF.md",
+        "target": "partitions_16M.csv"
+      },
+      {
+        "document": "docs/HANDOFF.md",
+        "target": ".agents/skills/mogo-e4p-flash/SKILL.md"
+      },
+      {
+        "document": "AGENTS.md",
+        "target": "main/factory/vcom_setup.c"
+      },
+      {
+        "document": ".agents/skills/mogo-e4p-flash/SKILL.md",
+        "target": "tools/flash_fast.py"
       }
     ]
   }

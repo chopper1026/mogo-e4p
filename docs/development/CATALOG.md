@@ -7,6 +7,7 @@
 
 - [docs/development/designs/DISPLAY_REFRESH.md](designs/DISPLAY_REFRESH.md)
 - [docs/development/designs/MEMORY_MANAGEMENT.md](designs/MEMORY_MANAGEMENT.md)
+- [docs/development/guides/PERSISTENCE.md](guides/PERSISTENCE.md)
 
 ## 使用与开发指南
 
@@ -21,7 +22,6 @@
 - [docs/development/guides/MINI_LIBRARY.md](guides/MINI_LIBRARY.md)
 - [docs/development/guides/MOBI.md](guides/MOBI.md)
 - [docs/development/guides/NETWORK.md](guides/NETWORK.md)
-- [docs/development/guides/PERSISTENCE.md](guides/PERSISTENCE.md)
 - [docs/development/guides/PLATFORM_OTA.md](guides/PLATFORM_OTA.md)
 - [docs/development/guides/READER_DICTIONARY.md](guides/READER_DICTIONARY.md)
 - [docs/development/guides/READER_ORIENTATION.md](guides/READER_ORIENTATION.md)

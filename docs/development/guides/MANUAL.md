@@ -23,5 +23,5 @@ python3 tools/build_detailed_manual.py \
   --output build/manual-preview
 ```
 
-校对两份 JSON 与 README 三语言中的设备型号、独立信息栏、手工词库、官方 OTA、隐藏 TF 入口和[备份覆盖](PERSISTENCE.md)。保留旧任务 ID，避免损坏已有锚点；原生验证不校验产品语义。图片须标注源码身份/示例数据，天气示例使用上海，不使用石家庄。官网由外部平台独立维护；本仓库修改不会自动更新其正文或部署。
-Check target, independent chrome controls, manual dictionary installation, official OTA, hidden card entry and backup scope across both inputs and all READMEs. Preserve task IDs; native validation does not establish semantics. Label screenshot provenance; weather examples use Shanghai. External platform publication requires separate synchronization.
+校对两份 JSON 与 README 三语言中的设备型号、独立信息栏、手工词库、官方 OTA、已撤下的设置 BOOT 入口、隐藏的 TF 升级入口和[备份覆盖](PERSISTENCE.md)。已撤下入口不得保留为当前步骤或挂上旧操作图；`boot-mode` 等现有任务 ID 仍保留。保留旧任务 ID，避免损坏已有锚点；原生验证不校验产品语义。图片须标注源码身份/示例数据，天气示例使用上海，不使用石家庄。官网由外部平台独立维护；本仓库修改不会自动更新其正文或部署。
+Check target, independent chrome controls, manual dictionary installation, official OTA, withdrawn Settings BOOT and card update entries, and backup scope across both inputs and all READMEs. Keep retired instructions and diagrams out of current procedures while retaining task anchors such as `boot-mode`. Preserve task IDs; native validation does not establish semantics. Label screenshot provenance; weather examples use Shanghai. External platform publication requires separate synchronization.

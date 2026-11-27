@@ -51,6 +51,8 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 
 确认设备是 **Metalio E-INK4 Plus / ESP32-S31**。在电脑端 Chrome 或 Edge 中打开[网页刷机页](https://mogo.mantake.shop/flash)，连接 USB 数据线，核对所选固件的设备型号后按页面提示操作。刷写前保存可导出的配置并另行复制 TF 卡文件；配置备份不复制书籍或目录树，先核对[备份覆盖与数据风险](docs/development/guides/PERSISTENCE.md)。
 
+如果网页安装器无法进入下载模式，先检查线材、串口占用与设备型号；当前设置没有「BOOT 刷机」入口，不要套用其他开发板的 BOOT 按键步骤。仍失败时按对应 USB 包的恢复说明处理或联系维护者。
+
 也可以在 [GitHub Releases](https://github.com/chopper1026/mogo-e4p/releases/latest) 下载完整 USB 刷机包，按包内 `README.txt` 操作，并用 `SHA256SUMS` 核对文件。
 
 <details>
@@ -154,7 +156,7 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 
 **天气**支持中文选城、今日 / 明日切换，灰阶背景随天气变化。数据来自官方 HTTPS 代理；平台未配置、停用或数据过期时不显示虚构预报。详情见[组件与天气](docs/development/guides/WEATHER.md)。
 
-**阅读手账**记录每天读过的书、时长、章节和翻页次数，点开查看当月日历，搭配六幅轮换的像素插画。记录保存在本机，不补造历史明细；目前只查看当月，手账明细不包含在设置备份中。详情见[阅读手账](docs/development/guides/READING_JOURNAL.md)。
+**阅读手账**记录每天读过的书、时长、章节和翻页次数，点开查看当月日历，搭配六幅轮换的像素插画。记录保存在本机，不补造历史明细；目前只查看当月，v48 起可用配置备份保存手账快照，不导出已过月份的逐书明细。详情见[阅读手账](docs/development/guides/READING_JOURNAL.md)。
 
 ### 传书，一个浏览器就够
 
@@ -243,32 +245,10 @@ mogo 是面向 **Metalio E-INK4 Plus（ESP32-S31）** 的独立阅读固件，�
 
 ## 从源码构建
 
-先安装并激活 **ESP-IDF v6.1**。ESP32-S31 仍是 preview 目标，以下 `idf.py` 命令都必须带 `--preview`。
-
-```sh
-git clone https://github.com/chopper1026/mogo-e4p.git
-cd mogo-e4p
-
-. "$IDF_PATH/export.sh"
-idf.py --preview set-target esp32s31
-idf.py --preview build
-```
-
-`IDF_PATH` 应指向本机的 ESP-IDF v6.1 安装目录。产品配置使用 `sdkconfig.defaults`；已有 `sdkconfig` 会保留旧值，修改 defaults 后应核对生成配置。
+使用 **ESP-IDF v6.1** 和 `esp32s31` 目标；S31 构建须带 `--preview`。本机固定工具链的激活和路径检查、产品/CI 配置，以及宿主回归命令，统一见[开发上手](docs/ONBOARDING.md#构建环境--build-environment)。完整回归前还须通过[本机环境硬约束](docs/ONBOARDING.md#本机环境硬约束--local-environment-hard-rules)。
 
 <details>
-<summary>CI 配置、宿主回归与本地刷写</summary>
-
-CI 在产品 defaults 后叠加编译警告配置，不切换硬件目标：
-
-```sh
-idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" set-target esp32s31
-idf.py --preview -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ci" build
-python3 tools/check_architecture.py
-python3 tools/run_reader_baseline.py
-```
-
-宿主回归保留 ASan / UBSan。编译器、Python 图像依赖和各套件要求见[上手指南](docs/ONBOARDING.md)与[工具入口](tools/README.md)。编译、宿主回归、刷写校验、设备启动与实屏验收是不同验证层级。
+<summary>本地镜像与刷写</summary>
 
 开发构建完成后，可先准备本次产品镜像：
 

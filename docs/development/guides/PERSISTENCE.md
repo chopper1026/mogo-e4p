@@ -3,8 +3,8 @@
 适用基线：2026-11-17，`2e2b9b9` 的源码、`partitions_16M.csv` 和当前文档工作区。以下是读写、备份字段与写入范围的静态核对，未执行擦除、格式化、迁移或设备恢复验收。
 Scope: source and partition layout at `2e2b9b9`, statically checked on 2026-11-17. Retention follows code and write ranges; destructive operations and device restoration were not tested.
 
-自动电量校准及模型绑定电量检查点已于2026-11-18按本地实现补充静态核对与宿主故障回归；其余存储布局基线沿用上述记录，设备恢复仍待验收。
-Automatic calibration and model-bound SOC checkpoints were updated against the local implementation and host fault regressions on 2026-11-18; other layout evidence retains the baseline above, with device restoration pending.
+自动电量校准及模型绑定电量检查点已于2026-11-18按本地实现补充静态核对与宿主故障回归；分区布局基线沿用上述记录；进度分桶迁移和紧凑 WiFi 记录按 2026-11-26 的 `05e3d76` 核对（原变更有定向宿主、S31 构建、写入校验和启动证据，旧版实机迁移与恢复未验）。
+Automatic calibration and model-bound SOC checkpoints were updated against the local implementation and host fault regressions on 2026-11-18; partition layout retains the baseline above. Bucketed progress migration and compact WiFi records were checked against `05e3d76` (2026-11-26); its targeted host checks, S31 build, write verification and boot do not establish on-device migration or restore from older firmware.
 
 ## 数据覆盖 / Data Coverage
 

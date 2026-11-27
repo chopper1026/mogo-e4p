@@ -7,7 +7,7 @@ This page owns navigation, authority and scope, not per-task summaries. Use the 
 
 | 资料 / Document | 适用范围 / Scope |
 | --- | --- |
-| [README](../../README.md)、[上手指南](../ONBOARDING.md) | 产品介绍、安装、当前 S31 硬件与构建入口；移植评估另存于历史资料。/ Product, installation, current S31 hardware and builds; port assessments live in the historical references. |
+| [README](../../README.md)、[上手指南](../ONBOARDING.md) | README 是产品、安装和硬件入口；上手指南是固定本机环境、构建与宿主回归命令的权威。移植评估归历史资料。/ README owns product, installation and hardware entry points; onboarding owns the fixed environment, build and host commands. Port assessments are historical. |
 | [AGENTS](../../AGENTS.md)、[贡献指南](../../CONTRIBUTING.md) | 产品硬约束、页面契约、许可和操作授权边界。/ Product constraints, page contracts, licenses and authorization boundaries. |
 | [中文提交规范](../COMMIT_CONVENTION.md) | 未来提交唯一格式依据；保留原路径与旧 Git 历史。/ Sole format authority for future commits, retaining its path and existing history. |
 | [架构](../ARCHITECTURE.md)、[功能全景](FEATURES.md) | 稳定依赖与所有权，以及有入口依据的产品能力。/ Stable dependencies/ownership and entry-backed capabilities. |
@@ -59,5 +59,5 @@ The shared catalog covers docs, the tool guide, selected first-party component R
 忽略目录、本机交接、夜间试验、构建产物、供应商源码和工具自己的 `.claude/`、`.zcode/`、`.playwright-mcp/` 不纳入共享过程资料。第三方许可由 [LICENSE](../../LICENSE) 和[第三方声明](../../THIRD_PARTY_NOTICES.md)负责；目录分类不替代许可核验。
 Ignored/local work, night trials, builds, vendor sources and tool working directories are excluded from shared process material. Root licensing and third-party notices remain authoritative; classification is not license verification.
 
-文档检查覆盖根 README 三语言、AGENTS/贡献说明、现行 docs Markdown、模块 README 和两份手册 JSON；排除历史资料、本机过程、旧计划与按版本存档的 CHANGELOG。引用检查不请求外部 URL，也不验证手册生成或产品行为。suite 注册来自 Python runner，需静态核对 `SUITES`，不套用 JSON registry 合约。
-Document checks cover maintained entry points, guides, module READMEs and both manual inputs. History, local work, old plans and the versioned changelog are excluded. External routes, generation and product behavior need separate evidence; runner suites use Python registration.
+文档检查覆盖根 README 三语言、AGENTS/贡献说明、现行 docs Markdown、模块 README、项目刷机说明和两份手册 JSON；排除历史资料、本机过程、旧计划与按版本存档的 CHANGELOG。引用检查不请求外部 URL，也不验证手册生成或产品行为。suite 注册来自 Python runner，需静态核对 `SUITES`，不套用 JSON registry 合约。
+Document checks cover maintained entry points, guides, module READMEs, the project flashing skill and both manual inputs. History, local work, old plans and the versioned changelog are excluded. External routes, generation and product behavior need separate evidence; runner suites use Python registration.
