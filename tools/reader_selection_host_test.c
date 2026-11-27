@@ -31,5 +31,30 @@ int main(void) {
     assert(reader_selection_begin(&s,many,33,cells,33,1,2,1,1));
     assert(!reader_selection_move(&s,many,33,cells,33,163,1));assert(!strcmp(s.query,"a"));
     assert(reader_selection_move(&s,many,33,cells,33,158,1)&&strlen(s.query)==32);
+    const char *phrase="中take off, don’t well‑being中";
+    book_layout_glyph_t latin[40]; size_t count=0;
+    for(size_t at=0;at<strlen(phrase);) {
+        size_t n=(unsigned char)phrase[at]<128?1:3;
+        latin[count]=(book_layout_glyph_t){at,n,count*10,10,10,10};
+        at+=n; ++count;
+    }
+    assert(reader_selection_begin(&s,phrase,strlen(phrase),latin,count,3,2,32,12));
+    assert(!strcmp(s.query,"take")&&!reader_selection_move(&s,phrase,strlen(phrase),latin,count,32,12));
+    assert(reader_selection_move(&s,phrase,strlen(phrase),latin,count,82,12)&&!strcmp(s.query,"take off"));
+    assert(reader_selection_begin(&s,phrase,strlen(phrase),latin,count,3,2,72,12)&&!strcmp(s.query,"off"));
+    assert(reader_selection_move(&s,phrase,strlen(phrase),latin,count,12,12)&&!strcmp(s.query,"take off"));
+    assert(reader_selection_begin(&s,phrase,strlen(phrase),latin,count,3,2,112,12)&&!strcmp(s.query,"don’t"));
+    s.extend_word=false;
+    assert(reader_selection_move(&s,phrase,strlen(phrase),latin,count,132,12)&&!strcmp(s.query,"don"));
+    assert(reader_selection_begin(&s,phrase,strlen(phrase),latin,count,3,2,182,12)&&!strcmp(s.query,"well‑being"));
+    // 选区只能扩到本页字格，不能从章节原文扩入邻页。/ Expand only over visible cells, not chapter bytes outside the page.
+    assert(reader_selection_begin(&s,phrase,strlen(phrase),latin+2,3,4,2,32,12)&&!strcmp(s.query,"ake"));
+    assert(reader_selection_english_key("《  Don’t! 》",one)&&!strcmp(one,"don't"));
+    assert(reader_selection_english_key("Ｔ Take 　\nOFF！",one)==false);
+    assert(reader_selection_english_key(" Take 　\nOFF！",one)&&!strcmp(one,"take off"));
+    assert(reader_selection_english_key("Élan well‑being",one)&&!strcmp(one,"élan well-being"));
+    assert(!reader_selection_english_key("take…off",one));
+    assert(!reader_selection_english_key("中hello",one));
+    assert(!reader_selection_english_key("123",one));
     puts("PASS: actual UTF-8 selection, exact/reverse/cross-line ranges, extension codepoint, variation cluster and bounded rejection");
 }

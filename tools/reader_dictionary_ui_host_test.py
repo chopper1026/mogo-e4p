@@ -30,12 +30,12 @@ static size_t s_dictionary_character,s_dictionary_chapter;static int64_t s_dicti
 static bool s_dictionary_feedback_pending,s_dictionary_presented;static EpdRect s_area;
 static struct {struct {size_t page,chapter;}position;}s_reader_session;
 static int64_t s_dictionary_notice_until;
-static unsigned generation=1,queries,cancels,draws;static bool pending,ready,map_missing;
+static unsigned generation=1,queries,cancels,draws;static bool pending,ready,map_missing;static size_t fixture_pages=1;
 static book_layout_glyph_t glyphs[]={{0,3,10,20,30,40},{3,3,40,20,30,40},{6,3,70,20,30,40},{9,3,100,20,30,40}};
 const book_layout_glyph_t *book_layout_glyphs(size_t page,size_t *n){(void)page;*n=4;return map_missing?NULL:glyphs;}
 uint32_t book_layout_generation(void){return generation;}
 static void reader_dictionary_cancel(void){++cancels;pending=false;}
-static bool reader_dictionary_start(const char *q){assert(q&&*q);++queries;pending=true;return true;}
+static bool reader_dictionary_start(book_dictionary_kind_t kind,const char *q){assert(kind==s_dictionary_view.kind&&q&&*q);++queries;pending=true;return true;}
 static bool reader_dictionary_poll(book_dictionary_result_t *r){if(!ready)return false;ready=false;pending=false;r->status=BOOK_DICTIONARY_OK;return true;}
 static void middle_pending_clear(void){}
 static void invalidate_prep(void){}
@@ -47,14 +47,19 @@ static const char *s_font_path="reader.ttf",*active_font="reader.ttf";
 static const char *ttf_font_path(void){return active_font;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++draws;}
 EpdRect ui_reader_dictionary_selection(uint8_t *fb,const reader_selection_t *s,const book_layout_glyph_t *g,size_t n){(void)fb;uint32_t a,b;assert(reader_selection_range(s,g,n,&a,&b));return(EpdRect){10,20,120,40};}
-int ui_reader_dictionary_action(const ui_reader_dictionary_t *v,int x,int y){(void)x;return y<v->top?0:-1;}
-size_t ui_reader_dictionary_page_end(const book_dictionary_result_t *r,size_t off){(void)r;return off;}
-size_t ui_reader_dictionary_content_size(const book_dictionary_result_t *r){return strlen(r->definition);}
+ui_dictionary_action_t ui_reader_dictionary_action(const ui_reader_dictionary_t *v,int x,int y){
+    if(y<v->top)return UI_DICTIONARY_CLOSE;
+    if(v->kind!=BOOK_DICTIONARY_CHINESE && x==410)return UI_DICTIONARY_EN_EN;
+    if(y==v->top+500 && x==50 && v->offset)return UI_DICTIONARY_PREV;
+    if(y==v->top+500 && x==550 && v->next_offset)return UI_DICTIONARY_NEXT;
+    return UI_DICTIONARY_NONE;
+}
+size_t ui_reader_dictionary_next_page(const book_dictionary_result_t *r,size_t off){return r->status==BOOK_DICTIONARY_OK && off+1<fixture_pages ? off+1 : 0;}
 static app_redraw_t dictionary_dismiss(void);
 '''
 # 真实 app_ctx_t 的轻量宿主契约。/ Lightweight host contract for the actual page context.
 unit=unit.replace('#include "reader_session_test.h"','')
-for name in ('dictionary_cancel','dictionary_dismiss','dictionary_long_drag','dictionary_query','dictionary_union','dictionary_handle','dictionary_gesture','dictionary_tick'):
+for name in ('dictionary_cancel','dictionary_dismiss','dictionary_long_drag','dictionary_query','dictionary_update_next_page','dictionary_union','dictionary_handle','dictionary_gesture','dictionary_tick'):
     unit+=function(name,BOOK)+'\n'
 unit+=r'''
 static uint8_t fb[684*1216/2];static app_touch_t touch;
@@ -96,9 +101,31 @@ int main(void){
  s_dictionary_selection.dragging=false;assert(dictionary_tick(&ctx)==APP_REDRAW_PAGE);
  s_dictionary_presented=false;
  assert(event(UI_GESTURE_LONG_PRESS,15,30)==APP_REDRAW_AREA);assert(event(UI_GESTURE_RELEASE,15,30)==APP_REDRAW_PAGE);
- s_dictionary_view.loading=false;s_dictionary_view.can_browse=false;s_dictionary_view.top=0;
+ s_dictionary_view.loading=false;s_dictionary_view.can_character=false;s_dictionary_view.top=0;
  before=queries;assert(event(UI_GESTURE_TAP,15,30)==APP_REDRAW_NONE&&queries==before);
  assert(dictionary_dismiss()==APP_REDRAW_PAGE&&!s_dictionary_selection.active);
+ s_text="Book";s_text_len=4;
+ for(unsigned i=0;i<4;++i)glyphs[i]=(book_layout_glyph_t){i,1,10+i*20,20,20,40};
+ assert(event(UI_GESTURE_LONG_PRESS,15,30)==APP_REDRAW_AREA&&!strcmp(s_dictionary_selection.query,"Book"));
+ assert(event(UI_GESTURE_RELEASE,15,30)==APP_REDRAW_PAGE&&s_dictionary_view.kind==BOOK_DICTIONARY_EN_ZH);
+ fixture_pages=3;ready=true;assert(dictionary_tick(&ctx)==APP_REDRAW_PAGE);
+ ui_gesture_event_t tap={.type=UI_GESTURE_TAP,.x0=50,.y0=s_dictionary_view.top+500};handled=false;
+ assert(!s_dictionary_view.offset&&s_dictionary_view.next_offset==1);
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_NONE&&handled);
+ tap.x0=550;
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_PAGE&&s_dictionary_view.offset==1&&s_dictionary_view.next_offset==2);
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_PAGE&&s_dictionary_view.offset==2&&!s_dictionary_view.next_offset);
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_NONE&&s_dictionary_history_count==2);
+ tap.x0=50;
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_PAGE&&s_dictionary_view.offset==1&&s_dictionary_view.next_offset==2);
+ tap.x0=410;
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_PAGE&&handled);
+ assert(s_dictionary_view.kind==BOOK_DICTIONARY_EN_EN&&s_dictionary_view.offset==0&&!s_dictionary_view.next_offset&&!s_dictionary_history_count);
+ assert(!strcmp(s_dictionary_selection.query,"Book")&&s_dictionary_selection.active);
+ assert(dictionary_gesture(&ctx,&tap,&handled)==APP_REDRAW_NONE);
+ assert(dictionary_dismiss()==APP_REDRAW_PAGE);
+ assert(event(UI_GESTURE_LONG_PRESS,15,30)==APP_REDRAW_AREA);
+ assert(event(UI_GESTURE_RELEASE,15,30)==APP_REDRAW_PAGE&&s_dictionary_view.kind==BOOK_DICTIONARY_EN_ZH);
  puts("PASS: actual reader orchestration, AREA drag, one query per release, cancel/no query, modal dismissal, stale layout and USB invalidation");
 }
 '''

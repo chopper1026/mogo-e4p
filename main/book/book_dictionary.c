@@ -14,8 +14,15 @@ static uint32_t u32(const unsigned char *p) { return (uint32_t)p[0] | (uint32_t)
 static unsigned u16(const unsigned char *p) { return p[0] | (unsigned)p[1]<<8; }
 static bool read_at(FILE *f, uint32_t off, void *p, size_t n) { return !fseek(f, (long)off, SEEK_SET) && fread(p, 1, n, f) == n; }
 static bool range(uint32_t off, uint32_t n, uint32_t end) { return off <= end && n <= end - off; }
-bool book_dictionary_path(const char *root, char *path, size_t capacity) {
+bool book_dictionary_path(const char *root, book_dictionary_kind_t kind, char *path, size_t capacity) {
     if (!root || !path || !capacity) return false;
+    if (kind != BOOK_DICTIONARY_CHINESE) {
+        const char *file = kind == BOOK_DICTIONARY_EN_ZH ? "english-zh.mgdict" :
+                           kind == BOOK_DICTIONARY_EN_EN ? "english-en.mgdict" : NULL;
+        int length = file ? snprintf(path, capacity, "%s/%s", root, file) : -1;
+        if (length >= 0 && (size_t)length < capacity) return true;
+        path[0] = 0; return false;
+    }
     const char *names[] = {"chinese.mgdict", "installed/chinese.mgdict", ".previous/chinese.mgdict"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         int length = snprintf(path, capacity, "%s/%s", root, names[i]);

@@ -4,6 +4,6 @@
 #pragma once
 #include "book_dictionary.h"
 /// 重请求先交还旧任务，锁屏/拔卡/离页必须调用取消。/ Drain old work before replacement; cancel before lock, media loss or exit.
-bool reader_dictionary_start(const char *query);
+bool reader_dictionary_start(book_dictionary_kind_t kind, const char *query);
 bool reader_dictionary_poll(book_dictionary_result_t *result);
 void reader_dictionary_cancel(void);

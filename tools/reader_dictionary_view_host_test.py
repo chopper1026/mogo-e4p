@@ -27,7 +27,8 @@ static int selected=2;
 int ttf_font_select(int slot) { int previous=selected;selected=slot;return previous; }
 int ttf_ascender_px(int px) { return px; }
 int ttf_text_width_px(int px, const char *s) { assert(selected==0);return (int)reader_selection_utf8(s, strlen(s)) * px; }
-bool ttf_font_has_text(const char *s) { return !strstr(s, "𠮷"); }
+static bool latin_only;
+bool ttf_font_has_text(const char *s) { return !strstr(s, "𠮷") && (!latin_only || (unsigned char)*s < 128); }
 void ttf_draw_text_px(uint8_t *fb, int x, int y, int px, const char *s, int align, int fg, int bg) {
     (void)fb; (void)align; (void)fg; (void)bg;
     assert(x >= 0 && y <= 1216 && px > 0);
@@ -37,11 +38,23 @@ void ttf_draw_text_px(uint8_t *fb, int x, int y, int px, const char *s, int alig
     strcat(drawn,s);strcat(drawn,"\n");
     ++painted;
 }
+static unsigned ui_painted;
+int ui_text_fixed_width_px(int px, const char *s) { return ttf_text_width_px(px,s); }
+void ui_text_fixed(uint8_t *fb, int x, int y, int px, const char *s, int align, bool inverted) {
+    ++ui_painted; ttf_draw_text_px(fb,x,y,px,s,align,inverted,0);
+}
 void ui_fill_rect_fast(EpdRect r, uint8_t gray, uint8_t *fb) {
     (void)gray; (void)fb; assert(r.x >= 0 && r.y >= 0 && r.x+r.width <= 684 && r.y+r.height <= 1216);
 }
 void ui_draw_separator(uint8_t *fb, int y, int x, int width, uint8_t gray) {
     (void)fb; (void)gray; assert(x >= 0 && x+width <= 684 && y >= 0 && y < 1216);
+}
+static void assert_nav(const ui_reader_dictionary_t *v, bool prev, bool next) {
+    int y = v->top + 500;
+    assert(ui_reader_dictionary_action(v, 50, y) == (prev ? UI_DICTIONARY_PREV : UI_DICTIONARY_NONE));
+    assert(ui_reader_dictionary_action(v, 550, y) == (next ? UI_DICTIONARY_NEXT : UI_DICTIONARY_NONE));
+    assert((strstr(drawn, "上一页") != NULL) == prev);
+    assert((strstr(drawn, "下一页") != NULL) == next);
 }
 int main(void) {
     size_t bytes=684*1216/2; uint8_t *guard=malloc(bytes+32), *original=malloc(bytes); assert(guard&&original);
@@ -71,24 +84,59 @@ int main(void) {
     book_dictionary_result_t r={.status=BOOK_DICTIONARY_OK};
     strcpy(r.reading,"yù\nyú\n更多读音");strcpy(r.variant,"鬱");strcpy(r.example,"这是完整例句。");
     for(unsigned i=0;i<500;++i)strcat(r.definition,"释义");
-    ui_reader_dictionary_t v={.open=true,.can_browse=true,.top=632};
-    size_t length=ui_reader_dictionary_content_size(&r),offset=0;unsigned pages=0;
-    assert(length>strlen(r.definition));
-    while(offset<length){drawn[0]=0;v.offset=offset;ui_reader_dictionary_draw(fb,&v,&r,"踽踽独行");size_t next=ui_reader_dictionary_page_end(&r,offset);assert(next>offset&&next<=length);offset=next;assert(++pages<128);}
-    assert(pages>1&&ui_reader_dictionary_action(&v,30,100)==0);
-    assert(ui_reader_dictionary_action(&v,570,660)==0);
-    assert(ui_reader_dictionary_action(&v,50,1130)==1&&ui_reader_dictionary_action(&v,300,1130)==3&&ui_reader_dictionary_action(&v,550,1130)==2);
-    v.can_browse=false;assert(ui_reader_dictionary_action(&v,300,1130)==-1);
+    ui_reader_dictionary_t v={.open=true,.can_character=true,.top=632};
+    assert(ui_reader_dictionary_content_size(&r)>strlen(r.definition));
+    unsigned pages=0;
+    do {
+        v.next_offset=ui_reader_dictionary_next_page(&r,v.offset);
+        drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"踽踽独行");
+        assert_nav(&v,pages>0,v.next_offset!=0);
+        assert(ui_reader_dictionary_action(&v,300,1130)==UI_DICTIONARY_CHARACTER);
+        assert(!v.next_offset||v.next_offset>v.offset);
+        if (!v.next_offset) assert(strstr(drawn,"这是完整例句。"));
+        v.offset=v.next_offset;
+        assert(++pages<128);
+    } while(v.offset);
+    assert(pages>2&&ui_reader_dictionary_action(&v,30,100)==UI_DICTIONARY_CLOSE);
+    assert(ui_reader_dictionary_action(&v,570,660)==UI_DICTIONARY_CLOSE);
+    r=(book_dictionary_result_t){.status=BOOK_DICTIONARY_OK};
+    strcpy(r.definition,"一\n二\n三\n四\n五\n六\n\n \t");
+    v.next_offset=ui_reader_dictionary_next_page(&r,0);
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"青铜");
+    assert_nav(&v,false,false);
+    assert(strstr(drawn,"六")&&ui_reader_dictionary_action(&v,300,1130)==UI_DICTIONARY_CHARACTER);
+    v.can_character=false;assert(ui_reader_dictionary_action(&v,300,1130)==UI_DICTIONARY_NONE);
     for(int status=BOOK_DICTIONARY_MISSING;status<=BOOK_DICTIONARY_CORRUPT;++status) {
         if(status==BOOK_DICTIONARY_NOT_FOUND)continue;
         r.status=status;drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"青铜");
         assert(strstr(drawn,"官网说明书")&&strstr(drawn,"mogo.mantake.shop"));
         assert(strstr(drawn,"dictionaries")&&strstr(drawn,"TF 卡根目录"));
-        assert(!strstr(drawn,"下载安装")&&!strstr(drawn,"上一屏"));
+        assert(!strstr(drawn,"下载安装"));assert_nav(&v,false,false);
     }
     r.definition[0]=0;assert(ui_reader_dictionary_content_size(&r)>strlen(r.reading));
     for(int status=BOOK_DICTIONARY_OK;status<=BOOK_DICTIONARY_BUSY;++status){drawn[0]=0;r.status=status;v.offset=0;ui_reader_dictionary_draw(fb,&v,&r,"𠮷");}
     ui_reader_dictionary_notice(fb);
+    v.kind=BOOK_DICTIONARY_EN_ZH;v.offset=0;v.loading=false;
+    r=(book_dictionary_result_t){.status=BOOK_DICTIONARY_MISSING,.kind=v.kind};
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"Book");
+    assert(strstr(drawn,"未安装此英文词库")&&strstr(drawn,"英汉")&&strstr(drawn,"英英"));
+    assert(ui_painted&&ui_reader_dictionary_action(&v,415,v.top+500)==UI_DICTIONARY_EN_EN);
+    assert(ui_reader_dictionary_action(&v,269,v.top+500)==UI_DICTIONARY_EN_ZH);
+    assert_nav(&v,false,false);
+    latin_only=true;r.status=BOOK_DICTIONARY_OK;strcpy(r.definition,"书籍\n读物");
+    v.next_offset=ui_reader_dictionary_next_page(&r,0);
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"Book");
+    assert(strstr(drawn,"阅读字体缺少汉字")&&strstr(drawn,"书籍")&&!strstr(drawn,"未收录"));
+    assert_nav(&v,false,false);
+    v.kind=r.kind=BOOK_DICTIONARY_EN_EN;strcpy(r.definition,"the quick brown fox jumps over the lazy dog");
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"Book");
+    assert(strstr(drawn,"the quick brown\n")&&!strstr(drawn,"阅读字体缺少汉字"));
+    strcpy(r.definition,"one\ntwo\nthree\nfour\nfive\nsix\nseven");
+    v.next_offset=ui_reader_dictionary_next_page(&r,v.offset);
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"Book");assert_nav(&v,false,true);
+    v.offset=v.next_offset;v.next_offset=ui_reader_dictionary_next_page(&r,v.offset);
+    drawn[0]=0;ui_reader_dictionary_draw(fb,&v,&r,"Book");assert_nav(&v,true,false);
+    assert(strstr(drawn,"seven")&&strstr(drawn,"英英"));
     assert(painted&&selected==2);free(original);free(guard);
     puts("PASS: actual view, reversible XOR handles at screen edges, complete reading/definition/example paging and error states");
 }
@@ -101,6 +149,8 @@ with tempfile.TemporaryDirectory(dir=ROOT / "build") as folder:
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_BLACK 0
+void ui_text_fixed(uint8_t *, int, int, int, const char *, int, bool);
+int ui_text_fixed_width_px(int, const char *);
 void ui_fill_rect_fast(EpdRect, uint8_t, uint8_t *);
 void ui_draw_separator(uint8_t *, int, int, int, uint8_t);
 EpdRect ui_rotate_rect_to_fb(EpdRect);

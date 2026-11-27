@@ -10,6 +10,7 @@ cc "${flags[@]}" tools/dictionary_host_test.c main/book/book_dictionary.c main/b
 build/dictionary-tests/selection
 python3 tools/reader_dictionary_host_test.py
 python3 tools/reader_dictionary_build_host_test.py
+python3 tools/reader_english_dictionary_host_test.py
 python3 tools/reader_dictionary_worker_host_test.py
 python3 tools/reader_dictionary_ui_host_test.py
 python3 tools/reader_dictionary_view_host_test.py

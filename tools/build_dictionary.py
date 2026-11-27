@@ -199,7 +199,7 @@ def import_unihan(conn, path):
 def write_package(conn, output, source=SOURCE):
     count = conn.execute('SELECT COUNT(*) FROM entries').fetchone()[0]
     if not count:
-        raise ValueError('No supported Chinese entries')
+        raise ValueError('No supported dictionary entries')
     if count > 1000000 or len(source.encode('utf-8')) > 159:
         raise ValueError('Package metadata exceeds device limits')
     with tempfile.TemporaryDirectory(dir=output.parent) as folder:
@@ -223,7 +223,7 @@ def write_package(conn, output, source=SOURCE):
         struct.pack_into('<8s8I', header, 0, b'MGDICT\r\n', VERSION, meta_at+len(source), count, 64, key_at, data_at, meta_at, len(source))
         struct.pack_into('<I', header, 40, zlib.crc32(source))
         struct.pack_into('<I', header, 60, zlib.crc32(header[:60]))
-        temporary = work / 'chinese.mgdict'
+        temporary = work / 'package.mgdict'
         with temporary.open('wb') as target:
             target.write(header)
             for stream in (index, keys, data):

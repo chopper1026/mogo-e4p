@@ -7757,16 +7757,22 @@ static bool dictionary_long_drag(app_ctx_t *ctx) {
     (void)ctx;
     return s_view == READING && s_text && !s_toolbar && !s_clear_confirm;
 }
-static void dictionary_query(const char *query) {
+static void dictionary_query(const char *query, book_dictionary_kind_t kind) {
     char saved[129]; copy_text(saved, sizeof(saved), query);
     memset(&s_dictionary_result, 0, sizeof(s_dictionary_result));
     copy_text(s_dictionary_result.query, sizeof(s_dictionary_result.query), saved);
-    s_dictionary_view.can_browse = false;
-    s_dictionary_view.loading = reader_dictionary_start(saved);
+    s_dictionary_result.kind = s_dictionary_view.kind = kind;
+    s_dictionary_view.can_character = false;
+    s_dictionary_view.next_offset = 0;
+    s_dictionary_view.loading = reader_dictionary_start(kind, saved);
     if (!s_dictionary_view.loading) s_dictionary_result.status = BOOK_DICTIONARY_BUSY;
     s_dictionary_view.open = true; s_dictionary_view.offset = 0;
     s_dictionary_history_count = 0;
     s_dictionary_chapter = s_reader_session.position.chapter;
+}
+static void dictionary_update_next_page(void) {
+    s_dictionary_view.next_offset = s_dictionary_history_count < sizeof(s_dictionary_history) / sizeof(s_dictionary_history[0])
+        ? ui_reader_dictionary_next_page(&s_dictionary_result, s_dictionary_view.offset) : 0;
 }
 static EpdRect dictionary_union(EpdRect a, EpdRect b) {
     int right = a.x + a.width > b.x + b.width ? a.x + a.width : b.x + b.width;
@@ -7809,6 +7815,7 @@ static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t 
             if (first) { size_t at = s_dictionary_selection.anchor; s_dictionary_selection.anchor = s_dictionary_selection.focus; s_dictionary_selection.focus = at; }
             reader_dictionary_cancel(); s_dictionary_view.open = false;
             s_dictionary_selection.dragging = true;
+            s_dictionary_selection.extend_word = false;
             // 当前接触只能区域绘制；先重绘原页，再恢复选区。/ Active contacts use area output; restore the base page and then its selection.
             render(ctx, ctx->fb); s_area = (EpdRect){0,0,READER_WIDTH,READER_HEIGHT};
             s_mode = MODE_DU; s_dictionary_feedback_pending = true; return APP_REDRAW_AREA;
@@ -7843,22 +7850,30 @@ static app_redraw_t dictionary_gesture(app_ctx_t *ctx, const ui_gesture_event_t 
         if (reader_selection_range(&s_dictionary_selection, g, count, &start, &end))
             for (size_t i = 0; i < count; ++i) if (g[i].start >= start && g[i].start < end && g[i].y + g[i].height > max_y) max_y = g[i].y + g[i].height;
         s_dictionary_view.top = max_y >= READER_HEIGHT / 2 ? 0 : READER_HEIGHT - 584;
-        s_dictionary_character = 0; dictionary_query(s_dictionary_selection.query); return APP_REDRAW_PAGE;
+        char english[READER_SELECTION_BYTES + 1];
+        book_dictionary_kind_t kind = reader_selection_english_key(s_dictionary_selection.query, english)
+            ? BOOK_DICTIONARY_EN_ZH : BOOK_DICTIONARY_CHINESE;
+        s_dictionary_character = 0; dictionary_query(s_dictionary_selection.query, kind); return APP_REDRAW_PAGE;
     }
     if (ev->type == UI_GESTURE_TAP && s_dictionary_view.open) {
-        int action = ui_reader_dictionary_action(&s_dictionary_view, ev->x0, ev->y0);
-        if (action == 0) return dictionary_dismiss();
-        if (action == 1 && s_dictionary_history_count) s_dictionary_view.offset = s_dictionary_history[--s_dictionary_history_count];
-        else if (action == 2) {
-            size_t next = ui_reader_dictionary_page_end(&s_dictionary_result, s_dictionary_view.offset);
-            if (next < ui_reader_dictionary_content_size(&s_dictionary_result) && s_dictionary_history_count < 128) {
-                s_dictionary_history[s_dictionary_history_count++] = s_dictionary_view.offset; s_dictionary_view.offset = next;
-            }
-        } else if (action == 3) {
+        ui_dictionary_action_t action = ui_reader_dictionary_action(&s_dictionary_view, ev->x0, ev->y0);
+        if (action == UI_DICTIONARY_CLOSE) return dictionary_dismiss();
+        if (action == UI_DICTIONARY_EN_ZH || action == UI_DICTIONARY_EN_EN) {
+            book_dictionary_kind_t kind = action == UI_DICTIONARY_EN_ZH ? BOOK_DICTIONARY_EN_ZH : BOOK_DICTIONARY_EN_EN;
+            if (kind == s_dictionary_view.kind) return APP_REDRAW_NONE;
+            dictionary_query(s_dictionary_selection.query, kind);
+        } else if (action == UI_DICTIONARY_PREV && s_dictionary_history_count) {
+            s_dictionary_view.offset = s_dictionary_history[--s_dictionary_history_count];
+            dictionary_update_next_page();
+        } else if (action == UI_DICTIONARY_NEXT) {
+            s_dictionary_history[s_dictionary_history_count++] = s_dictionary_view.offset;
+            s_dictionary_view.offset = s_dictionary_view.next_offset;
+            dictionary_update_next_page();
+        } else if (action == UI_DICTIONARY_CHARACTER) {
             char one[READER_SELECTION_BYTES + 1];
             s_dictionary_character = reader_selection_character(s_dictionary_selection.query, s_dictionary_character, one);
             if (!one[0]) return APP_REDRAW_NONE;
-            dictionary_query(one);
+            dictionary_query(one, BOOK_DICTIONARY_CHINESE);
         } else return APP_REDRAW_NONE;
         return APP_REDRAW_PAGE;
     }
@@ -7883,8 +7898,9 @@ static app_redraw_t dictionary_tick(app_ctx_t *ctx) {
     if (s_dictionary_view.loading && (!ctx->touch || !ctx->touch->touched) &&
         reader_dictionary_poll(&s_dictionary_result)) {
         s_dictionary_view.loading = false;
-        s_dictionary_view.can_browse = s_dictionary_result.status == BOOK_DICTIONARY_OK ||
-            s_dictionary_result.status == BOOK_DICTIONARY_NOT_FOUND;
+        s_dictionary_view.can_character = s_dictionary_view.kind == BOOK_DICTIONARY_CHINESE &&
+            (s_dictionary_result.status == BOOK_DICTIONARY_OK || s_dictionary_result.status == BOOK_DICTIONARY_NOT_FOUND);
+        dictionary_update_next_page();
         return APP_REDRAW_PAGE;
     }
     return APP_REDRAW_NONE;

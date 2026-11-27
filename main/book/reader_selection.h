@@ -9,11 +9,13 @@
 typedef struct {
     bool active, dragging;
     size_t anchor, focus;
+    size_t word_first, word_last;
+    bool extend_word;
     uint32_t generation;
     size_t page;
     char query[READER_SELECTION_BYTES + 1];
 } reader_selection_t;
-/// 单字起选、拖动扩选；所有指针仅本次调用借用。/ Start or extend selection; pointers are borrowed only for the call.
+/// 英文整词或单字起选；所有指针仅本次调用借用。/ Start with a whole English word or one character; pointers are borrowed.
 bool reader_selection_begin(reader_selection_t *selection, const char *text, size_t length,
     const book_layout_glyph_t *glyphs, size_t count, size_t page, uint32_t generation, int x, int y);
 bool reader_selection_move(reader_selection_t *selection, const char *text, size_t length,
@@ -25,3 +27,6 @@ void reader_selection_cancel(reader_selection_t *selection);
 size_t reader_selection_utf8(const char *text, size_t bytes);
 /// 逐字查询保留组合符，返回下一个字节位置；末尾返回 0。/ Per-character lookup keeps combining marks and returns the next byte offset, or zero at the end.
 size_t reader_selection_character(const char *text, size_t offset, char output[READER_SELECTION_BYTES + 1]);
+
+/// 英文词库键；不支持的选区返回 false，原选区不变。/ English index key; reject unsupported ranges without changing the original selection.
+bool reader_selection_english_key(const char *text, char output[READER_SELECTION_BYTES + 1]);

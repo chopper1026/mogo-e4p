@@ -6,8 +6,16 @@ Hold body text for about half a second, drag to select a phrase, then release to
 关闭卡片回到纯文字页时，整屏做一次归一化刷新，使覆盖区与其余正文墨度一致；有阅读背景时保留背景灰阶。插图页保留图片刷新路径。端点拖动中只做跟手刷新，取消后抬手再归一。
 Closing a sheet onto text normalizes the whole screen to equalize the covered and uncovered text, preserving reading-background grays. Illustration pages retain their image output. Endpoint drags use live updates and normalize after release if cancelled.
 
-字典标题、读音、释义、例句、来源和操作按钮直接使用当前阅读字体，与系统界面字体独立，不调用界面内置字库补字。未收录整词时可反复点「逐字」循环查所选单字；多义、全部读音及例句通过「上一屏 / 下一屏」查看。字体缺字与词库缺项分别提示；缺字时保留原文查询并显示 Unicode 编码。选择含变体选择符或组合符时逐字查询保留它们。
-All sheet text uses the current reader face directly, independently of the UI face and without the UI bitmap fallback. Per-character lookup cycles through the selected text; paging retains readings, definitions and examples. Missing glyphs and missing dictionary fields are separate conditions, with Unicode identifiers retained for missing headword glyphs.
+中文卡片文字和英文卡片的词头、释义、读音与例句直接使用当前阅读字体，不调用界面内置字库补字。英文的操作与状态提示使用内建界面字体。未收录整词时可反复点「逐字」循环查所选单字；较长的释义、读音及例句可点「上一页 / 下一页」翻阅；首页不显示「上一页」，末页不显示「下一页」，一页能看完时不显示翻页按钮。字体缺字与词库缺项分别提示；缺字时保留原文查询并显示 Unicode 编码。选择含变体选择符或组合符时逐字查询保留它们。
+Chinese sheets, and English headwords, glosses, readings and examples, use the current reader face without UI glyph fallback. English controls and messages use the built-in UI face. Per-character lookup cycles through the selected text; paging retains readings, definitions and examples. Missing glyphs and missing dictionary fields are separate conditions, with Unicode identifiers retained for missing headword glyphs.
+
+## 英文查词 / English Lookups
+
+长按英文单词中的字母时，从本页字格扩选整词；词内撇号和连字符不拆词。拖动可选短语，长按手柄可缩小或重新调整。英文卡片默认「英汉」，可随时切换「英英」或切回，两种结果分别查询；新一次选词默认英汉。切换不改变选区，不会用另一种结果顶替缺库、损坏或未收录。英汉释义保留词源简繁字形；阅读字体缺少所需汉字时提示更换字体。
+Hold an English letter to select its whole visible word, including internal apostrophes or hyphens. Drag to select a phrase or use the handles to refine it. The card starts in EN-ZH; EN-EN is available without changing the selection or substituting its results on error. EN-ZH keeps the source scripts and warns when the reading face lacks required Han glyphs.
+
+查词键使用 ASCII / Latin-1 大小写归一、直弯撇号和常见连字符归一、外缘标点去除和空白折叠；标题保留原文。整词或短语优先，词源明确且只有一个有效原形时记录交叉引用，不猜词根。混合中英文的选区沿用中文查询。
+Index keys fold ASCII/Latin-1 case, apostrophes, common hyphens and whitespace and trim edge punctuation. Titles keep the original text. Direct entries win; supported explicit inflections resolve to one unambiguous attested lemma, without stemming. Mixed Chinese/English selections keep the Chinese lookup path.
 
 ## 安装 / Installation
 
@@ -17,12 +25,15 @@ When missing, corrupt or unsupported, the sheet points to the official manual. D
 只读查询优先使用手工文件 `/sdcard/dictionaries/chinese.mgdict`；没有手工文件时，依次兼容旧版留下的 `installed/chinese.mgdict`、`.previous/chinese.mgdict`。不自动删除或修改旧目录，不读取未完成的 `.install/`。手工文件存在但损坏时直接提示重新下载，不静默回退到旧内容。官网完整包解压后约 68 MiB，复制前至少预留 80 MB；保留原词库备份时需额外空间。查词始终离线。
 Read-only lookup prefers the manual file, falling back to legacy installed and previous generations only when absent. It never reads unfinished staging data or changes legacy directories. A corrupt manual file reports an error instead of silently returning older content. Allow at least 80 MB for the current archive's extracted files, plus any retained backup; lookups are offline.
 
+英文为独立 ZIP，将其中 `dictionaries` 文件合并到 TF 卡已有同名目录；不要覆盖或重装中文包。`english-zh.mgdict` 为英汉，`english-en.mgdict` 为英英。两文件按模式独立打开，不读取旧安装目录。按英文 ZIP 解压大小另行预留空间。
+The standalone English ZIP merges into the existing `dictionaries` directory without replacing the Chinese package. `english-zh.mgdict` and `english-en.mgdict` are independently opened; neither uses legacy paths. Reserve space for the decompressed archive.
+
 支持 TXT、EPUB 和已支持的传统 MOBI 的可选择正文；图片、章节装饰题头、页眉页脚及跨页选词不在选区内。每次最多32个 Unicode 标量、128个 UTF-8 字节。极密页面超过2048个字格，或字格表分配/绘制失败时，本页拒绝选字并提示；调整字号后可重试。用户阅读字体本身缺字时须更换覆盖这些字的字体，词库数量不能证明字体覆盖。
 Selection covers text in TXT, EPUB and supported traditional MOBI, excluding pictures, decorative chapter headers, chrome and cross-page ranges. A range is capped at 32 Unicode scalars/128 UTF-8 bytes. Pages exceeding 2048 glyph cells or failing map allocation/drawing refuse selection explicitly. Dictionary coverage does not establish font coverage.
 
 ## 官网交付 / Website Delivery
 
-官网说明书提供完整 ZIP 下载，包含 `dictionaries/chinese.mgdict`、来源清单、署名、五份完整许可，以及安装说明和 SHA-256 清单。词库与固件分开维护；官网后台的启停、版本与下载统计属于平台，服务端完成传输不代表设备安装成功。固件不再依赖清单、下载接口、HTTP 缓冲、重试或写卡安装任务，天气、OTA 与对时按原有生命周期运行。
+官网说明书的中文 ZIP 包含 `dictionaries/chinese.mgdict`、来源清单、署名、五份完整许可，以及安装说明和 SHA-256 清单。词库与固件分开维护；官网后台的启停、版本与下载统计属于平台，服务端完成传输不代表设备安装成功。固件不再依赖清单、下载接口、HTTP 缓冲、重试或写卡安装任务，天气、OTA 与对时按原有生命周期运行。
 The website provides a complete ZIP with the dictionary, provenance, attribution, five full license files, installation instructions and SHA-256 checksums. Package management and transfer statistics belong to the platform and do not prove device installation. Firmware has no manifest/download/retry/write-install worker; weather, OTA and time sync retain their normal lifecycle.
 
 ## 来源与转换 / Sources And Conversion
@@ -55,12 +66,24 @@ python3 tools/build_dictionary.py \
 `--wiktionary` 可重复传入同一快照的其他汉语标签文件。`--chinese-dictionary` 可选，目录须含上游 `word/word.json` 与 `character/char_detail.json`。输出为词库、`.manifest.json`（来源、有效释义数量、50字/30词及青铜/破解样本）和 `.LICENSE.txt`（署名摘要）；完整许可文本由分发方随包保留。转换按 UTF-8 字节序生成定长索引和独立 zlib 词条块；相同输入、Python/zlib/OpenCC 版本和参数生成相同字节。字段超限会以省略号截断。
 Repeat `--wiktionary` for related labels; the optional supplemental folder contains upstream word and character files. Output includes provenance, actual-gloss counts, 82 coverage samples and attribution; complete licenses accompany distributions. Identical inputs and Python/zlib/OpenCC versions reproduce the package; oversized fields are truncated.
 
+### 英文词库复现 / Rebuild English Packages
+
+`tools/english-dictionary-sources.json` 固定 Kaikki/Wiktextract 快照、提取版本和完整许可的 SHA-256。按清单文件名准备输入；上游滚动更新后应复用原始快照，转换器拒绝哈希不符的文件。英英取英语维基词典释义与有署名来源的用法例句，不纳入外部引文；英汉同词性优先中文维基词典释义，缺项才用英语维基词典明确标注的普通话译词。MGDICT v1 每个文件至多 100 万键；优先保留直接释义，剩余额度优先收录原形同时支持两种释义的短词形，清单标记未纳入的原形映射数量。英文 ZIP 包含两个 MGDICT v1 文件、逐词来源、`english.manifest.json`、`english.LICENSE.txt`、完整 CC BY-SA 4.0 许可、安装说明和 `SHA256SUMS`。
+The lock pins both Kaikki/Wiktextract snapshots and the full license by SHA-256. Use retained matching inputs rather than later rolling exports. EN-EN uses English Wiktionary glosses and attributed usage examples, not external quotations. EN-ZH prioritizes Chinese Wiktionary by part of speech, filling gaps only with explicitly Mandarin translations. The format caps each database at one million keys: keep direct definitions first and prefer short forms with lemmas available in both modes. The manifest records excluded aliases. The ZIP includes both databases, per-headword attribution, manifest, full license, instructions and checksums.
+
+```sh
+python3 tools/build_english_dictionary.py --input-dir build/english-dictionary/sources \
+    --output build/english-dictionary/mogo-english-dictionary.zip
+# 先跑 dictionary 宿主套件生成真实 C 读取器，再验证包。/ Run the dictionary host suite first to build the actual C reader.
+python3 tools/reader_english_dictionary_host_test.py --archive build/english-dictionary/mogo-english-dictionary.zip
+```
+
 ## 维护契约 / Maintenance Contract
 
 - `ttf_*_observed` 在真实落笔过程中同步交付原文字节范围和字格，`book_layout` 使用本页/预绘页双表，只有完整且同代次的预绘结果随画面接管；观察器不分配、不读词库。/ Actual glyph draws report source spans/cells to bounded current/prefetch maps; only complete matching generations may be adopted.
 - `reader_selection` 只借用本次调用的章节和字格；工作任务只复制最多128字节的查询。`reader_dictionary` 串行替换查询，取消后等待退出并关闭文件，再释放任务结果；不触碰字体、画面或阅读进度。/ The worker owns a small query copy, drains cancellation and never touches chapter buffers, fonts, frames or progress.
 - 卡失效、USB、换章节、离页、锁屏和字体/布局失效均撤销旧选区或查询。`render` 只画已有结果，查询在事件/工作任务运行，结果在主任务 tick 接收。/ Media/USB/lifecycle/layout changes invalidate results; rendering consumes completed state only.
-- `book_dictionary_path` 只读选择手工文件及兼容目录，不拥有网络或写卡句柄；手工复制由电脑和 TF 卡读写工具完成。/ Read-only path selection owns no networking or write handles; manual copying belongs to the computer/card tools.
+- `book_dictionary_path` 只读选择相应语种手工文件及中文兼容目录，不拥有网络或写卡句柄；手工复制由电脑和 TF 卡读写工具完成。/ Read-only path selection owns no networking or write handles; manual copying belongs to the computer/card tools.
 - 双表最多64KiB，单词条解压最多8192字节；文件最大为有符号32位长度、最多100万词头，每次二分索引并校验头、来源和词条 CRC。词条损坏、版本不兼容、卡读错与未安装分别返回。/ Maps cap at 64KiB and decoded entries at 8192 bytes; bounded binary search validates header/source/entry CRC and distinguishes package/version/I/O errors.
 
 格式1：64字节小端文件头含 magic `MGDICT\r\n`、版本、文件长度、词条数、索引/键/压缩数据/来源区起点及来源长度；偏移40是来源CRC，偏移60是前60字节CRC。每条20字节索引为 `<IIHHIHH>`：键偏移、数据偏移、压缩长度、原始长度、原始CRC、键长度、保留0。解压内容为四个16位字段长度和对应UTF-8的读音、释义、例句、对应词头。其余字段含义以转换器和读取器共同测试为准，格式不兼容时递增版本。

@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 词典卡片改用「上一页 / 下一页」，只显示确实能翻到的方向；单页释义不显示翻页按钮。/ Dictionary cards show Previous and Next only when a page exists in that direction.
+
+- 阅读正文新增离线英汉和英英字典：长按英文整词，拖选短语，在释义卡片切换；英文词库独立安装到 TF 卡。/ Long-press an English word or drag over a phrase to switch between offline EN-ZH and EN-EN definitions. Install the English package separately on the TF card.
 - 修复阅读排版滑杆短拖回弹和反复闪动：拖动只刷新当前滑杆，松手才应用最终值；保留点按和两端微调。/ Fix typography sliders snapping back or flashing during short drags. Only the active slider updates while dragging; the final value applies on release. Taps and endpoint nudges still work.
 - 设置主列表改为随手指位移滚动，松手即停；保留原分隔线，松手后只对旧横线已变白的位置定点补白。/ The Settings list now follows the drag and stops on release. Dividers retain their appearance; old rule positions that are now white can receive a targeted cleanup.
 

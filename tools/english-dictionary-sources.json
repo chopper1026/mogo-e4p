@@ -1,0 +1,25 @@
+{
+  "inputs": {
+    "en": {
+      "dump_date": "2026-10-01",
+      "extraction_date": "2026-10-30",
+      "file": "en-snapshot.jsonl.gz",
+      "sha256": "4d03b6cba283744756c57ff661c2c6cbfe34fcf8ff513a966576cf7d97e91a99",
+      "source_url": "https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl.gz"
+    },
+    "license": {
+      "file": "CC-BY-SA-4.0.txt",
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5",
+      "source_url": "https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt"
+    },
+    "zh": {
+      "dump_date": "2026-11-01",
+      "extraction_date": "2026-11-02",
+      "file": "zh-english.jsonl.gz",
+      "sha256": "2c3d5b6cdd2b0972b237542874f06744facb5c4afc93b1347a947293600d9336",
+      "source_url": "https://kaikki.org/zhwiktionary/%E8%8B%B1%E8%AA%9E/kaikki.org-dictionary-%E8%8B%B1%E8%AA%9E.jsonl.gz"
+    }
+  },
+  "wikitextprocessor": "6f96ddf5f3466707f1869fe6618390fd77dfd10",
+  "wiktextract": "19f9a3006a405fb7bfb40193dca41c7117a009a5"
+}

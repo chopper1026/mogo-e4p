@@ -36,9 +36,10 @@ UNIT = r'''
 struct host_sem { pthread_mutex_t lock; pthread_cond_t ready; bool signalled; };
 static atomic_int tasks, semaphores, mode, entered;
 static bool fail_sem, fail_task;
-bool book_dictionary_path(const char *root, char *path, size_t capacity) {
+bool book_dictionary_path(const char *root, book_dictionary_kind_t kind, char *path, size_t capacity) {
     assert(!strcmp(root, "/sdcard/dictionaries"));
-    snprintf(path, capacity, "%s/chinese.mgdict", root); return true;
+    snprintf(path, capacity, "%s/%s", root, kind == BOOK_DICTIONARY_EN_EN ? "english-en.mgdict" :
+             kind == BOOK_DICTIONARY_EN_ZH ? "english-zh.mgdict" : "chinese.mgdict"); return true;
 }
 SemaphoreHandle_t xSemaphoreCreateBinary(void) {
     if (fail_sem) return NULL;
@@ -75,13 +76,14 @@ int xTaskCreate(void (*fn)(void *), const char *name, unsigned stack, void *arg,
 void vTaskDelete(void *handle) { assert(!handle); atomic_fetch_sub(&tasks, 1); pthread_exit(NULL); }
 book_dictionary_status_t book_dictionary_lookup(const char *path, const char *query,
     book_dictionary_result_t *result, book_dictionary_cancel_fn cancelled, void *context) {
-    assert(!strcmp(path, "/sdcard/dictionaries/chinese.mgdict"));
+    const char *name = strrchr(path, '/') + 1;
+    if (strcmp(name, "chinese.mgdict")) assert(!strcmp(query, "don't"));
     atomic_fetch_add(&entered, 1);
     while (atomic_load(&mode) && !cancelled(context)) usleep(100);
     usleep(1000);
     result->status = cancelled(context) ? BOOK_DICTIONARY_CANCELLED : BOOK_DICTIONARY_OK;
     snprintf(result->query, sizeof(result->query), "%s", query);
-    snprintf(result->definition, sizeof(result->definition), "释义：%s", query);
+    snprintf(result->definition, sizeof(result->definition), "%s:%s", name, query);
     return result->status;
 }
 static void wait_entered(int target) {
@@ -93,27 +95,34 @@ static void wait_idle(void) {
 }
 int main(void) {
     book_dictionary_result_t result;
-    assert(!reader_dictionary_start(NULL)); assert(!reader_dictionary_start(""));
+    assert(!reader_dictionary_start(BOOK_DICTIONARY_CHINESE, NULL)); assert(!reader_dictionary_start(BOOK_DICTIONARY_CHINESE, ""));
     char too_long[130]; memset(too_long, 'a', sizeof(too_long)); too_long[129] = 0;
-    assert(!reader_dictionary_start(too_long));
-    fail_sem = true; assert(!reader_dictionary_start("踽")); fail_sem = false;
-    fail_task = true; assert(!reader_dictionary_start("踽")); fail_task = false; wait_idle();
+    assert(!reader_dictionary_start(BOOK_DICTIONARY_CHINESE, too_long));
+    fail_sem = true; assert(!reader_dictionary_start(BOOK_DICTIONARY_CHINESE, "踽")); fail_sem = false;
+    fail_task = true; assert(!reader_dictionary_start(BOOK_DICTIONARY_CHINESE, "踽")); fail_task = false; wait_idle();
     char borrowed[] = "踽踽独行";
-    assert(reader_dictionary_start(borrowed)); memset(borrowed, 'x', sizeof(borrowed) - 1);
+    assert(reader_dictionary_start(BOOK_DICTIONARY_CHINESE, borrowed)); memset(borrowed, 'x', sizeof(borrowed) - 1);
     for (unsigned i = 0; !reader_dictionary_poll(&result); ++i) { assert(i < 10000); usleep(100); }
     assert(result.status == BOOK_DICTIONARY_OK && !strcmp(result.query, "踽踽独行"));
     assert(!reader_dictionary_poll(&result)); wait_idle();
     for (unsigned i = 0; i < 100; ++i) {
         atomic_store(&mode, 1); int next = atomic_load(&entered) + 1;
-        assert(reader_dictionary_start("旧查询")); wait_entered(next);
+        assert(reader_dictionary_start(BOOK_DICTIONARY_CHINESE, "旧查询")); wait_entered(next);
         // 新任务先回收旧任务；旧结果不允许流入新查询。/ Replacement drains the old task and drops its result.
-        assert(reader_dictionary_start("𠮷")); atomic_store(&mode, 0);
+        assert(reader_dictionary_start(BOOK_DICTIONARY_CHINESE, "𠮷")); atomic_store(&mode, 0);
         while (!reader_dictionary_poll(&result)) usleep(100);
         assert(result.status == BOOK_DICTIONARY_OK && !strcmp(result.query, "𠮷")); wait_idle();
         atomic_store(&mode, 1); next = atomic_load(&entered) + 1;
-        assert(reader_dictionary_start("拔卡或离页")); wait_entered(next);
+        assert(reader_dictionary_start(BOOK_DICTIONARY_CHINESE, "拔卡或离页")); wait_entered(next);
         reader_dictionary_cancel(); assert(!reader_dictionary_poll(&result)); wait_idle();
     }
+    atomic_store(&mode, 1); int next = atomic_load(&entered) + 1;
+    assert(reader_dictionary_start(BOOK_DICTIONARY_EN_ZH, "Don’t!")); wait_entered(next);
+    assert(reader_dictionary_start(BOOK_DICTIONARY_EN_EN, "Don’t!")); atomic_store(&mode, 0);
+    while (!reader_dictionary_poll(&result)) usleep(100);
+    assert(result.status == BOOK_DICTIONARY_OK && result.kind == BOOK_DICTIONARY_EN_EN);
+    assert(!strcmp(result.query, "Don’t!") && !strcmp(result.definition, "english-en.mgdict:don't"));
+    wait_idle();
     reader_dictionary_cancel();
     puts("PASS: actual worker, copied query, task/semaphore failures, 100 replacement/cancel cycles, no stale results or live handles");
 }
@@ -127,6 +136,8 @@ with tempfile.TemporaryDirectory(dir=ROOT / "build") as folder:
     (work / "test.c").write_text(UNIT)
     subprocess.run(["cc", "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Werror", "-pthread",
                     "-fsanitize=address,undefined", "-I" + str(work), "-I" + str(ROOT / "main/book"),
+                    "-I" + str(ROOT / "tools/book_layout_stubs"), "-I" + str(ROOT / "tools/book_source_host_stubs"),
                     str(work / "test.c"), str(ROOT / "main/book/reader_dictionary.c"),
+                    str(ROOT / "main/book/reader_selection.c"),
                     "-o", str(work / "test")], check=True)
     subprocess.run([str(work / "test")], check=True, timeout=30)
