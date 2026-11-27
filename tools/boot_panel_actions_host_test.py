@@ -55,12 +55,16 @@ int main(void) {
 gesture = function('on_gesture', SETTINGS)
 gesture = gesture[gesture.index('    if(y>=SETTINGS_MAINTENANCE_Y'):gesture.index('    if(y>=SETTINGS_POWER_Y')]
 render = function('render', SETTINGS)
-root_render = re.sub(r'\s+', '', render[render.index('const char *maintenance_labels'):])
+# 主列表内容与固定页头分开绘制；分别检查维护行和提示的顺序。
+# The scrolling list and fixed header paint separately; check the maintenance rows and notice order independently.
+root_render = re.sub(r'\s+', '', render[render.index('    paint_main_list(fb);'):])
 assert root_render.index('if(s_notice[0])') > root_render.index(
     'ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);')
 
 rows = re.search(r'^#define SETTINGS_MAINTENANCE_ROWS \d+$', SETTINGS.read_text(), re.M).group()
-assert 'maintenance_labels[]={"保存与恢复","系统升级"}' in render
+main_list = function('paint_main_list', SETTINGS)
+assert 'maintenance_labels[]={"保存与恢复","系统升级"}' in main_list
+assert 'maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);' in main_list
 
 ACTIONS = r'''
 #include <assert.h>
