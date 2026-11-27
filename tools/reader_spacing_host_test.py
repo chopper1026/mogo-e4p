@@ -21,6 +21,7 @@ unit = r'''
 #include <string.h>
 #include "app/app_touch.h"
 #include "book/book_font_size.h"
+#include "ui/ui_locale.h"
 #define BOOK_PX_MIN BOOK_READER_PX_MIN
 #define BOOK_PX_MAX BOOK_READER_PX_MAX
 #define BOOK_MARGIN_MIN 0
